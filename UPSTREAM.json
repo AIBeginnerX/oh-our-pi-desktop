@@ -1,0 +1,29 @@
+{
+  "archive": {
+    "file": "t3code-0.0.44.tar.gz",
+    "sha256": "1ff8cc46ba91e0af9bbacf6a3b8fe3d15629d45e8959906b5d035b43e440bb42",
+    "regular_files_excluding_directories": 23266
+  },
+  "source": {
+    "tag": "v0.0.44",
+    "commit": "451afcb22d93f06cb24f9bc16703404564952553",
+    "url": "https://github.com/pingdotgg/t3code/releases/tag/v0.0.44"
+  },
+  "package_version_note": "The release archive is v0.0.44; apps/desktop/package.json and apps/server/package.json both declare 0.0.43.",
+  "source_retention_status": {
+    "verified": true,
+    "scope": "All original archive source paths retained; verified by SHA-256 for all original regular files. This confirms source retention, not runtime or functional parity.",
+    "audit_date": "2026-10-01",
+    "original_regular_files": 23266,
+    "removed": 0,
+    "modified_original_files": 41,
+    "added_non_generated_files": 31
+  },
+  "fork": {
+    "display_name": "OoP",
+    "initial_platform": "macOS arm64",
+    "additional_provider_presets": ["Z.AI", "MiniMax"],
+    "provider_runtime": "OpenCode",
+    "internal_protocol_and_auth_identifiers_preserved": true
+  }
+}

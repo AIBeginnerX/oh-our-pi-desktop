@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#E9ECF1"/>
+    </linearGradient>
+  </defs>
+  <!-- Translucent vector layers keep the soft shadow compatible with the sips exporter. -->
+  <g fill="#000000">
+    <rect x="58" y="70" width="908" height="908" rx="226" opacity="0.00015"/>
+    <rect x="60" y="72" width="904" height="904" rx="224" opacity="0.00023"/>
+    <rect x="62" y="74" width="900" height="900" rx="222" opacity="0.00034"/>
+    <rect x="64" y="76" width="896" height="896" rx="220" opacity="0.00050"/>
+    <rect x="66" y="78" width="892" height="892" rx="218" opacity="0.00072"/>
+    <rect x="68" y="80" width="888" height="888" rx="216" opacity="0.00100"/>
+    <rect x="70" y="82" width="884" height="884" rx="214" opacity="0.00138"/>
+    <rect x="72" y="84" width="880" height="880" rx="212" opacity="0.00185"/>
+    <rect x="74" y="86" width="876" height="876" rx="210" opacity="0.00244"/>
+    <rect x="76" y="88" width="872" height="872" rx="208" opacity="0.00314"/>
+    <rect x="78" y="90" width="868" height="868" rx="206" opacity="0.00397"/>
+    <rect x="80" y="92" width="864" height="864" rx="204" opacity="0.00492"/>
+    <rect x="82" y="94" width="860" height="860" rx="202" opacity="0.00597"/>
+    <rect x="84" y="96" width="856" height="856" rx="200" opacity="0.00709"/>
+    <rect x="86" y="98" width="852" height="852" rx="198" opacity="0.00826"/>
+    <rect x="88" y="100" width="848" height="848" rx="196" opacity="0.00943"/>
+    <rect x="90" y="102" width="844" height="844" rx="194" opacity="0.01054"/>
+    <rect x="92" y="104" width="840" height="840" rx="192" opacity="0.01155"/>
+    <rect x="94" y="106" width="836" height="836" rx="190" opacity="0.01240"/>
+    <rect x="96" y="108" width="832" height="832" rx="188" opacity="0.01305"/>
+    <rect x="98" y="110" width="828" height="828" rx="186" opacity="0.01345"/>
+    <rect x="100" y="112" width="824" height="824" rx="184" opacity="0.01358"/>
+    <rect x="102" y="114" width="820" height="820" rx="182" opacity="0.01345"/>
+    <rect x="104" y="116" width="816" height="816" rx="180" opacity="0.01305"/>
+    <rect x="106" y="118" width="812" height="812" rx="178" opacity="0.01240"/>
+    <rect x="108" y="120" width="808" height="808" rx="176" opacity="0.01155"/>
+    <rect x="110" y="122" width="804" height="804" rx="174" opacity="0.01054"/>
+    <rect x="112" y="124" width="800" height="800" rx="172" opacity="0.00943"/>
+    <rect x="114" y="126" width="796" height="796" rx="170" opacity="0.00826"/>
+    <rect x="116" y="128" width="792" height="792" rx="168" opacity="0.00709"/>
+    <rect x="118" y="130" width="788" height="788" rx="166" opacity="0.00597"/>
+    <rect x="120" y="132" width="784" height="784" rx="164" opacity="0.00492"/>
+    <rect x="122" y="134" width="780" height="780" rx="162" opacity="0.00397"/>
+    <rect x="124" y="136" width="776" height="776" rx="160" opacity="0.00314"/>
+    <rect x="126" y="138" width="772" height="772" rx="158" opacity="0.00244"/>
+    <rect x="128" y="140" width="768" height="768" rx="156" opacity="0.00185"/>
+    <rect x="130" y="142" width="764" height="764" rx="154" opacity="0.00138"/>
+    <rect x="132" y="144" width="760" height="760" rx="152" opacity="0.00100"/>
+    <rect x="134" y="146" width="756" height="756" rx="150" opacity="0.00072"/>
+    <rect x="136" y="148" width="752" height="752" rx="148" opacity="0.00050"/>
+    <rect x="138" y="150" width="748" height="748" rx="146" opacity="0.00034"/>
+    <rect x="140" y="152" width="744" height="744" rx="144" opacity="0.00023"/>
+    <rect x="142" y="154" width="740" height="740" rx="142" opacity="0.00015"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#body)"/>
+  <g transform="translate(161 391) scale(1.95)" fill="#264269" fill-rule="evenodd">
+    <path d="M120 60a60 60 0 1 1-120 0 60 60 0 1 1 120 0ZM95 60a35 35 0 1 0-70 0 35 35 0 1 0 70 0Z"/>
+    <path d="M250 60a60 60 0 1 1-120 0 60 60 0 1 1 120 0ZM225 60a35 35 0 1 0-70 0 35 35 0 1 0 70 0Z"/>
+    <path d="M263.350 2.400L314.171 2.400C341.3 2.400 360 17.51 360 41.481C360 65.792 341.962 81.291 314.171 81.291L288.350 81.291L288.350 113.017L263.350 113.017L263.350 101.02C256.809 111.02 244.111 124 232.566 124C221.022 124 222.279 123.121 212.279 121.121C235.292 108.601 240.09 104.45 253.774 87.128C267.458 69.807 281.237 59.586 312.01 59.586C325.701 59.586 333.460 54.234 333.460 41.22C333.460 30.562 325.195 23.357 312.01 23.357L288.350 23.357L288.350 54.219C279.809 57.119 271.809 61.145 263.350 67.745L263.350 2.400Z"/>
+  </g>
+</svg>

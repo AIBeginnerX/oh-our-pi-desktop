@@ -1,0 +1,6 @@
+{
+  "apps/server: src/git/GitManager.test.ts > GitManager > does not reuse a cross-repo PR when GitHub omits head identity metadata": "Flaky: can time out at 12s (noted in .cursor/rules/cursor-cloud.mdc).",
+  "apps/server: src/server.test.ts > server router seam > rejects cloud mint requests for a cloud subject other than the linked user": "Flaky: passes alone (5/5), failed once in the full server suite on CI.",
+  "apps/server: src/server.test.ts > server router seam > separates access inventory reads from credential management writes": "Flaky: the in-process HTTP call to /api/auth/browser-session sometimes fails with a transport error (fetch failed); it passed on main e58b106 and failed on the PR run with the same code.",
+  "apps/server: src/server.test.ts > server router seam > subscribeServerConfig withholds published themes from other subscribers": "Flaky: the in-process /api/auth/browser-session bootstrap sometimes answers 404; it passed on main b08ee4e and fork PR #1 and failed on fd1b938, which did not touch the server."
+}

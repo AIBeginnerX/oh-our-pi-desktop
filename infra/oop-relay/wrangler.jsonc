@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "oop-relay",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY", "class_name": "OopRelay" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["OopRelay"] }],
+}

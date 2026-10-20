@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="864" viewBox="0 0 640 432">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#191B21"/>
+      <stop offset="1" stop-color="#0E1014"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="432" fill="url(#background)"/>
+  <svg x="31" y="23" width="50" height="28" viewBox="120 365 790 340">
+    <g transform="translate(-24 0)" fill="none" stroke="#F8F8F5" stroke-width="48" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="306" cy="512" r="112"/>
+      <circle cx="563" cy="558" r="77"/>
+      <path d="M708 659V410h76c58 0 90 27 90 79s-32 79-90 79h-76"/>
+    </g>
+  </svg>
+  <text x="320" y="105" fill="#F8F8F5" font-family="Helvetica" font-size="23" font-weight="700" text-anchor="middle">Drag OoP into Applications.</text>
+  <path d="M270 204Q320 179 370 204M358 190L370 204L351 209" stroke="#BFC3CA" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="320" y="367" fill="#BFC3CA" font-family="Helvetica" font-size="12" text-anchor="middle">Once copied, open it from Applications.</text>
+</svg>

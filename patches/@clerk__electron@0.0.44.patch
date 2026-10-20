@@ -1,0 +1,41 @@
+diff --git a/dist/cjs/index.js b/dist/cjs/index.js
+--- a/dist/cjs/index.js
++++ b/dist/cjs/index.js
+@@ -291,7 +291,7 @@
+ 		}
+ 		if (options.userAgent) electron.app.userAgentFallback = buildUserAgentFallback(electron.app.userAgentFallback, options.userAgent);
+ 		if (options.renderer) {
+-			electron.protocol.registerSchemesAsPrivileged([{
++			if (options.registerRendererScheme !== false) electron.protocol.registerSchemesAsPrivileged([{
+ 				scheme: options.renderer.scheme,
+ 				privileges: {
+ 					standard: true,
+diff --git a/dist/esm/index.js b/dist/esm/index.js
+--- a/dist/esm/index.js
++++ b/dist/esm/index.js
+@@ -290,7 +290,7 @@
+ 		}
+ 		if (options.userAgent) app.userAgentFallback = buildUserAgentFallback(app.userAgentFallback, options.userAgent);
+ 		if (options.renderer) {
+-			protocol.registerSchemesAsPrivileged([{
++			if (options.registerRendererScheme !== false) protocol.registerSchemesAsPrivileged([{
+ 				scheme: options.renderer.scheme,
+ 				privileges: {
+ 					standard: true,
+diff --git a/dist/types/shared/types.d.ts b/dist/types/shared/types.d.ts
+--- a/dist/types/shared/types.d.ts
++++ b/dist/types/shared/types.d.ts
+@@ -14,6 +14,13 @@
+      * Registers the custom scheme used to serve the Electron renderer from a stable origin.
+      */
+     renderer?: RendererSchemeOptions;
++    /**
++     * Register the renderer scheme with Electron. Set to false when the application
++     * registers it synchronously before Electron emits ready.
++     *
++     * @default true
++     */
++    registerRendererScheme?: boolean;
+     /**
+      * Whether Clerk should acquire and release Electron's process-wide single-instance lock for OAuth
+      * deep links. Set this to `false` when the application manages the lock itself. Ignored on macOS,

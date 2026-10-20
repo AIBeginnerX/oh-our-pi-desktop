@@ -1,0 +1,4 @@
+# Secret scan config for OoP CI. Extends gitleaks' built-in rules and allowlists
+# false positives that are not secrets.
+[extend]
+useDefault = true
