@@ -1117,6 +1117,95 @@ it.effect("GitVcsDriver flushes checkpoint objects and refs to disk before publi
   );
 });
 
+const checkpointWriteMock = (
+  observedArgs: ReadonlyArray<string>[],
+  failAdd: (args: ReadonlyArray<string>) => VcsProcessExitError | undefined,
+) =>
+  Layer.mergeAll(
+    NodeServices.layer,
+    Layer.mock(VcsProcess.VcsProcess)({
+      run: (input) => {
+        observedArgs.push(input.args);
+        const failure = input.args.includes("add") ? failAdd(input.args) : undefined;
+        if (failure !== undefined) return Effect.fail(failure);
+        return Effect.succeed({
+          exitCode: ChildProcessSpawner.ExitCode(0),
+          stdout: input.args.includes("write-tree")
+            ? "tree0000\n"
+            : input.args.includes("commit-tree")
+              ? "commit0000\n"
+              : input.args.includes("--git-common-dir")
+                ? ".git\n"
+                : "",
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        });
+      },
+    }),
+  );
+
+const addFailure = (failureKind: "unsupported-fsync" | "command-failed") =>
+  VcsProcessExitError.fromProcessExit(
+    { operation: VcsProcess.CHECKPOINT_CAPTURE_OPERATION, command: "git", cwd: "/repo" },
+    { exitCode: 128, stderr: "fatal: example", stderrTruncated: false },
+    failureKind,
+  );
+
+it.effect(
+  "GitVcsDriver checkpoints a filesystem that cannot flush with Git's default writes",
+  () => {
+    const observedArgs: ReadonlyArray<string>[] = [];
+    const flushes = (args: ReadonlyArray<string>) => args.includes("core.fsyncMethod=fsync");
+
+    return Effect.gen(function* () {
+      const driver = yield* GitVcsDriver.makeVcsDriverShape();
+      const capture = (turn: number) =>
+        driver.checkpoints.captureCheckpoint({
+          cwd: "/repo",
+          checkpointRef: CheckpointRef.make(`refs/t3/checkpoints/thread/turn/${turn}`),
+        });
+
+      yield* capture(1);
+      const writeCommands = ["add", "write-tree", "commit-tree", "update-ref"];
+      const writes = observedArgs.filter((args) =>
+        writeCommands.some((command) => args.includes(command)),
+      );
+      // The flushing add fails, the same add succeeds without flushing, and the rest follow it.
+      assert.deepStrictEqual(writes.map(flushes), [true, false, false, false, false]);
+
+      observedArgs.length = 0;
+      yield* capture(2);
+      assert.isFalse(observedArgs.some(flushes));
+    }).pipe(
+      Effect.provide(
+        checkpointWriteMock(observedArgs, (args) =>
+          flushes(args) ? addFailure("unsupported-fsync") : undefined,
+        ),
+      ),
+    );
+  },
+);
+
+it.effect("GitVcsDriver keeps flushing when a checkpoint write fails for another reason", () => {
+  const observedArgs: ReadonlyArray<string>[] = [];
+
+  return Effect.gen(function* () {
+    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    const error = yield* driver.checkpoints
+      .captureCheckpoint({
+        cwd: "/repo",
+        checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread/turn/1"),
+      })
+      .pipe(Effect.flip);
+
+    assert.strictEqual(error._tag, "VcsProcessExitError");
+    const adds = observedArgs.filter((args) => args.includes("add"));
+    assert.strictEqual(adds.length, 1);
+    assert.isTrue(adds[0]?.includes("core.fsyncMethod=fsync"));
+  }).pipe(Effect.provide(checkpointWriteMock(observedArgs, () => addFailure("command-failed"))));
+});
+
 describe("GitVcsDriver.checkpoints.observeTree", () => {
   type ObserveDriver = Effect.Success<ReturnType<typeof GitVcsDriver.makeVcsDriverShape>>;
 

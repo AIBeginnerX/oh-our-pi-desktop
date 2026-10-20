@@ -105,6 +105,11 @@ const classifyNonZeroExit = (command: string, stderr: string): VcsProcessExitFai
     return "not-found";
   }
 
+  // Git does not fall back when a filesystem rejects its flush (SMB shares on macOS reject F_FULLFSYNC).
+  if (normalized.includes("fsync error on") && normalized.includes("operation not supported")) {
+    return "unsupported-fsync";
+  }
+
   return "command-failed";
 };
 

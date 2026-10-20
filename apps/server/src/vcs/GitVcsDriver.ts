@@ -775,6 +775,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
     "-c",
     "core.fsyncMethod=fsync",
   ] as const;
+  // Repositories whose filesystem rejects that flush (SMB shares on macOS); their checkpoints use
+  // Git's default writes from then on instead of failing every turn.
+  const flushUnsupported = new Set<string>();
 
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
@@ -786,6 +789,37 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         "sparse.expectFilesOutsideOfPatterns=false",
       ];
       const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
+      let writeFlags: ReadonlyArray<string> = flushUnsupported.has(gitCommonDir)
+        ? []
+        : durableWrite;
+      // Runs a checkpoint write with the flush settings, once more without them if Git reports that
+      // this filesystem cannot flush.
+      const durableExecute = (
+        args: (flags: ReadonlyArray<string>) => ReadonlyArray<string>,
+        env?: NodeJS.ProcessEnv,
+      ) => {
+        const run = () =>
+          execute({
+            operation,
+            cwd: input.cwd,
+            args: args(writeFlags),
+            ...(env !== undefined ? { env } : {}),
+          });
+        return run().pipe(
+          Effect.catchIf(
+            (error) =>
+              writeFlags.length > 0 &&
+              error._tag === "VcsProcessExitError" &&
+              error.failureKind === "unsupported-fsync",
+            () =>
+              Effect.suspend(() => {
+                flushUnsupported.add(gitCommonDir);
+                writeFlags = [];
+                return run();
+              }),
+          ),
+        );
+      };
       const tempIndexPath = path.join(
         gitCommonDir,
         `t3-checkpoint-index-${NodeCrypto.randomUUID()}`,
@@ -933,13 +967,11 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         }
 
         const stageFiles = (exclusions: ReadonlyArray<string>) =>
-          execute({
-            operation,
-            cwd: input.cwd,
+          durableExecute(
             // Preserve absent skipped entries, but capture present nonignored files outside the cone.
-            args: [
+            (flags) => [
               ...indexConfig,
-              ...durableWrite,
+              ...flags,
               "add",
               ...(sparseCheckout ? ["--sparse"] : []),
               "-A",
@@ -947,8 +979,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               ".",
               ...exclusions,
             ],
-            env: commitEnv,
-          });
+            commitEnv,
+          );
         yield* stageFiles([]).pipe(
           Effect.catchTags({
             VcsProcessExitError: (error) =>
@@ -1002,12 +1034,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           }),
         );
 
-        const writeTreeResult = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: [...indexConfig, ...durableWrite, "write-tree"],
-          env: commitEnv,
-        });
+        const writeTreeResult = yield* durableExecute(
+          (flags) => [...indexConfig, ...flags, "write-tree"],
+          commitEnv,
+        );
         const treeOid = writeTreeResult.stdout.trim();
         if (treeOid.length === 0) {
           return yield* new VcsProcessExitError({
@@ -1020,12 +1050,10 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         }
 
         const message = `t3 checkpoint ref=${input.checkpointRef}`;
-        const commitTreeResult = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: [...durableWrite, "commit-tree", treeOid, "-m", message],
-          env: commitEnv,
-        });
+        const commitTreeResult = yield* durableExecute(
+          (flags) => [...flags, "commit-tree", treeOid, "-m", message],
+          commitEnv,
+        );
         const commitOid = commitTreeResult.stdout.trim();
         if (commitOid.length === 0) {
           return yield* new VcsProcessExitError({
@@ -1037,11 +1065,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           });
         }
 
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: [...durableWrite, "update-ref", input.checkpointRef, commitOid],
-        });
+        yield* durableExecute((flags) => [...flags, "update-ref", input.checkpointRef, commitOid]);
       }).pipe(Effect.ensuring(cleanupTempIndex));
     }),
 

@@ -188,6 +188,16 @@ export function validDriveSourceInfo(info) {
   );
 }
 
+/**
+ * Whether this run moves the task off the NAS to the runner copy: only once Drive's
+ * release\\windows carries the Drive source, because it was already up to date or this run's
+ * build from it succeeded. Until then the NAS launcher keeps running and keeps publishing to the
+ * NAS, which installed apps from before Drive still read.
+ */
+export function moveTaskToRunner({ source, fromRunner, decision, built }) {
+  return source === "drive" && !fromRunner && (decision === "up-to-date" || built);
+}
+
 /** Drive's archive when Drive has one; the NAS source otherwise; nothing to build from else. */
 export function autoBuildSource({ driveInfo, hasNasSource }) {
   if (validDriveSourceInfo(driveInfo)) return "drive";
@@ -704,6 +714,7 @@ async function autoBuild(sourceRoot, arch) {
     console.log(`  last failure: ${failed.error ?? "unknown"}`);
     console.log(`  next attempt after ${new Date(failed.at + AUTO_BUILD_RETRY_MS).toISOString()}`);
   }
+  let built = false;
   if (decision === "build") {
     doctor();
     try {
@@ -720,6 +731,7 @@ async function autoBuild(sourceRoot, arch) {
           requireShare: false,
         });
         await installRunner(NodePath.join(extracted, "scripts"), cacheRoot);
+        built = true;
       } else {
         await packageInstaller(sourceRoot, arch);
       }
@@ -739,9 +751,9 @@ async function autoBuild(sourceRoot, arch) {
       throw error;
     }
   }
-  // Once Drive carries the source, the task stops depending on the NAS: it runs a copy of this
-  // script from this PC. Registering again replaces the task; the running check finishes first.
-  if (source === "drive" && !fromRunner) {
+  // Once Drive's release carries the Drive source, the task stops depending on the NAS: it runs a
+  // copy of this script from this PC. Registering again replaces the task; this run finishes first.
+  if (moveTaskToRunner({ source, fromRunner, decision, built })) {
     const launcher = await installRunner(
       NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
       cacheRoot,

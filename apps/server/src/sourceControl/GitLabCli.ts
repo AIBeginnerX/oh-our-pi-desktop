@@ -142,6 +142,7 @@ export class GitLabCliCommandError extends Schema.TaggedError<GitLabCliCommandEr
           case "rate-limited":
             return new GitLabCliRateLimitError({ ...context, cause });
           case "not-found":
+          case "unsupported-fsync":
           case "command-failed":
           case undefined:
             return new GitLabCliCommandError({ ...context, cause });

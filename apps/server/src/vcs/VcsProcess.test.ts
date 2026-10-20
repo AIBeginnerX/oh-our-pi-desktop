@@ -396,6 +396,28 @@ describe("VcsProcess.run", () => {
     }).pipe(provideLive),
   );
 
+  it.effect("classifies a filesystem that cannot flush without retaining stderr", () =>
+    Effect.gen(function* () {
+      const gitStderr =
+        "fatal: fsync error on '/Volumes/share/repo/.git/objects/fb/tmp_obj_9thT6g': Operation not supported";
+      const error = yield* run({
+        operation: "test.fsync",
+        command: "node",
+        args: ["-e", "process.stderr.write(process.argv[1]); process.exit(128)", gitStderr],
+        cwd: process.cwd(),
+      }).pipe(Effect.flip);
+
+      expect(error).toBeInstanceOf(VcsProcessExitError);
+      expect(error).toMatchObject({
+        exitCode: 128,
+        detail: "The filesystem does not support flushing writes to disk.",
+        failureKind: "unsupported-fsync",
+        stderrLength: gitStderr.length,
+      });
+      expect(error.message).not.toContain("/Volumes/share");
+    }).pipe(provideLive),
+  );
+
   it.effect("classifies HTTP 429 responses as rate limits", () =>
     Effect.gen(function* () {
       const providerStderr = "HTTP 429: Too Many Requests. request-id=secret-value";

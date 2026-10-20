@@ -77,6 +77,7 @@ export const VcsProcessExitFailureKind = Schema.Literals([
   "authentication",
   "not-found",
   "rate-limited",
+  "unsupported-fsync",
   "command-failed",
 ]);
 export type VcsProcessExitFailureKind = typeof VcsProcessExitFailureKind.Type;
@@ -146,7 +147,9 @@ export class VcsProcessExitError extends Schema.TaggedError<VcsProcessExitError>
               : context.command === "gh" || context.command === "az"
                 ? "Pull request not found."
                 : "VCS resource not found."
-            : "Process exited with a non-zero status.";
+            : failureKind === "unsupported-fsync"
+              ? "The filesystem does not support flushing writes to disk."
+              : "Process exited with a non-zero status.";
 
     return new VcsProcessExitError({
       ...context,

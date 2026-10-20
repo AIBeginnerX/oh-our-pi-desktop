@@ -5,11 +5,12 @@ import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
 import {
-  copyRunnerLog,
   AUTO_BUILD_TASK_NAME,
   autoBuildDecision,
   autoBuildSource,
+  copyRunnerLog,
   driveRootCandidates,
+  moveTaskToRunner,
   parseArgs,
   prependPath,
   releaseFilesToPrune,
@@ -262,4 +263,24 @@ NodeTest.test("copies the runner log to Drive trimmed and leaves the local log a
   // A Drive that cannot be written is logged, never thrown.
   NodeFS.writeFileSync(NodePath.join(cacheRoot, "blocked"), "a file, not a folder");
   await copyRunnerLog(cacheRoot, NodePath.join(cacheRoot, "blocked", "OoP"));
+});
+
+NodeTest.test("moves the task off the NAS only once Drive carries the build", () => {
+  const drive = { source: "drive", fromRunner: false };
+  NodeAssert.equal(moveTaskToRunner({ ...drive, decision: "up-to-date", built: false }), true);
+  NodeAssert.equal(moveTaskToRunner({ ...drive, decision: "build", built: true }), true);
+  // A failed build, a wait after one, or Drive still syncing keeps the NAS launcher publishing.
+  NodeAssert.equal(moveTaskToRunner({ ...drive, decision: "build", built: false }), false);
+  NodeAssert.equal(
+    moveTaskToRunner({ ...drive, decision: "wait-after-failure", built: false }),
+    false,
+  );
+  NodeAssert.equal(
+    moveTaskToRunner({ source: "drive", fromRunner: true, decision: "up-to-date", built: false }),
+    false,
+  );
+  NodeAssert.equal(
+    moveTaskToRunner({ source: "nas", fromRunner: false, decision: "up-to-date", built: false }),
+    false,
+  );
 });
