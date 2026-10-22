@@ -18,6 +18,7 @@ import {
   parseChecksums,
 } from "@t3tools/shared/cliRelease";
 
+import { OOP_RELEASE_VERSION, OOP_UPDATE_MESSAGE } from "../oopBuild.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
@@ -284,6 +285,12 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     input.onProgress?.({ stage: "cached" });
     yield* input.validate(paths);
     return paths;
+  }
+  // OoP runtimes arrive from an OoP desktop over SSH; the upstream feed has none.
+  if (OOP_RELEASE_VERSION !== null) {
+    return yield* new PinnedRuntimeInstallError({
+      step: `finding OoP ${input.version} in ${paths.versionDir}. ${OOP_UPDATE_MESSAGE}`,
+    });
   }
   if (versionDirExists) {
     yield* fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(

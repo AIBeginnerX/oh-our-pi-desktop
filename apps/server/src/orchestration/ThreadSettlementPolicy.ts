@@ -114,6 +114,35 @@ export function resolveAutoSettlementAt(input: {
     : null;
 }
 
+/**
+ * Whether a settled thread has rested long enough to leave the sidebar for the archive. Pinned,
+ * snoozed, busy, and waiting threads stay; the clock starts at the later of settling and the last
+ * activity, so a thread someone reopened and re-settled gets the full grace period again.
+ */
+export function shouldAutoArchiveThread(input: {
+  readonly thread: OrchestrationThreadShell;
+  readonly now: string;
+  readonly autoArchiveAfterDays: number | null;
+}): boolean {
+  const { thread } = input;
+  if (input.autoArchiveAfterDays === null) return false;
+  if (thread.archivedAt !== null || thread.settledOverride !== "settled") return false;
+  if (thread.pinnedAt != null) return false;
+  if (thread.hasPendingApprovals || thread.hasPendingUserInput) return false;
+  if (thread.session?.status === "starting" || thread.session?.status === "running") return false;
+  if (thread.backgroundLiveness != null) return false;
+  if (thread.snoozedUntil != null && Date.parse(thread.snoozedUntil) > Date.parse(input.now)) {
+    return false;
+  }
+  const restingSince = latestTimestamp([
+    thread.settledAt,
+    thread.latestUserMessageAt,
+    thread.latestTurn?.completedAt,
+  ]);
+  if (restingSince === null) return false;
+  return Date.parse(restingSince) < Date.parse(input.now) - input.autoArchiveAfterDays * DAY_MS;
+}
+
 /** Cheap checks that run before any source control lookup. */
 export function isAutoSettlementCandidate(thread: OrchestrationThreadShell, now: string): boolean {
   if (thread.archivedAt !== null || thread.settledOverride !== null) return false;

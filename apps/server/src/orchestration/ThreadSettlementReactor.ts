@@ -20,6 +20,7 @@ import * as Stream from "effect/Stream";
 import * as GitManager from "../git/GitManager.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { TerminalManager } from "../terminal/Manager.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
@@ -27,6 +28,7 @@ import { pullRequestMatchesProject, readSweepSnapshot } from "./ThreadPullReques
 import {
   isAutoSettlementCandidate,
   resolveAutoSettlementAt,
+  shouldAutoArchiveThread,
   type SettlementPullRequest,
 } from "./ThreadSettlementPolicy.ts";
 
@@ -86,6 +88,7 @@ export const make = Effect.gen(function* () {
   const pullRequests = yield* PullRequestService.PullRequestService;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
+  const terminals = yield* TerminalManager;
 
   const sweep = Effect.fn("ThreadSettlementReactor.sweep")(function* (
     mergedPullRequest: PullRequestService.PullRequestMergeEvent | null,
@@ -331,6 +334,76 @@ export const make = Effect.gen(function* () {
     runSweep(null, threadId),
   );
 
+  // Settled threads leave the sidebar for the archive after the configured rest. This reads
+  // every unarchived thread, so it runs hourly and on a change of the setting, not each minute.
+  const archiveSweep = Effect.fn("ThreadSettlementReactor.archiveSweep")(function* () {
+    const days = (yield* settingsService.getSettings).sidebarAutoArchiveAfterDays;
+    if (days === null) return;
+    const snapshot = yield* snapshots.getShellSnapshot({ unsettledOnly: false });
+    const now = DateTime.formatIso(yield* DateTime.now);
+    const due = snapshot.threads.filter((thread) =>
+      shouldAutoArchiveThread({ thread, now, autoArchiveAfterDays: days }),
+    );
+    yield* Effect.forEach(
+      due,
+      (thread) =>
+        Effect.gen(function* () {
+          const uuid = yield* crypto.randomUUIDv4;
+          // Rejected when the thread changed after the snapshot or no longer qualifies.
+          yield* engine.dispatch({
+            type: "thread.auto-archive",
+            commandId: CommandId.make(`server:auto-archive:${thread.id}:${uuid}`),
+            threadId: thread.id,
+            snapshotSequence: snapshot.snapshotSequence,
+          });
+          // Same cleanup as a manual archive (see the archive handling in ws.ts): the thread
+          // leaves view, so its idle provider session stops and its terminals close.
+          if (thread.session !== null && thread.session.status !== "stopped") {
+            yield* engine
+              .dispatch({
+                type: "thread.session.stop",
+                commandId: CommandId.make(`server:auto-archive-stop:${thread.id}:${uuid}`),
+                threadId: thread.id,
+                createdAt: DateTime.formatIso(yield* DateTime.now),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("failed to stop provider session after auto-archive", {
+                    threadId: thread.id,
+                    cause: Cause.pretty(cause),
+                  }),
+                ),
+              );
+          }
+          yield* terminals.close({ threadId: thread.id }).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("failed to close thread terminals after auto-archive", {
+                threadId: thread.id,
+                error: error.message,
+              }),
+            ),
+          );
+        }).pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("automatic thread archive skipped", {
+                threadId: thread.id,
+                cause: Cause.pretty(cause),
+              }),
+          ),
+        ),
+      { discard: true },
+    );
+  });
+  const runArchiveSweep = archiveSweep().pipe(
+    Effect.catchCauseIf(
+      (cause) => !Cause.hasInterruptsOnly(cause),
+      (cause) =>
+        Effect.logWarning("automatic thread archive sweep failed", { cause: Cause.pretty(cause) }),
+    ),
+  );
+
   const processEvent = (event: OrchestrationEvent) => {
     switch (event.type) {
       case "thread.pull-request-linked":
@@ -359,6 +432,7 @@ export const make = Effect.gen(function* () {
     const events = yield* engine.subscribeDomainEvents;
     const initialSettings = yield* settingsService.getSettings.pipe(Effect.orDie);
     let lastSettlementSettings = autoSettlementSettingsKey(initialSettings);
+    let lastArchiveDays = initialSettings.sidebarAutoArchiveAfterDays;
     yield* forkParked(
       Effect.gen(function* () {
         yield* worker.enqueue(undefined);
@@ -366,14 +440,21 @@ export const make = Effect.gen(function* () {
       }).pipe(Effect.repeat(Schedule.spaced("1 minute")), Effect.asVoid),
     );
     yield* forkParked(
-      Stream.runForEach(settingsChanges, (settings) => {
-        const key = autoSettlementSettingsKey(settings);
-        if (key === lastSettlementSettings) {
-          return Effect.void;
-        }
-        lastSettlementSettings = key;
-        return worker.enqueue(undefined);
-      }),
+      runArchiveSweep.pipe(Effect.repeat(Schedule.spaced("1 hour")), Effect.asVoid),
+    );
+    yield* forkParked(
+      Stream.runForEach(settingsChanges, (settings) =>
+        Effect.gen(function* () {
+          if (settings.sidebarAutoArchiveAfterDays !== lastArchiveDays) {
+            lastArchiveDays = settings.sidebarAutoArchiveAfterDays;
+            yield* runArchiveSweep;
+          }
+          const key = autoSettlementSettingsKey(settings);
+          if (key === lastSettlementSettings) return;
+          lastSettlementSettings = key;
+          yield* worker.enqueue(undefined);
+        }),
+      ),
     );
     yield* forkParked(Stream.runForEach(mergedPullRequests, (event) => runSweep(event)));
     yield* forkParked(Stream.runForEach(events, processEvent));

@@ -1,3 +1,4 @@
+import { isCrewThreadTitle } from "@t3tools/shared/crew";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
@@ -128,6 +129,64 @@ export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
 // supported because snoozing requires a wake time.
 
 export type SidebarSection = "pinned" | "active" | "snoozed" | "settled";
+
+interface CrewSplitThread {
+  readonly environmentId: string;
+  readonly id: string;
+  readonly title: string;
+  readonly parentThreadId?: string | null | undefined;
+  readonly hasPendingApprovals: boolean;
+  readonly hasPendingUserInput: boolean;
+}
+
+export function sidebarParentKey(environmentId: string, threadId: string): string {
+  return `${environmentId}:${threadId}`;
+}
+
+/**
+ * Crew sub-task threads leave the top-level list: each folds under the thread that delegated it
+ * when that thread is in the list, and the rest (older crew threads saved before the link existed,
+ * or ones whose lead is archived) collect in one "earlier crew tasks" group. A sub-task that is
+ * waiting on the user stays top-level so its approval or question is never hidden.
+ */
+export function splitCrewSubTasks<T extends CrewSplitThread>(
+  threads: readonly T[],
+): {
+  readonly topLevel: T[];
+  readonly childrenByParentKey: ReadonlyMap<string, readonly T[]>;
+  readonly earlierCrewTasks: T[];
+} {
+  const listed = new Set(
+    threads.map((thread) => sidebarParentKey(thread.environmentId, thread.id)),
+  );
+  const topLevel: T[] = [];
+  const childrenByParentKey = new Map<string, T[]>();
+  const earlierCrewTasks: T[] = [];
+  for (const thread of threads) {
+    const isSubTask = thread.parentThreadId != null || isCrewThreadTitle(thread.title);
+    if (!isSubTask || thread.hasPendingApprovals || thread.hasPendingUserInput) {
+      topLevel.push(thread);
+      continue;
+    }
+    const parentKey =
+      thread.parentThreadId == null
+        ? null
+        : sidebarParentKey(thread.environmentId, thread.parentThreadId);
+    if (parentKey !== null && listed.has(parentKey)) {
+      const siblings = childrenByParentKey.get(parentKey);
+      if (siblings === undefined) childrenByParentKey.set(parentKey, [thread]);
+      else siblings.push(thread);
+    } else {
+      earlierCrewTasks.push(thread);
+    }
+  }
+  return { topLevel, childrenByParentKey, earlierCrewTasks };
+}
+
+/** The crew row label without the redundant "Crew " prefix, e.g. "Worker · Research …". */
+export function crewSubTaskLabel(title: string): string {
+  return isCrewThreadTitle(title) ? title.slice("Crew ".length) : title;
+}
 
 /** Sortable ids: thread rows use their scoped key; structural items use a
     colon-free prefix: scoped thread keys always contain a colon. */

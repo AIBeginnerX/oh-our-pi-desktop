@@ -3952,7 +3952,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   const stageProdResourcesDir = path.join(stageAppDir, "apps/desktop/prod-resources");
   yield* fs.copy(stageResourcesDir, stageProdResourcesDir);
-  if (localUpdateDirectory !== undefined || localUpdateCandidates !== undefined) {
+  // Written into the stage and copied to resources/ under the same condition: a Drive-only
+  // build (candidates, no share folder) shipped without it and could never update itself.
+  const localUpdateConfigBundled =
+    localUpdateDirectory !== undefined || localUpdateCandidates !== undefined;
+  if (localUpdateConfigBundled) {
     yield* fs.writeFileString(
       path.join(stageProdResourcesDir, OOP_LOCAL_UPDATE_CONFIG_NAME),
       renderOopLocalUpdateConfig(localUpdateDirectory, localUpdateConnectUrl, {
@@ -4040,7 +4044,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       bundlesWslRuntime({ platform: options.platform, runtimeArchivePath: options.wslRuntime }),
       options.arch,
       oopBrand,
-      localUpdateDirectory !== undefined,
+      localUpdateConfigBundled,
       options.macDeveloperId,
     ),
     dependencies: stageDependencies,

@@ -636,6 +636,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pinOrderKey: null,
             activeOrderKey: null,
             autoSettleDisabledAt: null,
+            parentThreadId: event.payload.parentThreadId ?? null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
             latestUserMessageAt: null,

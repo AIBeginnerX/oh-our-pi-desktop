@@ -31,6 +31,7 @@ import {
 } from "effect/unstable/http";
 
 import packageJson from "../../package.json" with { type: "json" };
+import { OOP_RELEASE_VERSION, OOP_UPDATE_MESSAGE } from "../oopBuild.ts";
 import * as BootService from "../cloud/bootService.ts";
 import {
   ensurePinnedRuntimeInstalled,
@@ -351,6 +352,10 @@ const runUpdate = Effect.fn("cli.update.run")(function* (input: {
   const httpClient = yield* HttpClient.HttpClient;
   const service = yield* BootService.BootService;
 
+  // An OoP executable never asks the upstream release feed what is newest.
+  if (OOP_RELEASE_VERSION !== null) {
+    return yield* new CliUpdateError({ reason: OOP_UPDATE_MESSAGE });
+  }
   const currentVersion = packageJson.version;
   const channel = input.channel ?? cliReleaseChannelOf(currentVersion);
   if (input.requestedVersion !== undefined && !isExactServiceVersion(input.requestedVersion)) {

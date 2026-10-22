@@ -13,6 +13,21 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 
+export const CREW_ROLE_LABEL: Record<CrewRole, string> = {
+  worker: "Worker",
+  expert: "Expert",
+  auditor: "Auditor",
+};
+
+/**
+ * Whether a thread is a crew sub-task, by the `Crew <Role> · <subject>` title the server gives it.
+ * Crew threads never delegate or get audited themselves, so the crew cannot recurse; clients
+ * also use this to nest them under the thread that delegated them.
+ */
+export function isCrewThreadTitle(title: string): boolean {
+  return Object.values(CREW_ROLE_LABEL).some((label) => title.startsWith(`Crew ${label} · `));
+}
+
 /** 1 = fast and cheap, 2 = balanced, 3 = strongest. */
 export type CrewModelTier = 1 | 2 | 3;
 

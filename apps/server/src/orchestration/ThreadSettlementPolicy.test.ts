@@ -7,7 +7,11 @@ import {
   type OrchestrationThreadShell,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
-import { type SettlementPullRequest, resolveAutoSettlementAt } from "./ThreadSettlementPolicy.ts";
+import {
+  type SettlementPullRequest,
+  resolveAutoSettlementAt,
+  shouldAutoArchiveThread,
+} from "./ThreadSettlementPolicy.ts";
 
 const NOW = "2026-08-28T12:00:00.000Z";
 const makeThread = (
@@ -255,6 +259,43 @@ const terminalSnapshot = (
   mergedAt: state === "merged" ? terminalAt : null,
   updatedAt,
   syncedAt: NOW,
+});
+
+describe("shouldAutoArchiveThread", () => {
+  // NOW is 2026-08-28T12:00Z; a thread settled 2026-08-20 has rested 8.5 days.
+  const settledLongAgo = (overrides: Partial<OrchestrationThreadShell> = {}) =>
+    makeThread({
+      settledOverride: "settled",
+      settledAt: "2026-08-20T00:00:00.000Z",
+      ...overrides,
+    });
+  const archives = (thread: OrchestrationThreadShell, days: number | null = 7) =>
+    shouldAutoArchiveThread({ thread, now: NOW, autoArchiveAfterDays: days });
+
+  it("archives a settled thread once it has rested past the setting", () => {
+    expect(archives(settledLongAgo())).toBe(true);
+    expect(archives(settledLongAgo(), 9)).toBe(false);
+  });
+
+  it("never archives with the setting off, or an active, archived, or pinned thread", () => {
+    expect(archives(settledLongAgo(), null)).toBe(false);
+    expect(archives(settledLongAgo({ settledOverride: null }))).toBe(false);
+    expect(archives(settledLongAgo({ settledOverride: "active" }))).toBe(false);
+    expect(archives(settledLongAgo({ archivedAt: "2026-08-21T00:00:00.000Z" }))).toBe(false);
+    expect(archives(settledLongAgo({ pinnedAt: "2026-08-21T00:00:00.000Z" }))).toBe(false);
+  });
+
+  it("keeps a thread that is waiting on the user or still snoozed", () => {
+    expect(archives(settledLongAgo({ hasPendingApprovals: true }))).toBe(false);
+    expect(archives(settledLongAgo({ hasPendingUserInput: true }))).toBe(false);
+    expect(archives(settledLongAgo({ snoozedUntil: "2026-09-01T00:00:00.000Z" }))).toBe(false);
+  });
+
+  it("restarts the rest when the thread saw activity after it settled", () => {
+    expect(archives(settledLongAgo({ latestUserMessageAt: "2026-08-25T00:00:00.000Z" }))).toBe(
+      false,
+    );
+  });
 });
 
 describe("per-thread auto-settle opt out", () => {

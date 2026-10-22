@@ -43,6 +43,7 @@ import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from "../persistence/Layers/Sqlite.ts";
+import { PersistenceDecodeError } from "../persistence/Errors.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import * as ProviderSafetyObservations from "../persistence/ProviderSafetyObservations.ts";
 import { OrchestrationEngineLive } from "../orchestration/Layers/OrchestrationEngine.ts";
@@ -187,6 +188,13 @@ const makeProjectedThread = (input: {
   };
 };
 
+const makeEmptyShellSnapshot = () => ({
+  snapshotSequence: 0,
+  projects: [],
+  threads: [],
+  updatedAt: "2026-08-24T10:00:00.000Z",
+});
+
 const makeSnapshotsLayer = (input: {
   readonly project?: OrchestrationProjectShell;
   readonly getThread?: (threadId: ThreadId) => Option.Option<OrchestrationThread>;
@@ -195,6 +203,8 @@ const makeSnapshotsLayer = (input: {
     getProjectShellById: () =>
       Effect.succeed(input.project === undefined ? Option.none() : Option.some(input.project)),
     getImportedAgentSessionSources: () => Effect.succeed([]),
+    getShellSnapshot: () => Effect.succeed(makeEmptyShellSnapshot()),
+    getArchivedShellSnapshot: () => Effect.succeed(makeEmptyShellSnapshot()),
     getThreadDetailById: (threadId) => Effect.succeed(input.getThread?.(threadId) ?? Option.none()),
   });
 
@@ -1031,6 +1041,315 @@ it.layer(NodeServices.layer)("AgentSessionImporter", (it) => {
         expect(result).toEqual({ importedCount: 0, skippedCount: 0 });
         expect(commands).toHaveLength(0);
         expect(upsertCount).toBe(0);
+      }),
+    );
+  });
+
+  describe("repairing imported titles taken from injected preamble", () => {
+    const PREAMBLE_THREAD_ID = ThreadId.make("import:codex:codex-preamble");
+
+    /** A thread as an earlier import stored it: title from the preamble. */
+    const makePreambleThread = (title: string): OrchestrationThread => {
+      const thread = makeProjectedThread({ source: "codex" });
+      return {
+        ...thread,
+        id: PREAMBLE_THREAD_ID,
+        title,
+        messages: [
+          {
+            id: MessageId.make(`${PREAMBLE_THREAD_ID}:000000`),
+            role: "user",
+            text: [
+              "<recommended_plugins>",
+              "Here is a list of plugins that are available but not installed.",
+              "",
+              "- Dropbox (dropbox@openai-curated-remote)",
+              "</recommended_plugins># AGENTS.md instructions",
+              "",
+              "<INSTRUCTIONS>",
+              "# Global Agent Context",
+              "</INSTRUCTIONS><environment_context>",
+              "  <cwd>/tmp/project-from-server</cwd>",
+              "</environment_context>",
+            ].join("\n"),
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-08-24T10:00:00.000Z",
+            updatedAt: "2026-08-24T10:00:00.000Z",
+          },
+          {
+            id: MessageId.make(`${PREAMBLE_THREAD_ID}:000001`),
+            role: "user",
+            text: "Add a completeAll() function to src/todo.ts and a test.",
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-08-24T10:05:00.000Z",
+            updatedAt: "2026-08-24T10:05:00.000Z",
+          },
+        ],
+      };
+    };
+
+    /** A shell snapshot and detail view over a mutable thread record. */
+    const makeThreadStore = (initial: OrchestrationThread) => {
+      const state = { thread: initial };
+      const shell = (threads: ReadonlyArray<OrchestrationThread>) => ({
+        snapshotSequence: 0,
+        projects: [makeProject()],
+        threads: threads.map((thread) => ({
+          id: thread.id,
+          projectId: thread.projectId,
+          title: thread.title,
+          modelSelection: thread.modelSelection,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          branch: thread.branch,
+          worktreePath: thread.worktreePath,
+          pullRequests: thread.pullRequests,
+          latestTurn: thread.latestTurn,
+          createdAt: thread.createdAt,
+          updatedAt: thread.updatedAt,
+          archivedAt: thread.archivedAt,
+          settledOverride: thread.settledOverride,
+          settledAt: thread.settledAt,
+          session: thread.session,
+          latestUserMessageAt: null,
+          hasPendingApprovals: false,
+          hasPendingUserInput: false,
+          hasActionableProposedPlan: false,
+        })),
+        updatedAt: "2026-08-24T10:00:00.000Z",
+      });
+      // The live list and the archive list are disjoint, exactly as the
+      // projection answers them.
+      const snapshots = Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+        getProjectShellById: () => Effect.succeedSome(makeProject()),
+        getImportedAgentSessionSources: () => Effect.succeed([]),
+        getShellSnapshot: () =>
+          Effect.succeed(shell(state.thread.archivedAt === null ? [state.thread] : [])),
+        getArchivedShellSnapshot: () =>
+          Effect.succeed(shell(state.thread.archivedAt === null ? [] : [state.thread])),
+        getThreadDetailById: (threadId) =>
+          threadId === state.thread.id ? Effect.succeedSome(state.thread) : Effect.succeedNone,
+      });
+      return { state, snapshots };
+    };
+
+    const makeDirectory = () =>
+      ProviderSessionDirectory.ProviderSessionDirectory.of({
+        upsert: () => Effect.die("unused"),
+        upsertIf: () => Effect.die("unused"),
+        upsertIfCurrent: () => Effect.die("unused"),
+        getProvider: () => Effect.die("unused"),
+        recordImportedTranscript: () => Effect.void,
+        getBinding: () => Effect.succeedNone,
+        listThreadIds: () => Effect.die("unused"),
+        listBindings: () => Effect.succeed([]),
+      });
+
+    it.effect("retitles a broken thread once, through the engine", () =>
+      Effect.gen(function* () {
+        const { state, snapshots } = makeThreadStore(makePreambleThread("<recommended_plugins>"));
+        const commands: Array<unknown> = [];
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: (command) =>
+            Effect.sync(() => {
+              commands.push(command);
+              if (command.type === "thread.meta.update" && command.title !== undefined) {
+                state.thread = { ...state.thread, title: command.title };
+              }
+              return { sequence: commands.length };
+            }),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () => Stream.empty,
+        });
+
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        expect(commands).toMatchObject([
+          {
+            type: "thread.meta.update",
+            threadId: PREAMBLE_THREAD_ID,
+            title: "Add a completeAll() function to src/todo.ts and a test.",
+          },
+        ]);
+        expect(state.thread.title).toBe("Add a completeAll() function to src/todo.ts and a test.");
+
+        // A second import finds nothing left to repair.
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        expect(commands).toHaveLength(1);
+      }),
+    );
+
+    it.effect("leaves a thread whose title is a real request alone", () =>
+      Effect.gen(function* () {
+        const { state, snapshots } = makeThreadStore(
+          makePreambleThread("Add a completeAll() function to src/todo.ts and a test."),
+        );
+        const commands: Array<unknown> = [];
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: (command) =>
+            Effect.sync(() => {
+              commands.push(command);
+              return { sequence: commands.length };
+            }),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () => Stream.empty,
+        });
+
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        expect(commands).toHaveLength(0);
+        expect(state.thread.title).toBe("Add a completeAll() function to src/todo.ts and a test.");
+      }),
+    );
+
+    it.effect("names a preamble-only thread by its source and date, once", () =>
+      Effect.gen(function* () {
+        const preambleOnly = makePreambleThread("<recommended_plugins>");
+        const { state, snapshots } = makeThreadStore({
+          ...preambleOnly,
+          messages: [preambleOnly.messages[0]!],
+        });
+        const commands: Array<unknown> = [];
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: (command) =>
+            Effect.sync(() => {
+              commands.push(command);
+              if (command.type === "thread.meta.update" && command.title !== undefined) {
+                state.thread = { ...state.thread, title: command.title };
+              }
+              return { sequence: commands.length };
+            }),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () => Stream.empty,
+        });
+
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        const expected = `Imported Codex session · ${preambleOnly.createdAt.slice(0, 10)}`;
+        expect(state.thread.title).toBe(expected);
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        expect(commands).toHaveLength(1);
+      }),
+    );
+
+    it.effect("retitles a broken archived thread once, through the engine", () =>
+      Effect.gen(function* () {
+        // An archived thread stays searchable, so a plugin-list title in the
+        // archive is as visible as one in the sidebar.
+        const { state, snapshots } = makeThreadStore({
+          ...makePreambleThread("<recommended_plugins>"),
+          archivedAt: "2026-08-24T10:10:00.000Z",
+        });
+        const commands: Array<unknown> = [];
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: (command) =>
+            Effect.sync(() => {
+              commands.push(command);
+              if (command.type === "thread.meta.update" && command.title !== undefined) {
+                state.thread = { ...state.thread, title: command.title };
+              }
+              return { sequence: commands.length };
+            }),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () => Stream.empty,
+        });
+
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        expect(commands).toMatchObject([
+          {
+            type: "thread.meta.update",
+            threadId: PREAMBLE_THREAD_ID,
+            title: "Add a completeAll() function to src/todo.ts and a test.",
+          },
+        ]);
+        expect(state.thread.archivedAt).toBe("2026-08-24T10:10:00.000Z");
+
+        // A second import finds nothing left to repair.
+        yield* runImport({ scanner, engine, directory: makeDirectory(), snapshots });
+        expect(commands).toHaveLength(1);
+      }),
+    );
+
+    it.effect("still imports when the repair fails", () =>
+      Effect.gen(function* () {
+        const snapshots = Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
+          getProjectShellById: () => Effect.succeedSome(makeProject()),
+          getImportedAgentSessionSources: () => Effect.succeed([]),
+          getShellSnapshot: () =>
+            Effect.fail(
+              new PersistenceDecodeError({
+                operation: "getShellSnapshot",
+                issue: "unavailable",
+              }),
+            ),
+          getThreadDetailById: () => Effect.succeedNone,
+        });
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: () => Effect.die("unused"),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () => Stream.fromIterable([makeThreadOutcome(makeThread("codex"))]),
+        });
+        const directory = ProviderSessionDirectory.ProviderSessionDirectory.of({
+          upsert: () => Effect.void,
+          upsertIf: () => Effect.die("unused"),
+          upsertIfCurrent: () => Effect.die("unused"),
+          getProvider: () => Effect.die("unused"),
+          recordImportedTranscript: () => Effect.void,
+          getBinding: () => Effect.succeedNone,
+          listThreadIds: () => Effect.die("unused"),
+          listBindings: () => Effect.succeed([]),
+        });
+
+        const result = yield* runImport({
+          scanner,
+          engine: OrchestrationEngine.OrchestrationEngineService.of({
+            ...engine,
+            dispatch: () => Effect.succeed({ sequence: 0 }),
+          }),
+          directory,
+          snapshots,
+        });
+
+        expect(result).toEqual({ importedCount: 1, skippedCount: 0 });
       }),
     );
   });

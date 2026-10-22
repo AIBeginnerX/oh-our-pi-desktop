@@ -180,6 +180,9 @@ import {
   shouldCreateNewThreadInCurrentProject,
   shouldNavigateAfterThreadPark,
   shouldRecedeSidebarThread,
+  crewSubTaskLabel,
+  sidebarParentKey,
+  splitCrewSubTasks,
   resolveWorkingStartedAt,
   sidebarListItemId,
   sidebarMarkerId,
@@ -968,8 +971,77 @@ const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
   ),
 };
 
+/**
+ * Crew sub-task threads folded under one line: under the thread that delegated them, or in the
+ * "earlier crew tasks" group. The group opens on demand and stays open while one of its threads
+ * is the open thread, so the selection is never hidden.
+ */
+const EARLIER_CREW_TASKS_GROUP = "earlier-crew-tasks";
+
+const SidebarCrewTasks = memo(function SidebarCrewTasks(props: {
+  readonly label: string;
+  readonly tasks: readonly EnvironmentThreadShell[];
+  readonly activeKey: string | null;
+  readonly nested: boolean;
+  /** Open-state lives in the sidebar so keyboard navigation can follow the open groups. */
+  readonly expanded: boolean;
+  readonly onToggle: () => void;
+  readonly onOpen: (threadRef: ScopedThreadRef) => void;
+}) {
+  const keyOf = (task: EnvironmentThreadShell) =>
+    scopedThreadKey(scopeThreadRef(task.environmentId, task.id));
+  const open = props.expanded || props.tasks.some((task) => keyOf(task) === props.activeKey);
+  const running = props.tasks.filter(
+    (task) => task.session?.status === "running" || task.session?.status === "starting",
+  ).length;
+  return (
+    <div className={cn("flex flex-col", props.nested ? "pl-7 pb-0.5" : "pt-1")}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={props.onToggle}
+        className="flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-2 text-left text-xs text-sidebar-muted-foreground/70 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+      >
+        <ChevronDownIcon
+          aria-hidden
+          className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
+        />
+        <span className="truncate">
+          {props.label} · {props.tasks.length}
+          {running > 0 ? ` · ${running} running` : ""}
+        </span>
+      </button>
+      {open
+        ? props.tasks.map((task) => {
+            const key = keyOf(task);
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-current={key === props.activeKey ? "page" : undefined}
+                onClick={() => props.onOpen(scopeThreadRef(task.environmentId, task.id))}
+                className={cn(
+                  "flex h-6 cursor-pointer items-center rounded-md pr-2 pl-6 text-left text-xs text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                  key === props.activeKey && "bg-sidebar-row-active text-sidebar-foreground",
+                )}
+              >
+                <span className="truncate">{crewSubTaskLabel(task.title)}</span>
+              </button>
+            );
+          })
+        : null}
+    </div>
+  );
+});
+
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
+  /** Crew sub-task threads this thread delegated, folded under its row. */
+  crewTasks?: readonly EnvironmentThreadShell[] | undefined;
+  crewTasksExpanded?: boolean | undefined;
+  onToggleCrewTasks?: ((groupKey: string) => void) | undefined;
+  /** The open thread's key, so a folded crew task can show it is the open one. */
+  routeThreadKey?: string | null | undefined;
   variant: "card" | "slim";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
@@ -1595,6 +1667,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     )
   ) : null;
 
+  const crewTasksBlock =
+    props.crewTasks !== undefined && props.crewTasks.length > 0 ? (
+      <SidebarCrewTasks
+        label="Crew"
+        tasks={props.crewTasks}
+        activeKey={props.routeThreadKey ?? null}
+        nested
+        expanded={props.crewTasksExpanded === true}
+        onToggle={() =>
+          props.onToggleCrewTasks?.(
+            scopedThreadKey(scopeThreadRef(props.thread.environmentId, props.thread.id)),
+          )
+        }
+        onOpen={onThreadActivate}
+      />
+    ) : null;
+
   if (variant === "slim") {
     return (
       <li
@@ -1746,6 +1835,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
+        {crewTasksBlock}
       </li>
     );
   }
@@ -2010,6 +2100,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
+      {crewTasksBlock}
     </li>
   );
 });
@@ -2567,6 +2658,8 @@ export default function Sidebar() {
     activeThreads,
     snoozedThreads,
     settledThreads,
+    crewTasksByParentKey,
+    earlierCrewTasks,
     snoozeNow,
   } = useMemo(() => {
     // Snooze classification uses a REAL clock, not the quantized minute:
@@ -2581,13 +2674,15 @@ export default function Sidebar() {
         (scopedProjectKeys === null ||
           scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
     );
+    // Crew sub-tasks fold under the thread that delegated them instead of filling the list.
+    const crew = splitCrewSubTasks(visible);
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
     const snoozed: EnvironmentThreadShell[] = [];
     const settled: EnvironmentThreadShell[] = [];
     const draggable = new Set<string>();
     const activeReorderable = new Set<string>();
-    for (const thread of visible) {
+    for (const thread of crew.topLevel) {
       const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
       // Threads on servers without the settlement capability (old server,
       // or descriptor not loaded yet) never classify as settled: the user
@@ -2663,6 +2758,8 @@ export default function Sidebar() {
           firstValidTimestampMs(right.snoozedUntil ?? null),
       ),
       settledThreads: sortSettledThreads(settled),
+      crewTasksByParentKey: crew.childrenByParentKey,
+      earlierCrewTasks: sortSettledThreads(crew.earlierCrewTasks),
       snoozeNow: preciseNow,
     };
   }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
@@ -2672,8 +2769,22 @@ export default function Sidebar() {
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
   const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
+    () => [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...snoozedThreads,
+      ...settledThreads,
+      ...[...crewTasksByParentKey.values()].flat(),
+      ...earlierCrewTasks,
+    ],
+    [
+      activeThreads,
+      crewTasksByParentKey,
+      earlierCrewTasks,
+      pinnedThreads,
+      settledThreads,
+      snoozedThreads,
+    ],
   );
   const searchEnvironmentIds = useMemo(
     () =>
@@ -2742,23 +2853,69 @@ export default function Sidebar() {
     lastSettledResetKeyRef.current = settledResetKey;
     setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
   }
+  // Crew task arrays keep their identity while their tasks do, so a lead's memoized row only
+  // re-renders when its own crew changes.
+  const crewTasksCacheRef = useRef(new Map<string, readonly EnvironmentThreadShell[]>());
+  const stableCrewTasksByParentKey = useMemo(() => {
+    const next = new Map<string, readonly EnvironmentThreadShell[]>();
+    for (const [parentKey, tasks] of crewTasksByParentKey) {
+      const previous = crewTasksCacheRef.current.get(parentKey);
+      next.set(
+        parentKey,
+        previous !== undefined &&
+          previous.length === tasks.length &&
+          previous.every((task, index) => task === tasks[index])
+          ? previous
+          : tasks,
+      );
+    }
+    crewTasksCacheRef.current = next;
+    return next;
+  }, [crewTasksByParentKey]);
+  // A crew task opens inside its lead's row, so the lead is the row that must stay visible.
+  const routeAnchorKey = useMemo(() => {
+    if (routeThreadKey === null) return null;
+    for (const tasks of stableCrewTasksByParentKey.values()) {
+      const routeTask = tasks.find(
+        (task) => scopedThreadKey(scopeThreadRef(task.environmentId, task.id)) === routeThreadKey,
+      );
+      if (routeTask?.parentThreadId != null) {
+        return scopedThreadKey(scopeThreadRef(routeTask.environmentId, routeTask.parentThreadId));
+      }
+    }
+    return routeThreadKey;
+  }, [routeThreadKey, stableCrewTasksByParentKey]);
+  const [expandedCrewGroups, setExpandedCrewGroups] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleCrewGroup = useCallback((groupKey: string) => {
+    setExpandedCrewGroups((previous) => {
+      const next = new Set(previous);
+      if (!next.delete(groupKey)) next.add(groupKey);
+      return next;
+    });
+  }, []);
+  const toggleEarlierCrewTasks = useCallback(
+    () => toggleCrewGroup(EARLIER_CREW_TASKS_GROUP),
+    [toggleCrewGroup],
+  );
   const visibleSettledThreads = useMemo(() => {
     if (settledThreads.length <= settledVisibleCount) return settledThreads;
     const visible = settledThreads.slice(0, settledVisibleCount);
     // The open thread must never hide under "Show more": navigating into a
     // deep settled thread (search, deep link) pulls its row into the visible
     // tail so the highlight and the un-settle affordance stay reachable.
-    if (routeThreadKey !== null) {
+    if (routeAnchorKey !== null) {
       const routeThread = settledThreads
         .slice(settledVisibleCount)
         .find(
           (thread) =>
-            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeAnchorKey,
         );
       if (routeThread !== undefined) visible.push(routeThread);
     }
     return visible;
-  }, [routeThreadKey, settledThreads, settledVisibleCount]);
+  }, [routeAnchorKey, settledThreads, settledVisibleCount]);
   const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
   const showMoreSettled = useCallback(
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
@@ -2775,13 +2932,13 @@ export default function Sidebar() {
   );
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
-    if (routeThreadKey === null) return EMPTY_THREADS;
+    if (routeAnchorKey === null) return EMPTY_THREADS;
     const routeThread = visibleSettledThreads.find(
       (thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeAnchorKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
+  }, [routeAnchorKey, settledShelfExpanded, visibleSettledThreads]);
 
   // The snoozed shelf is collapsed by default: out of the way, never gone.
   // Collapsed threads don't render (and so don't participate in jump
@@ -2801,18 +2958,48 @@ export default function Sidebar() {
     // snoozed thread reached by route (deep link, open before snoozing
     // elsewhere) keeps its row — with highlight and wake affordance — same
     // exception the settled tail's "Show more" makes.
-    if (routeThreadKey === null) return EMPTY_THREADS;
+    if (routeAnchorKey === null) return EMPTY_THREADS;
     const routeThread = snoozedThreads.find(
       (thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeAnchorKey,
     );
     return routeThread === undefined ? EMPTY_THREADS : [routeThread];
-  }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
+  }, [routeAnchorKey, snoozedShelfExpanded, snoozedThreads]);
 
-  const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
-  );
+  // Navigation follows the screen: an open crew group's tasks come right after their lead, and
+  // the open "earlier crew tasks" group comes last.
+  const orderedThreads = useMemo(() => {
+    const isOpen = (groupKey: string, tasks: readonly EnvironmentThreadShell[]) =>
+      expandedCrewGroups.has(groupKey) ||
+      tasks.some(
+        (task) => scopedThreadKey(scopeThreadRef(task.environmentId, task.id)) === routeThreadKey,
+      );
+    const ordered: EnvironmentThreadShell[] = [];
+    for (const thread of [
+      ...pinnedThreads,
+      ...activeThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ]) {
+      ordered.push(thread);
+      const tasks = stableCrewTasksByParentKey.get(
+        sidebarParentKey(thread.environmentId, thread.id),
+      );
+      const groupKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      if (tasks !== undefined && isOpen(groupKey, tasks)) ordered.push(...tasks);
+    }
+    if (isOpen(EARLIER_CREW_TASKS_GROUP, earlierCrewTasks)) ordered.push(...earlierCrewTasks);
+    return ordered;
+  }, [
+    activeThreads,
+    earlierCrewTasks,
+    expandedCrewGroups,
+    pinnedThreads,
+    renderedSettledThreads,
+    routeThreadKey,
+    stableCrewTasksByParentKey,
+    visibleSnoozedThreads,
+  ]);
   const orderedThreadKeys = useMemo(
     () =>
       orderedThreads.map((thread) =>
@@ -4729,6 +4916,18 @@ export default function Sidebar() {
                             // sortable wrapper keeps its identity during a drag.
                             key={`${threadKey}:${rowVariant}`}
                             thread={thread}
+                            crewTasks={stableCrewTasksByParentKey.get(
+                              sidebarParentKey(thread.environmentId, thread.id),
+                            )}
+                            crewTasksExpanded={expandedCrewGroups.has(threadKey)}
+                            onToggleCrewTasks={toggleCrewGroup}
+                            routeThreadKey={
+                              stableCrewTasksByParentKey.has(
+                                sidebarParentKey(thread.environmentId, thread.id),
+                              )
+                                ? routeThreadKey
+                                : null
+                            }
                             variant={rowVariant}
                             // Snoozed rows wake, settled rows un-settle, and cards settle.
                             variantAction={
@@ -4965,6 +5164,19 @@ export default function Sidebar() {
                           <PlusIcon aria-hidden className="size-4 shrink-0" />
                           Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
                         </button>
+                      </li>
+                    ) : null}
+                    {earlierCrewTasks.length > 0 ? (
+                      <li className="list-none">
+                        <SidebarCrewTasks
+                          label="Earlier crew tasks"
+                          tasks={earlierCrewTasks}
+                          activeKey={routeThreadKey}
+                          nested={false}
+                          expanded={expandedCrewGroups.has(EARLIER_CREW_TASKS_GROUP)}
+                          onToggle={toggleEarlierCrewTasks}
+                          onOpen={navigateToThread}
+                        />
                       </li>
                     ) : null}
                   </ul>

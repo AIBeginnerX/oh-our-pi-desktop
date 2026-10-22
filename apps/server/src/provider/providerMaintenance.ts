@@ -86,6 +86,13 @@ export interface ProviderMaintenanceResolutionContext {
   readonly binaryPath: string;
   readonly resolvedCommandPath: string;
   readonly realCommandPath: string;
+  /**
+   * Content of the launcher the resolved command points at, when that command
+   * is a Windows launcher script. A native Claude Code install resolves to a
+   * `claude.cmd` launcher, and only its content proves which binary runs
+   * behind it.
+   */
+  readonly launcherContent?: string | null;
   readonly env: NodeJS.ProcessEnv;
   /** Host platform; decides how the copyable command quotes the executable. */
   readonly platform: NodeJS.Platform;
@@ -112,7 +119,7 @@ export interface PackageManagedProviderMaintenanceDefinition {
   readonly npmPackageName: string;
   readonly nativeUpdate: {
     readonly args: ReadonlyArray<string>;
-    readonly isCommandPath: (commandPath: string) => boolean;
+    readonly isCommandPath: (commandPath: string, launcherContent?: string | null) => boolean;
     /** Environment the native updater needs to target this instance's install. */
     readonly env?: NodeJS.ProcessEnv;
   } | null;
@@ -419,7 +426,12 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
   const packageName = definition.npmPackageName;
 
   const nativeUpdate = definition.nativeUpdate;
-  if (nativeUpdate && commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))) {
+  if (
+    nativeUpdate &&
+    commandPaths.some((commandPath) =>
+      nativeUpdate.isCommandPath(commandPath, context.launcherContent ?? null),
+    )
+  ) {
     return makeProviderMaintenanceCapabilities({
       provider: definition.provider,
       packageName,
@@ -627,6 +639,18 @@ function makeManualProviderMaintenanceCapabilities(
 }
 
 /**
+ * Read a Windows launcher script's content when the resolved command is one.
+ * Launchers are tiny; a launcher that cannot be read stays unknown.
+ */
+const readLauncherContent = Effect.fn("readLauncherContent")(function* (
+  fileSystem: FileSystem.FileSystem,
+  commandPath: string,
+) {
+  if (!/\.(?:cmd|bat|ps1)$/i.test(commandPath)) return null;
+  return yield* fileSystem.readFileString(commandPath).pipe(Effect.orElseSucceed(() => null));
+});
+
+/**
  * Locate the configured provider executable, follow symlinks, and hand the
  * result to the resolver. A binary that cannot be found yields the resolver's
  * no-context answer.
@@ -665,10 +689,12 @@ export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
   if (!realCommandPath) {
     return yield* resolver.resolve(null);
   }
+  const launcherContent = yield* readLauncherContent(fileSystem, resolvedCommandPath);
   return yield* resolver.resolve({
     binaryPath,
     resolvedCommandPath,
     realCommandPath,
+    launcherContent,
     env,
     platform: yield* HostProcessPlatform,
   });

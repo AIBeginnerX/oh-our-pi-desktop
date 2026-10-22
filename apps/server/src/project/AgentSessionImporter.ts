@@ -36,6 +36,11 @@ import {
   readPriorProviderSessionRefs,
 } from "../provider/providerSessionIds.ts";
 import * as AgentSessionScanner from "./AgentSessionScanner.ts";
+import {
+  deriveThreadTitleFromUserTexts,
+  importedSessionFallbackTitle,
+  isInjectedPreambleTitle,
+} from "./AgentSessionUserRequest.ts";
 
 const CLAUDE_SESSION_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -74,6 +79,17 @@ class AgentSessionThreadModifiedError extends Schema.TaggedError<AgentSessionThr
   }
 }
 
+/** Every imported thread id starts with this; the repair matches on it. */
+const IMPORTED_THREAD_ID_PREFIX = "import:";
+
+const importedThreadIdOf = (providerInstanceId: string, providerSessionId: string): ThreadId =>
+  ThreadId.make(`${IMPORTED_THREAD_ID_PREFIX}${providerInstanceId}:${providerSessionId}`);
+
+const isImportedThreadId = (threadId: string) => threadId.startsWith(IMPORTED_THREAD_ID_PREFIX);
+
+const importedThreadProviderInstanceId = (threadId: string): string =>
+  threadId.slice(IMPORTED_THREAD_ID_PREFIX.length).split(":")[0] ?? "";
+
 function hasImportedHistory(thread: OrchestrationThread): boolean {
   return thread.messages.some((message) => isImportedAgentSessionMessageId(message.id));
 }
@@ -105,6 +121,60 @@ function hasImportBlockingActivity(
   );
 }
 
+/**
+ * Retitle imported threads whose title is harness preamble instead of a
+ * request. Such threads were created before titles were derived from the real
+ * user message, and the title is all the sidebar shows, so they all read as
+ * the same plugin list.
+ *
+ * Archived threads are repaired too: an archived thread stays searchable, so a
+ * broken title there is as visible as one in the live list.
+ *
+ * The rename goes through the engine like any other title change, so it lands
+ * in the event log and the projection catches up through the normal path. It is
+ * idempotent by construction: the repair only considers threads whose stored
+ * title still looks like preamble, and it rewrites each at most once.
+ */
+export const repairInjectedImportedThreadTitles = Effect.fn("repairInjectedImportedThreadTitles")(
+  function* () {
+    const engine = yield* OrchestrationEngine.OrchestrationEngineService;
+    const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+    const crypto = yield* Crypto.Crypto;
+    const [shell, archived] = yield* Effect.all([
+      snapshots.getShellSnapshot(),
+      snapshots.getArchivedShellSnapshot(),
+    ]);
+    const brokenThreads = [...shell.threads, ...archived.threads].filter(
+      (thread) => isImportedThreadId(thread.id) && isInjectedPreambleTitle(thread.title),
+    );
+    for (const thread of brokenThreads) {
+      const detail = yield* snapshots.getThreadDetailById(thread.id);
+      if (Option.isNone(detail)) continue;
+      // Some imports kept only the preamble message (no request was ever stored); name those
+      // plainly by source and date rather than leave the plugin list as the title.
+      // A derived title that still reads as markup (e.g. a Codex app event) would be picked up
+      // again on every start, so it takes the fallback too.
+      const derived = deriveThreadTitleFromUserTexts(
+        detail.value.messages.flatMap((message) => (message.role === "user" ? [message.text] : [])),
+      );
+      const title =
+        derived !== null && !isInjectedPreambleTitle(derived)
+          ? derived
+          : importedSessionFallbackTitle(
+              importedThreadProviderInstanceId(thread.id),
+              thread.createdAt,
+            );
+      if (title === thread.title) continue;
+      yield* engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make(yield* crypto.randomUUIDv4),
+        threadId: thread.id,
+        title,
+      });
+    }
+  },
+);
+
 /** Import recent transcript text and persist the cursor needed to resume its provider session. */
 export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(function* (
   input: AgentSessionImportInput,
@@ -114,6 +184,12 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const crypto = yield* Crypto.Crypto;
+  // A stale title must never fail the import the user asked for.
+  yield* repairInjectedImportedThreadTitles().pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("Could not repair imported thread titles", { cause }).pipe(Effect.asVoid),
+    ),
+  );
   const project = yield* snapshots.getProjectShellById(input.projectId).pipe(
     Effect.mapError((cause) => new AgentSessionScanError({ operation: "read-projects", cause })),
     Effect.flatMap(
@@ -220,8 +296,9 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
         return;
       }
       if (outcome._tag === "AlreadyImported" || outcome._tag === "Duplicate") {
-        const threadId = ThreadId.make(
-          `import:${outcome.source.providerInstanceId}:${outcome.source.providerSessionId}`,
+        const threadId = importedThreadIdOf(
+          outcome.source.providerInstanceId,
+          outcome.source.providerSessionId,
         );
         if (outcome._tag === "AlreadyImported") {
           // The no-write count exception: the completed source was validated
@@ -246,9 +323,7 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
         return;
       }
       const thread = outcome.thread;
-      const threadId = ThreadId.make(
-        `import:${thread.providerInstanceId}:${thread.providerSessionId}`,
-      );
+      const threadId = importedThreadIdOf(thread.providerInstanceId, thread.providerSessionId);
       const importThread = Effect.gen(function* () {
         const provider = ProviderDriverKind.make(thread.source);
         const model = thread.model ?? DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL;

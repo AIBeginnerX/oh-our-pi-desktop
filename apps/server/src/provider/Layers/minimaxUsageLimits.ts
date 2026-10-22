@@ -118,7 +118,8 @@ interface RemainsRequest {
 }
 
 /**
- * MiniMax Token Plan limits for the account MiniMax Code signs in with. The OAuth token from
+ * MiniMax Token Plan limits. An instance API key (`OOP_MINIMAX_API_KEY`, which MiniMax Code then
+ * runs on) reads them directly. Otherwise they belong to the account MiniMax Code signs in with: the OAuth token from
  * `mcode login` (`~/.minimax/auth/prod/<region>/mcode-public/auth.json`) reads the coding-plan
  * endpoint; it expires an hour after MiniMax Code last ran. The MiniMax CLI's API key
  * (`~/.mmx/config.json`) is the fallback, and without one `mcodeCommand provider list` refreshes the
@@ -190,7 +191,13 @@ export const readMiniMaxUsageLimits = Effect.fn("readMiniMaxUsageLimits")(functi
     );
   }).pipe(Effect.scoped, Effect.timeout("15 seconds"), Effect.ignore);
 
-  let request = (yield* fromMcode("en")) ?? (yield* fromMcode("cn")) ?? (yield* fromMmx);
+  const instanceKey = environment.OOP_MINIMAX_API_KEY?.trim();
+  const fromInstanceKey: RemainsRequest | null = instanceKey
+    ? { url: "https://api.minimax.io/v1/token_plan/remains", token: instanceKey }
+    : null;
+
+  let request =
+    fromInstanceKey ?? (yield* fromMcode("en")) ?? (yield* fromMcode("cn")) ?? (yield* fromMmx);
   if (request === null && (yield* signedInToMcode)) {
     yield* refreshMcodeToken;
     request = (yield* fromMcode("en")) ?? (yield* fromMcode("cn"));

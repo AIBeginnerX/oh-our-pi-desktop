@@ -680,18 +680,22 @@ describe("buildThreadActionItems", () => {
     expect(item?.description).toBe("T3 Code:feat/search:wt");
   });
 
-  it("filters archived threads out of thread search items", () => {
+  it("keeps archived threads as labelled fallback matches ranked after active ones", async () => {
+    const runThread = vi.fn(async () => undefined);
     const items = buildThreadActionItems({
       threads: [
         makeThread({
           id: ThreadId.make("thread-active"),
-          title: "Active thread",
+          title: "Relay reconnect",
           createdAt: "2026-03-02T00:00:00.000Z",
           updatedAt: "2026-03-19T00:00:00.000Z",
         }),
+      ],
+      archivedThreads: [
         makeThread({
           id: ThreadId.make("thread-archived"),
-          title: "Archived thread",
+          title: "Relay reconnect",
+          createdAt: "2026-03-01T00:00:00.000Z",
           archivedAt: "2026-03-20T00:00:00.000Z",
           updatedAt: "2026-03-20T00:00:00.000Z",
         }),
@@ -699,10 +703,96 @@ describe("buildThreadActionItems", () => {
       projectTitleById: new Map([[PROJECT_ID, "Project"]]),
       sortOrder: "updated_at",
       icon: null,
-      runThread: async (_thread) => undefined,
+      runThread,
     });
 
-    expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+    expect(items.map((item) => item.value)).toEqual([
+      "thread:thread-active",
+      "thread:thread-archived",
+    ]);
+    expect(items[0]?.description).toBe("Project");
+    expect(items[0]?.secondary).toBeUndefined();
+    expect(items[1]?.description).toBe("Project \u00b7 Archived");
+    expect(items[1]?.secondary).toBe(true);
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "relay reconnect",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      settingsSearchItems: [],
+      threadSearchItems: items,
+    });
+
+    expect(groups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
+      "thread:thread-active",
+      "thread:thread-archived",
+    ]);
+
+    await items[1]?.run();
+    expect(runThread).toHaveBeenCalledWith(
+      expect.objectContaining({ id: ThreadId.make("thread-archived") }),
+    );
+  });
+
+  it("still labels an archived thread whose project title is unknown", () => {
+    const items = buildThreadActionItems({
+      threads: [],
+      archivedThreads: [
+        makeThread({
+          id: ThreadId.make("thread-archived"),
+          title: "Archived thread",
+          projectId: ProjectId.make("project-gone"),
+          archivedAt: "2026-03-20T00:00:00.000Z",
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      runThread: async () => undefined,
+    });
+
+    expect(items[0]?.description).toBe("Archived");
+    expect(items[0]?.secondary).toBe(true);
+  });
+
+  it("finds an archived thread by message content alone", () => {
+    const items = buildThreadActionItems({
+      threads: [makeThread({ title: "Unrelated active work" })],
+      archivedThreads: [
+        makeThread({
+          id: ThreadId.make("thread-archived"),
+          title: "Old deployment notes",
+          archivedAt: "2026-03-20T00:00:00.000Z",
+        }),
+      ],
+      projectTitleById: new Map([[PROJECT_ID, "Project"]]),
+      sortOrder: "updated_at",
+      icon: null,
+      getContentMatch: (thread) =>
+        thread.id === ThreadId.make("thread-archived")
+          ? { source: "user", snippet: "Rotate the vault token first", query: "vault" }
+          : undefined,
+      runThread: async () => undefined,
+    });
+
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      query: "vault",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      settingsSearchItems: [],
+      threadSearchItems: items,
+    });
+
+    expect(groups.flatMap((group) => group.items.map((item) => item.value))).toEqual([
+      "thread:thread-archived",
+    ]);
+    expect(groups[0]?.items[0]?.threadContentMatch).toEqual({
+      source: "user",
+      snippet: "Rotate the vault token first",
+      query: "vault",
+    });
   });
 });
 

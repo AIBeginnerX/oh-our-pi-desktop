@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import packageJson from "../../package.json" with { type: "json" };
+import { CLI_VERSION } from "../oopBuild.ts";
 import {
   decodeServiceLauncherContext,
   decodeServiceLauncherParentMessage,
@@ -115,7 +115,7 @@ const resolveStartup = Effect.fn("cloud.service_launcher_client.resolve_startup"
   function* (options?: { readonly currentVersion?: string }) {
     const host = yield* ServiceLauncherHostProcess;
     const environment = yield* HostProcessEnvironment;
-    const currentVersion = options?.currentVersion ?? packageJson.version;
+    const currentVersion = options?.currentVersion ?? CLI_VERSION;
     const rawContext = environment[SERVICE_LAUNCHER_CONTEXT_ENV];
     const context = rawContext === undefined ? undefined : decodeServiceLauncherContext(rawContext);
 

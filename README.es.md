@@ -424,7 +424,16 @@ No hay un servidor público de actualización automática y OoP no se actualiza 
 1. `git pull`
 2. Vuelve a compilar / empaquetar (consulta [Instalación](#instalación--compilación-desde-el-código-fuente)) y reinstala.
 
-Cada versión se publica como **un solo commit** (titulado `OoP <version> source`) más una etiqueta llamada `v<version>`. Tus datos en `~/.oop-desktop/userdata` se conservan entre actualizaciones. Para enterarte de las versiones nuevas, usa **Watch → Custom → Releases** en el repositorio de GitHub o consulta las etiquetas de vez en cuando.
+Cada versión se publica como **un solo commit** (titulado `OoP <version> source`), una etiqueta llamada `v<version>` y un GitHub Release. Tus datos en `~/.oop-desktop/userdata` se conservan entre actualizaciones. Para enterarte de las versiones nuevas, activa **Watch → Custom → Releases** en el repositorio de GitHub; las versiones anteriores solo tienen etiqueta.
+
+Una app que compilaste tú mismo te ofrece dentro de la app tu siguiente compilación, desde la carpeta fijada al compilarla: `release\windows` en Windows (configurada arriba) y `release/macos` en macOS. En macOS, `package` solo genera el DMG, así que después compila también el paquete de actualización:
+
+```bash
+V=<version>
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+```
 
 > [!NOTE]
 > Los avisos de actualización del servidor en la app y `t3 update` provienen de T3 Code upstream. No son un canal de actualización de OoP.

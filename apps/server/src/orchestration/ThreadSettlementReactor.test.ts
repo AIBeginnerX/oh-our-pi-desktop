@@ -181,6 +181,8 @@ interface HarnessOptions {
   /** Serve full sweep reads from this instead of `snapshot`. */
   readonly getShellSnapshot?: ProjectionSnapshotQueryShape["getShellSnapshot"];
   readonly settings?: ServerSettings;
+  /** Auto-archive is off unless a test sets it, so settlement tests see only settlement reads. */
+  readonly autoArchiveAfterDays?: number;
   readonly branchPullRequest?: GitManager["Service"]["branchPullRequest"];
   readonly pullRequestSummary?: PullRequestService["Service"]["summary"];
   readonly existingWorktreePaths?: ReadonlyArray<string>;
@@ -195,7 +197,11 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
   const snapshotReadCount = yield* Ref.make(0);
   // Each shell read: a thread id for a one-thread read, null for a full read.
   const snapshotReads = yield* Queue.unbounded<ThreadId | null>();
-  const settings = yield* Ref.make(options.settings ?? DEFAULT_SERVER_SETTINGS);
+  const settings = yield* Ref.make({
+    ...(options.settings ?? DEFAULT_SERVER_SETTINGS),
+    sidebarAutoArchiveAfterDays: options.autoArchiveAfterDays ?? null,
+  });
+  const archivedThreadIds = yield* Queue.unbounded<ThreadId>();
   const settingsReads = yield* Queue.unbounded<ServerSettings>();
   const settingsChanges = yield* PubSub.unbounded<ServerSettings>();
   const mergedPullRequests = yield* PubSub.unbounded<PullRequestMergeEvent>();
@@ -245,6 +251,12 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     });
 
   const dispatch: OrchestrationEngineShape["dispatch"] = (command) => {
+    if (command.type === "thread.auto-archive") {
+      return Queue.offer(archivedThreadIds, command.threadId).pipe(Effect.as({ sequence: 1 }));
+    }
+    if (command.type === "thread.session.stop") {
+      return Effect.succeed({ sequence: 1 });
+    }
     if (command.type !== "thread.auto-settle") {
       return Effect.die(new Error(`Unexpected command: ${command.type}`));
     }
@@ -310,6 +322,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
       latestSequence: Effect.succeed(0),
     }),
     Layer.succeed(ServerSettingsService, serverSettings),
+    Layer.mock(TerminalManager)({ close: () => Effect.void }),
     Layer.succeed(ServerActivation, Deferred.await(activation)),
     Layer.succeed(Crypto.Crypto, testCrypto),
     FileSystem.layerNoop({
@@ -324,6 +337,7 @@ const makeHarness = Effect.fn("makeThreadSettlementHarness")(function* (options:
     snapshotReads,
     settingsReads,
     commands,
+    archivedThreadIds,
     branchCalls,
     summaryCalls,
     summaryRecovery,
@@ -548,6 +562,41 @@ describe("ThreadSettlementReactor", () => {
       }),
     ),
   );
+  it.effect("archives settled threads past the auto-archive setting and keeps pinned ones", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const longSettled = {
+          settledOverride: "settled" as const,
+          settledAt: "2026-08-10T00:00:00.000Z",
+          latestUserMessageAt: "2026-08-10T00:00:00.000Z",
+        };
+        const fixture = yield* makeHarness({
+          // The archive sweep dispatches in snapshot order, so once the last thread arrives
+          // the threads before it have been decided.
+          snapshot: makeSnapshot([
+            makeThread("pinned-settled", { ...longSettled, pinnedAt: "2026-08-11T00:00:00.000Z" }),
+            makeThread("recently-settled", {
+              ...longSettled,
+              settledAt: "2026-08-27T00:00:00.000Z",
+            }),
+            makeThread("still-active", { latestUserMessageAt: "2026-08-10T00:00:00.000Z" }),
+            makeThread("long-settled", longSettled),
+          ]),
+          settings: { ...DEFAULT_SERVER_SETTINGS, sidebarAutoSettleAfterDays: null },
+          autoArchiveAfterDays: 7,
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
+          yield* reactor.start();
+          yield* Deferred.succeed(fixture.activation, undefined);
+          assert.strictEqual(yield* Queue.take(fixture.archivedThreadIds), "long-settled");
+          assert.strictEqual(yield* Queue.size(fixture.archivedThreadIds), 0);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("uses saved PRs without settling resumed threads or branches with newer PRs", () =>
     Effect.scoped(
       Effect.gen(function* () {

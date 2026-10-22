@@ -106,7 +106,17 @@ choose **Auto-settle behavior**, and pick **Disabled**. The current option is ch
 **Enabled** to return to the usual rules. Manual settle, snooze, and archive still work while it
 is disabled.
 
-Change these rules in **Settings → General** on web and desktop, or **Settings → Thread behavior** on mobile.
+Settled threads also leave the sidebar on their own: seven days after a thread settled or last saw
+activity, it moves to the archive. Pinned, snoozed, busy, and waiting threads stay, and a thread
+that sees any activity before the archive lands stays too. Like a manual archive, this stops the
+thread's idle agent session and closes its terminals. Archived threads remain searchable by title and
+message text from the command palette, where they are labelled **Archived**; choosing one restores
+it. **Settings → Archived threads** also restores them. A restored thread comes back as active
+work. Turn **Auto-archive settled threads** off, or change the number of days, in
+**Settings → General** on web and desktop. The mobile app has no switch for it yet; the value set on
+web or desktop applies to the environment, so it covers mobile too.
+
+Change the auto-settle rules in **Settings → General** on web and desktop, or **Settings → Thread behavior** on mobile.
 They continue to run when your apps are closed. On web and desktop, choose an environment at the
 top to change only its rules, or **All environments** to update connected environments together.
 Mixed values show where the selected environments disagree. Mobile applies these

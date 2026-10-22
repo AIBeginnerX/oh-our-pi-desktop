@@ -256,6 +256,12 @@ export type BuildThreadActionItemsThread = Pick<
 
 export function buildThreadActionItems<TThread extends BuildThreadActionItemsThread>(input: {
   threads: ReadonlyArray<TThread>;
+  /**
+   * Archived threads are a search-only fallback. They rank after every active
+   * match and say so, because a settled result that reads as live work is worse
+   * than no result at all.
+   */
+  archivedThreads?: ReadonlyArray<TThread>;
   activeThreadId?: Thread["id"];
   projectTitleById: ReadonlyMap<Project["id"], string>;
   sortOrder: SidebarThreadSortOrder;
@@ -270,14 +276,13 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
 }): CommandPaletteActionItem[] {
-  const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null),
-    input.sortOrder,
-  );
+  const sortedThreads = sortThreads(input.threads, input.sortOrder);
   const visibleThreads =
     input.limit === undefined ? sortedThreads : sortedThreads.slice(0, input.limit);
+  const archivedThreads = sortThreads(input.archivedThreads ?? [], input.sortOrder);
 
-  return visibleThreads.map((thread) => {
+  return [...visibleThreads, ...archivedThreads].map((thread) => {
+    const isArchived = thread.archivedAt !== null;
     const projectTitle = input.projectTitleById.get(thread.projectId);
     const descriptionParts: string[] = [];
 
@@ -289,6 +294,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
     }
     if (thread.id === input.activeThreadId) {
       descriptionParts.push("Current thread");
+    }
+    if (isArchived) {
+      descriptionParts.push("Archived");
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);
@@ -319,6 +327,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
         searchRecency: getThreadSortTimestamp(thread, "updated_at"),
         icon: input.icon,
       },
+      isArchived ? { secondary: true } : {},
       leadingContent ? { titleLeadingContent: leadingContent } : {},
       trailingContent ? { titleTrailingContent: trailingContent } : {},
       contentMatch ? { threadContentMatch: contentMatch } : {},

@@ -72,13 +72,29 @@ const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
 const CAPABILITIES_PROBE_TTL = Duration.minutes(5);
 
-function isClaudeNativeCommandPath(commandPath: string): boolean {
+/**
+ * Anthropic's native Windows installer keeps the real binary in
+ * `~/.local/bin/claude.exe` and registers it with a `claude.cmd` launcher in
+ * the npm global bin directory, so `claude` on PATH resolves to that launcher
+ * instead of the native binary. Path matching alone cannot recognise a native
+ * install on Windows; the launcher content is the only signal that points back
+ * at `~/.local/bin/claude.exe`.
+ */
+export function isClaudeNativeCommandPath(
+  commandPath: string,
+  launcherContent?: string | null,
+): boolean {
   const normalized = normalizeCommandPath(commandPath);
-  return (
+  if (
     normalized.endsWith("/.local/bin/claude") ||
     normalized.endsWith("/.local/bin/claude.exe") ||
     normalized.includes("/.local/share/claude/")
-  );
+  ) {
+    return true;
+  }
+  if (!/\/claude(\.cmd|\.bat|\.ps1|\.exe)?$/.test(normalized)) return false;
+  if (launcherContent === null || launcherContent === undefined) return false;
+  return /\.local[\\/]bin[\\/]claude(\.exe)?/i.test(launcherContent);
 }
 
 const UPDATE = makePackageManagedProviderMaintenanceResolver({

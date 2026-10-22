@@ -32,6 +32,7 @@ import {
   PinnedRuntimePreflightBlockedError,
 } from "./pinnedRuntime.ts";
 import { decodeServicePreflightResult } from "./servicePreflight.ts";
+import { OOP_RELEASE_VERSION, OOP_UPDATE_MESSAGE } from "../oopBuild.ts";
 import * as ServiceLauncherClient from "./serviceLauncherClient.ts";
 import { isExactServiceVersion, SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
@@ -211,6 +212,9 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
       return yield* failWith(
         "Remote updates require the T3 Code background service. Run `t3 service install` on the server machine.",
       );
+    }
+    if (OOP_RELEASE_VERSION !== null) {
+      return yield* failWith(OOP_UPDATE_MESSAGE);
     }
 
     const targetVersion = input.targetVersion.trim();

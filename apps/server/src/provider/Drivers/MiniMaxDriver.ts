@@ -21,7 +21,11 @@ import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
 import {
   buildInitialMiniMaxProviderSnapshot,
   checkMiniMaxProviderStatus,
+  miniMaxApiKeyDirName,
+  miniMaxApiKeyOf,
   miniMaxCodeAcpLaunch,
+  prepareMiniMaxApiKeyDataDir,
+  withApiKeyModelNames,
 } from "../Layers/MiniMaxProvider.ts";
 import { readMiniMaxUsageLimits } from "../Layers/minimaxUsageLimits.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
@@ -45,6 +49,9 @@ import {
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 
 const decodeMiniMaxCodeSettings = Schema.decodeSync(MiniMaxCodeSettings);
+
+const describeCause = (cause: unknown): string =>
+  cause instanceof Error && cause.message ? cause.message : String(cause);
 
 const DRIVER_KIND = ProviderDriverKind.make("minimax");
 const MINIMAX_CODE_NPM_PACKAGE = "@minimax-ai/code";
@@ -87,8 +94,35 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
+      // With a MiniMax API key (for example a Coding Plan key) in the instance's variables, MiniMax
+      // Code runs from an OoP-owned data dir set to that key instead of the user's own sign-in.
+      const apiKey = miniMaxApiKeyOf(processEnv);
+      const apiKeyDataDir = apiKey
+        ? path.join(
+            serverConfig.stateDir,
+            "providers",
+            "minimax",
+            instanceId,
+            miniMaxApiKeyDirName(apiKey),
+          )
+        : undefined;
+      const launch = miniMaxCodeAcpLaunch(config, apiKeyDataDir);
+      const prepareApiKey = prepareMiniMaxApiKeyDataDir(launch, processEnv).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+      );
+      yield* prepareApiKey.pipe(
+        Effect.catch((cause) =>
+          Effect.logWarning("MiniMax Code could not use the instance API key", {
+            instanceId,
+            detail: describeCause(cause),
+          }),
+        ),
+      );
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -123,25 +157,38 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
         instanceId,
         driverKind: DRIVER_KIND,
         providerLabel: "MiniMax Code",
-        launch: () => miniMaxCodeAcpLaunch(effectiveConfig),
+        launch: () => launch,
         productModelSlug: MINIMAX_CODE_DEFAULT_MODEL,
         harnessLabel: "MiniMax Code",
-        signInCommand: `${miniMaxCodeAcpLaunch(effectiveConfig).command} login --region global`,
+        signInCommand: `${launch.command} login --region global`,
       });
       const textGeneration = yield* makeGrokTextGeneration(acpSettings, processEnv, {
-        launch: miniMaxCodeAcpLaunch(effectiveConfig),
+        launch,
         productModelSlug: MINIMAX_CODE_DEFAULT_MODEL,
         label: "MiniMax Code",
       });
 
-      const checkProvider = checkMiniMaxProviderStatus(effectiveConfig, processEnv).pipe(
-        // Token Plan limits come from the account MiniMax Code signs in with, for the Usage view.
+      const checkProvider = prepareApiKey.pipe(
+        Effect.as(undefined as string | undefined),
+        Effect.catch((cause) => Effect.succeed(describeCause(cause))),
+        Effect.flatMap((apiKeyFailure) =>
+          checkMiniMaxProviderStatus(effectiveConfig, processEnv, apiKeyDataDir).pipe(
+            Effect.map((status) =>
+              apiKeyFailure && status.installed
+                ? { ...status, status: "error" as const, message: apiKeyFailure }
+                : apiKeyDataDir
+                  ? { ...status, models: withApiKeyModelNames(status.models) }
+                  : status,
+            ),
+          ),
+        ),
+        // Token Plan limits come from the instance's API key, else the account MiniMax Code signs
+        // in with, for the Usage view.
         Effect.flatMap((status) =>
           effectiveConfig.enabled && status.installed
-            ? readMiniMaxUsageLimits(
-                processEnv,
-                miniMaxCodeAcpLaunch(effectiveConfig).command,
-              ).pipe(Effect.map((usageLimits) => ({ ...status, usageLimits })))
+            ? readMiniMaxUsageLimits(processEnv, launch.command).pipe(
+                Effect.map((usageLimits) => ({ ...status, usageLimits })),
+              )
             : Effect.succeed(status),
         ),
         Effect.map(stampIdentity),

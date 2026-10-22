@@ -6,7 +6,11 @@ import {
   describeReadinessCause,
   waitForHttpReady as waitForHttpReadyShared,
 } from "@t3tools/shared/httpReadiness";
-import { cliReleaseDownloadBaseUrl } from "@t3tools/shared/cliRelease";
+import {
+  cliArchivePlatformKey,
+  type CliArchivePlatformKey,
+  cliReleaseDownloadBaseUrl,
+} from "@t3tools/shared/cliRelease";
 import * as NetService from "@t3tools/shared/Net";
 import { extractJsonObject, fromLenientJson } from "@t3tools/shared/schemaJson";
 import { satisfiesSemverRange } from "@t3tools/shared/semver";
@@ -83,10 +87,38 @@ export interface RemoteT3RunnerOptions {
    */
   readonly archiveVersion?: string | null;
   readonly releaseBaseUrl?: string | null;
+  /**
+   * Folder under the remote `$HOME` that holds the installed runtimes, launch
+   * state, and server data. Defaults to `.t3`; a fork with its own database
+   * names its own folder so it never opens another build's state.
+   */
+  readonly remoteHomeDirName?: string | null;
+  /**
+   * False: the runner never downloads. A missing runtime then fails the launch
+   * and the caller installs it, as OoP does by sending its own archive over SSH.
+   */
+  readonly archiveDownloads?: boolean;
 }
+
+/** A release archive this computer holds, sent to a remote that lacks the runtime. */
+export interface LocalRuntimeArchive {
+  readonly bytes: Uint8Array;
+  readonly sha256: string;
+}
+
+/**
+ * Finds the archive for `version` and a remote platform on this computer, or
+ * null when there is none. With a source, an archive runner never downloads:
+ * the remote gets this computer's copy over the SSH connection instead.
+ */
+export type LocalRuntimeArchiveSource = (input: {
+  readonly version: string;
+  readonly platformKey: CliArchivePlatformKey;
+}) => Effect.Effect<LocalRuntimeArchive | null>;
 
 export interface SshEnvironmentManagerOptions {
   readonly resolveCliRunner?: Effect.Effect<RemoteT3RunnerOptions>;
+  readonly localRuntimeArchives?: LocalRuntimeArchiveSource;
 }
 
 interface SshTunnelEntry {
@@ -449,16 +481,20 @@ fi
 # Self-contained release archive: no Node, npm, or compiler on the remote.
 # Unpacked into the pinned-runtime layout so \`t3 service install\` reuses it.
 T3_RELEASE_BASE_URL=@@T3_RELEASE_BASE_URL@@
-T3_RUNTIME_DIR="$HOME/.t3/runtime/versions/$T3_ARCHIVE_VERSION"
+T3_RUNTIME_DIR="$HOME/@@T3_REMOTE_HOME@@/runtime/versions/$T3_ARCHIVE_VERSION"
 t3_runtime_ready() {
   [ -x "$T3_RUNTIME_DIR/t3" ] && [ "$(cat "$T3_RUNTIME_DIR/.install-complete" 2>/dev/null)" = "$T3_ARCHIVE_VERSION" ]
 }
+if [ "@@T3_ARCHIVE_DOWNLOADS@@" != "1" ] && ! t3_runtime_ready; then
+  printf 'The server %s is not installed in %s; connect again to install it.\\n' "$T3_ARCHIVE_VERSION" "$T3_RUNTIME_DIR" >&2
+  exit 1
+fi
 if ! t3_runtime_ready; then
-  mkdir -p "$HOME/.t3/runtime/versions"
+  mkdir -p "$HOME/@@T3_REMOTE_HOME@@/runtime/versions"
   # Concurrent launches (two clients, a retry racing a slow first run) must
   # not both install: mkdir is the atomic lock and the ready check repeats
   # under it.
-  T3_LOCK="$HOME/.t3/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"
+  T3_LOCK="$HOME/@@T3_REMOTE_HOME@@/runtime/versions/.$T3_ARCHIVE_VERSION.install.lock"
   # mkdir is the only portable atomic exclusive create (mv would silently
   # nest a candidate inside an existing lock). The owner publishes its pid
   # right after, so a lock with a live owner is never reclaimed however
@@ -505,7 +541,7 @@ if ! t3_runtime_ready; then
     *) printf 'Remote host %s has no t3 release archive.\\n' "$(uname -m)" >&2; exit 1 ;;
   esac
   T3_ARCHIVE="t3-$T3_ARCHIVE_VERSION-$T3_PLATFORM-$T3_ARCH.tar.gz"
-  T3_STAGING="$(mktemp -d "$HOME/.t3/runtime/versions/.staging-XXXXXX")"
+  T3_STAGING="$(mktemp -d "$HOME/@@T3_REMOTE_HOME@@/runtime/versions/.staging-XXXXXX")"
   trap 'rm -rf "$T3_STAGING" "$T3_LOCK"' EXIT
   t3_fetch() {
     if command -v curl >/dev/null 2>&1; then curl -fsSL --connect-timeout 30 --max-time "$3" "$1" -o "$2"
@@ -545,8 +581,8 @@ exec "$T3_RUNTIME_DIR/t3" "$@"
 const REMOTE_LAUNCH_SCRIPT = `set -eu
 @@T3_NODE_ENV_SCRIPT@@
 STATE_KEY="$1"
-STATE_DIR="$HOME/.t3/ssh-launch/$STATE_KEY"
-DEFAULT_SERVER_HOME="$HOME/.t3"
+STATE_DIR="$HOME/@@T3_REMOTE_HOME@@/ssh-launch/$STATE_KEY"
+DEFAULT_SERVER_HOME="$HOME/@@T3_REMOTE_HOME@@"
 DEFAULT_RUNTIME_FILE="$DEFAULT_SERVER_HOME/userdata/server-runtime.json"
 PORT_FILE="$STATE_DIR/port"
 PID_FILE="$STATE_DIR/pid"
@@ -724,20 +760,23 @@ printf '{"remotePort":%s,"serverKind":"%s"}\\n' "$REMOTE_PORT" "\${REMOTE_MANAGE
 `;
 
 const REMOTE_PAIRING_SCRIPT = `set -eu
-STATE_DIR="$HOME/.t3/ssh-launch/@@T3_STATE_KEY@@"
-DEFAULT_SERVER_HOME="$HOME/.t3"
+STATE_DIR="$HOME/@@T3_REMOTE_HOME@@/ssh-launch/@@T3_STATE_KEY@@"
+DEFAULT_SERVER_HOME="$HOME/@@T3_REMOTE_HOME@@"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
+RUNNER_NEXT="$STATE_DIR/run-t3.pair.$$"
+trap 'rm -f "$RUNNER_NEXT"' EXIT
 mkdir -p "$STATE_DIR"
-cat >"$RUNNER_FILE" <<'SH'
+cat >"$RUNNER_NEXT" <<'SH'
 @@T3_RUNNER_SCRIPT@@
 SH
-chmod 700 "$RUNNER_FILE"
+chmod 700 "$RUNNER_NEXT"
+mv "$RUNNER_NEXT" "$RUNNER_FILE"
 PAIRING_BASE_DIR="$DEFAULT_SERVER_HOME"
 "$RUNNER_FILE" auth pairing create --base-dir "$PAIRING_BASE_DIR" --json
 `;
 
 const REMOTE_STOP_SCRIPT = `set -eu
-STATE_DIR="$HOME/.t3/ssh-launch/@@T3_STATE_KEY@@"
+STATE_DIR="$HOME/@@T3_REMOTE_HOME@@/ssh-launch/@@T3_STATE_KEY@@"
 PID_FILE="$STATE_DIR/pid"
 PORT_FILE="$STATE_DIR/port"
 MANAGED_FILE="$STATE_DIR/managed"
@@ -760,7 +799,7 @@ printf '{"stopped":true}\\n'
 `;
 
 const REMOTE_LOG_TAIL_SCRIPT = `set -eu
-STATE_DIR="$HOME/.t3/ssh-launch/@@T3_STATE_KEY@@"
+STATE_DIR="$HOME/@@T3_REMOTE_HOME@@/ssh-launch/@@T3_STATE_KEY@@"
 LOG_FILE="$STATE_DIR/server.log"
 if [ -f "$LOG_FILE" ]; then
   tail -n 80 "$LOG_FILE" 2>/dev/null || true
@@ -781,6 +820,26 @@ export class SshInvalidArchiveVersionError extends Schema.TaggedError<SshInvalid
 // metacharacters beyond what SemVer allows.
 const EXACT_ARCHIVE_VERSION =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/u;
+
+export class SshInvalidRemoteHomeError extends Schema.TaggedError<SshInvalidRemoteHomeError>()(
+  "SshInvalidRemoteHomeError",
+  { remoteHomeDirName: Schema.String },
+) {
+  override get message(): string {
+    return `'${this.remoteHomeDirName}' cannot name a folder under the remote home directory.`;
+  }
+}
+
+// One plain folder name directly under $HOME, never a path or a shell word.
+const REMOTE_HOME_DIR_NAME = /^\.?[A-Za-z0-9][A-Za-z0-9_-]*$/u;
+
+export function remoteHomeDirName(input?: RemoteT3RunnerOptions): string {
+  const name = input?.remoteHomeDirName?.trim() || ".t3";
+  if (!REMOTE_HOME_DIR_NAME.test(name)) {
+    throw new SshInvalidRemoteHomeError({ remoteHomeDirName: name });
+  }
+  return name;
+}
 
 export class SshMissingRunnerError extends Schema.TaggedError<SshMissingRunnerError>()(
   "SshMissingRunnerError",
@@ -810,6 +869,8 @@ export function buildRemoteT3RunnerScript(input?: RemoteT3RunnerOptions): string
       T3_NODE_SCRIPT_PATH: shellSingleQuote(nodeScriptPath),
       T3_ARCHIVE_VERSION: shellSingleQuote(archiveVersion),
       T3_RELEASE_BASE_URL: shellSingleQuote(releaseBaseUrl),
+      T3_REMOTE_HOME: remoteHomeDirName(input),
+      T3_ARCHIVE_DOWNLOADS: input?.archiveDownloads === false ? "0" : "1",
       T3_ARCHIVE_LOCK_WAIT_SECONDS: String(REMOTE_ARCHIVE_LOCK_WAIT_SECONDS),
       T3_ARCHIVE_DOWNLOAD_SECONDS: String(REMOTE_ARCHIVE_DOWNLOAD_SECONDS),
       T3_ARCHIVE_CHECKSUMS_SECONDS: String(REMOTE_ARCHIVE_CHECKSUMS_SECONDS),
@@ -832,6 +893,7 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_ARCHIVE_MODE: isNodeScriptRunner(input) ? "0" : "1",
     T3_NODE_ENV_SCRIPT: buildRemoteNodeEnvScript(input),
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
+    T3_REMOTE_HOME: remoteHomeDirName(input),
     T3_PICK_PORT_SCRIPT: stripTrailingNewlines(REMOTE_PICK_PORT_SCRIPT),
     T3_WAIT_READY_SCRIPT: stripTrailingNewlines(REMOTE_WAIT_READY_SCRIPT),
     T3_DEFAULT_REMOTE_PORT: String(DEFAULT_REMOTE_PORT),
@@ -849,20 +911,194 @@ export function buildRemotePairingScript(
   return applyScriptPlaceholders(REMOTE_PAIRING_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
     T3_RUNNER_SCRIPT: stripTrailingNewlines(buildRemoteT3RunnerScript(input)),
+    T3_REMOTE_HOME: remoteHomeDirName(input),
   });
 }
 
-export function buildRemoteStopScript(target: DesktopSshEnvironmentTarget): string {
+export function buildRemoteStopScript(
+  target: DesktopSshEnvironmentTarget,
+  input?: RemoteT3RunnerOptions,
+): string {
   return applyScriptPlaceholders(REMOTE_STOP_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
+    T3_REMOTE_HOME: remoteHomeDirName(input),
   });
 }
 
-function buildRemoteLogTailScript(target: DesktopSshEnvironmentTarget): string {
+function buildRemoteLogTailScript(
+  target: DesktopSshEnvironmentTarget,
+  input?: RemoteT3RunnerOptions,
+): string {
   return applyScriptPlaceholders(REMOTE_LOG_TAIL_SCRIPT, {
     T3_STATE_KEY: remoteStateKey(target),
+    T3_REMOTE_HOME: remoteHomeDirName(input),
   });
 }
+
+const REMOTE_RUNTIME_PROBE_SCRIPT = `V="$1"
+DIR="$HOME/$2/runtime/versions/$V"
+if [ -x "$DIR/t3" ] && [ "$(cat "$DIR/.install-complete" 2>/dev/null)" = "$V" ]; then
+  echo ready
+else
+  echo "missing $(uname -s) $(uname -m)"
+fi
+`;
+
+// Reads the archive from stdin into the same pinned-runtime layout the
+// download path uses, so the launch script then finds it ready. Contains no
+// single quote: it travels inside one.
+const REMOTE_RUNTIME_UPLOAD_SCRIPT = `set -eu
+V="$1"
+SUM="$2"
+ROOT="$HOME/$3/runtime/versions"
+DIR="$ROOT/$V"
+ready() { [ -x "$DIR/t3" ] && [ "$(cat "$DIR/.install-complete" 2>/dev/null)" = "$V" ]; }
+if ready; then cat >/dev/null; echo ready; exit 0; fi
+mkdir -p "$ROOT"
+# Same lock as the runner: one install of a version at a time, whoever starts it.
+LOCK="$ROOT/.$V.install.lock"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  OWNER="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$OWNER" ] && kill -0 "$OWNER" 2>/dev/null; then
+    cat >/dev/null
+    printf "Another install of %s is running on this host; connect again in a moment.\\n" "$V" >&2
+    exit 1
+  fi
+  rm -rf "$LOCK"
+  mkdir "$LOCK"
+fi
+printf "%s\\n" "$$" >"$LOCK/pid"
+STAGE="$(mktemp -d "$ROOT/.upload-XXXXXX")"
+trap "rm -rf \\"$STAGE\\" \\"$LOCK\\"" EXIT
+if ready; then cat >/dev/null; echo ready; exit 0; fi
+cat >"$STAGE/archive.tar.gz"
+if command -v sha256sum >/dev/null 2>&1; then
+  GOT="$(sha256sum "$STAGE/archive.tar.gz" | cut -d" " -f1)"
+else
+  GOT="$(shasum -a 256 "$STAGE/archive.tar.gz" | cut -d" " -f1)"
+fi
+if [ "$GOT" != "$SUM" ]; then
+  printf "Checksum mismatch for the uploaded server %s.\\n" "$V" >&2
+  exit 1
+fi
+tar -xzf "$STAGE/archive.tar.gz" -C "$STAGE" --strip-components=1
+rm -f "$STAGE/archive.tar.gz"
+if ! RUN_ERROR="$("$STAGE/t3" --version 2>&1 >/dev/null)"; then
+  printf "The server %s does not run on this host: %s\\n" "$V" "$RUN_ERROR" >&2
+  exit 1
+fi
+printf "%s\\n" "$V" >"$STAGE/.install-complete"
+rm -rf "$DIR"
+mv "$STAGE" "$DIR"
+echo installed
+`;
+
+/** The archive platform for a remote's `uname -s` and `uname -m`, if a release builds one. */
+export function remoteCliArchivePlatformKey(
+  os: string,
+  machine: string,
+): CliArchivePlatformKey | null {
+  const arch =
+    machine === "x86_64" || machine === "amd64"
+      ? "x64"
+      : machine === "aarch64" || machine === "arm64"
+        ? "arm64"
+        : null;
+  const platform = os === "Linux" ? "linux" : os === "Darwin" ? "darwin" : null;
+  if (arch === null || platform === null) return null;
+  return cliArchivePlatformKey(platform, arch) ?? null;
+}
+
+export function buildRemoteRuntimeUploadCommand(input: {
+  readonly version: string;
+  readonly sha256: string;
+  readonly remoteHomeDirName: string;
+}): string {
+  return [
+    "sh",
+    "-c",
+    shellSingleQuote(REMOTE_RUNTIME_UPLOAD_SCRIPT),
+    "sh",
+    shellSingleQuote(input.version),
+    shellSingleQuote(input.sha256),
+    shellSingleQuote(input.remoteHomeDirName),
+  ].join(" ");
+}
+
+/**
+ * Installs the archive runtime on the remote from this computer when the
+ * remote lacks it. Runs before launch, so the launch script never downloads.
+ */
+export const ensureRemoteRuntimeFromLocalArchive = Effect.fn(
+  "ssh/tunnel.ensureRemoteRuntimeFromLocalArchive",
+)(function* (
+  target: DesktopSshEnvironmentTarget,
+  input: SshAuthOptions | undefined,
+  runner: RemoteT3RunnerOptions,
+  archives: LocalRuntimeArchiveSource,
+): Effect.fn.Return<
+  void,
+  SshCommandError | SshInvalidTargetError | SshLaunchError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
+> {
+  const version = runner.archiveVersion?.trim() ?? "";
+  if (isNodeScriptRunner(runner) || version === "") return;
+  if (!EXACT_ARCHIVE_VERSION.test(version)) {
+    throw new SshInvalidArchiveVersionError({ archiveVersion: version });
+  }
+  const homeDirName = remoteHomeDirName(runner);
+  const auth = {
+    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
+    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
+    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
+  };
+  const probe = yield* runSshCommand(target, {
+    remoteCommandArgs: ["sh", "-s", "--", version, homeDirName],
+    stdin: REMOTE_RUNTIME_PROBE_SCRIPT,
+    ...auth,
+  });
+  const status = getLastNonEmptyOutputLine(probe.stdout) ?? "";
+  if (status === "ready") return;
+  const [, os = "", machine = ""] = status.split(" ");
+  const platformKey = remoteCliArchivePlatformKey(os, machine);
+  if (platformKey === null) {
+    return yield* new SshLaunchError({
+      message: `No server build exists for this remote host (${os || "unknown OS"} ${machine || "unknown CPU"}).`,
+      stdout: probe.stdout,
+    });
+  }
+  const archive = yield* archives({ version, platformKey });
+  if (archive === null) {
+    return yield* new SshLaunchError({
+      message: `The server ${version} for ${platformKey} is not on this computer, so it cannot be installed on ${target.alias}. Publish the ${version} release, including its server archives, then connect again.`,
+      stdout: probe.stdout,
+    });
+  }
+  yield* Effect.logInfo("ssh.remoteRuntime.upload.start", {
+    ...sshTargetLogFields(target),
+    version,
+    platformKey,
+    bytes: archive.bytes.byteLength,
+  });
+  const upload = yield* runSshCommand(target, {
+    remoteCommandArgs: [
+      buildRemoteRuntimeUploadCommand({
+        version,
+        sha256: archive.sha256,
+        remoteHomeDirName: homeDirName,
+      }),
+    ],
+    stdin: archive.bytes,
+    timeoutMs: REMOTE_ARCHIVE_LAUNCH_TIMEOUT_MS,
+    ...auth,
+  });
+  yield* Effect.logInfo("ssh.remoteRuntime.upload.succeeded", {
+    ...sshTargetLogFields(target),
+    version,
+    platformKey,
+    result: getLastNonEmptyOutputLine(upload.stdout) ?? null,
+  });
+});
 
 export const launchOrReuseRemoteServer = Effect.fn("ssh/tunnel.launchOrReuseRemoteServer")(
   function* (
@@ -983,6 +1219,7 @@ export const issueRemotePairingToken = Effect.fn("ssh/tunnel.issueRemotePairingT
 const stopRemoteServer = Effect.fn("ssh/tunnel.stopRemoteServer")(function* (
   target: DesktopSshEnvironmentTarget,
   input?: SshAuthOptions,
+  runner?: RemoteT3RunnerOptions,
 ): Effect.fn.Return<
   void,
   SshCommandError | SshInvalidTargetError,
@@ -994,7 +1231,7 @@ const stopRemoteServer = Effect.fn("ssh/tunnel.stopRemoteServer")(function* (
   });
   yield* runSshCommand(target, {
     remoteCommandArgs: ["sh", "-s"],
-    stdin: buildRemoteStopScript(target),
+    stdin: buildRemoteStopScript(target, runner),
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
     ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
     ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
@@ -1008,6 +1245,7 @@ const stopRemoteServer = Effect.fn("ssh/tunnel.stopRemoteServer")(function* (
 const readRemoteServerLogTail = Effect.fn("ssh/tunnel.readRemoteServerLogTail")(function* (
   target: DesktopSshEnvironmentTarget,
   input?: SshAuthOptions,
+  runner?: RemoteT3RunnerOptions,
 ): Effect.fn.Return<
   string,
   SshCommandError | SshInvalidTargetError,
@@ -1015,7 +1253,7 @@ const readRemoteServerLogTail = Effect.fn("ssh/tunnel.readRemoteServerLogTail")(
 > {
   const result = yield* runSshCommand(target, {
     remoteCommandArgs: ["sh", "-s"],
-    stdin: buildRemoteLogTailScript(target),
+    stdin: buildRemoteLogTailScript(target, runner),
     timeoutMs: 10_000,
     ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
     ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
@@ -1109,6 +1347,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
   readonly wsBaseUrl: string;
   readonly authOptions: SshAuthOptions;
   readonly remoteServerKind: "external" | "managed" | null;
+  readonly runner?: RemoteT3RunnerOptions;
 }): Effect.fn.Return<
   SshTunnelEntry,
   SshCommandError | SshInvalidTargetError | SshReadinessError,
@@ -1282,7 +1521,7 @@ const startSshTunnel = Effect.fn("ssh/tunnel.startSshTunnel")(function* (input: 
           net.canListenOnHost(input.localPort, "127.0.0.1"),
         );
         const remoteLogTailExit = yield* Effect.exit(
-          readRemoteServerLogTail(input.resolvedTarget, input.authOptions),
+          readRemoteServerLogTail(input.resolvedTarget, input.authOptions, input.runner),
         );
         const processRunning = Exit.isSuccess(processRunningExit) ? processRunningExit.value : null;
         const localPortAvailable = Exit.isSuccess(localPortAvailableExit)
@@ -1498,11 +1737,23 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...sshRunnerLogFields(input.runner),
       key: input.key,
     });
+    const archives = options.localRuntimeArchives;
+    const runner = input.runner;
     const remoteLaunch = yield* runWithSshAuth({
       key: input.key,
       target: input.resolvedTarget,
       operation: (authOptions) =>
-        launchOrReuseRemoteServer(input.resolvedTarget, authOptions, input.runner),
+        Effect.gen(function* () {
+          if (archives !== undefined && runner !== undefined) {
+            yield* ensureRemoteRuntimeFromLocalArchive(
+              input.resolvedTarget,
+              authOptions,
+              runner,
+              archives,
+            );
+          }
+          return yield* launchOrReuseRemoteServer(input.resolvedTarget, authOptions, runner);
+        }),
     });
     const remotePort = remoteLaunch.remotePort;
     yield* Effect.logDebug("ssh.environment.remotePort.ready", {
@@ -1534,6 +1785,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
           wsBaseUrl,
           authOptions,
           remoteServerKind: remoteLaunch.remoteServerKind,
+          ...(input.runner === undefined ? {} : { runner: input.runner }),
         }).pipe(Effect.provideService(Scope.Scope, entryScope)),
     }).pipe(
       Effect.onExit((exit) =>
@@ -1579,6 +1831,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
                 batchMode: "no",
                 interactiveAuth: true,
               },
+          input.runner,
         ).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawnerService),
           Effect.provideService(FileSystem.FileSystem, fileSystemService),
@@ -1728,6 +1981,8 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...(target.port !== null ? { port: target.port } : {}),
     };
     const key = targetConnectionKey(resolvedTarget);
+    const runner =
+      options.resolveCliRunner === undefined ? undefined : yield* options.resolveCliRunner;
     yield* withTargetLock(
       key,
       Effect.gen(function* () {
@@ -1747,7 +2002,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
         yield* runWithSshAuth({
           key,
           target: resolvedTarget,
-          operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
+          operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions, runner),
         });
         yield* Effect.logInfo("ssh.environment.disconnect.succeeded", {
           ...sshTargetLogFields(resolvedTarget),

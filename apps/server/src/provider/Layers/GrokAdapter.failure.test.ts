@@ -19,4 +19,13 @@ describe("describeAcpPromptFailure", () => {
     expect(long.length).toBe("ZCode request failed: ".length + 300);
     expect(describeAcpPromptFailure("ZCode", undefined)).toBe("ZCode prompt request failed.");
   });
+
+  it("translates a MiniMax Code LLM first-event timeout into a friendly retry message", () => {
+    const defect = new Error(
+      "Internal error: MiniMax Code Runtime failed: LLM request timed out: no response from the provider within 300000ms. Raise it with MCODE_LLM_FIRST_EVENT_TIMEOUT_MS (milliseconds, 0 disables) or the host's per-model firstEventTimeoutMs.",
+    );
+    expect(describeAcpPromptFailure("MiniMax Code", defect)).toBe(
+      "MiniMax Code got no response from the model provider in time. The provider may be busy; send the message again or pick another model.",
+    );
+  });
 });

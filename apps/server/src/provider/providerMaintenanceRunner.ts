@@ -426,6 +426,15 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             const result = yield* runMaintenanceCommand(command);
             const finishedAt = yield* nowIso;
             if (result.timedOut || result.exitCode !== 0) {
+              // A failed update otherwise only shows up in the client's update state, and the
+              // installer output explaining why is the only trace it leaves in the server log.
+              yield* Effect.logWarning("Provider update command failed", {
+                provider,
+                instanceId,
+                exitCode: result.exitCode,
+                timedOut: result.timedOut,
+                output: commandOutput(result)?.slice(-2000) ?? null,
+              });
               return yield* finish(
                 makeUpdateState({
                   status: "failed",

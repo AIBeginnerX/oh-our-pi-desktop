@@ -9,6 +9,8 @@ import {
   buildBulkTitleRegenerationContextMenuItem,
   buildBulkUnpinContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  crewSubTaskLabel,
+  splitCrewSubTasks,
   createThreadJumpHintVisibilityController,
   deleteSelectedThreadEntries,
   filterSidebarProjectScopeItems,
@@ -2558,4 +2560,66 @@ describe("navigation after parking a thread", () => {
       ).toBe(expected);
     },
   );
+});
+
+describe("splitCrewSubTasks", () => {
+  const thread = (
+    id: string,
+    title: string,
+    extra: Partial<{
+      parentThreadId: string | null;
+      hasPendingApprovals: boolean;
+      environmentId: string;
+    }> = {},
+  ) => ({
+    environmentId: extra.environmentId ?? "env",
+    id,
+    title,
+    parentThreadId: extra.parentThreadId ?? null,
+    hasPendingApprovals: extra.hasPendingApprovals ?? false,
+    hasPendingUserInput: false,
+  });
+
+  it("folds linked crew threads under their lead and collects unlinked ones", () => {
+    const lead = thread("lead", "Plan the trading strategy");
+    const worker = thread("w1", "Crew Worker · Research signals", { parentThreadId: "lead" });
+    const legacy = thread("old", "Crew Expert · Old sizing review");
+    const orphan = thread("w2", "Crew Auditor · Review", { parentThreadId: "archived-lead" });
+    const plain = thread("p", "Crewing a boat");
+    const { topLevel, childrenByParentKey, earlierCrewTasks } = splitCrewSubTasks([
+      lead,
+      worker,
+      legacy,
+      orphan,
+      plain,
+    ]);
+    expect(topLevel.map((entry) => entry.id)).toEqual(["lead", "p"]);
+    expect(childrenByParentKey.get("env:lead")?.map((entry) => entry.id)).toEqual(["w1"]);
+    expect(earlierCrewTasks.map((entry) => entry.id)).toEqual(["old", "w2"]);
+  });
+
+  it("keeps a crew thread that waits on the user at the top level", () => {
+    const lead = thread("lead", "Lead");
+    const waiting = thread("w", "Crew Worker · Needs approval", {
+      parentThreadId: "lead",
+      hasPendingApprovals: true,
+    });
+    expect(splitCrewSubTasks([lead, waiting]).topLevel.map((entry) => entry.id)).toEqual([
+      "lead",
+      "w",
+    ]);
+  });
+
+  it("does not nest under a same-id thread from another environment", () => {
+    const otherLead = thread("lead", "Lead elsewhere", { environmentId: "other" });
+    const worker = thread("w", "Crew Worker · Task", { parentThreadId: "lead" });
+    expect(
+      splitCrewSubTasks([otherLead, worker]).earlierCrewTasks.map((entry) => entry.id),
+    ).toEqual(["w"]);
+  });
+
+  it("labels crew rows without the Crew prefix", () => {
+    expect(crewSubTaskLabel("Crew Worker · Research")).toBe("Worker · Research");
+    expect(crewSubTaskLabel("Crewing a boat")).toBe("Crewing a boat");
+  });
 });

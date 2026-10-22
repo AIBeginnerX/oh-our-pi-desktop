@@ -150,7 +150,8 @@ const sessionModels = (
   environment: NodeJS.ProcessEnv,
   version: string | null,
 ) => {
-  const key = `${launch.command}\0${version ?? ""}`;
+  // The launch env picks the agent's account (MiniMax Code's data dir), which picks its models.
+  const key = `${launch.command}\0${version ?? ""}\0${JSON.stringify(launch.env ?? {})}`;
   const cached = sessionModelCache.get(key);
   if (cached !== undefined) return Effect.succeed(cached);
   return Effect.gen(function* () {

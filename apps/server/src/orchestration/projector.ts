@@ -484,6 +484,7 @@ export function projectEvent(
             unsettledAt: null,
             activeOrderKey: null,
             autoSettleDisabledAt: null,
+            parentThreadId: payload.parentThreadId ?? null,
             snoozedUntil: null,
             snoozedAt: null,
             deletedAt: null,

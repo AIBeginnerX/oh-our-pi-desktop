@@ -851,6 +851,8 @@ export const OrchestrationThread = Schema.Struct({
   // Survives manual settle, un-settle, and activity: only the user clears it.
   // Optional so payloads from older servers still decode.
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  // The lead thread a crew sub-task belongs to; clients nest it there. Optional for older servers.
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
@@ -922,6 +924,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   session: Schema.NullOr(OrchestrationSession),
@@ -1138,6 +1141,8 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  /** Set by the server for crew sub-task threads: the lead thread that delegated them. */
+  parentThreadId: Schema.optional(ThreadId),
   createdAt: IsoDateTime,
   historyImport: Schema.optional(Schema.Literal(true)),
 });
@@ -1172,6 +1177,18 @@ const ThreadAutoSettleCommand = Schema.Struct({
   threadId: ThreadId,
   snapshotSequence: NonNegativeInt,
   settledAt: IsoDateTime,
+});
+
+/**
+ * Server-only: archive a thread the settlement reactor found settled and idle in the snapshot at
+ * `snapshotSequence`. The engine rejects it when the thread changed since that snapshot, and the
+ * decider re-checks the archive rules against the current thread.
+ */
+const ThreadAutoArchiveCommand = Schema.Struct({
+  type: Schema.Literal("thread.auto-archive"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  snapshotSequence: NonNegativeInt,
 });
 
 const ThreadUnsettleCommand = Schema.Struct({
@@ -1693,6 +1710,7 @@ const ThreadPullRequestLinkSyncCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadAutoSettleCommand,
+  ThreadAutoArchiveCommand,
   ThreadPullRequestSyncCommand,
   ThreadPullRequestLinkSyncCommand,
   ThreadSessionSetCommand,
@@ -1806,6 +1824,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  parentThreadId: Schema.optional(ThreadId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });

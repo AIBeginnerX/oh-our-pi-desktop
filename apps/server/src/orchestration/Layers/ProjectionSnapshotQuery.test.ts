@@ -487,6 +487,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinOrderKey: "gm",
           activeOrderKey: "hq",
           autoSettleDisabledAt: null,
+          parentThreadId: null,
           titleRegeneration: null,
           titleState: null,
           deletedAt: null,
@@ -614,6 +615,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinOrderKey: "gm",
           activeOrderKey: "hq",
           autoSettleDisabledAt: null,
+          parentThreadId: null,
           titleRegeneration: null,
           titleState: null,
           session: {
@@ -2134,7 +2136,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
-  it.effect("searches active user messages and canonical assistant outputs", () =>
+  it.effect("searches live and archived user messages and canonical assistant outputs", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
@@ -2155,16 +2157,27 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           updated_at,
           deleted_at
         )
-        VALUES (
-          'project-search',
-          'Project Needle',
-          '/tmp/project-search',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-05-01T00:00:00.000Z',
-          '2026-05-01T00:00:01.000Z',
-          NULL
-        )
+        VALUES
+          (
+            'project-search',
+            'Project Needle',
+            '/tmp/project-search',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-05-01T00:00:00.000Z',
+            '2026-05-01T00:00:01.000Z',
+            NULL
+          ),
+          (
+            'project-deleted-search',
+            'Deleted Project',
+            '/tmp/project-deleted-search',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            '[]',
+            '2026-05-01T00:00:00.000Z',
+            '2026-05-01T00:00:02.000Z',
+            '2026-05-01T00:00:02.000Z'
+          )
       `;
 
       yield* sql`
@@ -2243,6 +2256,44 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '2026-05-01T00:00:06.000Z',
             '2026-05-01T00:00:07.000Z',
             '2026-05-01T00:00:08.000Z',
+            NULL
+          ),
+          (
+            'thread-deleted-search',
+            'project-search',
+            'Deleted search',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-05-01T00:00:09.000Z',
+            '2026-05-01T00:00:10.000Z',
+            NULL,
+            '2026-05-01T00:00:11.000Z'
+          ),
+          (
+            'thread-deleted-project',
+            'project-deleted-search',
+            'Thread in a deleted project',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-05-01T00:00:12.000Z',
+            '2026-05-01T00:00:13.000Z',
+            NULL,
             NULL
           )
       `;
@@ -2324,10 +2375,30 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'thread-hidden',
             NULL,
             'user',
-            'Hidden needle in archive.',
+            'Archived vault token rotation.',
             0,
             '2026-05-01T00:00:16.000Z',
             '2026-05-01T00:00:16.000Z'
+          ),
+          (
+            'message-deleted-search',
+            'thread-deleted-search',
+            NULL,
+            'user',
+            'Deleted graveyard token rotation.',
+            0,
+            '2026-05-01T00:00:17.000Z',
+            '2026-05-01T00:00:17.000Z'
+          ),
+          (
+            'message-deleted-project',
+            'thread-deleted-project',
+            NULL,
+            'user',
+            'Message about a revoked project.',
+            0,
+            '2026-05-01T00:00:18.000Z',
+            '2026-05-01T00:00:18.000Z'
           )
       `;
 
@@ -2383,8 +2454,18 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         (yield* snapshotQuery.searchThreads({ query: "system needle" })).matches,
         [],
       );
+      // Archiving moves a thread out of the sidebar, not out of search.
+      const archived = yield* snapshotQuery.searchThreads({ query: "vault token" });
       assert.deepStrictEqual(
-        (yield* snapshotQuery.searchThreads({ query: "hidden needle" })).matches,
+        archived.matches.map((match) => [match.threadId, match.source]),
+        [[ThreadId.make("thread-hidden"), "user"]],
+      );
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreads({ query: "graveyard" })).matches,
+        [],
+      );
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreads({ query: "revoked project" })).matches,
         [],
       );
       yield* sql`

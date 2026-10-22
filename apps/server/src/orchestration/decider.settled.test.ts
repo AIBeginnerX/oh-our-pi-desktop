@@ -851,3 +851,74 @@ it.layer(NodeServices.layer)("settled thread decider", (it) => {
     }),
   );
 });
+
+it.layer(NodeServices.layer)("automatic archive decider", (it) => {
+  const autoArchive = {
+    type: "thread.auto-archive" as const,
+    commandId: CommandId.make("cmd-auto-archive"),
+    threadId: ThreadId.make("thread-1"),
+    snapshotSequence: 0,
+  };
+
+  it.effect("archives a settled thread that is still idle", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        command: autoArchive,
+        readModel: makeReadModel("settled"),
+      });
+      const events = Array.isArray(result) ? result : [result];
+      expect(events.map((event) => event.type)).toEqual(["thread.archived"]);
+    }),
+  );
+
+  it.effect("re-checks the current thread and refuses one that came back to life", () =>
+    Effect.gen(function* () {
+      const refused = (readModel: OrchestrationReadModel) =>
+        decideOrchestrationCommand({ command: autoArchive, readModel }).pipe(
+          Effect.flip,
+          Effect.map((error) => error._tag),
+        );
+      expect(yield* refused(makeReadModel("active"))).toBe("OrchestrationCommandInvariantError");
+      expect(yield* refused(makeReadModel(null))).toBe("OrchestrationCommandInvariantError");
+      expect(yield* refused(makeReadModel("settled", null, makeSession("running")))).toBe(
+        "OrchestrationCommandInvariantError",
+      );
+      expect(
+        yield* refused(makeReadModel("settled", null, null, [], [], { pinnedAt: SETTLED_AT })),
+      ).toBe("OrchestrationCommandInvariantError");
+      expect(
+        yield* refused(
+          makeReadModel("settled", null, null, [], [], {
+            snoozedUntil: "2999-01-01T00:00:00.000Z",
+          }),
+        ),
+      ).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("restores a settled thread as active work so the sweep does not re-archive it", () =>
+    Effect.gen(function* () {
+      const unarchive = {
+        type: "thread.unarchive" as const,
+        commandId: CommandId.make("cmd-unarchive"),
+        threadId: ThreadId.make("thread-1"),
+      };
+      const settled = yield* decideOrchestrationCommand({
+        command: unarchive,
+        readModel: makeReadModel("settled", SETTLED_AT),
+      });
+      const settledEvents = Array.isArray(settled) ? settled : [settled];
+      expect(settledEvents.map((event) => event.type)).toEqual([
+        "thread.unarchived",
+        "thread.unsettled",
+      ]);
+
+      const active = yield* decideOrchestrationCommand({
+        command: unarchive,
+        readModel: makeReadModel(null, SETTLED_AT),
+      });
+      const activeEvents = Array.isArray(active) ? active : [active];
+      expect(activeEvents.map((event) => event.type)).toEqual(["thread.unarchived"]);
+    }),
+  );
+});

@@ -21,8 +21,11 @@ If a crew model fails, for example because its account is out of credit, OoP han
 When the auditor asks for changes, or a crew task finishes after the brain has already answered, OoP sends the brain a follow-up turn with that report so it can fix the work or update its answer. Audit fixes stop after two rounds per message you send. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
 
 Each piece of crew work runs as its own chat named `Crew Worker · …`, `Crew Expert · …`, or
-`Crew Auditor · …` in the same workspace, and is settled when it finishes. The brain and its crew
-show up live in the right panel under **Workflows** and **Agents**.
+`Crew Auditor · …` in the same workspace, and is settled when it finishes. In the sidebar these
+chats fold into a **Crew · N** line under the chat that delegated them; open it to see or jump to
+each task. Crew chats from before this grouping, or whose lead chat is archived, collect in one
+**Earlier crew tasks** line. A crew chat waiting on your approval or answer stays in the main list.
+The brain and its crew show up live in the right panel under **Workflows** and **Agents**.
 
 When the brain is a Claude chat, crew roles that use a Claude model from the same account run as
 the brain's own subagents instead of separate chats. They start faster and share the brain's

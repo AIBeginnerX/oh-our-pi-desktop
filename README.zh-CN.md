@@ -424,7 +424,16 @@ OoP 在 [`infra/oop-relay`](infra/oop-relay/README.md) 中附带了一个小型 
 1. `git pull`
 2. 重新构建 / 打包（参见[安装](#安装--从源码构建)）并重新安装。
 
-每个版本都以**一次提交**（标题为 `OoP <version> source`）加上名为 `v<version>` 的标签发布。你在 `~/.oop-desktop/userdata` 中的数据在更新后会被保留。想了解新版本，请在 GitHub 仓库上使用 **Watch → Custom → Releases**，或不时查看标签。
+每个版本都以**一次提交**（标题为 `OoP <version> source`）、名为 `v<version>` 的标签和一个 GitHub Release 发布。你在 `~/.oop-desktop/userdata` 中的数据在更新后会被保留。想了解新版本，请在 GitHub 仓库上开启 **Watch → Custom → Releases**；较早的版本只有标签。
+
+你自己构建的应用会从构建时设定的文件夹中找到你的下一次构建，并在应用内提示更新：Windows 上是上面设置的 `release\windows`，macOS 上是 `release/macos`。macOS 的 `package` 只生成 DMG，因此还需要接着构建更新包：
+
+```bash
+V=<version>
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+```
 
 > [!NOTE]
 > 应用内的服务器更新提示和 `t3 update` 来自上游 T3 Code，并不是 OoP 的更新渠道。

@@ -3,7 +3,11 @@
 import { threadPullRequestLinkMode } from "@t3tools/client-runtime/thread-pull-request-compatibility";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
 import {
   canCreateProjectInEnvironment,
   getCloneDestinationBrowsePath,
@@ -99,6 +103,8 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
+import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
   appendBrowsePathSegment,
@@ -193,7 +199,7 @@ import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
 } from "../sidebarProjectGrouping";
-import type { Project } from "../types";
+import type { Project, ThreadShell } from "../types";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 
@@ -641,6 +647,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
         </div>
         <CommandPaletteDialog
           mode={state.mode}
+          open={state.open}
           openIntent={state.openIntent}
           setOpen={setOpen}
           openOverlayMode={toggleMode}
@@ -653,6 +660,7 @@ export function CommandPalette({ children }: { children: ReactNode }) {
 
 function CommandPaletteDialog(props: {
   readonly mode: SearchOverlayMode;
+  readonly open: boolean;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
@@ -687,6 +695,7 @@ function CommandPaletteDialog(props: {
         <ProjectContentSearchDialog onOpenChange={props.setOpen} />
       ) : (
         <OpenCommandPaletteDialog
+          open={props.open}
           openIntent={props.openIntent}
           setOpen={props.setOpen}
           openOverlayMode={props.openOverlayMode}
@@ -698,6 +707,7 @@ function CommandPaletteDialog(props: {
 }
 
 function OpenCommandPaletteDialog(props: {
+  readonly open: boolean;
   readonly openIntent: CommandPaletteOpenIntent | null;
   readonly setOpen: (open: boolean) => void;
   readonly openOverlayMode: (mode: SearchOverlayMode) => void;
@@ -845,6 +855,35 @@ function OpenCommandPaletteDialog(props: {
       ),
     [threadSearch.matches],
   );
+  // Archived threads are a search fallback, so their shells are fetched only
+  // while the palette is open in command mode with a query typed. An always-on
+  // subscription would pull the whole archive on every app render.
+  const archivedSearchQuery =
+    props.open && currentView === null && !isActionsOnly ? deferredQuery.trim() : "";
+  const archivedSearchEnvironmentIds = useMemo(
+    () => (archivedSearchQuery === "" ? [] : environmentIds),
+    [archivedSearchQuery, environmentIds],
+  );
+  const { snapshots: archivedSnapshots } = useArchivedThreadSnapshots(archivedSearchEnvironmentIds);
+  const archivedThreadShells = useMemo<ReadonlyArray<ThreadShell>>(
+    () =>
+      archivedSearchQuery === ""
+        ? []
+        : archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
+            snapshot.threads.map((thread) => ({ ...thread, environmentId })),
+          ),
+    [archivedSearchQuery, archivedSnapshots],
+  );
+  const archivedThreadKeys = useMemo(
+    () =>
+      new Set(
+        archivedThreadShells.map((thread) =>
+          scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        ),
+      ),
+    [archivedThreadShells],
+  );
+  const { unarchiveThread } = useThreadActions();
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const browseNavigationRef = useRef<ReturnType<typeof createBrowseNavigationCoordinator> | null>(
     null,
@@ -1102,6 +1141,22 @@ function OpenCommandPaletteDialog(props: {
     () => new Map<ProjectId, string>(projects.map((project) => [project.id, project.title])),
     [projects],
   );
+  // An archived thread's project can be gone from the live project list, so its
+  // title has to come from the archive snapshot or the result loses its context.
+  const threadProjectTitleById = useMemo(() => {
+    if (archivedSnapshots.length === 0) {
+      return projectTitleById;
+    }
+    const titles = new Map(projectTitleById);
+    for (const { snapshot } of archivedSnapshots) {
+      for (const project of snapshot.projects) {
+        if (!titles.has(project.id)) {
+          titles.set(project.id, project.title);
+        }
+      }
+    }
+    return titles;
+  }, [archivedSnapshots, projectTitleById]);
 
   const activeThreadId = activeThread?.id;
   const currentProjectEnvironmentId =
@@ -1344,12 +1399,19 @@ function OpenCommandPaletteDialog(props: {
     () =>
       buildThreadActionItems({
         threads,
+        archivedThreads: archivedThreadShells,
         ...(activeThreadId ? { activeThreadId } : {}),
-        projectTitleById,
+        projectTitleById: threadProjectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+        renderTrailingContent: (thread) =>
+          // An archived thread has no live status left to report; the label replaces it.
+          thread.archivedAt === null ? (
+            <ThreadRowTrailingStatus thread={thread} />
+          ) : (
+            <span className="shrink-0 text-2xs text-muted-foreground/70">Archived</span>
+          ),
         renderDescription: (thread, { projectTitle }) => {
           const modelInstanceId =
             thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
@@ -1390,26 +1452,39 @@ function OpenCommandPaletteDialog(props: {
             : undefined;
         },
         runThread: async (thread) => {
+          const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+          // The server serves no live view of an archived thread, so opening one restores it.
+          if (archivedThreadKeys.has(scopedThreadKey(threadRef))) {
+            await unarchiveThread(threadRef, { navigate: true });
+            return;
+          }
           await navigate({
             to: "/$environmentId/$threadId",
-            params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
+            params: buildThreadRouteParams(threadRef),
           });
         },
       }),
     [
       activeThreadId,
+      archivedThreadKeys,
+      archivedThreadShells,
+      unarchiveThread,
       clientSettings.sidebarThreadSortOrder,
       navigate,
       projectByKey,
       projectEnvironmentLocationById,
-      projectTitleById,
       providerEntryByEnvironmentAndInstanceId,
       threadContentMatchByKey,
+      threadProjectTitleById,
       threadSearchQuery,
       threads,
     ],
   );
-  const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
+  // Archived items ride along in `allThreadItems` so search can reach them, but
+  // the root list is "Recent Threads" and only shows primary matches.
+  const recentThreadItems = allThreadItems
+    .filter((item) => !item.secondary)
+    .slice(0, RECENT_THREAD_LIMIT);
 
   const pushPaletteView = useCallback(
     (view: CommandPaletteView): void => {

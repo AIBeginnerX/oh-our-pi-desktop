@@ -1,4 +1,4 @@
-import packageJson from "../../package.json" with { type: "json" };
+import { CLI_VERSION } from "../oopBuild.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
 export type ServicePreflightResult =
@@ -19,7 +19,7 @@ export function runServicePreflight(input: {
   readonly launcherProtocol: number;
   readonly version?: string;
 }): ServicePreflightResult {
-  const version = input.version ?? packageJson.version;
+  const version = input.version ?? CLI_VERSION;
   if (input.launcherProtocol !== SERVICE_LAUNCHER_PROTOCOL) {
     return {
       status: "blocked",

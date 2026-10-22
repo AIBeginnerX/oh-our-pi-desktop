@@ -58,6 +58,12 @@ import {
   createTranscriptJsonSelector,
   TranscriptJsonLimitError,
 } from "./AgentSessionJson.ts";
+import {
+  firstRealUserRequest,
+  importedSessionFallbackTitle,
+  isDelegationPreambleRequest,
+  threadTitleFromRequest,
+} from "./AgentSessionUserRequest.ts";
 
 /** Chunk size for full transcript reads. */
 const TRANSCRIPT_PREFIX_BYTES = 32 * 1024;
@@ -96,6 +102,15 @@ const MAX_IMPORT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_IMPORT_TRANSCRIPTS = 100;
 const MAX_IMPORT_RECORDS = 100_000;
 
+/**
+ * Claude Code names a sub-agent transcript `agent-<id>.jsonl` under its
+ * session's `subagents/` directory. Nested layout is invisible here (discovery
+ * reads one project directory, never recurses), but the flat layout older
+ * versions wrote puts the file beside real sessions, where only its name
+ * separates a delegated run from a conversation.
+ */
+const CLAUDE_SUBAGENT_TRANSCRIPT_PREFIX = "agent-";
+
 const TranscriptContentBlock = Schema.Struct({
   type: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String),
@@ -131,6 +146,10 @@ const TranscriptRecord = Schema.Struct({
       model: Schema.optional(Schema.String),
       cwd: Schema.optional(Schema.String),
       content: Schema.optional(Schema.Array(TranscriptContentBlock)),
+      // Both sub-agent markers live on the session_meta payload and are read
+      // after the record is decoded, so the decode schema has to keep them.
+      source: Schema.optional(Schema.Unknown),
+      parent_thread_id: Schema.optional(Schema.Unknown),
       internal_chat_message_metadata_passthrough: Schema.optional(Schema.Unknown),
     }),
   ),
@@ -342,6 +361,19 @@ function parseAgentSessionRecords(
   input: AgentSessionTranscriptMetadata,
   records: ReadonlyArray<DecodedTranscriptRecord>,
 ): AgentSessionThread | null {
+  // A transcript that records a sidechain turn is a delegated sub-agent run,
+  // not a conversation the user had. Claude Code keeps sub-agent transcripts in
+  // their own files and never marks a top-level session's turns, so this is
+  // the marker that survives both layouts.
+  if (records.some((record) => record.isSidechain === true)) return null;
+  if (
+    input.source === "codex" &&
+    records.some(
+      (record) => record.type === "session_meta" && codexSessionDeclaresSubagent(record.payload),
+    )
+  ) {
+    return null;
+  }
   const fallbackTimestamp = DateTime.formatIso(DateTime.makeUnsafe(input.lastActiveAtMs));
   // Claude filenames are session IDs. Codex rollout filenames include extra
   // timestamp text, so only transcript metadata can provide a resumable ID.
@@ -353,6 +385,11 @@ function parseAgentSessionRecords(
   let firstUserMessage:
     | (AgentSessionThreadMessage & { readonly codexResponseUser: boolean })
     | undefined;
+  // The first user message is usually the harness preamble; a title taken from
+  // it names a plugin list or an environment block. The real request is read
+  // from every user message as it arrives, because a long conversation pushes
+  // its second message out of the retained window long before it ends.
+  let firstRealRequest: string | null = null;
   // A Codex response item can include generated setup text beside the real
   // prompt. Suppress response-user records only when the shared turn ID and a
   // verbatim event copy prove which prompt the user submitted.
@@ -412,8 +449,9 @@ function parseAgentSessionRecords(
   const retainMessage = (
     message: AgentSessionThreadMessage & { readonly codexResponseUser: boolean },
   ) => {
-    if (firstUserMessage === undefined && message.role === "user") {
-      firstUserMessage = message;
+    if (message.role === "user") {
+      if (firstUserMessage === undefined) firstUserMessage = message;
+      firstRealRequest ??= firstRealUserRequest(message.text);
     }
     messages.push(message);
     if (messages.length > MAX_IMPORTED_MESSAGES) messages.shift();
@@ -535,18 +573,90 @@ function parseAgentSessionRecords(
   const retainedMessages = firstUserMessageRetained
     ? visibleMessages
     : [visibleFirstUserMessage, ...visibleMessages.slice(-(MAX_IMPORTED_MESSAGES - 1))];
-  const derivedTitle = visibleFirstUserMessage.text.trim().split("\n")[0]?.slice(0, 100).trim();
+  // A session whose first real request is a delegation harness's own opening
+  // is a delegated run, not a conversation the user had. Neither the CLI marks
+  // it: Claude writes it as a top-level SDK session with no sidechain record.
+  if (firstRealRequest !== null && isDelegationPreambleRequest(firstRealRequest)) return null;
+  const sessionCreatedAt = retainedMessages[0]?.createdAt ?? fallbackTimestamp;
+  // A session whose messages hold no request at all — the user has not typed
+  // into it yet — is named by its source and date, the same title the repair
+  // gives an earlier import of such a session.
+  const derivedTitle = firstRealRequest === null ? null : threadTitleFromRequest(firstRealRequest);
 
   return {
     source: input.source,
     providerInstanceId: input.providerInstanceId,
     providerSessionId,
-    title: title ?? (derivedTitle && derivedTitle.length > 0 ? derivedTitle : "Imported thread"),
+    title:
+      title ??
+      derivedTitle ??
+      importedSessionFallbackTitle(input.providerInstanceId, sessionCreatedAt),
     model,
-    createdAt: retainedMessages[0]?.createdAt ?? fallbackTimestamp,
+    createdAt: sessionCreatedAt,
     updatedAt: fallbackTimestamp,
     messages: retainedMessages,
   };
+}
+
+/**
+ * Whether a Codex session metadata record belongs to a spawned sub-agent
+ * thread. Codex writes `source: { subagent: { thread_spawn: { parent_thread_id } } }`
+ * and repeats the parent id at the top level of the same record. A top-level
+ * conversation has a string `source` (`vscode`, `exec`) and no parent.
+ */
+function codexSessionDeclaresSubagent(payload: unknown): boolean {
+  if (typeof payload !== "object" || payload === null) return false;
+  const record = payload as { readonly parent_thread_id?: unknown; readonly source?: unknown };
+  if (typeof record.parent_thread_id === "string" && record.parent_thread_id.length > 0) {
+    return true;
+  }
+  return (
+    typeof record.source === "object" &&
+    record.source !== null &&
+    "subagent" in (record.source as Record<string, unknown>)
+  );
+}
+
+/**
+ * Cheap pre-filter over a raw transcript line. Discovery reads every record of
+ * every candidate, so this only parses lines that could name a sub-agent.
+ */
+function codexLineDeclaresSubagent(line: string): boolean {
+  if (!line.includes("subagent") && !line.includes("parent_thread_id")) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const record = parsed as { readonly type?: unknown; readonly payload?: unknown };
+  return record.type === "session_meta" && codexSessionDeclaresSubagent(record.payload);
+}
+
+/** A transcript record Claude Code marked as a delegated sub-agent turn. */
+function claudeLineDeclaresSidechain(line: string): boolean {
+  if (!line.includes("isSidechain")) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  return (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    (parsed as { readonly isSidechain?: unknown }).isSidechain === true
+  );
+}
+
+/**
+ * Whether a transcript is a delegated run rather than something the user had.
+ * Dropped during discovery so a sub-agent transcript never reaches the import
+ * path or counts towards a project's session count.
+ */
+function transcriptDeclaresSubagent(line: string): boolean {
+  return claudeLineDeclaresSidechain(line) || codexLineDeclaresSubagent(line);
 }
 
 function extractDecodedCwd(record: DecodedTranscriptRecord): string | null {
@@ -823,7 +933,9 @@ export const make = Effect.gen(function* () {
             };
             const readLastRecord = () => {
               const record = remaining + decoder.decode();
-              return record.length === 0 || !reserveRecord() ? null : extractCwd(record.trim());
+              if (record.length === 0 || !reserveRecord()) return null;
+              const line = record.trim();
+              return transcriptDeclaresSubagent(line) ? null : extractCwd(line);
             };
 
             while (bytesRead < maxBytes) {
@@ -850,6 +962,9 @@ export const make = Effect.gen(function* () {
 
               for (const line of lines) {
                 if (!reserveRecord()) return null;
+                // A delegated run is dropped here rather than parsed: it is
+                // never a project the user worked in.
+                if (transcriptDeclaresSubagent(line.trim())) return null;
                 const cwd = extractCwd(line.trim());
                 if (cwd !== null) return cwd;
               }
@@ -1006,7 +1121,10 @@ export const make = Effect.gen(function* () {
         }
         const directory = path.join(projectsDir, projectDirectory);
         const directoryTranscripts = (yield* readDirectory(directory))
-          .filter((entry) => entry.endsWith(".jsonl"))
+          .filter(
+            (entry) =>
+              entry.endsWith(".jsonl") && !entry.startsWith(CLAUDE_SUBAGENT_TRANSCRIPT_PREFIX),
+          )
           .map((entry) => path.join(directory, entry));
 
         for (const filePath of directoryTranscripts) {

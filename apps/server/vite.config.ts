@@ -111,6 +111,8 @@ export default mergeConfig(
       },
       define: {
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
+        // Set by scripts/build-oop-cli-archives.mjs for the OoP server archives (src/oopBuild.ts).
+        __T3CODE_BUILD_OOP_RELEASE__: JSON.stringify(process.env.T3CODE_OOP_RELEASE?.trim() ?? ""),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
         __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
           repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",

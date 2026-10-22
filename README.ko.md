@@ -424,7 +424,16 @@ OoP에는 [`infra/oop-relay`](infra/oop-relay/README.md)에 작은 Cloudflare Wo
 1. `git pull`
 2. 다시 빌드 / 패키징([설치](#설치--소스에서-빌드) 참고)하고 재설치합니다.
 
-각 릴리스는 **커밋 하나**(제목 `OoP <version> source`)와 `v<version>` 태그로 게시됩니다. `~/.oop-desktop/userdata`에 있는 데이터는 업데이트해도 유지됩니다. 새 버전 소식을 받으려면 GitHub 저장소에서 **Watch → Custom → Releases**를 사용하거나, 가끔 태그를 확인하세요.
+각 릴리스는 **커밋 하나**(제목 `OoP <version> source`), `v<version>` 태그, GitHub Release로 게시됩니다. `~/.oop-desktop/userdata`에 있는 데이터는 업데이트해도 유지됩니다. 새 버전 소식을 받으려면 GitHub 저장소에서 **Watch → Custom → Releases**를 켜세요. 이전 버전에는 태그만 있습니다.
+
+직접 빌드한 앱은 빌드할 때 정해진 폴더에서 다음 빌드를 찾아 앱 안에서 업데이트를 제안합니다. Windows는 위에서 지정한 `release\windows`, macOS는 `release/macos`입니다. macOS의 `package`는 DMG만 만들므로, 이어서 업데이트 패키지도 만드세요.
+
+```bash
+V=<version>
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+```
 
 > [!NOTE]
 > 앱의 서버 업데이트 알림과 `t3 update`는 업스트림 T3 Code에서 오는 것입니다. OoP의 업데이트 채널이 아닙니다.

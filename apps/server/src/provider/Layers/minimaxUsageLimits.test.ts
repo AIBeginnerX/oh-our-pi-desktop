@@ -115,7 +115,10 @@ const REMAINS = {
 };
 
 /** Runs the reader against a throwaway home where `mcode provider list` rewrites the auth file. */
-const readWith = (initialAuth: ((nowMs: number) => string) | null) =>
+const readWith = (
+  initialAuth: ((nowMs: number) => string) | null,
+  instanceEnvironment: NodeJS.ProcessEnv = {},
+) =>
   Effect.gen(function* () {
     const nowMs = yield* Clock.currentTimeMillis;
     const fs = yield* FileSystem.FileSystem;
@@ -135,16 +138,21 @@ const readWith = (initialAuth: ((nowMs: number) => string) | null) =>
         .pipe(Effect.as(finishedProcess()), Effect.orDie);
     });
     const authorizations: Array<string | undefined> = [];
+    const urls: Array<string> = [];
     const client = HttpClient.make((request) => {
       authorizations.push(request.headers.authorization);
+      urls.push(request.url);
       return Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(REMAINS)));
     });
-    const limits = yield* readMiniMaxUsageLimits({ HOME: home }, "mcode").pipe(
+    const limits = yield* readMiniMaxUsageLimits(
+      { ...instanceEnvironment, HOME: home },
+      "mcode",
+    ).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Effect.provideService(HttpClient.HttpClient, client),
       Effect.provideService(HostProcessPlatform, "darwin"),
     );
-    return { limits, commands, authorizations };
+    return { limits, commands, authorizations, urls };
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 describe("readMiniMaxUsageLimits", () => {
@@ -160,6 +168,19 @@ describe("readMiniMaxUsageLimits", () => {
         expect(limits.unavailable).toBeUndefined();
         expect(limits.windows.map((window) => window.usedPercent)).toEqual([30]);
       }),
+  );
+
+  effectIt.effect("reads the plan of the instance's MiniMax API key before any sign-in", () =>
+    Effect.gen(function* () {
+      const { limits, commands, authorizations, urls } = yield* readWith(
+        (nowMs) => mcodeAuth("oauth-token", nowMs + 3_600_000),
+        { OOP_MINIMAX_API_KEY: " sk-cp-test " },
+      );
+      expect(commands).toEqual([]);
+      expect(authorizations).toEqual(["Bearer sk-cp-test"]);
+      expect(urls).toEqual(["https://api.minimax.io/v1/token_plan/remains"]);
+      expect(limits.windows.map((window) => window.usedPercent)).toEqual([30]);
+    }),
   );
 
   effectIt.effect("does not run mcode for an account that never signed in", () =>

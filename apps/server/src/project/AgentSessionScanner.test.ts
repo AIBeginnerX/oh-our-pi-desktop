@@ -9,6 +9,7 @@ import {
   type ServerSettings as ContractServerSettings,
 } from "@t3tools/contracts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -175,6 +176,30 @@ const codexRolloutLine = (cwd: string) =>
   `${JSON.stringify({ timestamp: "2026-01-01T00:00:00.000Z", type: "session_meta", payload: { id: "r1", cwd } })}\n`;
 
 const encodeTranscriptRecord = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
+/** A Claude transcript of nothing but user turns, each with its reply. */
+const makeClaudeUserTurns = (texts: ReadonlyArray<string>): string => {
+  const at = (second: number) =>
+    DateTime.formatIso(
+      DateTime.makeUnsafe(Date.parse("2026-08-24T10:00:00.000Z") + second * 1_000),
+    );
+  return texts
+    .flatMap((text, index) => [
+      encodeTranscriptRecord({
+        type: "user",
+        sessionId: "turn-session",
+        timestamp: at(index * 2),
+        message: { role: "user", content: text },
+      }),
+      encodeTranscriptRecord({
+        type: "assistant",
+        sessionId: "turn-session",
+        timestamp: at(index * 2 + 1),
+        message: { role: "assistant", content: [{ type: "text", text: `Reply ${index + 1}` }] },
+      }),
+    ])
+    .join("\n");
+};
 
 function makeRecordLimitTranscript(cwd: string, overflow: boolean): string {
   const records =
@@ -3190,6 +3215,658 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
   });
+
+  describe("delegated sub-agent transcripts", () => {
+    it.effect("skips a Claude sidechain transcript and a flat agent-*.jsonl next to it", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+        const projectDirectory = path.join(claudeHomePath, "projects", "-slug");
+
+        yield* writeTranscript({
+          filePath: path.join(projectDirectory, "real-session.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "user",
+              cwd: workspace,
+              sessionId: "real-session",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              message: { role: "user", content: "Fix the project" },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+        // A delegated sub-agent run: every record is a sidechain turn.
+        yield* writeTranscript({
+          filePath: path.join(projectDirectory, "sidechain-session.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "user",
+              cwd: workspace,
+              sessionId: "sidechain-session",
+              isSidechain: true,
+              timestamp: "2026-08-24T10:02:00.000Z",
+              message: { role: "user", content: "Review the diff" },
+            }),
+            encodeTranscriptRecord({
+              type: "assistant",
+              cwd: workspace,
+              sessionId: "sidechain-session",
+              isSidechain: true,
+              timestamp: "2026-08-24T10:03:00.000Z",
+              message: { role: "assistant", content: [{ type: "text", text: "Reviewed" }] },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 30_000,
+        });
+        // The same run in the flat layout older Claude Code versions wrote:
+        // it shares the file name shape but no session id of its own.
+        yield* writeTranscript({
+          filePath: path.join(projectDirectory, "agent-a95dfaaf145d757ec.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "user",
+              cwd: workspace,
+              sessionId: "agent-a95dfaaf145d757ec",
+              isSidechain: true,
+              timestamp: "2026-08-24T10:04:00.000Z",
+              message: { role: "user", content: "Write the regression test" },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 10_000,
+        });
+
+        let agentTranscriptOpens = 0;
+        const trackedFileSystem = FileSystem.FileSystem.of({
+          ...fileSystem,
+          open: (filePath, options) => {
+            if (filePath.includes("agent-a95dfaaf145d757ec")) agentTranscriptOpens += 1;
+            return fileSystem.open(filePath, options);
+          },
+        });
+
+        const outcomes = yield* runRecentThreadOutcomes({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        }).pipe(Effect.provideService(FileSystem.FileSystem, trackedFileSystem));
+
+        expect(outcomes.map((outcome) => outcome._tag)).toEqual(["Importable"]);
+        expect(
+          outcomes.flatMap((outcome) =>
+            outcome._tag === "Importable" ? [outcome.thread.providerSessionId] : [],
+          ),
+        ).toEqual(["real-session"]);
+        expect(agentTranscriptOpens).toBe(0);
+
+        // A delegated run is not a thread the user worked in, so it must not
+        // inflate the project's session count either.
+        const scan = yield* Effect.gen(function* () {
+          const scanner = yield* AgentSessionScanner.AgentSessionScanner;
+          return yield* scanner.scan;
+        }).pipe(
+          Effect.provide(makeScannerTestLayer({ claudeHomePath, codexHomePath })),
+          Effect.provideService(FileSystem.FileSystem, trackedFileSystem),
+        );
+        expect(scan.candidates.find((candidate) => candidate.path === workspace)?.threadCount).toBe(
+          1,
+        );
+      }),
+    );
+
+    it.effect("skips a Claude session whose first real request is a delegation preamble", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+
+        // Shaped like a real delegated run: no sidechain record and no agent
+        // id, only the environment block, the SDK caveat wrapper, and a
+        // launcher opening that the user never typed.
+        yield* writeTranscript({
+          filePath: path.join(claudeHomePath, "projects", "-slug", "delegated-session.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "user",
+              cwd: workspace,
+              sessionId: "delegated-session",
+              entrypoint: "sdk-ts",
+              promptSource: "sdk",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      'The above is the conversation history so far, provided as context. Respond as the assistant to the user message below only. Never emit "USER:" or "ASSISTANT:" labels or continue the transcript.<environment_context>',
+                      `  <cwd>${workspace}</cwd>`,
+                      "  <current_date>2026-08-24</current_date>",
+                      "</environment_context>You are running as an agent-task child. Task id: st_x",
+                      "Parent session: 01a15ddf-583f-72b9-906c-8f4f02378968.",
+                    ].join("\n"),
+                  },
+                ],
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "assistant",
+              sessionId: "delegated-session",
+              timestamp: "2026-08-24T10:01:00.000Z",
+              message: { role: "assistant", content: [{ type: "text", text: "Running" }] },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+
+        const outcomes = yield* runRecentThreadOutcomes({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(outcomes.map((outcome) => outcome._tag)).toEqual(["Skipped"]);
+      }),
+    );
+
+    it.effect("skips a Codex crew delegate session", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+
+        yield* writeTranscript({
+          filePath: path.join(
+            codexHomePath,
+            "sessions",
+            "2026",
+            "08",
+            "24",
+            "rollout-crew-delegate.jsonl",
+          ),
+          contents: [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: "crew-delegate", cwd: workspace, source: "vscode" },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              payload: {
+                type: "user_message",
+                message: [
+                  "<environment_context>",
+                  `  <cwd>${workspace}</cwd>`,
+                  "</environment_context>",
+                  'You are the worker on an OOP crew. The lead agent of the thread "Fix the INI parser" handed you this task.',
+                  "Write the regression test.",
+                ].join("\n"),
+              },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+
+        const outcomes = yield* runRecentThreadOutcomes({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(outcomes.map((outcome) => outcome._tag)).toEqual(["Skipped"]);
+      }),
+    );
+
+    it.effect("skips a Codex rollout whose session metadata names a spawned sub-agent", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+        const directory = path.join(codexHomePath, "sessions", "2026", "08", "24");
+
+        yield* writeTranscript({
+          filePath: path.join(directory, "rollout-top-level.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: "top-level", cwd: workspace, source: "vscode" },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              payload: { type: "user_message", message: "Review this code" },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+        yield* writeTranscript({
+          filePath: path.join(directory, "rollout-spawned.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: {
+                id: "spawned",
+                session_id: "top-level",
+                parent_thread_id: "top-level",
+                cwd: workspace,
+                source: {
+                  subagent: {
+                    thread_spawn: {
+                      parent_thread_id: "top-level",
+                      depth: 1,
+                      agent_path: "/root/cold_read",
+                      agent_nickname: "Descartes",
+                      agent_role: null,
+                    },
+                  },
+                },
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              timestamp: "2026-08-24T10:05:00.000Z",
+              payload: { type: "user_message", message: "Read the cold path" },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 10_000,
+        });
+
+        const outcomes = yield* runRecentThreadOutcomes({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(
+          outcomes.flatMap((outcome) =>
+            outcome._tag === "Importable" ? [outcome.thread.providerSessionId] : [],
+          ),
+        ).toEqual(["top-level"]);
+      }),
+    );
+  });
+
+  describe("titles from the first real user request", () => {
+    it.effect("titles a Codex thread from the request after its injected preamble", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+
+        // Shaped like a real Codex rollout: the plugin list, the AGENTS.md
+        // block and the environment block arrive as one first user message.
+        yield* writeTranscript({
+          filePath: path.join(
+            codexHomePath,
+            "sessions",
+            "2026",
+            "08",
+            "24",
+            "rollout-preamble.jsonl",
+          ),
+          contents: [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: "preamble-session", cwd: workspace },
+            }),
+            encodeTranscriptRecord({
+              type: "response_item",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              payload: {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: [
+                      "<recommended_plugins>",
+                      "Here is a list of plugins that are available but not installed.",
+                      "",
+                      "- Dropbox (dropbox@openai-curated-remote)",
+                      "</recommended_plugins># AGENTS.md instructions",
+                      "",
+                      "<INSTRUCTIONS>",
+                      "# Global Agent Context",
+                      "- apply the global policy first.",
+                      "</INSTRUCTIONS><environment_context>",
+                      "  <cwd>/tmp/project</cwd>",
+                      "  <current_date>2026-08-24</current_date>",
+                      "</environment_context>",
+                    ].join("\n"),
+                  },
+                ],
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              timestamp: "2026-08-24T10:01:00.000Z",
+              payload: { type: "user_message", message: "Add a completeAll() function" },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(threads.map((thread) => thread.title)).toEqual(["Add a completeAll() function"]);
+      }),
+    );
+
+    it.effect("titles a Claude thread from the request the caveat wrapper introduces", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+
+        yield* writeTranscript({
+          filePath: path.join(claudeHomePath, "projects", "-slug", "wrapped-session.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "user",
+              cwd: workspace,
+              sessionId: "wrapped-session",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      "<conversation_history>",
+                      "USER:",
+                      "<agent-task>",
+                      "Background task results are automatically delivered.",
+                      "</agent-task>",
+                      "",
+                      "USER:",
+                      "<environment_context>",
+                      `  <cwd>${workspace}</cwd>`,
+                      "  <current_date>2026-08-24</current_date>",
+                      "</environment_context>Stop the migration halfway",
+                      "</conversation_history>",
+                      'The above is the conversation history so far, provided as context. Respond as the assistant to the user message below only. Never emit "USER:" or "ASSISTANT:" labels or continue the transcript.',
+                      "<system-reminder>",
+                      "This is the first request of the session.",
+                      "</system-reminder>",
+                    ].join("\n"),
+                  },
+                ],
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "assistant",
+              sessionId: "wrapped-session",
+              timestamp: "2026-08-24T10:01:00.000Z",
+              message: { role: "assistant", content: [{ type: "text", text: "Paused" }] },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(threads.map((thread) => thread.title)).toEqual(["Stop the migration halfway"]);
+      }),
+    );
+
+    it.effect("imports an SDK session whose first real request is the user's own text", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+
+        // Same harness fields as a delegated run: a top-level SDK session with
+        // no sidechain record. Only the request itself says it is the user's.
+        yield* writeTranscript({
+          filePath: path.join(claudeHomePath, "projects", "-slug", "sdk-session.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "user",
+              cwd: workspace,
+              sessionId: "sdk-session",
+              entrypoint: "sdk-ts",
+              promptSource: "sdk",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "text",
+                    text: [
+                      "<system-reminder>",
+                      "This is the first request of the session.",
+                      "</system-reminder>",
+                      "방금전에 작업을 진행하다 멈췄다. 세션을 확인해서 가져올 수 있니?",
+                    ].join("\n"),
+                  },
+                ],
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "assistant",
+              sessionId: "sdk-session",
+              timestamp: "2026-08-24T10:01:00.000Z",
+              message: { role: "assistant", content: [{ type: "text", text: "확인했습니다" }] },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60_000,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(threads.map((thread) => thread.providerSessionId)).toEqual(["sdk-session"]);
+        expect(threads.map((thread) => thread.title)).toEqual([
+          "방금전에 작업을 진행하다 멈췄다. 세션을 확인해서 가져올 수 있니?",
+        ]);
+      }),
+    );
+
+    it("titles a conversation from its first real request, not from its 200th", () => {
+      // Long enough that the retained window drops both the preamble and the
+      // request that followed it.
+      const thread = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: makeClaudeUserTurns([
+          "<environment_context>\n  <cwd>/tmp/project</cwd>\n</environment_context>",
+          "Build a search page",
+          ...Array.from({ length: 210 }, (_, index) => `Follow up ${index + 1}`),
+        ]),
+        source: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        fallbackSessionId: "long-session",
+        lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+      });
+
+      expect(thread?.title).toBe("Build a search page");
+      expect(thread?.messages).toHaveLength(200);
+    });
+
+    it("skips a long conversation whose second message is a delegation preamble", () => {
+      const thread = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: makeClaudeUserTurns([
+          "<environment_context>\n  <cwd>/tmp/project</cwd>\n</environment_context>",
+          "You are running as an agent-task child. Task id: st_x",
+          ...Array.from({ length: 210 }, (_, index) => `Follow up ${index + 1}`),
+        ]),
+        source: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        fallbackSessionId: "long-delegated-session",
+        lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+      });
+
+      expect(thread).toBeNull();
+    });
+
+    it("takes the request a transcript wrapper introduces after its closing tag", () => {
+      // The wrapper replays a history that holds nothing but the environment
+      // block, so the request sits behind the closing tag.
+      const thread = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: encodeTranscriptRecord({
+          type: "user",
+          sessionId: "wrapped-session",
+          timestamp: "2026-08-24T10:00:00.000Z",
+          message: {
+            role: "user",
+            content: [
+              "<conversation_history>",
+              "USER:",
+              "<environment_context>",
+              "x",
+              "</environment_context>",
+              '</conversation_history>The above is the conversation history so far, provided as context. Respond as the assistant to the user message below only. Never emit "USER:" or "ASSISTANT:" labels or continue the transcript.',
+              "Fix the crash",
+            ].join("\n"),
+          },
+        }),
+        source: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        fallbackSessionId: "wrapped-session",
+        lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+      });
+
+      expect(thread?.title).toBe("Fix the crash");
+    });
+
+    it("keeps markup the user wrote into their own request", () => {
+      const thread = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: encodeTranscriptRecord({
+          type: "user",
+          sessionId: "markup-session",
+          timestamp: "2026-08-24T10:00:00.000Z",
+          message: { role: "user", content: "<section>Fix the layout</section>" },
+        }),
+        source: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        fallbackSessionId: "markup-session",
+        lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+      });
+
+      expect(thread?.title).toBe("<section>Fix the layout</section>");
+    });
+
+    it("names a transcript whose messages hold no request by its source and date", () => {
+      const thread = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: [
+          encodeTranscriptRecord({
+            type: "user",
+            sessionId: "preamble-only",
+            timestamp: "2026-08-24T10:00:00.000Z",
+            message: {
+              role: "user",
+              content: "<environment_context>\n  <cwd>/tmp/x</cwd>\n</environment_context>",
+            },
+          }),
+          encodeTranscriptRecord({
+            type: "assistant",
+            sessionId: "preamble-only",
+            timestamp: "2026-08-24T10:01:00.000Z",
+            message: { role: "assistant", content: [{ type: "text", text: "Ready" }] },
+          }),
+        ].join("\n"),
+        source: "claudeAgent",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        fallbackSessionId: "preamble-only",
+        lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+      });
+
+      expect(thread?.title).toBe("Imported Claude session · 2026-08-24");
+    });
+
+    for (const [marker, sessionMeta] of [
+      [
+        "a parent thread id",
+        {
+          id: "spawned",
+          cwd: "/tmp/project",
+          source: "vscode",
+          parent_thread_id: "top-level",
+        },
+      ],
+      [
+        "a sub-agent source",
+        {
+          id: "spawned",
+          cwd: "/tmp/project",
+          source: { subagent: { thread_spawn: { parent_thread_id: "top-level" } } },
+        },
+      ],
+    ] as const) {
+      // Discovery filters these records before parsing; the parser still has to
+      // refuse one that reaches it, which only works if decoding keeps the mark.
+      it(`skips a decoded Codex session_meta carrying ${marker}`, () => {
+        const thread = AgentSessionScanner.parseAgentSessionTranscript({
+          contents: [
+            encodeTranscriptRecord({ type: "session_meta", payload: sessionMeta }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              payload: { type: "user_message", message: "Review the parser" },
+            }),
+          ].join("\n"),
+          source: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          fallbackSessionId: "rollout-spawned",
+          lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+        });
+
+        expect(thread).toBeNull();
+      });
+    }
+
+    it("keeps a decoded Codex session_meta whose source names no sub-agent", () => {
+      const thread = AgentSessionScanner.parseAgentSessionTranscript({
+        contents: [
+          encodeTranscriptRecord({
+            type: "session_meta",
+            payload: { id: "top-level", cwd: "/tmp/project", source: "vscode" },
+          }),
+          encodeTranscriptRecord({
+            type: "event_msg",
+            payload: { type: "user_message", message: "Review the parser" },
+          }),
+        ].join("\n"),
+        source: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        fallbackSessionId: "rollout-top-level",
+        lastActiveAtMs: Date.parse("2026-08-24T12:00:00.000Z"),
+      });
+
+      expect(thread?.title).toBe("Review the parser");
+    });
+  });
 });
 
 describe("parseAgentSessionTranscript", () => {
@@ -3212,31 +3889,31 @@ describe("parseAgentSessionTranscript", () => {
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
       contents: [
         "not valid json",
-        JSON.stringify({ type: "ai-title", aiTitle: "Fix authentication" }),
-        JSON.stringify({
+        encodeTranscriptRecord({ type: "ai-title", aiTitle: "Fix authentication" }),
+        encodeTranscriptRecord({
           type: "user",
           sessionId: "claude-session",
           isMeta: true,
           message: { role: "user", content: "Injected skill instructions" },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "user",
           sessionId: "claude-session",
           isCompactSummary: true,
           message: { role: "user", content: "Injected compaction summary" },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "user",
           sessionId: "claude-session",
           timestamp: "2026-08-24T10:00:00.000Z",
           message: { role: "user", content: [{ type: "text", text: "Fix authentication" }] },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "user",
           sessionId: "claude-session",
           message: { role: "user", content: [{ type: "tool_result", text: "hidden" }] },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "assistant",
           sessionId: "claude-session",
           message: {
@@ -3245,7 +3922,7 @@ describe("parseAgentSessionTranscript", () => {
             content: [{ type: "text", text: "Updated the login flow" }],
           },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "assistant",
           sessionId: "claude-session",
           message: {
@@ -3276,8 +3953,8 @@ describe("parseAgentSessionTranscript", () => {
   it("drops injected Codex instructions while keeping the visible user event", () => {
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
       contents: [
-        JSON.stringify({ type: "session_meta", payload: { id: "codex-session" } }),
-        JSON.stringify({
+        encodeTranscriptRecord({ type: "session_meta", payload: { id: "codex-session" } }),
+        encodeTranscriptRecord({
           type: "response_item",
           payload: {
             type: "message",
@@ -3291,11 +3968,11 @@ describe("parseAgentSessionTranscript", () => {
             ],
           },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "event_msg",
           payload: { type: "user_message", message: "Fix the actual bug" },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "response_item",
           payload: {
             type: "message",
@@ -3304,7 +3981,7 @@ describe("parseAgentSessionTranscript", () => {
             content: [{ type: "input_text", text: "Fix the actual bug" }],
           },
         }),
-        JSON.stringify({
+        encodeTranscriptRecord({
           type: "response_item",
           payload: {
             type: "message",
@@ -3682,7 +4359,7 @@ describe("parseAgentSessionTranscript", () => {
       lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
     });
 
-    expect(thread?.title).toBe("<environment_context>");
+    expect(thread?.title).toBe("Initialize Git and add a README.");
     expect(thread?.messages.map((message) => message.text)).toEqual([
       context,
       "Initialize Git and add a README.",
@@ -3709,7 +4386,7 @@ describe("parseAgentSessionTranscript", () => {
       lastActiveAtMs: Date.parse("2026-08-25T08:00:00.000Z"),
     });
 
-    expect(thread?.title).toBe("<environment_context>");
+    expect(thread?.title).toBe("Create a useful project.");
     expect(thread?.messages.map((message) => message.text)).toEqual([prompt]);
   });
 
@@ -3758,7 +4435,7 @@ describe("parseAgentSessionTranscript", () => {
 
   it("skips sessions without a visible user message", () => {
     const thread = AgentSessionScanner.parseAgentSessionTranscript({
-      contents: JSON.stringify({
+      contents: encodeTranscriptRecord({
         type: "assistant",
         message: { role: "assistant", content: "Done" },
       }),

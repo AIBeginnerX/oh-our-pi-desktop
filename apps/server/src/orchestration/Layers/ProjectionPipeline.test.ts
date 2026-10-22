@@ -176,6 +176,75 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-clea
   },
 );
 
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-parent-thread-")))(
+  "crew sub-task parent link",
+  (it) => {
+    it.effect("stores a sub-task's lead thread and keeps it through later thread events", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const createdAt = "2026-10-22T10:00:00.000Z";
+        const created = (threadId: ThreadId, parentThreadId?: ThreadId) =>
+          eventStore.append({
+            type: "thread.created",
+            eventId: EventId.make(`evt-parent-${threadId}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: createdAt,
+            commandId: CommandId.make(`cmd-parent-${threadId}`),
+            causationEventId: null,
+            correlationId: null,
+            metadata: {},
+            payload: {
+              threadId,
+              projectId: ProjectId.make("project-parent"),
+              title: parentThreadId ? "Crew Worker · Research" : "Lead",
+              modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              ...(parentThreadId ? { parentThreadId } : {}),
+              createdAt,
+              updatedAt: createdAt,
+            },
+          });
+        const lead = ThreadId.make("lead-thread");
+        const worker = ThreadId.make("crew-worker-thread");
+        yield* created(lead);
+        yield* created(worker, lead);
+        yield* eventStore.append({
+          type: "thread.archived",
+          eventId: EventId.make("evt-parent-archive-worker"),
+          aggregateKind: "thread",
+          aggregateId: worker,
+          occurredAt: createdAt,
+          commandId: CommandId.make("cmd-parent-archive-worker"),
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          payload: { threadId: worker, archivedAt: createdAt, updatedAt: createdAt },
+        });
+        yield* projectionPipeline.bootstrap;
+
+        const rows = yield* sql<{
+          readonly threadId: string;
+          readonly parentThreadId: string | null;
+        }>`
+          SELECT thread_id AS "threadId", parent_thread_id AS "parentThreadId"
+          FROM projection_threads
+          ORDER BY thread_id
+        `;
+        assert.deepEqual(rows, [
+          { threadId: worker, parentThreadId: lead },
+          { threadId: lead, parentThreadId: null },
+        ]);
+      }),
+    );
+  },
+);
+
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-import-shell-")))(
   "imported thread shell projection",
   (it) => {

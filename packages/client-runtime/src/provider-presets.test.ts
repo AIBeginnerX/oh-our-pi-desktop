@@ -12,7 +12,7 @@ describe("OpenCode provider presets", () => {
       "coding",
       "minimax-coding-plan",
       "https://api.minimax.io/anthropic/v1",
-      "MiniMax-M3.1-Flash-Preview",
+      "MiniMax-M3.1-Flash",
     ],
   ] as const)(
     "builds isolated %s %s OpenCode config",

@@ -424,7 +424,16 @@ There is no public auto-update server, and OoP does not update itself from GitHu
 1. `git pull`
 2. Rebuild / package again (see [Install](#install--build-from-source)) and reinstall.
 
-Each release is published as **one commit** (titled `OoP <version> source`) plus a tag named `v<version>`. Your data in `~/.oop-desktop/userdata` is kept across updates. To hear about new versions, use **Watch → Custom → Releases** on the GitHub repository, or check the tags occasionally.
+Each release is published as **one commit** (titled `OoP <version> source`), a tag named `v<version>`, and a GitHub Release. Your data in `~/.oop-desktop/userdata` is kept across updates. To hear about new versions, use **Watch → Custom → Releases** on the GitHub repository; older versions have only a tag.
+
+An app you built yourself offers your next build in the app, from the folder it was built for: `release\windows` on Windows (set above), `release/macos` on macOS. On macOS, `package` writes only the DMG, so also build the update package after it:
+
+```bash
+V=<version>
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+```
 
 > [!NOTE]
 > Server update notices in the app and `t3 update` come from upstream T3 Code. They are not an OoP update channel.

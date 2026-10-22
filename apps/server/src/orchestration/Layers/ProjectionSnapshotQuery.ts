@@ -589,6 +589,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
           auto_settle_disabled_at AS "autoSettleDisabledAt",
+          parent_thread_id AS "parentThreadId",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
@@ -637,6 +638,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
           auto_settle_disabled_at AS "autoSettleDisabledAt",
+          parent_thread_id AS "parentThreadId",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
@@ -712,6 +714,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
           auto_settle_disabled_at AS "autoSettleDisabledAt",
+          parent_thread_id AS "parentThreadId",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
@@ -1137,7 +1140,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           INNER JOIN projection_projects AS projects
             ON projects.project_id = threads.project_id
           WHERE threads.deleted_at IS NULL
-            AND threads.archived_at IS NULL
             AND projects.deleted_at IS NULL
             AND messages.is_streaming = 0
             -- Only these two roles are searchable, and the CASE above depends
@@ -1316,6 +1318,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pin_order_key AS "pinOrderKey",
           active_order_key AS "activeOrderKey",
           auto_settle_disabled_at AS "autoSettleDisabledAt",
+          parent_thread_id AS "parentThreadId",
           title_regeneration_request_id AS "titleRegenerationRequestId",
           title_regeneration_started_at AS "titleRegenerationStartedAt",
           latest_user_message_at AS "latestUserMessageAt",
@@ -2392,6 +2395,7 @@ pending_approval_requests AS (
                 pinOrderKey: row.pinOrderKey ?? null,
                 activeOrderKey: row.activeOrderKey ?? null,
                 autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
+                parentThreadId: row.parentThreadId ?? null,
                 titleRegeneration: mapTitleRegeneration(row),
                 titleState: row.titleState,
                 deletedAt: row.deletedAt,
@@ -2638,6 +2642,7 @@ pending_approval_requests AS (
                   pinOrderKey: row.pinOrderKey ?? null,
                   activeOrderKey: row.activeOrderKey ?? null,
                   autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
+                  parentThreadId: row.parentThreadId ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
                   titleState: row.titleState,
                   deletedAt: row.deletedAt,
@@ -2799,6 +2804,7 @@ pending_approval_requests AS (
                         pinOrderKey: row.pinOrderKey ?? null,
                         activeOrderKey: row.activeOrderKey ?? null,
                         autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
+                        parentThreadId: row.parentThreadId ?? null,
                         titleRegeneration: mapTitleRegeneration(row),
                         titleState: row.titleState,
                         session: sessionByThread.get(row.threadId) ?? null,
@@ -2985,6 +2991,7 @@ pending_approval_requests AS (
                   pinOrderKey: row.pinOrderKey ?? null,
                   activeOrderKey: row.activeOrderKey ?? null,
                   autoSettleDisabledAt: row.autoSettleDisabledAt ?? null,
+                  parentThreadId: row.parentThreadId ?? null,
                   titleRegeneration: mapTitleRegeneration(row),
                   titleState: row.titleState,
                   session: sessionByThread.get(row.threadId) ?? null,
@@ -3334,6 +3341,7 @@ pending_approval_requests AS (
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         activeOrderKey: threadRow.value.activeOrderKey ?? null,
         autoSettleDisabledAt: threadRow.value.autoSettleDisabledAt ?? null,
+        parentThreadId: threadRow.value.parentThreadId ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         titleState: threadRow.value.titleState,
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
@@ -3636,6 +3644,7 @@ pending_approval_requests AS (
         pinOrderKey: threadRow.value.pinOrderKey ?? null,
         activeOrderKey: threadRow.value.activeOrderKey ?? null,
         autoSettleDisabledAt: threadRow.value.autoSettleDisabledAt ?? null,
+        parentThreadId: threadRow.value.parentThreadId ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         titleState: threadRow.value.titleState,
         deletedAt: null,

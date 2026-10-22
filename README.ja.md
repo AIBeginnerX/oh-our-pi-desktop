@@ -424,7 +424,16 @@ OoP には小さな Cloudflare Worker が [`infra/oop-relay`](infra/oop-relay/RE
 1. `git pull`
 2. 再度ビルド / パッケージングして ([インストール](#インストール--ソースからのビルド)を参照)、再インストールします。
 
-各リリースは、**1つのコミット** (タイトルは `OoP <version> source`) と、`v<version>` というタグとして公開されます。`~/.oop-desktop/userdata` にあるデータはアップデートをまたいで保持されます。新しいバージョンの通知を受け取るには、GitHub リポジトリで **Watch → Custom → Releases** を使うか、ときどきタグを確認してください。
+各リリースは、**1つのコミット** (タイトルは `OoP <version> source`)、`v<version>` というタグ、GitHub Release として公開されます。`~/.oop-desktop/userdata` にあるデータはアップデートをまたいで保持されます。新しいバージョンの通知を受け取るには、GitHub リポジトリで **Watch → Custom → Releases** を有効にしてください。以前のバージョンにはタグしかありません。
+
+自分でビルドしたアプリは、ビルド時に決まったフォルダから次のビルドを見つけ、アプリ内でアップデートを提案します。Windows では上で指定した `release\windows`、macOS では `release/macos` です。macOS の `package` は DMG しか作らないため、続けてアップデートパッケージも作成してください。
+
+```bash
+V=<version>
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+```
 
 > [!NOTE]
 > アプリ内のサーバーアップデート通知と `t3 update` は、アップストリームの T3 Code によるものです。OoP のアップデートチャネルではありません。

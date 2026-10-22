@@ -290,6 +290,23 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "project-defaults",
   },
   {
+    id: "auto-archive-settled-threads",
+    title: "Auto-archive settled threads",
+    to: "/settings/general",
+    searchTerms: ["sidebar archive old finished threads clean up declutter"],
+    requiresThreadAutoSettlement: true,
+    scope: "environment-defaults",
+  },
+  {
+    id: "days-before-auto-archive",
+    title: "Days settled before auto-archive",
+    to: "/settings/general",
+    targetId: "auto-archive-settled-threads",
+    searchTerms: ["archive sidebar days"],
+    requiresThreadAutoSettlement: true,
+    scope: "environment-defaults",
+  },
+  {
     id: "days-before-auto-settle",
     title: "Days of inactivity before auto-settle",
     to: "/settings/general",

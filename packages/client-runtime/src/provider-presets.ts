@@ -68,7 +68,7 @@ export const PROVIDER_PRESETS: Readonly<Record<ProviderPresetId, ProviderPreset>
         label: "Token Plan",
         providerId: "minimax-coding-plan",
         baseURL: "https://api.minimax.io/anthropic/v1",
-        defaultModel: "MiniMax-M3.1-Flash-Preview",
+        defaultModel: "MiniMax-M3.1-Flash",
       },
     ],
   },

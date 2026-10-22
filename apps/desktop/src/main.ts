@@ -57,6 +57,7 @@ import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
+import * as DesktopSshRuntimeArchives from "./ssh/DesktopSshRuntimeArchives.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
@@ -92,9 +93,14 @@ const desktopEnvironmentLayer = Layer.unwrap(
   }),
 );
 
-// OoP keeps remote CLI archives on its upstream compatibility release, separate
-// from the shell's update version. Other builds use the app release as before.
-// Development can point the remote at a source checkout instead.
+const isOopDesktopBuild = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
+  Option.getOrUndefined(environment.buildProfileName) === "oop-desktop";
+
+// OoP runs its own server on the remote, at the app's version and in its own
+// home folder so it never opens an upstream T3 database there; the archive
+// comes from this device's release folder (see localRuntimeArchives below).
+// Other builds use their archive release as before. Development can point the
+// remote at a source checkout instead.
 const resolveDesktopSshCliRunner = (
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
 ): RemoteT3RunnerOptions => {
@@ -103,6 +109,13 @@ const resolveDesktopSshCliRunner = (
     return {
       nodeScriptPath: devRemoteEntryPath,
       nodeEngineRange: serverPackageJson.engines.node,
+    };
+  }
+  if (isOopDesktopBuild(environment)) {
+    return {
+      archiveVersion: environment.appVersion,
+      remoteHomeDirName: ".oop-desktop",
+      archiveDownloads: false,
     };
   }
   return {
@@ -119,6 +132,13 @@ const desktopSshEnvironmentLayer = Layer.unwrap(
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     return DesktopSshEnvironment.layer({
       resolveCliRunner: Effect.succeed(resolveDesktopSshCliRunner(environment)),
+      ...(isOopDesktopBuild(environment)
+        ? {
+            localRuntimeArchives: DesktopSshRuntimeArchives.makeLocalRuntimeArchiveSource(
+              DesktopSshRuntimeArchives.localUpdateDirectories(environment),
+            ),
+          }
+        : {}),
     });
   }),
 );

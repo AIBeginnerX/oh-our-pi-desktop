@@ -466,6 +466,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...(command.parentThreadId !== undefined
+            ? { parentThreadId: command.parentThreadId }
+            : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -517,13 +520,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.unarchive": {
-      yield* requireThreadArchived({
+    case "thread.auto-archive": {
+      const thread = yield* requireThreadNotArchived({
         readModel,
         command,
         threadId: command.threadId,
       });
       const occurredAt = yield* nowIso;
+      // The sweep chose this thread from an older snapshot; archive only if it is still a
+      // settled, unpinned, idle thread that nobody is waiting on.
+      const stillSnoozed =
+        thread.snoozedUntil != null && Date.parse(thread.snoozedUntil) > Date.parse(occurredAt);
+      if (
+        thread.settledOverride !== "settled" ||
+        thread.pinnedAt != null ||
+        stillSnoozed ||
+        thread.session?.status === "starting" ||
+        thread.session?.status === "running" ||
+        openRequests(thread).size > 0 ||
+        hasQueuedTurnStartForThread(thread, occurredAt)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `thread ${command.threadId} changed before automatic archive`,
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -531,12 +552,51 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           occurredAt,
           commandId: command.commandId,
         })),
-        type: "thread.unarchived",
+        type: "thread.archived",
+        payload: {
+          threadId: command.threadId,
+          archivedAt: occurredAt,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.unarchive": {
+      const thread = yield* requireThreadArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = yield* nowIso;
+      const unarchived = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.unarchived" as const,
         payload: {
           threadId: command.threadId,
           updatedAt: occurredAt,
         },
       };
+      // Restoring a settled thread brings it back as active work; left settled, the
+      // auto-archive sweep would take it straight back to the archive.
+      if (thread.settledOverride !== "settled") return unarchived;
+      return [
+        unarchived,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.unsettled" as const,
+          payload: { threadId: command.threadId, reason: "user" as const, updatedAt: occurredAt },
+        },
+      ];
     }
 
     case "thread.settle":

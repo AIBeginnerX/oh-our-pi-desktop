@@ -4,11 +4,10 @@
  */
 import type { CrewRole, OrchestrationThreadShell } from "@t3tools/contracts";
 
-export const CREW_ROLE_LABEL: Record<CrewRole, string> = {
-  worker: "Worker",
-  expert: "Expert",
-  auditor: "Auditor",
-};
+// Clients nest crew threads by this title too, so its rules live in the shared package.
+import { CREW_ROLE_LABEL, isCrewThreadTitle } from "@t3tools/shared/crew";
+
+export { CREW_ROLE_LABEL, isCrewThreadTitle };
 
 const CREW_TITLE_PREFIX = "Crew ";
 
@@ -20,16 +19,6 @@ export function crewThreadTitle(role: CrewRole, subject: string): string {
   const oneLine = subject.replace(/\s+/g, " ").trim();
   const short = oneLine.length > 60 ? `${oneLine.slice(0, 57)}...` : oneLine;
   return `${CREW_TITLE_PREFIX}${CREW_ROLE_LABEL[role]} · ${short || "task"}`;
-}
-
-/** Crew threads never delegate or get audited themselves, so the crew cannot recurse. */
-export function isCrewThreadTitle(title: string): boolean {
-  return (
-    title.startsWith(CREW_TITLE_PREFIX) &&
-    Object.values(CREW_ROLE_LABEL).some((label) =>
-      title.startsWith(`${CREW_TITLE_PREFIX}${label} · `),
-    )
-  );
 }
 
 export function crewTaskStatus(

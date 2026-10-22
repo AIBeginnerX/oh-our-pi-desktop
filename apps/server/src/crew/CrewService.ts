@@ -312,6 +312,7 @@ export const make = Effect.gen(function* () {
       interactionMode,
       branch: input.lead.branch,
       worktreePath: input.lead.worktreePath,
+      parentThreadId: input.lead.id,
       createdAt,
     });
     yield* engine.dispatch({

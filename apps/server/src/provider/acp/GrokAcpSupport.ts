@@ -186,7 +186,43 @@ export function sessionSelectsModelByConfigOption(
   return started.sessionSetupResult.models == null && started.modelConfigId !== undefined;
 }
 
-/** Selects a model through the session's `model` config option; the agent's own ids pass as-is. */
+type AcpModelSelectOptionEntry =
+  | { readonly value: string }
+  | { readonly options: ReadonlyArray<{ readonly value: string }> };
+
+function collectAcpSelectOptionValues(
+  options: ReadonlyArray<AcpModelSelectOptionEntry>,
+): ReadonlyArray<string> {
+  const values: Array<string> = [];
+  for (const option of options) {
+    if ("options" in option) {
+      for (const nested of option.options) values.push(nested.value);
+    } else {
+      values.push(option.value);
+    }
+  }
+  return values;
+}
+
+/**
+ * The released id for a retired preview model id, when the agent lists it instead: a thread or
+ * crew pin saved while MiniMax Code offered `MiniMax-M3.1-Flash-Preview` keeps working once only
+ * `MiniMax-M3.1-Flash` is listed. Any other id passes through unchanged.
+ */
+export function releasedAcpModelId(requested: string, advertised: ReadonlyArray<string>): string {
+  if (advertised.length === 0 || advertised.includes(requested)) return requested;
+  const released = requested.replace(/-preview(?=:|$)/iu, "");
+  return released !== requested && advertised.includes(released) ? released : requested;
+}
+
+/**
+ * Selects a model through the session's `model` config option; the agent's own ids pass as-is,
+ * except a retired preview id the agent no longer lists (see `releasedAcpModelId`).
+ *
+ * When the agent refuses a `:v:` model id it also lists (MiniMax Code signed in to its own
+ * account advertises `M3.1-Flash (Free)` with thinking off, then refuses it as an invalid
+ * reasoning setting), fall back to the sibling `:v:thinking` entry the agent does accept.
+ */
 export function applyAcpConfigOptionModelSelection<E>(input: {
   readonly runtime: Pick<
     AcpSessionRuntime.AcpSessionRuntime["Service"],
@@ -201,23 +237,38 @@ export function applyAcpConfigOptionModelSelection<E>(input: {
     );
     const current = option?.type === "select" ? option.currentValue : undefined;
     // The product slug is never sent over the wire; it keeps the session's current model.
-    const requested =
+    const asked =
       input.requestedModelId === GROK_DEFAULT_MODEL_SLUG ? undefined : input.requestedModelId;
+    const advertised =
+      option?.type === "select" ? collectAcpSelectOptionValues(option.options) : [];
+    const requested = asked === undefined ? undefined : releasedAcpModelId(asked, advertised);
     if (requested === undefined || requested === current) return current;
-    yield* input.runtime.setModel(requested).pipe(
-      // MiniMax Code and ZCode list some models they then refuse (an unsupported reasoning variant,
-      // a model outside the plan); the ACP client raises that refusal as a defect.
-      Effect.catchDefect(() =>
-        Effect.fail(
-          new EffectAcpErrors.AcpRequestError({
-            code: -32603,
-            errorMessage: `The agent could not switch to model '${requested}'. Pick another model.`,
-          }),
-        ),
-      ),
-      Effect.mapError(input.mapError),
-    );
-    return requested;
+
+    const trySetModel = (modelId: string) =>
+      input.runtime.setModel(modelId).pipe(
+        Effect.mapError(input.mapError),
+        Effect.as("accepted" as const),
+        Effect.catchDefect(() => Effect.succeed("refused" as const)),
+      );
+
+    const requestedOutcome = yield* trySetModel(requested);
+    if (requestedOutcome === "accepted") return requested;
+
+    // MiniMax Code refuses some `:v:` ids (thinking off) on models that always think; try the
+    // matching `:v:thinking` sibling if it is actually listed, then fail with the original id.
+    if (requested.endsWith(":v:")) {
+      const sibling = `${requested}thinking`;
+      if (advertised.includes(sibling) && (yield* trySetModel(sibling)) === "accepted") {
+        return sibling;
+      }
+    }
+
+    return yield* Effect.fail(
+      new EffectAcpErrors.AcpRequestError({
+        code: -32603,
+        errorMessage: `The agent could not switch to model '${requested}'. Pick another model.`,
+      }),
+    ).pipe(Effect.mapError(input.mapError));
   });
 }
 

@@ -381,6 +381,9 @@ export function describeAcpPromptFailure(label: string, defect: unknown): string
     )
     .replace(/\s+/g, " ")
     .trim();
+  if (/LLM request timed out: no response from the provider/i.test(reason)) {
+    return `${label} got no response from the model provider in time. The provider may be busy; send the message again or pick another model.`;
+  }
   if (reason.length === 0) return `${label} prompt request failed.`;
   const short =
     reason.length > FAILURE_REASON_LIMIT ? `${reason.slice(0, FAILURE_REASON_LIMIT - 1)}…` : reason;

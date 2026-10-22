@@ -8,6 +8,7 @@ import {
   buildGrokAcpSpawnInput,
   grokAcpSpawnArgs,
   isValidGrokReasoningEffortToken,
+  releasedAcpModelId,
   resolveGrokAcpBaseModelId,
   sessionSelectsModelByConfigOption,
 } from "./GrokAcpSupport.ts";
@@ -310,6 +311,162 @@ describe("config-option model selection (MiniMax Code, ZCode)", () => {
       expect(error).toContain("could not switch to model 'builtin:zai-coding-plan\\GLM-5.3-Flash'");
     }),
   );
+
+  const REQUESTED = "m:minimax:MiniMax-M3.1-Flash:v:";
+  const THINKING_SIBLING = "m:minimax:MiniMax-M3.1-Flash:v:thinking";
+  const OTHER_LISTED = "m:minimax:MiniMax-M3:v:";
+  const flatOptions = (currentValue: string) => ({
+    id: "model",
+    name: "Model",
+    category: "model" as const,
+    type: "select" as const,
+    currentValue,
+    options: [
+      { value: OTHER_LISTED, name: "M3" },
+      { value: REQUESTED, name: "M3.1-Flash (Free)" },
+      { value: THINKING_SIBLING, name: "M3.1-Flash (Free) \u00b7 thinking" },
+    ],
+  });
+  const groupedOptions = (currentValue: string) => ({
+    id: "model",
+    name: "Model",
+    category: "model" as const,
+    type: "select" as const,
+    currentValue,
+    options: [
+      {
+        group: "free",
+        name: "Free",
+        options: [
+          { value: REQUESTED, name: "M3.1-Flash (Free)" },
+          { value: THINKING_SIBLING, name: "M3.1-Flash (Free) \u00b7 thinking" },
+        ],
+      },
+      {
+        group: "paid",
+        name: "Paid",
+        options: [{ value: OTHER_LISTED, name: "M3" }],
+      },
+    ],
+  });
+
+  const makeOptionRuntime = (
+    options: ReturnType<typeof flatOptions> | ReturnType<typeof groupedOptions>,
+    behaviour: (model: string) => Effect.Effect<unknown, never, never>,
+  ) => {
+    const selected: Array<string> = [];
+    const runtime = {
+      getConfigOptions: Effect.succeed([options]),
+      setModel: (model: string) =>
+        Effect.gen(function* () {
+          selected.push(model);
+          yield* behaviour(model);
+        }),
+    };
+    return { runtime, selected };
+  };
+
+  it.effect(
+    "falls back to the listed :v:thinking sibling when the :v: model is refused (flat options)",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, selected } = makeOptionRuntime(flatOptions(OTHER_LISTED), (model) =>
+          model === REQUESTED ? Effect.die(new Error("Invalid model reasoning")) : Effect.void,
+        );
+        const result = yield* applyAcpConfigOptionModelSelection({
+          runtime,
+          requestedModelId: REQUESTED,
+          mapError: (cause) => cause.message,
+        });
+        expect(selected).toEqual([REQUESTED, THINKING_SIBLING]);
+        expect(result).toBe(THINKING_SIBLING);
+      }),
+  );
+
+  it.effect(
+    "falls back to the listed :v:thinking sibling when the :v: model is refused (grouped options)",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, selected } = makeOptionRuntime(groupedOptions(OTHER_LISTED), (model) =>
+          model === REQUESTED ? Effect.die(new Error("Invalid model reasoning")) : Effect.void,
+        );
+        const result = yield* applyAcpConfigOptionModelSelection({
+          runtime,
+          requestedModelId: REQUESTED,
+          mapError: (cause) => cause.message,
+        });
+        expect(selected).toEqual([REQUESTED, THINKING_SIBLING]);
+        expect(result).toBe(THINKING_SIBLING);
+      }),
+  );
+
+  it.effect(
+    "names the original model in the error when the :v: model is refused with no sibling listed",
+    () =>
+      Effect.gen(function* () {
+        const noSiblingOptions = {
+          ...flatOptions(OTHER_LISTED),
+          options: flatOptions(OTHER_LISTED).options.filter(
+            (option) => option.value !== THINKING_SIBLING,
+          ),
+        };
+        const { runtime, selected } = makeOptionRuntime(noSiblingOptions, (model) =>
+          model === REQUESTED ? Effect.die(new Error("Invalid model reasoning")) : Effect.void,
+        );
+        const error = yield* Effect.flip(
+          applyAcpConfigOptionModelSelection({
+            runtime,
+            requestedModelId: REQUESTED,
+            mapError: (cause) => cause.message,
+          }),
+        );
+        expect(selected).toEqual([REQUESTED]);
+        expect(error).toContain(`could not switch to model '${REQUESTED}'`);
+      }),
+  );
+
+  it.effect(
+    "names the original model in the error when both the :v: and sibling calls are refused",
+    () =>
+      Effect.gen(function* () {
+        const { runtime, selected } = makeOptionRuntime(flatOptions(OTHER_LISTED), () =>
+          Effect.die(new Error("Invalid model reasoning")),
+        );
+        const error = yield* Effect.flip(
+          applyAcpConfigOptionModelSelection({
+            runtime,
+            requestedModelId: REQUESTED,
+            mapError: (cause) => cause.message,
+          }),
+        );
+        expect(selected).toEqual([REQUESTED, THINKING_SIBLING]);
+        expect(error).toContain(`could not switch to model '${REQUESTED}'`);
+      }),
+  );
+
+  it.effect("switches a retired preview id to the released model the agent lists", () =>
+    Effect.gen(function* () {
+      const { runtime, selected } = makeOptionRuntime(flatOptions(OTHER_LISTED), () => Effect.void);
+      const result = yield* applyAcpConfigOptionModelSelection({
+        runtime,
+        requestedModelId: "m:minimax:MiniMax-M3.1-Flash-Preview:v:",
+        mapError: (cause) => cause.message,
+      });
+      expect(selected).toEqual([REQUESTED]);
+      expect(result).toBe(REQUESTED);
+    }),
+  );
+
+  it("keeps a listed or unmatched model id as it is", () => {
+    const advertised = [REQUESTED, THINKING_SIBLING, OTHER_LISTED];
+    expect(releasedAcpModelId(REQUESTED, advertised)).toBe(REQUESTED);
+    expect(releasedAcpModelId("m:minimax:MiniMax-M4-Preview:v:", advertised)).toBe(
+      "m:minimax:MiniMax-M4-Preview:v:",
+    );
+    expect(releasedAcpModelId("m:minimax:MiniMax-M3.1-Flash-Preview:v:", [])).toBe(
+      "m:minimax:MiniMax-M3.1-Flash-Preview:v:",
+    );
+  });
 
   it("uses the config option only when the session has no session/set_model state", () => {
     expect(

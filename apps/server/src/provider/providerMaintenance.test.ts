@@ -31,6 +31,7 @@ import {
   type ProviderMaintenanceCapabilities,
 } from "./providerMaintenance.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
+import { isClaudeNativeCommandPath } from "./Drivers/ClaudeDriver.ts";
 
 const driver = (value: string) => ProviderDriverKind.make(value);
 // These write `#!/bin/sh` stubs and evaluate them with darwin/linux path
@@ -58,6 +59,19 @@ const nativePackageToolUpdate = makePackageManagedProviderMaintenanceResolver({
     isCommandPath: isNativeTestCommandPath("/.local/bin/native-package-tool"),
   },
 });
+// Anthropic's native Windows install keeps `claude.exe` in `%USERPROFILE%\.local\bin` and
+// registers an npm-global `claude.cmd` launcher in front of it, so only the launcher's content
+// proves a native install on Windows.
+const claudeDefinition = {
+  provider: driver("claudeAgent"),
+  npmPackageName: "@anthropic-ai/claude-code",
+  nativeUpdate: { args: ["update"], isCommandPath: isClaudeNativeCommandPath },
+};
+const claudeUpdate = makePackageManagedProviderMaintenanceResolver(claudeDefinition);
+const WINDOWS_CLAUDE_SHIM = "C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd";
+const NATIVE_CLAUDE_LAUNCHER = '@echo off\r\n"%USERPROFILE%\\.local\\bin\\claude.exe" %*\r\n';
+const NPM_CLAUDE_LAUNCHER =
+  '@echo off\r\n"%dp0%\\node_modules\\@anthropic-ai\\claude-code\\cli.js" %*\r\n';
 const installedPackageToolProvider: ServerProvider = {
   instanceId: ProviderInstanceId.make("packageTool"),
   driver: driver("packageTool"),
@@ -433,6 +447,76 @@ it.layer(NodeServices.layer)("providerMaintenance", (it) => {
         executable: visiblePath,
         args: ["update"],
         lockKey: "codex-native",
+      });
+    }),
+  );
+
+  it.effect("resolves a Windows claude.cmd launcher that runs the native binary as native", () =>
+    Effect.gen(function* () {
+      const capabilities = yield* resolvePackageManagedProviderMaintenance(claudeDefinition, {
+        binaryPath: "claude",
+        resolvedCommandPath: WINDOWS_CLAUDE_SHIM,
+        realCommandPath: WINDOWS_CLAUDE_SHIM,
+        launcherContent: NATIVE_CLAUDE_LAUNCHER,
+        env: {},
+        platform: "win32",
+      }).pipe(Effect.provideService(HostProcessPlatform, "win32"));
+
+      expect(capabilities.update).toMatchObject({
+        executable: WINDOWS_CLAUDE_SHIM,
+        args: ["update"],
+        lockKey: "claudeAgent-native",
+      });
+    }),
+  );
+
+  it.effect("keeps the npm update for a claude.cmd shim that launches the npm package", () =>
+    Effect.gen(function* () {
+      const npmDir = yield* makeTempDir("t3-claude-npm-shim");
+      NodeFS.mkdirSync(npmDir, { recursive: true });
+      NodeFS.writeFileSync(NodePath.join(npmDir, "npm.cmd"), "@echo off\r\n");
+
+      const capabilities = yield* resolvePackageManagedProviderMaintenance(claudeDefinition, {
+        binaryPath: "claude",
+        resolvedCommandPath: WINDOWS_CLAUDE_SHIM,
+        realCommandPath: WINDOWS_CLAUDE_SHIM,
+        launcherContent: NPM_CLAUDE_LAUNCHER,
+        env: { PATH: npmDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+        platform: "win32",
+      }).pipe(Effect.provideService(HostProcessPlatform, "win32"));
+
+      expect(capabilities.update).toMatchObject({
+        executable: "npm",
+        args: [
+          "install",
+          "-g",
+          "--allow-scripts=@anthropic-ai/claude-code",
+          "@anthropic-ai/claude-code@latest",
+        ],
+        lockKey: "npm-global:unowned",
+      });
+    }),
+  );
+
+  it.effect("reads the claude.cmd launcher off disk to prove a native install", () =>
+    Effect.gen(function* () {
+      const tempDir = yield* makeTempDir("t3-claude-native-launcher");
+      NodeFS.mkdirSync(tempDir, { recursive: true });
+      const shim = NodePath.join(tempDir, "claude.cmd");
+      NodeFS.writeFileSync(shim, NATIVE_CLAUDE_LAUNCHER);
+
+      const capabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(claudeUpdate, {
+        binaryPath: shim,
+        env: { PATH: "", PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "win32"),
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, noSpawn),
+      );
+
+      expect(capabilities.update).toMatchObject({
+        executable: shim,
+        args: ["update"],
+        lockKey: "claudeAgent-native",
       });
     }),
   );
