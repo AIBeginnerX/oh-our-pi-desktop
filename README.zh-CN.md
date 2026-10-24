@@ -21,6 +21,7 @@ OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 - [支持的提供商](#支持的提供商)
 - [平台支持](#平台支持)
 - [环境要求](#环境要求)
+- [安装桌面应用](#安装桌面应用)
 - [安装 / 从源码构建](#安装--从源码构建)
 - [从手机连接](#从手机连接)
 - [更新机制](#更新机制)
@@ -39,12 +40,14 @@ OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 - **离开键盘也能工作。** 把手机与运行智能体的电脑配对，随时关注（或指挥）耗时较长的任务。
 - **一切留在本地。** 项目、提供商登录和智能体的工作都留在你的电脑上。没有 OoP 账号，也没有 OoP 服务器。
 
-适合谁：已经订阅了一个或多个编码智能体服务或 API 套餐、能接受从源码构建应用、并且希望有一个统一控制界面的开发者。如果你想要一个打磨精良、已签名、可自动更新的产品，目前上游的 T3 Code 更合适。
+适合已经订阅一个或多个编码智能体服务或 API 套餐、能接受早期且未签名的桌面应用，
+并希望使用统一控制界面的开发者。如果你想要一个打磨精良、已签名、可自动更新的产品，
+目前上游的 T3 Code 更合适。
 
 ### 30 秒速览
 
 ![OoP 主聊天视图，包含输入框、模型选择器和权限模式](docs/screenshots/chat.png)
-*主聊天视图：选择提供商和模型，设置权限模式，并跟进线程。*
+_主聊天视图：选择提供商和模型，设置权限模式，并跟进线程。_
 
 1. 打开 OoP，登录一个提供商（Settings → Providers）。
 2. 添加一个项目文件夹并新建线程。
@@ -62,7 +65,7 @@ OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 **打开方式：** 添加项目，然后从侧边栏新建线程。
 
 ![带有输入框、模型选择器和权限模式的主聊天界面](docs/screenshots/chat.png)
-*聊天：线程时间线下方是带模型选择器和权限模式的输入框。*
+_聊天：线程时间线下方是带模型选择器和权限模式的输入框。_
 
 ### OOP Crew
 
@@ -71,7 +74,7 @@ OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 **适用场景：** 较大的任务，希望大部分工作用便宜的模型完成，再由强模型把关。**打开方式：** 输入框中模型选择器旁边的 **Crew**。Crew 的工作会实时显示在右侧面板的 **Workflows** 和 **Agents** 下。
 
 ![OOP Crew 看板，展示 brain 模型把任务分派给 worker 和 auditor](docs/screenshots/crew.png)
-*OOP Crew：一个聊天，多个模型，并有实时看板显示谁在做什么。*
+_OOP Crew：一个聊天，多个模型，并有实时看板显示谁在做什么。_
 
 > [!NOTE]
 > Crew 在每个聊天中运行多个模型，因此会成倍增加提供商的用量。如果你在意费用，请先从 **Budget** 预设开始。
@@ -83,7 +86,7 @@ OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 **打开方式：** Settings → Providers。
 
 ![Settings 的 Providers 页面，显示每个提供商的安装、更新和登录状态](docs/screenshots/providers.png)
-*Settings → Providers：安装、更新并登录各个提供商。*
+_Settings → Providers：安装、更新并登录各个提供商。_
 
 ### 添加 Z.AI 或 MiniMax（OpenCode 预设）
 
@@ -92,7 +95,7 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** Settings → Providers → Add。需要 OpenCode 1.14.19 或更高版本。
 
 ![包含 Z.AI 和 MiniMax 预设的添加提供商对话框](docs/screenshots/add-provider.png)
-*添加提供商：通过 OpenCode 运行的 Z.AI 和 MiniMax 预设。*
+_添加提供商：通过 OpenCode 运行的 Z.AI 和 MiniMax 预设。_
 
 > [!NOTE]
 > 本分支尚未测试付费的 Z.AI / MiniMax 登录和聊天请求。
@@ -104,7 +107,7 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** 右侧面板中的 **Diff** 标签页（位于 git 仓库中的服务器线程）。
 
 ![Diff 面板，显示智能体在线程中所做的改动](docs/screenshots/diff.png)
-*Diff 面板：审查智能体改了什么，并可从检查点恢复。*
+_Diff 面板：审查智能体改了什么，并可从检查点恢复。_
 
 ### 提交与源代码管理
 
@@ -113,23 +116,23 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** 先在 Settings → Source Control 中检测你的 CLI（登录后点击 **Rescan**），然后使用线程上的提交控件。
 
 ![线程的提交与源代码管理操作](docs/screenshots/commit.png)
-*源代码管理：在线程中提交改动并发布。*
+_源代码管理：在线程中提交改动并发布。_
 
 ### 权限模式
 
 选择智能体在行动前何时必须先询问你。该模式按线程生效。
 
-| 模式 | 行为 |
-|---|---|
-| **Supervised** | 命令和文件改动都需要审批。 |
-| **Auto-accept edits** | 自动批准文件编辑；其他操作仍可能询问。 |
-| **Auto** | 对常规操作使用提供商的自动审查，其余仍会询问（Codex、Claude、Cursor；其他提供商会退回为询问）。 |
-| **Full access** | 命令和编辑无需审批提示直接运行。这是新线程的**默认**模式。 |
+| 模式                  | 行为                                                                                            |
+| --------------------- | ----------------------------------------------------------------------------------------------- |
+| **Supervised**        | 命令和文件改动都需要审批。                                                                      |
+| **Auto-accept edits** | 自动批准文件编辑；其他操作仍可能询问。                                                          |
+| **Auto**              | 对常规操作使用提供商的自动审查，其余仍会询问（Codex、Claude、Cursor；其他提供商会退回为询问）。 |
+| **Full access**       | 命令和编辑无需审批提示直接运行。这是新线程的**默认**模式。                                      |
 
 **打开方式：** 输入框中的模式选择器。默认值可在 Settings → General → New threads → Permissions 中更改。
 
 ![输入框中的权限模式选择器](docs/screenshots/permissions.png)
-*权限模式：从 Supervised 到 Full access。*
+_权限模式：从 Supervised 到 Full access。_
 
 ### 线程目标
 
@@ -138,7 +141,7 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** 输入框中 **Crew** 旁边的 **Goal**。使用 **Stop goal** 结束目标。
 
 ![输入框中的 Goal 控件，显示已使用的继续次数](docs/screenshots/goal.png)
-*线程目标：聊天会一直继续，直到目标完成、受阻或被停止。*
+_线程目标：聊天会一直继续，直到目标完成、受阻或被停止。_
 
 ### 聊天中的报告
 
@@ -147,7 +150,7 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **试一试：** 让智能体画一张图表或流程图。
 
 ![聊天回复中绘制的图表和统计卡片](docs/screenshots/reports.png)
-*报告：在对话中渲染图表和关键数据。*
+_报告：在对话中渲染图表和关键数据。_
 
 ### Workflows 与 Agents 面板
 
@@ -156,7 +159,7 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** 右侧面板（Workflows 和 Agents 标签页）、命令面板，或 `mod+alt+w`。
 
 ![Workflows 面板，以实时图表绘制线程的工具调用](docs/screenshots/workflows.png)
-*Workflows 面板：实时跟进智能体的工作。*
+_Workflows 面板：实时跟进智能体的工作。_
 
 ### Usage
 
@@ -165,26 +168,26 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** 侧边栏或命令面板中的 **Usage**，或 `mod+u`（终端未获得焦点时）。
 
 ![Usage 页面，显示各提供商的 token 和估算费用历史](docs/screenshots/usage.png)
-*Usage：各提供商的 token 和估算费用历史。*
+_Usage：各提供商的 token 和估算费用历史。_
 
 ### 内置终端
 
 每个线程一个终端，运行在服务器所在的机器上，服务器端保留最多 5,000 行（8 MiB）的回滚内容，因此重新连接后依然存在。
 
 ![聊天线程旁边的内置终端](docs/screenshots/terminal.png)
-*与聊天并排的内置终端。*
+_与聊天并排的内置终端。_
 
 ### 深色主题
 
 ![深色主题下的 OoP](docs/screenshots/dark.png)
-*深色主题。*
+_深色主题。_
 
 ### 手机尺寸的 Web 客户端
 
 配对之后，同一个 Web 界面可以在手机浏览器中使用（参见[从手机连接](#从手机连接)）。
 
 ![手机尺寸的 OoP Web 客户端](docs/screenshots/mobile.png)
-*手机尺寸的 Web 客户端。*
+_手机尺寸的 Web 客户端。_
 
 ### 远程访问设置
 
@@ -193,68 +196,70 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 **打开方式：** Settings → Connections。
 
 ![Settings 的 Connections 页面，包含网络访问和配对链接（配对码已打码）](docs/screenshots/connections.png)
-*Settings → Connections：远程访问与配对（配对码已打码）。*
+_Settings → Connections：远程访问与配对（配对码已打码）。_
 
 ## 功能参考
 
 “Added in OoP”（OoP 新增）表示本分支的文档和代码将其标记为 OoP 专有。“From T3 Code”（来自 T3 Code）表示据文档和代码所示，它属于上游（v0.0.44）的一部分；本分支没有做过文件级别的 diff，所以这一划分只是大致准确。
 
-| 功能 | 作用 | 位置 | 来源 |
-|---|---|---|---|
-| OOP Crew | brain 模型把任务委派给 worker、expert 和 auditor 模型；支持预设和按角色覆盖 | 输入框 → Crew；右侧面板 → Workflows / Agents | Added in OoP |
-| 线程目标 | 让线程持续运行，直到检查通过或目标受阻 | 输入框 → Goal | Added in OoP |
-| 项目记忆 | 在输入框中推荐已保存的项目记忆 | 输入框，记忆按钮 | Added in OoP |
-| 本地角色偏好 | 按环境为实现或审查保存偏好的模型，并附带推荐 | 输入框模型选择器 | Added in OoP |
-| Z.AI / MiniMax 预设 | 基于 OpenCode 的提供商预设 | Settings → Providers → Add | Added in OoP（付费请求未测试） |
-| ZCode (GLM) 提供商 | 通过 ACP 接入 Z.AI 的智能体 | Settings → Providers | Added in OoP |
-| MiniMax Code 提供商 | 通过 ACP 接入 MiniMax 的智能体 | Settings → Providers | Added in OoP |
-| 一键安装 / 更新提供商 | 在提供商卡片上安装或更新提供商 CLI | Settings → Providers | Added in OoP（与上游的具体差异未核实） |
-| Verify macOS build | 在服务器所在的 Mac 上检查 OoP `.dmg` 的完整性、严格代码签名和启动情况 | 聊天标题栏 → Verify macOS build | Added in OoP |
-| 手机连接对话框 | 桌面应用中一键生成手机配对二维码，可选自有中继 | 侧边栏 → Connect mobile | Added in OoP（仅桌面应用） |
-| 自有 Cloudflare 中继 | 你自行部署的 Worker，让手机可以从任何网络访问你的桌面 | `infra/oop-relay` | Added in OoP，早期 |
-| 本地文件夹更新器 | 打包后的 OoP 可以从你指定的文件夹中获取更新的安装包 | 打包的 macOS / Windows 版本 | Added in OoP，早期，未经他人测试 |
-| 多提供商会话 | 跨提供商的线程、轮次和检查点 | 各处 | From T3 Code |
-| 权限模式 | Supervised、Auto-accept edits、Auto、Full access | 输入框；Settings → General | From T3 Code |
-| Diff 面板与检查点 | 审查并恢复智能体的改动 | 右侧面板 → Diff | From T3 Code |
-| 源代码管理 | 通过提供商 CLI 克隆、提交、发布和发起拉取请求 | Settings → Source Control | From T3 Code |
-| 内置终端 | 每个线程一个终端，运行在服务器所在机器上 | 线程内 | From T3 Code |
-| 聊天中的报告 | 图表、统计卡片、进度条、mermaid 流程图 | 回复中 | From T3 Code |
-| 工作流视图 | 工具调用和子智能体的实时图表 | 右侧面板，`mod+alt+w` | From T3 Code |
-| 用量页面 | token 和估算费用历史 | 侧边栏，`mod+u` | From T3 Code（ZCode 和 MiniMax 两行为 OoP 新增） |
-| SnapShots | 把窗口截取到你的草稿中（默认关闭；macOS、Windows、Linux Wayland） | Settings → SnapShots | From T3 Code（归属未核实） |
-| 远程访问 | 局域网配对、Tailscale HTTPS、SSH 环境 | Settings → Connections | From T3 Code |
-| 设备面板 | 在线程旁观看并点按 iOS 模拟器或 Android 模拟器 | 右侧面板 → Device | From T3 Code（此处未测试） |
-| 后台服务 | macOS（launchd）和 Linux（systemd 用户单元）上的 `t3 service install`；不支持 Windows | CLI | From T3 Code（此处未测试） |
-| 快捷键、项目设置、主题 | 可自定义的快捷键、按项目的覆盖设置、外观 | Settings | From T3 Code |
+| 功能                   | 作用                                                                                  | 位置                                         | 来源                                             |
+| ---------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------ |
+| OOP Crew               | brain 模型把任务委派给 worker、expert 和 auditor 模型；支持预设和按角色覆盖           | 输入框 → Crew；右侧面板 → Workflows / Agents | Added in OoP                                     |
+| 线程目标               | 让线程持续运行，直到检查通过或目标受阻                                                | 输入框 → Goal                                | Added in OoP                                     |
+| 项目记忆               | 在输入框中推荐已保存的项目记忆                                                        | 输入框，记忆按钮                             | Added in OoP                                     |
+| 本地角色偏好           | 按环境为实现或审查保存偏好的模型，并附带推荐                                          | 输入框模型选择器                             | Added in OoP                                     |
+| Z.AI / MiniMax 预设    | 基于 OpenCode 的提供商预设                                                            | Settings → Providers → Add                   | Added in OoP（付费请求未测试）                   |
+| ZCode (GLM) 提供商     | 通过 ACP 接入 Z.AI 的智能体                                                           | Settings → Providers                         | Added in OoP                                     |
+| MiniMax Code 提供商    | 通过 ACP 接入 MiniMax 的智能体                                                        | Settings → Providers                         | Added in OoP                                     |
+| 一键安装 / 更新提供商  | 在提供商卡片上安装或更新提供商 CLI                                                    | Settings → Providers                         | Added in OoP（与上游的具体差异未核实）           |
+| Verify macOS build     | 在服务器所在的 Mac 上检查 OoP `.dmg` 的完整性、严格代码签名和启动情况                 | 聊天标题栏 → Verify macOS build              | Added in OoP                                     |
+| 手机连接对话框         | 桌面应用中一键生成手机配对二维码，可选自有中继                                        | 侧边栏 → Connect mobile                      | Added in OoP（仅桌面应用）                       |
+| 自有 Cloudflare 中继   | 你自行部署的 Worker，让手机可以从任何网络访问你的桌面                                 | `infra/oop-relay`                            | Added in OoP，早期                               |
+| 本地文件夹更新器       | 打包后的 OoP 可以从你指定的文件夹中获取更新的安装包                                   | 打包的 macOS / Windows 版本                  | Added in OoP，早期，未经他人测试                 |
+| 多提供商会话           | 跨提供商的线程、轮次和检查点                                                          | 各处                                         | From T3 Code                                     |
+| 权限模式               | Supervised、Auto-accept edits、Auto、Full access                                      | 输入框；Settings → General                   | From T3 Code                                     |
+| Diff 面板与检查点      | 审查并恢复智能体的改动                                                                | 右侧面板 → Diff                              | From T3 Code                                     |
+| 源代码管理             | 通过提供商 CLI 克隆、提交、发布和发起拉取请求                                         | Settings → Source Control                    | From T3 Code                                     |
+| 内置终端               | 每个线程一个终端，运行在服务器所在机器上                                              | 线程内                                       | From T3 Code                                     |
+| 聊天中的报告           | 图表、统计卡片、进度条、mermaid 流程图                                                | 回复中                                       | From T3 Code                                     |
+| 工作流视图             | 工具调用和子智能体的实时图表                                                          | 右侧面板，`mod+alt+w`                        | From T3 Code                                     |
+| 用量页面               | token 和估算费用历史                                                                  | 侧边栏，`mod+u`                              | From T3 Code（ZCode 和 MiniMax 两行为 OoP 新增） |
+| SnapShots              | 把窗口截取到你的草稿中（默认关闭；macOS、Windows、Linux Wayland）                     | Settings → SnapShots                         | From T3 Code（归属未核实）                       |
+| 远程访问               | 局域网配对、Tailscale HTTPS、SSH 环境                                                 | Settings → Connections                       | From T3 Code                                     |
+| 设备面板               | 在线程旁观看并点按 iOS 模拟器或 Android 模拟器                                        | 右侧面板 → Device                            | From T3 Code（此处未测试）                       |
+| 后台服务               | macOS（launchd）和 Linux（systemd 用户单元）上的 `t3 service install`；不支持 Windows | CLI                                          | From T3 Code（此处未测试）                       |
+| 快捷键、项目设置、主题 | 可自定义的快捷键、按项目的覆盖设置、外观                                              | Settings                                     | From T3 Code                                     |
 
 ## 支持的提供商
 
 开始线程之前，请至少安装一个提供商 CLI 并完成登录。
 
-| 提供商 | 登录方式 | 备注 |
-|---|---|---|
-| Codex | 安装 Codex CLI，然后运行 `codex login`（或在 Settings → Providers 中点击 **Connect with ChatGPT**） | |
-| Claude Code | 安装 Claude Code，然后运行 `claude auth login` | Claude 作 brain 时，会把同账号的 Claude crew 角色作为子智能体运行。 |
-| Cursor | 安装 Cursor CLI，然后运行 `agent login` | |
-| Grok Build | 安装 Grok Build CLI，然后运行 `grok login` | |
-| OpenCode | 安装 OpenCode 1.14.19 或更高版本，然后运行 `opencode auth login` | Z.AI / MiniMax 预设需要它。 |
-| Antigravity | Settings → Providers：启用，点击 **Install**，然后点击 **Sign in with Google** | 无需 CLI。Gemini API 密钥以明文形式保存在设置中。 |
-| ZCode (GLM) | 安装 ZCode，运行 `zcode login zai`，然后运行 `npm i -g zcode-acp-server` | 无论你选择哪种权限模式，它都会不经审批地运行自己的工具。 |
-| MiniMax Code | `npm i -g @minimax-ai/code`，然后运行 `mcode login --region global` | |
-| 通过 OpenCode 使用 Z.AI / MiniMax | Settings → Providers → Add → Z.AI 或 MiniMax；把密钥填入 `OOP_ZAI_API_KEY` / `OOP_MINIMAX_API_KEY` | 付费请求未测试。 |
+| 提供商                            | 登录方式                                                                                            | 备注                                                                |
+| --------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Codex                             | 安装 Codex CLI，然后运行 `codex login`（或在 Settings → Providers 中点击 **Connect with ChatGPT**） |                                                                     |
+| Claude Code                       | 安装 Claude Code，然后运行 `claude auth login`                                                      | Claude 作 brain 时，会把同账号的 Claude crew 角色作为子智能体运行。 |
+| Cursor                            | 安装 Cursor CLI，然后运行 `agent login`                                                             |                                                                     |
+| Grok Build                        | 安装 Grok Build CLI，然后运行 `grok login`                                                          |                                                                     |
+| OpenCode                          | 安装 OpenCode 1.14.19 或更高版本，然后运行 `opencode auth login`                                    | Z.AI / MiniMax 预设需要它。                                         |
+| Antigravity                       | Settings → Providers：启用，点击 **Install**，然后点击 **Sign in with Google**                      | 无需 CLI。Gemini API 密钥以明文形式保存在设置中。                   |
+| ZCode (GLM)                       | 安装 ZCode，运行 `zcode login zai`，然后运行 `npm i -g zcode-acp-server`                            | 无论你选择哪种权限模式，它都会不经审批地运行自己的工具。            |
+| MiniMax Code                      | `npm i -g @minimax-ai/code`，然后运行 `mcode login --region global`                                 |                                                                     |
+| 通过 OpenCode 使用 Z.AI / MiniMax | Settings → Providers → Add → Z.AI 或 MiniMax；把密钥填入 `OOP_ZAI_API_KEY` / `OOP_MINIMAX_API_KEY`  | 付费请求未测试。                                                    |
 
 ## 平台支持
 
-| 平台 | 状态 |
-|---|---|
-| macOS，Apple Silicon (arm64) | **已测试。** 这是主要目标平台。 |
-| Windows x64 | **实验性。** 由维护者构建；未在干净的机器上验证。 |
-| macOS Intel | 本分支未测试。macOS 构建脚本会拒绝在 Intel 上运行。 |
-| Linux | 本分支未测试。仓库中有上游的打包代码，但不作任何承诺。 |
-| iOS / Android 原生应用 | 本分支未测试。参见[原生应用还是浏览器](#原生应用还是浏览器)。 |
-| 手机浏览器（访问 Web 界面） | 已按手机尺寸检查 Web 界面；参见[从手机连接](#从手机连接)。 |
+| 平台                         | 状态                                                          |
+| ---------------------------- | ------------------------------------------------------------- |
+| macOS，Apple Silicon (arm64) | **已测试。** 这是主要目标平台。                               |
+| Windows x64                  | **实验性。** 由维护者构建；未在干净的机器上验证。             |
+| macOS Intel                  | 本分支未测试。macOS 构建脚本会拒绝在 Intel 上运行。           |
+| Linux                        | 本分支未测试。仓库中有上游的打包代码，但不作任何承诺。        |
+| iOS / Android 原生应用       | 本分支未测试。参见[原生应用还是浏览器](#原生应用还是浏览器)。 |
+| 手机浏览器（访问 Web 界面）  | 已按手机尺寸检查 Web 界面；参见[从手机连接](#从手机连接)。    |
 
 ## 环境要求
+
+以下要求仅适用于从源码构建。二进制安装程序不需要 Node.js、pnpm、git 或编译器。使用智能体还需要单独安装并登录提供商 CLI。
 
 - **Node.js 24.x，24.13.1 或更高版本**
 - **pnpm 11.10.0**
@@ -263,11 +268,33 @@ Z.AI（API 或 Coding Plan）和 MiniMax（API 或 Token Plan）的预设，通�
 - **至少一个提供商 CLI**，已安装并登录（参见[支持的提供商](#支持的提供商)）
 - 仅 Windows 打包需要：Rust、Python 3 和 Visual Studio Build Tools（使用 C++ 的桌面开发，含 Windows SDK）
 
+## 安装桌面应用
+
+**macOS (Apple Silicon)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+**Windows (PowerShell, x64)**
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex
+```
+
+**Linux (x64)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+安装位置、更新、安全和发布前提请参阅简明的[桌面安装指南](INSTALL.md)。v0.0.105 及更早的源码发布版本均不含二进制文件。请使用 v0.0.106 或更高版本，并确认相应安装程序及 `.sha256` 文件列在发布页的 **Assets** 中。
+
 ## 安装 / 从源码构建
 
 ```bash
 git clone https://github.com/AIBeginnerX/oh-our-pi-desktop.git
-cd oh-our-pi
+cd oh-our-pi-desktop
 ```
 
 ### macOS (Apple Silicon)
@@ -303,9 +330,9 @@ vp i          # install dependencies
 vp run dev    # server + web; open the pairing URL it prints
 ```
 
-### 首次运行清单
+### 首次运行清单（源码构建）
 
-构建产物是**临时（ad hoc）签名且未经公证**的，所以你的操作系统会警告一次。
+源码构建产物是**临时（ad hoc）签名且未经公证**的，操作系统可能会显示警告。二进制安装程序会在安装前验证 SHA-256，不会绕过 Gatekeeper 隔离属性或 Windows SmartScreen。
 
 - **macOS（Gatekeeper）：** 右键点击应用，选择 **Open**（打开），或前往“系统设置” → “隐私与安全性” → **Open Anyway**（仍要打开）。
 - **Windows（SmartScreen）：** 点击 **More info**（更多信息） → **Run anyway**（仍要运行）。
@@ -332,11 +359,11 @@ graph LR
 
 请按下面的顺序，选择对你最简单可行的路径。
 
-| | 路径 | 需要 | 能否在离家时使用 | 风险 |
-|---|---|---|---|---|
-| a | 同一 Wi-Fi / 局域网 | 手机和电脑在同一网络 | 否 | 最低 |
-| b | Tailscale | 两台设备上都有免费的 Tailscale 账号 | 是 | 低 |
-| c | 你自己的 Cloudflare 中继 | 一个 Cloudflare 账号和一次性部署 | 是 | 中（Cloudflare 能看到流量） |
+|     | 路径                     | 需要                                | 能否在离家时使用 | 风险                        |
+| --- | ------------------------ | ----------------------------------- | ---------------- | --------------------------- |
+| a   | 同一 Wi-Fi / 局域网      | 手机和电脑在同一网络                | 否               | 最低                        |
+| b   | Tailscale                | 两台设备上都有免费的 Tailscale 账号 | 是               | 低                          |
+| c   | 你自己的 Cloudflare 中继 | 一个 Cloudflare 账号和一次性部署    | 是               | 中（Cloudflare 能看到流量） |
 
 > [!WARNING]
 > **配对链接和配对码就是密码。** 切勿发布在 issue、聊天或截图中。只配对你自己的设备。切勿把服务器端口暴露到公网。离家使用时优先选择 Tailscale。撤销你不认识的设备。远程控制智能体时请使用 **Supervised** 权限模式。
@@ -394,15 +421,15 @@ OoP 在 [`infra/oop-relay`](infra/oop-relay/README.md) 中附带了一个小型 
 
 ### 原生应用还是浏览器？
 
-| | 手机浏览器 | iOS / Android 原生应用 |
-|---|---|---|
-| 它是什么 | 由你的电脑提供的 OoP Web 界面 | 由上游项目发布的 T3 Code 移动应用（不带 OoP 品牌） |
-| 安装 | 无需安装 | App Store / Google Play 上的 T3 Code 商店页面 |
-| 连接 | 打开配对链接或扫描二维码 | 添加环境：扫描二维码或粘贴配对 URL |
-| 本分支是否测试 | 已按手机尺寸检查 Web 界面；尚未单独在真机上验证配对 | **否** |
+|                | 手机浏览器                                          | iOS / Android 原生应用                             |
+| -------------- | --------------------------------------------------- | -------------------------------------------------- |
+| 它是什么       | 由你的电脑提供的 OoP Web 界面                       | 由上游项目发布的 T3 Code 移动应用（不带 OoP 品牌） |
+| 安装           | 无需安装                                            | App Store / Google Play 上的 T3 Code 商店页面      |
+| 连接           | 打开配对链接或扫描二维码                            | 添加环境：扫描二维码或粘贴配对 URL                 |
+| 本分支是否测试 | 已按手机尺寸检查 Web 界面；尚未单独在真机上验证配对 | **否**                                             |
 
 ![通过配对链接连接的手机尺寸 Web 客户端](docs/screenshots/mobile.png)
-*连接到 OoP 的手机浏览器。*
+_连接到 OoP 的手机浏览器。_
 
 本分支保留了协议和认证标识符（见 [`UPSTREAM.json`](UPSTREAM.json) 中的 `internal_protocol_and_auth_identifiers_preserved`），因此上游应用应该可以与 OoP 服务器配对。**本分支没有测试过原生移动应用**，所以请将其视为未经确认。上游文档在 Settings → Environments 下介绍了应用的连接设置。如果出现任何异常，请改用浏览器。
 
@@ -419,7 +446,7 @@ OoP 在 [`infra/oop-relay`](infra/oop-relay/README.md) 中附带了一个小型 
 
 ## 更新机制
 
-没有公开的自动更新服务器，OoP 也不会从 GitHub 自动更新自己。
+源码构建不会从 GitHub 自动更新，请按下方步骤重新构建。若要更新二进制安装版本，请退出 OoP 并重新运行对应的安装命令。用户数据会保留。
 
 1. `git pull`
 2. 重新构建 / 打包（参见[安装](#安装--从源码构建)）并重新安装。
@@ -447,9 +474,9 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **费用：** 每个提供商都使用你自己的订阅或 API 额度。Crew 在每个聊天中运行多个模型，会成倍增加用量。Usage 页面显示的是估算值，不是你的账单。
 - **API 密钥**保存在服务器端，也就是你的机器上。Antigravity 的 Gemini API 密钥在设置中以**明文**保存。
 - **切勿提交 `.env` 文件或密钥**，也不要把它们粘贴到 issue 或日志中。
-- **上游安装程序安装的是 T3 Code，而不是 OoP：** `t3.codes` 的安装脚本、`npx t3`、Homebrew `t3-code`、winget `T3Tools.T3Code`，以及 App Store / Play 商店页面，都属于上游项目。请从本仓库构建 OoP。
+- **上游安装程序安装的是 T3 Code，而不是 OoP：** `t3.codes` 的安装脚本、`npx t3`、Homebrew `t3-code`、winget `T3Tools.T3Code`，以及 App Store / Play 商店页面，都属于上游项目。请使用上面的 OoP 桌面安装程序，或从本仓库构建 OoP。
 - **CLI 仍然叫 `t3`**，可能与上游的安装冲突。
-- **构建产物是临时签名的**，没有 Developer ID，也未经公证。预计会出现一次 Gatekeeper 或 SmartScreen 警告。
+- **源码构建产物是临时签名的**，没有 Developer ID，也未经公证。二进制安装程序会验证 SHA-256，不会绕过 Gatekeeper 隔离属性或 SmartScreen。
 - **本地文件夹更新器**信任任何能写入更新文件夹的人；它的 SHA-256 校验只能检测数据损坏。
 
 **遥测。** OoP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（使用上游项目的密钥和 `us.i.posthog.com`）；OoP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。
@@ -458,16 +485,17 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 
 ## 常见问题 / 故障排查
 
-**macOS 提示无法打开该应用，或来自身份不明的开发者。**
-该构建是临时签名且未经公证的。右键点击应用并选择 **Open**，或前往“系统设置” → “隐私与安全性” → **Open Anyway**。
+**macOS 提示无法打开源码构建的应用，或来自身份不明的开发者。**
+源码构建是临时签名且未经公证的。右键点击应用并选择 **Open**，或前往“系统设置” → “隐私与安全性” → **Open Anyway**。二进制安装程序不会绕过隔离属性。
 
-**Windows 对安装程序显示 SmartScreen 警告。**
-该安装程序未签名。点击 **More info** → **Run anyway**。
+**Windows 对源码构建的安装程序显示 SmartScreen 警告。**
+源码构建的安装程序未签名。二进制安装程序不会绕过 SmartScreen。
 
 **某个提供商显示“not signed in”。**
 使用该提供商自己的命令登录（参见[支持的提供商](#支持的提供商)），然后重新打开 Settings → Providers。该 CLI 必须位于运行服务器那台机器的 `PATH` 中。源代码管理账号在 Settings → Source Control 中有 **Rescan** 按钮。
 
 **我的手机连不上服务器。**
+
 - 检查网络访问是否已开启（Connect mobile → **Allow mobile connections**，或 Settings → Connections → **Network access**）。
 - 确保配对链接不是 `127.0.0.1` / localhost 地址。
 - 手机和电脑必须在同一网络（局域网）或同一个 tailnet 中；访客 Wi-Fi 通常会阻止设备之间的流量。
@@ -478,13 +506,16 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 你需要 Node.js 24.x（24.13.1 或更高版本）和 pnpm 11.10.0。其他 Node 主版本会被拒绝。
 
 **我的数据在哪里？**
-OoP 的服务器状态（线程、设置、本地数据库）位于 `~/.oop-desktop/userdata`。提供商的登录信息保存在各提供商 CLI 自己的文件夹中，不在这里。
+OoP 的服务器状态（线程、设置、本地数据库）位于 `~/.oop-desktop/userdata`。桌面二进制程序与这些数据分开安装。提供商的登录信息保存在各提供商 CLI 自己的文件夹中，不在这里。
+
+**如何更新二进制安装版本？**
+退出 OoP，然后重新运行对应的安装命令。用户数据会保留。
 
 **如何重置 OoP？**
 退出应用，然后把 `~/.oop-desktop/userdata` 移到一边（在确定之前不要删除）。OoP 下次启动时会是全新状态。你的项目文件夹不会受影响。
 
 **如何卸载？**
-退出应用，然后删除 `/Applications/OoP.app`（macOS），或在 Windows 设置中卸载 OoP。也可以删除 `~/.oop-desktop` 来清除它的数据。提供商 CLI 是单独安装的，不会被移除。
+退出应用，然后删除 `~/Applications/OoP.app`（macOS；或 `OOP_INSTALL_DIR` 指定的路径），在 Windows 设置中卸载 OoP，或在 Linux 上删除 `~/.local/bin/oop-desktop`、`~/.local/share/oop-desktop` 和桌面菜单项。也可以删除 `~/.oop-desktop` 来清除它的数据。提供商 CLI 是单独安装的，不会被移除。
 
 **这会花我的钱吗？**
 OoP 本身免费。它所运行的提供商使用你自己的订阅或 API 额度。Crew 在每个聊天中使用多个模型，Usage 页面显示的是估算（而非实际计费）的费用。
@@ -494,16 +525,16 @@ OoP 本身免费。它所运行的提供商使用你自己的订阅或 API 额�
 
 ## 仓库结构
 
-| 路径 | 内容 |
-|---|---|
-| `apps/server` | Node WebSocket 服务器：编排、提供商、检查点、`t3` CLI |
-| `apps/web` | React / Vite 界面 |
-| `apps/desktop` | 封装 Web 界面并内置服务器的 Electron 外壳 |
-| `apps/mobile` | React Native 客户端（上游应用代码） |
-| `packages/contracts` | 所有跨线路数据的类型化模式 |
-| `packages/shared`、`packages/client-runtime` | 共享的运行时工具，以及 Web 与移动端共用的客户端代码 |
-| `infra/oop-relay` | 可选的 Cloudflare 中继 Worker |
-| `docs/` | `user/` 用户指南、`internals/` 架构笔记、`operations/` 安装与发布说明 |
+| 路径                                         | 内容                                                                  |
+| -------------------------------------------- | --------------------------------------------------------------------- |
+| `apps/server`                                | Node WebSocket 服务器：编排、提供商、检查点、`t3` CLI                 |
+| `apps/web`                                   | React / Vite 界面                                                     |
+| `apps/desktop`                               | 封装 Web 界面并内置服务器的 Electron 外壳                             |
+| `apps/mobile`                                | React Native 客户端（上游应用代码）                                   |
+| `packages/contracts`                         | 所有跨线路数据的类型化模式                                            |
+| `packages/shared`、`packages/client-runtime` | 共享的运行时工具，以及 Web 与移动端共用的客户端代码                   |
+| `infra/oop-relay`                            | 可选的 Cloudflare 中继 Worker                                         |
+| `docs/`                                      | `user/` 用户指南、`internals/` 架构笔记、`operations/` 安装与发布说明 |
 
 关于代码库的组织方式及其遵循的约定，参见 [`AGENTS.md`](AGENTS.md)。
 

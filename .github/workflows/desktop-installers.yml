@@ -1,0 +1,201 @@
+name: Build public desktop installers
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable OoP version already tagged on main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-desktop-installers-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate release source
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: release
+        name: Bind the build to tagged main
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          source_version="$(node -p "require('./OOP_RELEASE.json').version")"
+          [[ "$REQUESTED_VERSION" == "$source_version" ]]
+          tag_sha="$(git rev-list -n 1 "v$REQUESTED_VERSION")"
+          [[ "$tag_sha" == "$GITHUB_SHA" ]]
+          echo "version=$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-14
+            platform: mac
+            target: dmg
+            arch: arm64
+            asset: OoP-${{ needs.preflight.outputs.version }}-arm64.dmg
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            target: nsis
+            arch: x64
+            asset: OoP-${{ needs.preflight.outputs.version }}-x64.exe
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            target: AppImage
+            arch: x64
+            asset: OoP-${{ needs.preflight.outputs.version }}-x86_64.AppImage
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: ${{ matrix.platform != 'win' }}
+          run-install: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - name: Install Linux build libraries
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev pkg-config imagemagick
+
+      - name: Install Spectre-mitigated Windows runtime
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          if (-not $installPath) { throw "Visual Studio installation not found." }
+          $setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $process = Start-Process -FilePath $setup -ArgumentList @(
+            "modify", "--installPath", "`"$installPath`"",
+            "--add", "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre",
+            "--quiet", "--norestart"
+          ) -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Visual Studio Installer failed with exit code $($process.ExitCode)." }
+
+      - name: Install desktop dependencies
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - name: Build desktop bundle
+        run: vp run build:desktop
+
+      - name: Package OoP installer
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+          T3CODE_DESKTOP_BUILD_PROFILE_NAME: oop-desktop
+        run: |
+          set -euo pipefail
+          node scripts/build-desktop-artifact.ts \
+            --platform "$PLATFORM" \
+            --target "$TARGET" \
+            --arch "$ARCH" \
+            --build-version "$VERSION" \
+            --skip-build \
+            --output-dir public-installer \
+            --verbose
+
+      - name: Accept only the requested installer
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          test -s "public-installer/$ASSET"
+          find public-installer -maxdepth 1 -type f -print
+
+      - name: Upload installer between jobs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: installer-${{ matrix.platform }}-${{ matrix.arch }}
+          path: public-installer/${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Verify and attach all installers
+    needs: [preflight, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download all platform installers
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: installer-*
+          path: release-input
+          merge-multiple: true
+
+      - name: Copy and hash the final release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          node scripts/prepare-desktop-install-assets.mjs \
+            --version "$VERSION" \
+            --mac "release-input/OoP-$VERSION-arm64.dmg" \
+            --windows "release-input/OoP-$VERSION-x64.exe" \
+            --linux "release-input/OoP-$VERSION-x86_64.AppImage" \
+            --out release-ready
+
+      - name: Verify release and upload without overwriting
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(git rev-list -n 1 "v$VERSION")"
+          [[ "$tag_sha" == "$GITHUB_SHA" ]]
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length' | grep -vq '^0$'; then
+            echo "Release v$VERSION already has assets; refusing to overwrite." >&2
+            exit 1
+          fi
+          gh release upload "v$VERSION" release-ready/* --repo "$GITHUB_REPOSITORY"

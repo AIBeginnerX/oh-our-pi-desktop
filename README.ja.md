@@ -21,6 +21,7 @@ OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (
 - [対応プロバイダー](#対応プロバイダー)
 - [対応プラットフォーム](#対応プラットフォーム)
 - [要件](#要件)
+- [デスクトップアプリをインストール](#デスクトップアプリをインストール)
 - [インストール / ソースからのビルド](#インストール--ソースからのビルド)
 - [スマートフォンから接続する](#スマートフォンから接続する)
 - [アップデートの仕組み](#アップデートの仕組み)
@@ -39,12 +40,15 @@ OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (
 - **キーボードから離れても作業。** スマートフォンをエージェントが動いているコンピューターとペアリングして、長いタスクを見守ったり、操作したりできます。
 - **すべてローカルに。** プロジェクト、プロバイダーのログイン、エージェントの作業内容はあなたのマシンに残ります。OoP のアカウントも OoP のサーバーもありません。
 
-対象となる方: すでに1つ以上のコーディングエージェントのサブスクリプションや API プランに支払っていて、ソースからのアプリのビルドに抵抗がなく、1つの操作画面にまとめたい開発者。洗練された署名済みの自動更新プロダクトをお求めなら、現時点ではアップストリームの T3 Code のほうが向いています。
+対象となる方: すでに1つ以上のコーディングエージェントのサブスクリプションや API
+プランを利用し、初期段階の未署名デスクトップアプリを使用でき、1つの操作画面に
+まとめたい開発者。洗練された署名済みの自動更新プロダクトをお求めなら、
+現時点ではアップストリームの T3 Code のほうが向いています。
 
 ### 30秒ツアー
 
 ![OoP main chat view with composer, model picker and permission mode](docs/screenshots/chat.png)
-*メインのチャット画面: プロバイダーとモデルを選び、権限モードを設定して、スレッドを追いかけます。*
+_メインのチャット画面: プロバイダーとモデルを選び、権限モードを設定して、スレッドを追いかけます。_
 
 1. OoP を開き、1つのプロバイダーにサインインします (Settings → Providers)。
 2. プロジェクトのフォルダーを追加して、スレッドを開始します。
@@ -62,7 +66,7 @@ OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (
 **開き方:** プロジェクトを追加し、サイドバーからスレッドを開始します。
 
 ![Main chat with composer, model picker and permission mode](docs/screenshots/chat.png)
-*チャット: スレッドのタイムラインの下に、モデルピッカーと権限モードを備えたコンポーザーがあります。*
+_チャット: スレッドのタイムラインの下に、モデルピッカーと権限モードを備えたコンポーザーがあります。_
 
 ### OOP Crew
 
@@ -71,7 +75,7 @@ OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (
 **使いどころ:** 大部分は安価なモデルに任せ、レビューは強力なモデルにさせたい大きめのタスク。**開き方:** コンポーザーのモデルピッカーの隣にある **Crew**。Crew の作業は、右パネルの **Workflows** と **Agents** にリアルタイムで表示されます。
 
 ![OOP Crew board showing a brain model delegating to workers and an auditor](docs/screenshots/crew.png)
-*OOP Crew: 1つのチャットで複数のモデルを使い、誰が何をしているかをライブボードで確認できます。*
+_OOP Crew: 1つのチャットで複数のモデルを使い、誰が何をしているかをライブボードで確認できます。_
 
 > [!NOTE]
 > Crew は1つのチャットで複数のモデルを動かすため、プロバイダーの使用量が増えます。コストが気になる場合は、まず **Budget** プリセットから始めてください。
@@ -83,7 +87,7 @@ OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (
 **開き方:** Settings → Providers。
 
 ![Settings, Providers page with install, update and sign-in status per provider](docs/screenshots/providers.png)
-*Settings → Providers: 各プロバイダーのインストール、アップデート、サインイン。*
+_Settings → Providers: 各プロバイダーのインストール、アップデート、サインイン。_
 
 ### Z.AI または MiniMax の追加 (OpenCode プリセット)
 
@@ -92,7 +96,7 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** Settings → Providers → Add。OpenCode 1.14.19 以降が必要です。
 
 ![Add provider dialog with Z.AI and MiniMax presets](docs/screenshots/add-provider.png)
-*Add provider: OpenCode 経由で動作する Z.AI と MiniMax のプリセット。*
+_Add provider: OpenCode 経由で動作する Z.AI と MiniMax のプリセット。_
 
 > [!NOTE]
 > 有料の Z.AI / MiniMax のサインインとチャットリクエストは、このフォークではテストしていません。
@@ -104,7 +108,7 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** 右パネルの **Diff** タブ (git リポジトリ内のサーバースレッド)。
 
 ![Diff panel showing changes made by an agent in a thread](docs/screenshots/diff.png)
-*Diff パネル: エージェントの変更を確認し、チェックポイントから復元します。*
+_Diff パネル: エージェントの変更を確認し、チェックポイントから復元します。_
 
 ### コミットとソース管理
 
@@ -113,23 +117,23 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** Settings → Source Control で CLI を検出し (サインイン後に **Rescan** を押します)、スレッドのコミット操作を使います。
 
 ![Commit and source control actions for a thread](docs/screenshots/commit.png)
-*ソース管理: スレッドから変更をコミットして公開します。*
+_ソース管理: スレッドから変更をコミットして公開します。_
 
 ### 権限モード
 
 エージェントが行動する前に確認を求めるタイミングを選びます。モードはスレッドごとに適用されます。
 
-| モード | 動作 |
-|---|---|
-| **Supervised** | コマンドとファイル変更の承認を求めます。 |
-| **Auto-accept edits** | ファイル編集を自動で承認します。それ以外の操作は引き続き確認を求める場合があります。 |
-| **Auto** | 日常的な操作にはプロバイダーの自動レビューを使い、それ以外は確認を求めます (Codex、Claude、Cursor。他のプロバイダーは確認を求める動作になります)。 |
-| **Full access** | コマンドと編集を承認プロンプトなしで実行します。新しいスレッドの**デフォルト**です。 |
+| モード                | 動作                                                                                                                                               |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervised**        | コマンドとファイル変更の承認を求めます。                                                                                                           |
+| **Auto-accept edits** | ファイル編集を自動で承認します。それ以外の操作は引き続き確認を求める場合があります。                                                               |
+| **Auto**              | 日常的な操作にはプロバイダーの自動レビューを使い、それ以外は確認を求めます (Codex、Claude、Cursor。他のプロバイダーは確認を求める動作になります)。 |
+| **Full access**       | コマンドと編集を承認プロンプトなしで実行します。新しいスレッドの**デフォルト**です。                                                               |
 
 **開き方:** コンポーザーのモードセレクター。デフォルトは Settings → General → New threads → Permissions で変更できます。
 
 ![Permission mode selector in the composer](docs/screenshots/permissions.png)
-*権限モード: Supervised から Full access まで。*
+_権限モード: Supervised から Full access まで。_
 
 ### スレッドゴール
 
@@ -138,7 +142,7 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** コンポーザーの **Crew** の隣にある **Goal**。終了するには **Stop goal** を使います。
 
 ![Goal control in the composer showing continuations used](docs/screenshots/goal.png)
-*スレッドゴール: ゴールが達成されるか、ブロックされるか、停止されるまでチャットは続きます。*
+_スレッドゴール: ゴールが達成されるか、ブロックされるか、停止されるまでチャットは続きます。_
 
 ### チャット内レポート
 
@@ -147,7 +151,7 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **試し方:** エージェントにチャートや図を頼んでみてください。
 
 ![Chart and stat cards drawn inside a chat reply](docs/screenshots/reports.png)
-*レポート: 会話の中に描画されたチャートと主要数値。*
+_レポート: 会話の中に描画されたチャートと主要数値。_
 
 ### Workflows と Agents パネル
 
@@ -156,7 +160,7 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** 右パネル (Workflows タブと Agents タブ)、コマンドパレット、または `mod+alt+w`。
 
 ![Workflows panel drawing a thread's tool calls as a live diagram](docs/screenshots/workflows.png)
-*Workflows パネル: エージェントの作業をリアルタイムで追えます。*
+_Workflows パネル: エージェントの作業をリアルタイムで追えます。_
 
 ### Usage
 
@@ -165,26 +169,26 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** サイドバーまたはコマンドパレットの **Usage**、もしくは `mod+u` (ターミナルにフォーカスがないとき)。
 
 ![Usage page with token and estimated cost history per provider](docs/screenshots/usage.png)
-*Usage: プロバイダー別のトークンと推定コストの履歴。*
+_Usage: プロバイダー別のトークンと推定コストの履歴。_
 
 ### 内蔵ターミナル
 
 サーバーを実行しているマシン上に、スレッドごとのターミナルがあります。最大5,000行 (8 MiB) のスクロールバックがサーバー側に保持されるため、再接続しても残ります。
 
 ![Built-in terminal next to a chat thread](docs/screenshots/terminal.png)
-*チャットと並んだ内蔵ターミナル。*
+_チャットと並んだ内蔵ターミナル。_
 
 ### ダークテーマ
 
 ![OoP in the dark theme](docs/screenshots/dark.png)
-*ダークテーマ。*
+_ダークテーマ。_
 
 ### スマートフォンサイズの Web クライアント
 
 ペアリングすれば、同じ Web UI をスマートフォンのブラウザでも使えます ([スマートフォンから接続する](#スマートフォンから接続する)を参照)。
 
 ![OoP web client at phone size](docs/screenshots/mobile.png)
-*スマートフォンサイズの Web クライアント。*
+_スマートフォンサイズの Web クライアント。_
 
 ### リモートアクセス設定
 
@@ -193,68 +197,70 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 **開き方:** Settings → Connections。
 
 ![Settings, Connections page with network access and pairing links (codes masked)](docs/screenshots/connections.png)
-*Settings → Connections: リモートアクセスとペアリング (コードはマスク済み)。*
+_Settings → Connections: リモートアクセスとペアリング (コードはマスク済み)。_
 
 ## 機能リファレンス
 
 「Added in OoP (OoP で追加)」は、フォークのドキュメントとコードが OoP 固有のものとして示していることを意味します。「From T3 Code (T3 Code 由来)」は、ドキュメントとコードから判断する限りアップストリーム (v0.0.44) の一部であることを意味します。フォークではファイル単位の差分確認を行っていないため、この区分はおおよそのものとして扱ってください。
 
-| 機能 | 内容 | 場所 | 由来 |
-|---|---|---|---|
-| OOP Crew | brain モデルが worker、expert、auditor モデルに委任します。プリセットとロールごとの上書きがあります | Composer → Crew、右パネル → Workflows / Agents | Added in OoP (OoP で追加) |
-| スレッドゴール | チェックが通るか、ゴールがブロックされるまでスレッドを継続します | Composer → Goal | Added in OoP |
-| プロジェクトメモリ | コンポーザーから、保存済みのプロジェクトメモリを提案します | コンポーザー、メモリボタン | Added in OoP |
-| ローカルのロール設定 | 実装用・レビュー用の好みのモデルを環境ごとに保存でき、おすすめも表示されます | コンポーザーのモデルピッカー | Added in OoP |
-| Z.AI / MiniMax プリセット | OpenCode ベースのプロバイダープリセット | Settings → Providers → Add | Added in OoP (有料リクエストは未テスト) |
-| ZCode (GLM) プロバイダー | Z.AI のエージェントを ACP 経由で利用します | Settings → Providers | Added in OoP |
-| MiniMax Code プロバイダー | MiniMax のエージェントを ACP 経由で利用します | Settings → Providers | Added in OoP |
-| ワンクリックのプロバイダーインストール / アップデート | プロバイダーのカードから、プロバイダー CLI をインストールまたはアップデートします | Settings → Providers | Added in OoP (アップストリームとの正確な差分は未検証) |
-| Verify macOS build | OoP の `.dmg` について、整合性、厳密なコード署名、サーバー Mac での起動を確認します | チャットヘッダー → Verify macOS build | Added in OoP |
-| スマートフォン接続ダイアログ | デスクトップアプリ向けのワンクリックのスマートフォンペアリング QR。独自のリレーも任意で設定できます | サイドバー → Connect mobile | Added in OoP (デスクトップアプリのみ) |
-| 独自の Cloudflare リレー | 自分でデプロイする Worker で、どのネットワークからでもスマートフォンからデスクトップに接続できます | `infra/oop-relay` | Added in OoP、初期段階 |
-| ローカルフォルダーのアップデーター | パッケージ版の OoP が、指定したフォルダーにある新しいパッケージを取得できます | パッケージ版の macOS / Windows ビルド | Added in OoP、初期段階、他者による検証なし |
-| マルチプロバイダーのセッション | プロバイダーをまたいだスレッド、ターン、チェックポイント | あらゆる場所 | From T3 Code (T3 Code 由来) |
-| 権限モード | Supervised、Auto-accept edits、Auto、Full access | コンポーザー、Settings → General | From T3 Code |
-| Diff パネルとチェックポイント | エージェントの変更を確認して復元します | 右パネル → Diff | From T3 Code |
-| ソース管理 | プロバイダー CLI 経由のクローン、コミット、公開、プルリクエスト | Settings → Source Control | From T3 Code |
-| 内蔵ターミナル | サーバーマシン上のスレッドごとのターミナル | スレッド内 | From T3 Code |
-| チャット内レポート | チャート、統計カード、進捗バー、mermaid のフロー図 | 返信内 | From T3 Code |
-| ワークフロービュー | ツール呼び出しとサブエージェントのリアルタイム図 | 右パネル、`mod+alt+w` | From T3 Code |
-| Usage ページ | トークンと推定コストの履歴 | サイドバー、`mod+u` | From T3 Code (ZCode と MiniMax の行は OoP) |
-| SnapShots | ウィンドウをキャプチャして下書きに取り込みます (デフォルトはオフ。macOS、Windows、Linux Wayland) | Settings → SnapShots | From T3 Code (帰属は未検証) |
-| リモートアクセス | LAN ペアリング、Tailscale HTTPS、SSH 環境 | Settings → Connections | From T3 Code |
-| デバイスパネル | iOS Simulator や Android Emulator をスレッドの隣で表示し、タップ操作もできます | 右パネル → Device | From T3 Code (ここでは未テスト) |
-| バックグラウンドサービス | macOS (launchd) と Linux (systemd ユーザーユニット) での `t3 service install`。Windows は非対応 | CLI | From T3 Code (ここでは未テスト) |
-| キーバインド、プロジェクト設定、テーマ | カスタマイズ可能なショートカット、プロジェクトごとの上書き、外観 | Settings | From T3 Code |
+| 機能                                                  | 内容                                                                                                | 場所                                           | 由来                                                  |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- |
+| OOP Crew                                              | brain モデルが worker、expert、auditor モデルに委任します。プリセットとロールごとの上書きがあります | Composer → Crew、右パネル → Workflows / Agents | Added in OoP (OoP で追加)                             |
+| スレッドゴール                                        | チェックが通るか、ゴールがブロックされるまでスレッドを継続します                                    | Composer → Goal                                | Added in OoP                                          |
+| プロジェクトメモリ                                    | コンポーザーから、保存済みのプロジェクトメモリを提案します                                          | コンポーザー、メモリボタン                     | Added in OoP                                          |
+| ローカルのロール設定                                  | 実装用・レビュー用の好みのモデルを環境ごとに保存でき、おすすめも表示されます                        | コンポーザーのモデルピッカー                   | Added in OoP                                          |
+| Z.AI / MiniMax プリセット                             | OpenCode ベースのプロバイダープリセット                                                             | Settings → Providers → Add                     | Added in OoP (有料リクエストは未テスト)               |
+| ZCode (GLM) プロバイダー                              | Z.AI のエージェントを ACP 経由で利用します                                                          | Settings → Providers                           | Added in OoP                                          |
+| MiniMax Code プロバイダー                             | MiniMax のエージェントを ACP 経由で利用します                                                       | Settings → Providers                           | Added in OoP                                          |
+| ワンクリックのプロバイダーインストール / アップデート | プロバイダーのカードから、プロバイダー CLI をインストールまたはアップデートします                   | Settings → Providers                           | Added in OoP (アップストリームとの正確な差分は未検証) |
+| Verify macOS build                                    | OoP の `.dmg` について、整合性、厳密なコード署名、サーバー Mac での起動を確認します                 | チャットヘッダー → Verify macOS build          | Added in OoP                                          |
+| スマートフォン接続ダイアログ                          | デスクトップアプリ向けのワンクリックのスマートフォンペアリング QR。独自のリレーも任意で設定できます | サイドバー → Connect mobile                    | Added in OoP (デスクトップアプリのみ)                 |
+| 独自の Cloudflare リレー                              | 自分でデプロイする Worker で、どのネットワークからでもスマートフォンからデスクトップに接続できます  | `infra/oop-relay`                              | Added in OoP、初期段階                                |
+| ローカルフォルダーのアップデーター                    | パッケージ版の OoP が、指定したフォルダーにある新しいパッケージを取得できます                       | パッケージ版の macOS / Windows ビルド          | Added in OoP、初期段階、他者による検証なし            |
+| マルチプロバイダーのセッション                        | プロバイダーをまたいだスレッド、ターン、チェックポイント                                            | あらゆる場所                                   | From T3 Code (T3 Code 由来)                           |
+| 権限モード                                            | Supervised、Auto-accept edits、Auto、Full access                                                    | コンポーザー、Settings → General               | From T3 Code                                          |
+| Diff パネルとチェックポイント                         | エージェントの変更を確認して復元します                                                              | 右パネル → Diff                                | From T3 Code                                          |
+| ソース管理                                            | プロバイダー CLI 経由のクローン、コミット、公開、プルリクエスト                                     | Settings → Source Control                      | From T3 Code                                          |
+| 内蔵ターミナル                                        | サーバーマシン上のスレッドごとのターミナル                                                          | スレッド内                                     | From T3 Code                                          |
+| チャット内レポート                                    | チャート、統計カード、進捗バー、mermaid のフロー図                                                  | 返信内                                         | From T3 Code                                          |
+| ワークフロービュー                                    | ツール呼び出しとサブエージェントのリアルタイム図                                                    | 右パネル、`mod+alt+w`                          | From T3 Code                                          |
+| Usage ページ                                          | トークンと推定コストの履歴                                                                          | サイドバー、`mod+u`                            | From T3 Code (ZCode と MiniMax の行は OoP)            |
+| SnapShots                                             | ウィンドウをキャプチャして下書きに取り込みます (デフォルトはオフ。macOS、Windows、Linux Wayland)    | Settings → SnapShots                           | From T3 Code (帰属は未検証)                           |
+| リモートアクセス                                      | LAN ペアリング、Tailscale HTTPS、SSH 環境                                                           | Settings → Connections                         | From T3 Code                                          |
+| デバイスパネル                                        | iOS Simulator や Android Emulator をスレッドの隣で表示し、タップ操作もできます                      | 右パネル → Device                              | From T3 Code (ここでは未テスト)                       |
+| バックグラウンドサービス                              | macOS (launchd) と Linux (systemd ユーザーユニット) での `t3 service install`。Windows は非対応     | CLI                                            | From T3 Code (ここでは未テスト)                       |
+| キーバインド、プロジェクト設定、テーマ                | カスタマイズ可能なショートカット、プロジェクトごとの上書き、外観                                    | Settings                                       | From T3 Code                                          |
 
 ## 対応プロバイダー
 
 スレッドを始める前に、少なくとも1つのプロバイダー CLI をインストールしてサインインしてください。
 
-| プロバイダー | サインイン方法 | 備考 |
-|---|---|---|
-| Codex | Codex CLI をインストールし、`codex login` を実行します (または Settings → Providers の **Connect with ChatGPT**) | |
-| Claude Code | Claude Code をインストールし、`claude auth login` を実行します | Claude の brain は、同じアカウントの Claude の crew ロールをサブエージェントとして実行します。 |
-| Cursor | Cursor CLI をインストールし、`agent login` を実行します | |
-| Grok Build | Grok Build CLI をインストールし、`grok login` を実行します | |
-| OpenCode | OpenCode 1.14.19 以降をインストールし、`opencode auth login` を実行します | Z.AI / MiniMax プリセットに必要です。 |
-| Antigravity | Settings → Providers で有効にし、**Install**、続いて **Sign in with Google** | CLI は不要です。Gemini API キーは設定内に平文で保存されます。 |
-| ZCode (GLM) | ZCode をインストールし、`zcode login zai` を実行して、`npm i -g zcode-acp-server` を実行します | どの権限モードを選んでも、独自のツールを承認なしで実行します。 |
-| MiniMax Code | `npm i -g @minimax-ai/code` を実行し、`mcode login --region global` を実行します | |
-| OpenCode 経由の Z.AI / MiniMax | Settings → Providers → Add → Z.AI または MiniMax を選び、キーを `OOP_ZAI_API_KEY` / `OOP_MINIMAX_API_KEY` に設定します | 有料リクエストは未テストです。 |
+| プロバイダー                   | サインイン方法                                                                                                         | 備考                                                                                           |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Codex                          | Codex CLI をインストールし、`codex login` を実行します (または Settings → Providers の **Connect with ChatGPT**)       |                                                                                                |
+| Claude Code                    | Claude Code をインストールし、`claude auth login` を実行します                                                         | Claude の brain は、同じアカウントの Claude の crew ロールをサブエージェントとして実行します。 |
+| Cursor                         | Cursor CLI をインストールし、`agent login` を実行します                                                                |                                                                                                |
+| Grok Build                     | Grok Build CLI をインストールし、`grok login` を実行します                                                             |                                                                                                |
+| OpenCode                       | OpenCode 1.14.19 以降をインストールし、`opencode auth login` を実行します                                              | Z.AI / MiniMax プリセットに必要です。                                                          |
+| Antigravity                    | Settings → Providers で有効にし、**Install**、続いて **Sign in with Google**                                           | CLI は不要です。Gemini API キーは設定内に平文で保存されます。                                  |
+| ZCode (GLM)                    | ZCode をインストールし、`zcode login zai` を実行して、`npm i -g zcode-acp-server` を実行します                         | どの権限モードを選んでも、独自のツールを承認なしで実行します。                                 |
+| MiniMax Code                   | `npm i -g @minimax-ai/code` を実行し、`mcode login --region global` を実行します                                       |                                                                                                |
+| OpenCode 経由の Z.AI / MiniMax | Settings → Providers → Add → Z.AI または MiniMax を選び、キーを `OOP_ZAI_API_KEY` / `OOP_MINIMAX_API_KEY` に設定します | 有料リクエストは未テストです。                                                                 |
 
 ## 対応プラットフォーム
 
-| プラットフォーム | 状況 |
-|---|---|
-| macOS、Apple Silicon (arm64) | **テスト済み。** 主なターゲットです。 |
-| Windows x64 | **実験的。** メンテナーがビルドしたもので、クリーンなマシンでは検証していません。 |
-| macOS Intel | このフォークでは未テストです。macOS 用のビルドスクリプトは Intel 上での実行を拒否します。 |
-| Linux | このフォークでは未テストです。アップストリームのパッケージングコードはリポジトリにありますが、保証はありません。 |
-| iOS / Android ネイティブアプリ | このフォークでは未テストです。[ネイティブアプリかブラウザか](#ネイティブアプリかブラウザか)を参照してください。 |
+| プラットフォーム                       | 状況                                                                                                                       |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| macOS、Apple Silicon (arm64)           | **テスト済み。** 主なターゲットです。                                                                                      |
+| Windows x64                            | **実験的。** メンテナーがビルドしたもので、クリーンなマシンでは検証していません。                                          |
+| macOS Intel                            | このフォークでは未テストです。macOS 用のビルドスクリプトは Intel 上での実行を拒否します。                                  |
+| Linux                                  | このフォークでは未テストです。アップストリームのパッケージングコードはリポジトリにありますが、保証はありません。           |
+| iOS / Android ネイティブアプリ         | このフォークでは未テストです。[ネイティブアプリかブラウザか](#ネイティブアプリかブラウザか)を参照してください。            |
 | スマートフォンのブラウザ (Web UI 経由) | Web UI はスマートフォンサイズで確認済みです。[スマートフォンから接続する](#スマートフォンから接続する)を参照してください。 |
 
 ## 要件
+
+以下の要件はソースからビルドする場合のみ必要です。バイナリーインストーラーには Node.js、pnpm、git、コンパイラーは不要です。エージェントを使うには、プロバイダー CLI のインストールとログインが別途必要です。
 
 - **Node.js 24.x、24.13.1 以降**
 - **pnpm 11.10.0**
@@ -263,11 +269,33 @@ Z.AI (API または Coding Plan) と MiniMax (API または Token Plan) 用の�
 - **少なくとも1つのプロバイダー CLI**。インストールしてサインイン済みであること ([対応プロバイダー](#対応プロバイダー)を参照)
 - Windows でのパッケージングのみ: Rust、Python 3、Visual Studio Build Tools (Desktop development with C++、Windows SDK を含む)
 
+## デスクトップアプリをインストール
+
+**macOS (Apple Silicon)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+**Windows (PowerShell, x64)**
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex
+```
+
+**Linux (x64)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+インストール先、更新、セキュリティ、リリースの前提条件は、簡潔な[デスクトップインストールガイド](INSTALL.md)を参照してください。v0.0.105 およびそれ以前のソースのみのリリースにはバイナリーがありません。v0.0.106 以降で、対応するインストーラーと `.sha256` ファイルがリリースの **Assets** にあるものを使用してください。
+
 ## インストール / ソースからのビルド
 
 ```bash
 git clone https://github.com/AIBeginnerX/oh-our-pi-desktop.git
-cd oh-our-pi
+cd oh-our-pi-desktop
 ```
 
 ### macOS (Apple Silicon)
@@ -303,9 +331,9 @@ vp i          # install dependencies
 vp run dev    # server + web; open the pairing URL it prints
 ```
 
-### 初回起動チェックリスト
+### 初回起動チェックリスト (ソースビルド)
 
-ビルドは **ad hoc 署名で、公証 (notarize) されていません**。そのため、OS から一度だけ警告が表示されます。
+ソースビルドは **ad hoc 署名で、公証 (notarize) されていない**ため、OS から警告が表示される場合があります。バイナリーインストーラーはインストール前に SHA-256 を検証し、Gatekeeper の隔離属性や Windows SmartScreen を回避しません。
 
 - **macOS (Gatekeeper):** アプリを右クリックして **Open** を選ぶか、System Settings → Privacy & Security → **Open Anyway** に進みます。
 - **Windows (SmartScreen):** **More info** → **Run anyway** をクリックします。
@@ -332,11 +360,11 @@ graph LR
 
 次の順で、ご自身に合う最もシンプルな経路を選んでください。
 
-| | 経路 | 必要なもの | 外出先で使える | リスク |
-|---|---|---|---|---|
-| a | 同じ Wi-Fi / LAN | スマートフォンとコンピューターが同じネットワークにあること | いいえ | 最も低い |
-| b | Tailscale | 両方のデバイスで無料の Tailscale アカウント | はい | 低い |
-| c | 独自の Cloudflare リレー | Cloudflare アカウントと、一度きりのデプロイ | はい | 中程度 (Cloudflare に通信が見える) |
+|     | 経路                     | 必要なもの                                                 | 外出先で使える | リスク                             |
+| --- | ------------------------ | ---------------------------------------------------------- | -------------- | ---------------------------------- |
+| a   | 同じ Wi-Fi / LAN         | スマートフォンとコンピューターが同じネットワークにあること | いいえ         | 最も低い                           |
+| b   | Tailscale                | 両方のデバイスで無料の Tailscale アカウント                | はい           | 低い                               |
+| c   | 独自の Cloudflare リレー | Cloudflare アカウントと、一度きりのデプロイ                | はい           | 中程度 (Cloudflare に通信が見える) |
 
 > [!WARNING]
 > **ペアリングリンクとコードはパスワードと同じです。** Issue、チャット、スクリーンショットに絶対に投稿しないでください。ペアリングするのは自分のデバイスだけにしてください。サーバーのポートをインターネットに公開しないでください。外出先で使う場合は Tailscale をおすすめします。見覚えのないデバイスは取り消してください。リモートでエージェントを操作するときは **Supervised** 権限モードを使ってください。
@@ -394,15 +422,15 @@ OoP には小さな Cloudflare Worker が [`infra/oop-relay`](infra/oop-relay/RE
 
 ### ネイティブアプリかブラウザか
 
-| | スマートフォンのブラウザ | ネイティブの iOS / Android アプリ |
-|---|---|---|
-| 概要 | お使いのコンピューターが配信する OoP の Web UI | アップストリームのプロジェクトが公開している T3 Code のモバイルアプリ (OoP ブランドではありません) |
-| インストール | 不要 | T3 Code の App Store / Google Play のページ |
-| 接続 | ペアリングリンクを開くか、QR コードをスキャンします | 環境を追加します: QR コードをスキャンするか、ペアリング URL を貼り付けます |
-| このフォークでのテスト | Web UI はスマートフォンサイズで確認済み。実機のスマートフォンからのペアリングは個別には未検証 | **未テスト** |
+|                        | スマートフォンのブラウザ                                                                      | ネイティブの iOS / Android アプリ                                                                  |
+| ---------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| 概要                   | お使いのコンピューターが配信する OoP の Web UI                                                | アップストリームのプロジェクトが公開している T3 Code のモバイルアプリ (OoP ブランドではありません) |
+| インストール           | 不要                                                                                          | T3 Code の App Store / Google Play のページ                                                        |
+| 接続                   | ペアリングリンクを開くか、QR コードをスキャンします                                           | 環境を追加します: QR コードをスキャンするか、ペアリング URL を貼り付けます                         |
+| このフォークでのテスト | Web UI はスマートフォンサイズで確認済み。実機のスマートフォンからのペアリングは個別には未検証 | **未テスト**                                                                                       |
 
 ![Phone-size web client connected through a pairing link](docs/screenshots/mobile.png)
-*OoP に接続したスマートフォンのブラウザ。*
+_OoP に接続したスマートフォンのブラウザ。_
 
 このフォークはプロトコルと認証の識別子を維持しているため ([`UPSTREAM.json`](UPSTREAM.json) の `internal_protocol_and_auth_identifiers_preserved`)、アップストリームのアプリは OoP サーバーとペアリングできるはずです。**ただし、フォークではネイティブのモバイルアプリをテストしていない**ため、未確認として扱ってください。アップストリームのドキュメントでは、アプリの接続設定は Settings → Environments に記載されています。不具合があればブラウザを使ってください。
 
@@ -419,7 +447,7 @@ OoP には小さな Cloudflare Worker が [`infra/oop-relay`](infra/oop-relay/RE
 
 ## アップデートの仕組み
 
-公開の自動アップデートサーバーはなく、OoP が GitHub から自分自身を更新することもありません。
+ソースビルドは GitHub から自動更新されないため、以下の手順で再ビルドしてください。バイナリーインストール版を更新するには、OoP を終了して該当するインストーラーコマンドを再実行してください。ユーザーデータは保持されます。
 
 1. `git pull`
 2. 再度ビルド / パッケージングして ([インストール](#インストール--ソースからのビルド)を参照)、再インストールします。
@@ -447,9 +475,9 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **コスト:** どのプロバイダーも、あなた自身のサブスクリプションまたは API クレジットを使います。Crew は1つのチャットで複数のモデルを動かすため、使用量が増えます。Usage ページが表示するのは推定値で、請求額ではありません。
 - **API キー**は、サーバー側、つまりあなたのマシンに保存されます。Antigravity の Gemini API キーは設定内に**平文で**保存されます。
 - **`.env` ファイルやキーは絶対にコミットしないでください**。Issue やログにも貼り付けないでください。
-- **アップストリームのインストーラーがインストールするのは OoP ではなく T3 Code です:** `t3.codes` のインストールスクリプト、`npx t3`、Homebrew の `t3-code`、winget の `T3Tools.T3Code`、App Store / Play のページは、すべてアップストリームのプロジェクトのものです。OoP はこのリポジトリからビルドしてください。
+- **アップストリームのインストーラーがインストールするのは OoP ではなく T3 Code です:** `t3.codes` のインストールスクリプト、`npx t3`、Homebrew の `t3-code`、winget の `T3Tools.T3Code`、App Store / Play のページは、すべてアップストリームのプロジェクトのものです。上記の OoP デスクトップインストーラーを使うか、このリポジトリからビルドしてください。
 - **CLI の名前は今も `t3` のまま**で、アップストリームのインストールと衝突することがあります。
-- **ビルドは ad hoc 署名**で、Developer ID も公証もありません。Gatekeeper や SmartScreen の警告が一度表示されます。
+- **ソースビルドは ad hoc 署名**で、Developer ID も公証もありません。バイナリーインストーラーは SHA-256 を検証し、Gatekeeper の隔離属性や SmartScreen を回避しません。
 - **ローカルフォルダーのアップデーター**は、アップデート用フォルダーに書き込める人を信頼します。SHA-256 のチェックで検出できるのは破損だけです。
 
 **テレメトリー。** OoP にはサーバーがなく、メンテナーがあなたのアプリから何かを受け取ることはありません。アップストリームから引き継いだサーバーコードには、匿名の PostHog 利用状況レポーターが含まれています (アップストリームのプロジェクトのキーと `us.i.posthog.com` を使用)。OoP ではこれを**デフォルトで無効**にしているため、オプトインしない限り何も送信されません。有効にするには、サーバーを起動する前にサーバーの環境で `T3CODE_TELEMETRY_ENABLED=true` を設定してください ([`docs/user/telemetry.md`](docs/user/telemetry.md) を参照)。有効にすると、イベントにはプロバイダー、モデル、推論の強度、権限モード、ターンの結果、所要時間、メインエージェントのトークン合計が含まれ、ハッシュ化されたアカウントまたはインストールの識別子に紐づきます。ドキュメントによれば、プロンプト、応答、ファイルの内容、認証トークン、会話 ID は決して含まれません。
@@ -458,16 +486,17 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 
 ## FAQ / トラブルシューティング
 
-**macOS で、アプリを開けない、または未確認の開発元のものだと表示されます。**
-ビルドは ad hoc 署名で、公証されていません。アプリを右クリックして **Open** を選ぶか、System Settings → Privacy & Security → **Open Anyway** を使ってください。
+**macOS で、ソースビルドのアプリを開けない、または未確認の開発元のものだと表示されます。**
+ソースビルドは ad hoc 署名で、公証されていません。アプリを右クリックして **Open** を選ぶか、System Settings → Privacy & Security → **Open Anyway** を使ってください。バイナリーインストーラーは隔離属性を回避しません。
 
-**Windows で、インストーラーに SmartScreen の警告が表示されます。**
-インストーラーは署名されていません。**More info** → **Run anyway** をクリックしてください。
+**Windows で、ソースビルドのインストーラーに SmartScreen の警告が表示されます。**
+ソースビルドのインストーラーは署名されていません。バイナリーインストーラーは SmartScreen を回避しません。
 
 **プロバイダーが「not signed in」と表示されます。**
 そのプロバイダー自身のコマンドでサインインし ([対応プロバイダー](#対応プロバイダー)を参照)、Settings → Providers を開き直してください。CLI は、サーバーを実行しているマシンの `PATH` 上にある必要があります。ソース管理のアカウントには、Settings → Source Control に **Rescan** ボタンがあります。
 
 **スマートフォンからサーバーに接続できません。**
+
 - ネットワークアクセスがオンになっているか確認してください (Connect mobile → **Allow mobile connections**、または Settings → Connections → **Network access**)。
 - ペアリングリンクが `127.0.0.1` / localhost のアドレスになっていないことを確認してください。
 - スマートフォンとコンピューターは、同じネットワーク (LAN) または同じ tailnet 上にある必要があります。ゲスト用 Wi-Fi は、デバイス間の通信をブロックすることがよくあります。
@@ -478,13 +507,16 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 Node.js 24.x の 24.13.1 以降と、pnpm 11.10.0 が必要です。それ以外の Node のメジャーバージョンは受け付けられません。
 
 **データはどこにありますか?**
-OoP のサーバーの状態 (スレッド、設定、ローカルデータベース) は `~/.oop-desktop/userdata` にあります。プロバイダーのログインは、ここではなく各プロバイダー CLI 自身のフォルダーにあります。
+OoP のサーバーの状態 (スレッド、設定、ローカルデータベース) は `~/.oop-desktop/userdata` にあります。デスクトップバイナリーはこのデータとは別にインストールされます。プロバイダーのログインは、ここではなく各プロバイダー CLI 自身のフォルダーにあります。
+
+**バイナリーインストール版を更新するには?**
+OoP を終了し、該当するインストーラーコマンドを再実行してください。ユーザーデータは保持されます。
 
 **OoP をリセットするには?**
 アプリを終了し、`~/.oop-desktop/userdata` を別の場所に移動してください (確信が持てるまで削除しないでください)。次回は OoP が新しい状態で起動します。プロジェクトのフォルダーには影響しません。
 
 **アンインストールするには?**
-アプリを終了し、`/Applications/OoP.app` (macOS) を削除するか、Windows の設定から OoP をアンインストールします。データも削除したい場合は、`~/.oop-desktop` を削除してください。プロバイダー CLI は別にインストールされたものなので、削除されません。
+アプリを終了し、`~/Applications/OoP.app` (macOS。`OOP_INSTALL_DIR` で指定した場合はその場所) を削除するか、Windows の設定から OoP をアンインストールします。Linux では `~/.local/bin/oop-desktop`、`~/.local/share/oop-desktop`、デスクトップメニュー項目を削除してください。データも削除したい場合は、`~/.oop-desktop` を削除してください。プロバイダー CLI は別にインストールされたものなので、削除されません。
 
 **お金はかかりますか?**
 OoP 自体は無料です。OoP が動かすプロバイダーには、あなた自身のサブスクリプションまたは API クレジットが使われます。Crew は1つのチャットで複数のモデルを使い、Usage ページには (請求額ではなく) 推定コストが表示されます。
@@ -494,16 +526,16 @@ OoP 自体は無料です。OoP が動かすプロバイダーには、あなた
 
 ## リポジトリマップ
 
-| パス | 内容 |
-|---|---|
-| `apps/server` | Node の WebSocket サーバー: オーケストレーション、プロバイダー、チェックポイント、`t3` CLI |
-| `apps/web` | React / Vite の UI |
-| `apps/desktop` | Web UI をラップし、サーバーを同梱する Electron シェル |
-| `apps/mobile` | React Native クライアント (アップストリームのアプリコード) |
-| `packages/contracts` | ネットワークを越えるすべてのものの型付きスキーマ |
-| `packages/shared`、`packages/client-runtime` | 共有のランタイムユーティリティと、Web とモバイルで共有するクライアントコード |
-| `infra/oop-relay` | 任意で使える Cloudflare リレー Worker |
-| `docs/` | `user/` ガイド、`internals/` アーキテクチャノート、`operations/` セットアップとリリースのノート |
+| パス                                         | 内容                                                                                            |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `apps/server`                                | Node の WebSocket サーバー: オーケストレーション、プロバイダー、チェックポイント、`t3` CLI      |
+| `apps/web`                                   | React / Vite の UI                                                                              |
+| `apps/desktop`                               | Web UI をラップし、サーバーを同梱する Electron シェル                                           |
+| `apps/mobile`                                | React Native クライアント (アップストリームのアプリコード)                                      |
+| `packages/contracts`                         | ネットワークを越えるすべてのものの型付きスキーマ                                                |
+| `packages/shared`、`packages/client-runtime` | 共有のランタイムユーティリティと、Web とモバイルで共有するクライアントコード                    |
+| `infra/oop-relay`                            | 任意で使える Cloudflare リレー Worker                                                           |
+| `docs/`                                      | `user/` ガイド、`internals/` アーキテクチャノート、`operations/` セットアップとリリースのノート |
 
 コードベースの構成と従っている規約については、[`AGENTS.md`](AGENTS.md) を参照してください。
 

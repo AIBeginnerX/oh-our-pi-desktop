@@ -21,6 +21,7 @@ OoP is a fork of [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc.
 - [Supported providers](#supported-providers)
 - [Platform support](#platform-support)
 - [Requirements](#requirements)
+- [Install the desktop app](#install-the-desktop-app)
 - [Install / build from source](#install--build-from-source)
 - [Connect from your phone](#connect-from-your-phone)
 - [How updates work](#how-updates-work)
@@ -39,12 +40,14 @@ Coding agents are good, but each one lives in its own terminal or app, with its 
 - **Work away from the keyboard.** Pair your phone to the computer that runs the agents and keep an eye on (or steer) long tasks.
 - **Keep it local.** Projects, provider logins and agent work stay on your machine. There is no OoP account and no OoP server.
 
-Who it is for: developers who already pay for one or more coding-agent subscriptions or API plans, are comfortable building an app from source, and want a single control surface. If you want a polished, signed, auto-updating product, the upstream T3 Code is the better fit today.
+Who it is for: developers who already pay for one or more coding-agent subscriptions or API plans,
+accept an early unsigned desktop app, and want one control surface. If you want a polished, signed,
+auto-updating product, the upstream T3 Code is the better fit today.
 
 ### 30-second tour
 
 ![OoP main chat view with composer, model picker and permission mode](docs/screenshots/chat.png)
-*Main chat view: pick a provider and model, set the permission mode, and follow the thread.*
+_Main chat view: pick a provider and model, set the permission mode, and follow the thread._
 
 1. Open OoP and sign in to one provider (Settings → Providers).
 2. Add a project folder and start a thread.
@@ -62,7 +65,7 @@ The main workspace. Each project has threads; each thread is a conversation with
 **Open it:** add a project, then start a thread from the sidebar.
 
 ![Main chat with composer, model picker and permission mode](docs/screenshots/chat.png)
-*Chat: composer with model picker and permission mode below the thread timeline.*
+_Chat: composer with model picker and permission mode below the thread timeline._
 
 ### OOP Crew
 
@@ -71,7 +74,7 @@ One chat, several models. The chat's own model is the **brain**; it plans and ta
 **When to use it:** larger tasks where you want cheap models for the bulk and a strong model for review. **Open it:** **Crew** next to the model picker in the composer. Crew work shows live under **Workflows** and **Agents** in the right panel.
 
 ![OOP Crew board showing a brain model delegating to workers and an auditor](docs/screenshots/crew.png)
-*OOP Crew: one chat, several models, with a live board of who is doing what.*
+_OOP Crew: one chat, several models, with a live board of who is doing what._
 
 > [!NOTE]
 > Crew runs several models per chat, so it multiplies provider usage. Start with the **Budget** preset if you are watching costs.
@@ -83,7 +86,7 @@ Install, update and sign in to each provider in one place. The card shows whethe
 **Open it:** Settings → Providers.
 
 ![Settings, Providers page with install, update and sign-in status per provider](docs/screenshots/providers.png)
-*Settings → Providers: install, update and sign in to each provider.*
+_Settings → Providers: install, update and sign in to each provider._
 
 ### Add Z.AI or MiniMax (OpenCode presets)
 
@@ -92,7 +95,7 @@ Presets for Z.AI (API or Coding Plan) and MiniMax (API or Token Plan) that run t
 **Open it:** Settings → Providers → Add. Needs OpenCode 1.14.19 or newer.
 
 ![Add provider dialog with Z.AI and MiniMax presets](docs/screenshots/add-provider.png)
-*Add provider: Z.AI and MiniMax presets that run through OpenCode.*
+_Add provider: Z.AI and MiniMax presets that run through OpenCode._
 
 > [!NOTE]
 > Paid Z.AI / MiniMax sign-in and chat requests have not been tested by this fork.
@@ -104,7 +107,7 @@ See exactly what the agent changed in a thread, review it, and restore from the 
 **Open it:** the **Diff** tab in the right panel (server threads in a git repository).
 
 ![Diff panel showing changes made by an agent in a thread](docs/screenshots/diff.png)
-*Diff panel: review what the agent changed, and restore from checkpoints.*
+_Diff panel: review what the agent changed, and restore from checkpoints._
 
 ### Commit and source control
 
@@ -113,23 +116,23 @@ Connect GitHub, GitLab, Forgejo/Gitea, Bitbucket or Azure DevOps through their o
 **Open it:** Settings → Source Control to detect your CLIs (press **Rescan** after signing in), then the commit controls on the thread.
 
 ![Commit and source control actions for a thread](docs/screenshots/commit.png)
-*Source control: commit changes and publish them from the thread.*
+_Source control: commit changes and publish them from the thread._
 
 ### Permission modes
 
 Choose when the agent must ask before it acts. The mode applies per thread.
 
-| Mode | Behavior |
-|---|---|
-| **Supervised** | Asks for approval for commands and file changes. |
-| **Auto-accept edits** | Approves file edits automatically; other actions can still ask. |
-| **Auto** | Uses the provider's automatic review for routine actions and asks about the rest (Codex, Claude, Cursor; other providers fall back to asking). |
-| **Full access** | Commands and edits run without approval prompts. This is the **default** for new threads. |
+| Mode                  | Behavior                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervised**        | Asks for approval for commands and file changes.                                                                                               |
+| **Auto-accept edits** | Approves file edits automatically; other actions can still ask.                                                                                |
+| **Auto**              | Uses the provider's automatic review for routine actions and asks about the rest (Codex, Claude, Cursor; other providers fall back to asking). |
+| **Full access**       | Commands and edits run without approval prompts. This is the **default** for new threads.                                                      |
 
 **Open it:** the mode selector in the composer. Change the default in Settings → General → New threads → Permissions.
 
 ![Permission mode selector in the composer](docs/screenshots/permissions.png)
-*Permission modes: from Supervised to Full access.*
+_Permission modes: from Supervised to Full access._
 
 ### Thread goals
 
@@ -138,7 +141,7 @@ Describe what should be true when the chat is done. While the goal is open, OoP 
 **Open it:** **Goal** next to **Crew** in the composer. Use **Stop goal** to end it.
 
 ![Goal control in the composer showing continuations used](docs/screenshots/goal.png)
-*Thread goal: the chat keeps going until the goal is done, blocked or stopped.*
+_Thread goal: the chat keeps going until the goal is done, blocked or stopped._
 
 ### Reports in chat
 
@@ -147,7 +150,7 @@ When an answer carries numbers or a process, the agent can draw it as charts, ke
 **Try it:** ask the agent for a chart or a diagram.
 
 ![Chart and stat cards drawn inside a chat reply](docs/screenshots/reports.png)
-*Reports: charts and key figures rendered in the conversation.*
+_Reports: charts and key figures rendered in the conversation._
 
 ### Workflows and agents panel
 
@@ -156,7 +159,7 @@ A live diagram of what the agent is doing: each tool call, subagent or provider 
 **Open it:** the right panel (Workflows and Agents tabs), the command palette, or `mod+alt+w`.
 
 ![Workflows panel drawing a thread's tool calls as a live diagram](docs/screenshots/workflows.png)
-*Workflows panel: follow the agent's work as it happens.*
+_Workflows panel: follow the agent's work as it happens._
 
 ### Usage
 
@@ -165,26 +168,26 @@ Token use, cache savings, model breakdowns and **estimated** API-equivalent cost
 **Open it:** **Usage** in the sidebar or command palette, or `mod+u` (when the terminal is not focused).
 
 ![Usage page with token and estimated cost history per provider](docs/screenshots/usage.png)
-*Usage: token and estimated cost history per provider.*
+_Usage: token and estimated cost history per provider._
 
 ### Built-in terminal
 
 A terminal per thread on the machine that runs the server, with up to 5,000 lines (8 MiB) of scrollback kept on the server, so it survives reconnects.
 
 ![Built-in terminal next to a chat thread](docs/screenshots/terminal.png)
-*Built-in terminal alongside the chat.*
+_Built-in terminal alongside the chat._
 
 ### Dark theme
 
 ![OoP in the dark theme](docs/screenshots/dark.png)
-*Dark theme.*
+_Dark theme._
 
 ### Phone-size web client
 
 The same web UI works in a phone browser once you pair it (see [Connect from your phone](#connect-from-your-phone)).
 
 ![OoP web client at phone size](docs/screenshots/mobile.png)
-*The web client at phone size.*
+_The web client at phone size._
 
 ### Remote access settings
 
@@ -193,68 +196,70 @@ Where you turn on network access, create pairing links, see authorized clients a
 **Open it:** Settings → Connections.
 
 ![Settings, Connections page with network access and pairing links (codes masked)](docs/screenshots/connections.png)
-*Settings → Connections: remote access and pairing (codes masked).*
+_Settings → Connections: remote access and pairing (codes masked)._
 
 ## Feature reference
 
 "Added in OoP" means the fork's docs and code mark it as OoP-specific. "From T3 Code" means it is part of upstream (v0.0.44) as far as the docs and code show; the fork has not done a file-level diff, so treat the split as approximate.
 
-| Feature | What it does | Where | Origin |
-|---|---|---|---|
-| OOP Crew | Brain model delegates to worker, expert and auditor models; presets and per-role overrides | Composer → Crew; right panel → Workflows / Agents | Added in OoP |
-| Thread goals | Keeps a thread going until checks pass or the goal is blocked | Composer → Goal | Added in OoP |
-| Project memories | Suggests saved project memories from the composer | Composer, memory button | Added in OoP |
-| Local role preferences | Save a preferred model for implementation or review per environment, with recommendations | Composer model picker | Added in OoP |
-| Z.AI / MiniMax presets | OpenCode-based provider presets | Settings → Providers → Add | Added in OoP (paid requests untested) |
-| ZCode (GLM) provider | Z.AI's agent over ACP | Settings → Providers | Added in OoP |
-| MiniMax Code provider | MiniMax's agent over ACP | Settings → Providers | Added in OoP |
-| One-click provider install / update | Install or update provider CLIs from the provider card | Settings → Providers | Added in OoP (exact delta from upstream unverified) |
-| Verify macOS build | Checks an OoP `.dmg` for integrity, strict code signature and startup on the server Mac | Chat header → Verify macOS build | Added in OoP |
-| Phone connect dialog | One-click phone pairing QR for the desktop app, optional own relay | Sidebar → Connect mobile | Added in OoP (desktop app only) |
-| Own Cloudflare relay | A Worker you deploy yourself so a phone can reach your desktop from any network | `infra/oop-relay` | Added in OoP, early |
-| Local-folder updater | Packaged OoP builds can pick up newer packages from a folder you point them at | Packaged macOS / Windows builds | Added in OoP, early, untested by others |
-| Multi-provider sessions | Threads, turns, checkpoints across providers | Everywhere | From T3 Code |
-| Permission modes | Supervised, Auto-accept edits, Auto, Full access | Composer; Settings → General | From T3 Code |
-| Diff panel and checkpoints | Review and restore agent changes | Right panel → Diff | From T3 Code |
-| Source control | Clone, commit, publish, pull requests via provider CLIs | Settings → Source Control | From T3 Code |
-| Built-in terminal | Terminal per thread on the server machine | Inside a thread | From T3 Code |
-| Reports in chat | Charts, stat cards, progress bars, mermaid flows | In replies | From T3 Code |
-| Workflow view | Live diagram of tool calls and subagents | Right panel, `mod+alt+w` | From T3 Code |
-| Usage page | Token and estimated cost history | Sidebar, `mod+u` | From T3 Code (ZCode and MiniMax rows are OoP) |
-| SnapShots | Capture a window into your draft (off by default; macOS, Windows, Linux Wayland) | Settings → SnapShots | From T3 Code (attribution unverified) |
-| Remote access | LAN pairing, Tailscale HTTPS, SSH environments | Settings → Connections | From T3 Code |
-| Device panel | Watch and tap an iOS Simulator or Android Emulator next to a thread | Right panel → Device | From T3 Code (untested here) |
-| Background service | `t3 service install` on macOS (launchd) and Linux (systemd user unit); not Windows | CLI | From T3 Code (untested here) |
-| Keybindings, project settings, themes | Customizable shortcuts, per-project overrides, appearance | Settings | From T3 Code |
+| Feature                               | What it does                                                                               | Where                                             | Origin                                              |
+| ------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------- | --------------------------------------------------- |
+| OOP Crew                              | Brain model delegates to worker, expert and auditor models; presets and per-role overrides | Composer → Crew; right panel → Workflows / Agents | Added in OoP                                        |
+| Thread goals                          | Keeps a thread going until checks pass or the goal is blocked                              | Composer → Goal                                   | Added in OoP                                        |
+| Project memories                      | Suggests saved project memories from the composer                                          | Composer, memory button                           | Added in OoP                                        |
+| Local role preferences                | Save a preferred model for implementation or review per environment, with recommendations  | Composer model picker                             | Added in OoP                                        |
+| Z.AI / MiniMax presets                | OpenCode-based provider presets                                                            | Settings → Providers → Add                        | Added in OoP (paid requests untested)               |
+| ZCode (GLM) provider                  | Z.AI's agent over ACP                                                                      | Settings → Providers                              | Added in OoP                                        |
+| MiniMax Code provider                 | MiniMax's agent over ACP                                                                   | Settings → Providers                              | Added in OoP                                        |
+| One-click provider install / update   | Install or update provider CLIs from the provider card                                     | Settings → Providers                              | Added in OoP (exact delta from upstream unverified) |
+| Verify macOS build                    | Checks an OoP `.dmg` for integrity, strict code signature and startup on the server Mac    | Chat header → Verify macOS build                  | Added in OoP                                        |
+| Phone connect dialog                  | One-click phone pairing QR for the desktop app, optional own relay                         | Sidebar → Connect mobile                          | Added in OoP (desktop app only)                     |
+| Own Cloudflare relay                  | A Worker you deploy yourself so a phone can reach your desktop from any network            | `infra/oop-relay`                                 | Added in OoP, early                                 |
+| Local-folder updater                  | Packaged OoP builds can pick up newer packages from a folder you point them at             | Packaged macOS / Windows builds                   | Added in OoP, early, untested by others             |
+| Multi-provider sessions               | Threads, turns, checkpoints across providers                                               | Everywhere                                        | From T3 Code                                        |
+| Permission modes                      | Supervised, Auto-accept edits, Auto, Full access                                           | Composer; Settings → General                      | From T3 Code                                        |
+| Diff panel and checkpoints            | Review and restore agent changes                                                           | Right panel → Diff                                | From T3 Code                                        |
+| Source control                        | Clone, commit, publish, pull requests via provider CLIs                                    | Settings → Source Control                         | From T3 Code                                        |
+| Built-in terminal                     | Terminal per thread on the server machine                                                  | Inside a thread                                   | From T3 Code                                        |
+| Reports in chat                       | Charts, stat cards, progress bars, mermaid flows                                           | In replies                                        | From T3 Code                                        |
+| Workflow view                         | Live diagram of tool calls and subagents                                                   | Right panel, `mod+alt+w`                          | From T3 Code                                        |
+| Usage page                            | Token and estimated cost history                                                           | Sidebar, `mod+u`                                  | From T3 Code (ZCode and MiniMax rows are OoP)       |
+| SnapShots                             | Capture a window into your draft (off by default; macOS, Windows, Linux Wayland)           | Settings → SnapShots                              | From T3 Code (attribution unverified)               |
+| Remote access                         | LAN pairing, Tailscale HTTPS, SSH environments                                             | Settings → Connections                            | From T3 Code                                        |
+| Device panel                          | Watch and tap an iOS Simulator or Android Emulator next to a thread                        | Right panel → Device                              | From T3 Code (untested here)                        |
+| Background service                    | `t3 service install` on macOS (launchd) and Linux (systemd user unit); not Windows         | CLI                                               | From T3 Code (untested here)                        |
+| Keybindings, project settings, themes | Customizable shortcuts, per-project overrides, appearance                                  | Settings                                          | From T3 Code                                        |
 
 ## Supported providers
 
 Install at least one provider CLI and sign in before starting a thread.
 
-| Provider | How to sign in | Notes |
-|---|---|---|
-| Codex | Install the Codex CLI, then `codex login` (or **Connect with ChatGPT** in Settings → Providers) | |
-| Claude Code | Install Claude Code, then `claude auth login` | A Claude brain runs same-account Claude crew roles as subagents. |
-| Cursor | Install the Cursor CLI, then `agent login` | |
-| Grok Build | Install the Grok Build CLI, then `grok login` | |
-| OpenCode | Install OpenCode 1.14.19 or newer, then `opencode auth login` | Required for the Z.AI / MiniMax presets. |
-| Antigravity | Settings → Providers: enable, **Install**, then **Sign in with Google** | No CLI needed. The Gemini API key is stored in plain text in settings. |
-| ZCode (GLM) | Install ZCode, `zcode login zai`, then `npm i -g zcode-acp-server` | Runs its own tools without approval whatever permission mode you pick. |
-| MiniMax Code | `npm i -g @minimax-ai/code`, then `mcode login --region global` | |
-| Z.AI / MiniMax via OpenCode | Settings → Providers → Add → Z.AI or MiniMax; put the key in `OOP_ZAI_API_KEY` / `OOP_MINIMAX_API_KEY` | Paid requests untested. |
+| Provider                    | How to sign in                                                                                         | Notes                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Codex                       | Install the Codex CLI, then `codex login` (or **Connect with ChatGPT** in Settings → Providers)        |                                                                        |
+| Claude Code                 | Install Claude Code, then `claude auth login`                                                          | A Claude brain runs same-account Claude crew roles as subagents.       |
+| Cursor                      | Install the Cursor CLI, then `agent login`                                                             |                                                                        |
+| Grok Build                  | Install the Grok Build CLI, then `grok login`                                                          |                                                                        |
+| OpenCode                    | Install OpenCode 1.14.19 or newer, then `opencode auth login`                                          | Required for the Z.AI / MiniMax presets.                               |
+| Antigravity                 | Settings → Providers: enable, **Install**, then **Sign in with Google**                                | No CLI needed. The Gemini API key is stored in plain text in settings. |
+| ZCode (GLM)                 | Install ZCode, `zcode login zai`, then `npm i -g zcode-acp-server`                                     | Runs its own tools without approval whatever permission mode you pick. |
+| MiniMax Code                | `npm i -g @minimax-ai/code`, then `mcode login --region global`                                        |                                                                        |
+| Z.AI / MiniMax via OpenCode | Settings → Providers → Add → Z.AI or MiniMax; put the key in `OOP_ZAI_API_KEY` / `OOP_MINIMAX_API_KEY` | Paid requests untested.                                                |
 
 ## Platform support
 
-| Platform | Status |
-|---|---|
-| macOS, Apple Silicon (arm64) | **Tested.** This is the main target. |
-| Windows x64 | **Experimental.** Built by the maintainer; not verified on clean machines. |
-| macOS Intel | Untested by this fork. The macOS build script refuses to run on Intel. |
-| Linux | Untested by this fork. Upstream packaging code is in the repo, with no promises. |
-| iOS / Android native app | Untested by this fork. See [native app vs browser](#native-app-or-browser). |
-| Phone browser (against the web UI) | Web UI checked at phone size; see [Connect from your phone](#connect-from-your-phone). |
+| Platform                           | Status                                                                                             |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| macOS, Apple Silicon (arm64)       | **Tested.** This is the main target.                                                               |
+| Windows x64                        | **Experimental.** Built by the maintainer; not verified on clean machines.                         |
+| macOS Intel                        | Untested by this fork. The macOS build script refuses to run on Intel.                             |
+| Linux                              | Binary installer Linux GUI not verified; upstream packaging code is in the repo, with no promises. |
+| iOS / Android native app           | Untested by this fork. See [native app vs browser](#native-app-or-browser).                        |
+| Phone browser (against the web UI) | Web UI checked at phone size; see [Connect from your phone](#connect-from-your-phone).             |
 
 ## Requirements
+
+These requirements apply only to building from source. The binary installer does not require Node.js, pnpm, git, or a compiler. A provider CLI and its login are separate requirements for using an agent.
 
 - **Node.js 24.x, 24.13.1 or newer**
 - **pnpm 11.10.0**
@@ -263,11 +268,33 @@ Install at least one provider CLI and sign in before starting a thread.
 - **At least one provider CLI**, installed and signed in (see [Supported providers](#supported-providers))
 - Windows packaging only: Rust, Python 3 and Visual Studio Build Tools (Desktop development with C++, with the Windows SDK)
 
+## Install the desktop app
+
+**macOS (Apple Silicon)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+**Windows (PowerShell, x64)**
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex
+```
+
+**Linux (x64)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+See the concise [desktop installation guide](INSTALL.md) for installation locations, updates, security, and release prerequisites. v0.0.105 and earlier source-only releases lack binaries; use v0.0.106 or a later release that lists the matching installer and `.sha256` file under **Assets**.
+
 ## Install / build from source
 
 ```bash
 git clone https://github.com/AIBeginnerX/oh-our-pi-desktop.git
-cd oh-our-pi
+cd oh-our-pi-desktop
 ```
 
 ### macOS (Apple Silicon)
@@ -281,7 +308,7 @@ node scripts/macos.mjs start     # optional: run an isolated dev copy of the des
 node scripts/macos.mjs package   # builds an ad hoc signed DMG into release/macos/
 ```
 
-Open the DMG from `release/macos/` and drag the app to `/Applications/OoP.app`.
+Open the DMG from `release/macos/` and drag the app to `/Applications/OoP.app` (source build).
 
 ### Windows (x64, experimental)
 
@@ -303,9 +330,9 @@ vp i          # install dependencies
 vp run dev    # server + web; open the pairing URL it prints
 ```
 
-### First run checklist
+### First run checklist (source builds)
 
-Builds are **ad hoc signed and not notarized**, so your OS will warn you once.
+Source builds are **ad hoc signed and not notarized**, so your OS may warn you. The binary installer verifies SHA-256 before installation and does not bypass Gatekeeper quarantine or Windows SmartScreen.
 
 - **macOS (Gatekeeper):** right-click the app, choose **Open**, or go to System Settings → Privacy & Security → **Open Anyway**.
 - **Windows (SmartScreen):** click **More info** → **Run anyway**.
@@ -332,11 +359,11 @@ graph LR
 
 Pick the simplest route that works for you, in this order.
 
-| | Route | Needs | Works away from home | Risk |
-|---|---|---|---|---|
-| a | Same Wi-Fi / LAN | Phone and computer on one network | No | Lowest |
-| b | Tailscale | Free Tailscale account on both devices | Yes | Low |
-| c | Your own Cloudflare relay | A Cloudflare account and a one-time deploy | Yes | Medium (Cloudflare sees the traffic) |
+|     | Route                     | Needs                                      | Works away from home | Risk                                 |
+| --- | ------------------------- | ------------------------------------------ | -------------------- | ------------------------------------ |
+| a   | Same Wi-Fi / LAN          | Phone and computer on one network          | No                   | Lowest                               |
+| b   | Tailscale                 | Free Tailscale account on both devices     | Yes                  | Low                                  |
+| c   | Your own Cloudflare relay | A Cloudflare account and a one-time deploy | Yes                  | Medium (Cloudflare sees the traffic) |
 
 > [!WARNING]
 > **Pairing links and codes are passwords.** Never post them in issues, chats or screenshots. Pair only devices you own. Never expose the server port to the open internet. Prefer Tailscale for use away from home. Revoke devices you do not recognize. Use **Supervised** permission mode when controlling agents remotely.
@@ -394,15 +421,15 @@ OoP includes a small Cloudflare Worker in [`infra/oop-relay`](infra/oop-relay/RE
 
 ### Native app or browser?
 
-| | Phone browser | Native iOS / Android app |
-|---|---|---|
-| What it is | The OoP web UI served by your computer | The T3 Code mobile app, published by the upstream project (not OoP-branded) |
-| Install | Nothing | App Store / Google Play listing of T3 Code |
-| Connect | Open the pairing link or scan the QR code | Add an environment: scan the QR code or paste the pairing URL |
-| Tested by this fork | Web UI checked at phone size; pairing from a real phone not separately verified | **No** |
+|                     | Phone browser                                                                   | Native iOS / Android app                                                    |
+| ------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| What it is          | The OoP web UI served by your computer                                          | The T3 Code mobile app, published by the upstream project (not OoP-branded) |
+| Install             | Nothing                                                                         | App Store / Google Play listing of T3 Code                                  |
+| Connect             | Open the pairing link or scan the QR code                                       | Add an environment: scan the QR code or paste the pairing URL               |
+| Tested by this fork | Web UI checked at phone size; pairing from a real phone not separately verified | **No**                                                                      |
 
 ![Phone-size web client connected through a pairing link](docs/screenshots/mobile.png)
-*A phone browser connected to OoP.*
+_A phone browser connected to OoP._
 
 The fork preserves the protocol and authentication identifiers (`internal_protocol_and_auth_identifiers_preserved` in [`UPSTREAM.json`](UPSTREAM.json)), so the upstream app should be able to pair with an OoP server. **The fork has not tested the native mobile app**, so treat that as unconfirmed. The upstream docs describe the app's connection settings under Settings → Environments. Use the browser if anything misbehaves.
 
@@ -419,7 +446,7 @@ The upstream docs say phone push notifications (agent finished, failed, needs ap
 
 ## How updates work
 
-There is no public auto-update server, and OoP does not update itself from GitHub.
+Source builds do not update themselves from GitHub; rebuild them as described below. For an installed binary, quit OoP and rerun the matching installer command to update. Your user data is preserved.
 
 1. `git pull`
 2. Rebuild / package again (see [Install](#install--build-from-source)) and reinstall.
@@ -447,9 +474,9 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **Costs:** every provider uses your own subscription or API credit. Crew multiplies usage by running several models per chat. The Usage page shows estimates, not your bill.
 - **API keys** are stored on the server side, on your machine. The Antigravity Gemini API key is stored **in plain text** in settings.
 - **Never commit `.env` files or keys**, and do not paste them into issues or logs.
-- **Upstream installers install T3 Code, not OoP:** the `t3.codes` install scripts, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, and the App Store / Play listings all belong to the upstream project. Build OoP from this repo.
+- **Upstream installers install T3 Code, not OoP:** the `t3.codes` install scripts, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, and the App Store / Play listings all belong to the upstream project. Use the OoP desktop installer above or build OoP from this repo.
 - **The CLI is still named `t3`**, which can clash with an upstream install.
-- **Builds are ad hoc signed**, with no Developer ID and no notarization. Expect a one-time Gatekeeper or SmartScreen warning.
+- **Source builds are ad hoc signed**, with no Developer ID and no notarization. The binary installer verifies SHA-256 and does not bypass Gatekeeper quarantine or SmartScreen.
 - **The local-folder updater** trusts whoever can write to the update folder; its SHA-256 check only detects corruption.
 
 **Telemetry.** OoP has no servers and the maintainers receive nothing from your app. The server code inherited from upstream contains an anonymous PostHog usage reporter (it uses the upstream project's key, `us.i.posthog.com`); OoP turns it **off by default**, so nothing is sent unless you opt in. To opt in, set `T3CODE_TELEMETRY_ENABLED=true` in the server's environment before it starts (see [`docs/user/telemetry.md`](docs/user/telemetry.md)). When enabled, events cover provider, model, reasoning effort, permission mode, turn result, duration and main-agent token totals, tied to a hashed account or installation identifier, and per the docs never include prompts, responses, file contents, authentication tokens or conversation IDs.
@@ -458,16 +485,17 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## FAQ / Troubleshooting
 
-**macOS says the app cannot be opened or is from an unidentified developer.**
-The build is ad hoc signed and not notarized. Right-click the app and choose **Open**, or System Settings → Privacy & Security → **Open Anyway**.
+**macOS says the source-built app cannot be opened or is from an unidentified developer.**
+Source builds are ad hoc signed and not notarized. Right-click the app and choose **Open**, or System Settings → Privacy & Security → **Open Anyway**. The binary installer does not bypass quarantine.
 
-**Windows shows a SmartScreen warning on the installer.**
-The installer is unsigned. Click **More info** → **Run anyway**.
+**Windows shows a SmartScreen warning on a source-built installer.**
+The source-built installer is unsigned. The binary installer does not bypass SmartScreen.
 
 **A provider shows "not signed in".**
 Sign in with the provider's own command (see [Supported providers](#supported-providers)), then reopen Settings → Providers. The CLI must be on the `PATH` of the machine that runs the server. Source control accounts have a **Rescan** button in Settings → Source Control.
 
 **My phone cannot reach the server.**
+
 - Check that network access is on (Connect mobile → **Allow mobile connections**, or Settings → Connections → **Network access**).
 - Make sure the pairing link is not a `127.0.0.1` / localhost address.
 - Phone and computer must be on the same network (LAN) or the same tailnet; guest Wi-Fi often blocks device-to-device traffic.
@@ -478,13 +506,16 @@ Sign in with the provider's own command (see [Supported providers](#supported-pr
 You need Node.js 24.x, 24.13.1 or newer, and pnpm 11.10.0. Other Node majors are rejected.
 
 **Where is my data?**
-OoP's server state (threads, settings, the local database) is in `~/.oop-desktop/userdata`. Provider logins live in each provider CLI's own folders, not here.
+OoP's server state (threads, settings, the local database) is in `~/.oop-desktop/userdata`. The desktop binary is installed separately from this data. Provider logins live in each provider CLI's own folders, not here.
+
+**How do I update a binary install?**
+Quit OoP, then rerun the matching install command. User data is preserved.
 
 **How do I reset OoP?**
 Quit the app, then move `~/.oop-desktop/userdata` aside (do not delete it until you are sure). OoP starts fresh next time. Your project folders are untouched.
 
 **How do I uninstall?**
-Quit the app and remove `/Applications/OoP.app` (macOS) or uninstall OoP from Windows Settings. Optionally remove `~/.oop-desktop` to delete its data. Provider CLIs are installed separately and are not removed.
+Quit the app and remove `~/Applications/OoP.app` (binary install; or the path set by `OOP_INSTALL_DIR`) or `/Applications/OoP.app` (source build), uninstall OoP from Windows Settings, or remove `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop`, and the Linux menu entry. Optionally remove `~/.oop-desktop` to delete its data. Provider CLIs are installed separately and are not removed.
 
 **Will this cost me money?**
 OoP itself is free. The providers it runs use your own subscription or API credit. Crew uses several models per chat, and the Usage page shows estimated (not billed) costs.
@@ -494,16 +525,16 @@ It should pair, but the fork has not tested it. See [Native app or browser](#nat
 
 ## Repo map
 
-| Path | What is there |
-|---|---|
-| `apps/server` | Node WebSocket server: orchestration, providers, checkpointing, `t3` CLI |
-| `apps/web` | React / Vite UI |
-| `apps/desktop` | Electron shell that wraps the web UI and bundles the server |
-| `apps/mobile` | React Native client (upstream app code) |
-| `packages/contracts` | Typed schemas for everything that crosses the wire |
-| `packages/shared`, `packages/client-runtime` | Shared runtime utilities and client code shared by web and mobile |
-| `infra/oop-relay` | The optional Cloudflare relay Worker |
-| `docs/` | `user/` guides, `internals/` architecture notes, `operations/` setup and release notes |
+| Path                                         | What is there                                                                          |
+| -------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `apps/server`                                | Node WebSocket server: orchestration, providers, checkpointing, `t3` CLI               |
+| `apps/web`                                   | React / Vite UI                                                                        |
+| `apps/desktop`                               | Electron shell that wraps the web UI and bundles the server                            |
+| `apps/mobile`                                | React Native client (upstream app code)                                                |
+| `packages/contracts`                         | Typed schemas for everything that crosses the wire                                     |
+| `packages/shared`, `packages/client-runtime` | Shared runtime utilities and client code shared by web and mobile                      |
+| `infra/oop-relay`                            | The optional Cloudflare relay Worker                                                   |
+| `docs/`                                      | `user/` guides, `internals/` architecture notes, `operations/` setup and release notes |
 
 See [`AGENTS.md`](AGENTS.md) for how the codebase is organized and the conventions it follows.
 
