@@ -1,8 +1,8 @@
 # OoP Desktop installation
 
 The commands below install the desktop app from a GitHub release. Release
-v0.0.105 and earlier source-only releases lack binaries. This installation
-route works with v0.0.106 and later releases that list the matching installer
+v0.0.106 and earlier source-only releases lack binaries. This installation
+route works with v0.0.107 and later releases that list the matching installer
 and `.sha256` file under **Assets**. A source-only release fails without
 changing an existing installation.
 

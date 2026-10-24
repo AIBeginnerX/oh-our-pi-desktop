@@ -160,6 +160,11 @@ overrides:
   "expo-sharing>@expo/config-plugins": 57.0.9
   "expo-sharing>@expo/config-types": 57.0.2
   node-abi: 4.33.0
+  # Security floors for transitive desktop/server dependencies.
+  proxy-addr: 2.0.8
+  seroval: 1.6.3
+  seroval-plugins: 1.6.3
+  shell-quote: 1.11.0
   lightningcss: "catalog:"
   tailwindcss: "catalog:"
   vite: "catalog:"

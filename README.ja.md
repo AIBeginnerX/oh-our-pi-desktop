@@ -289,7 +289,11 @@ irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts
 curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
 ```
 
-インストール先、更新、セキュリティ、リリースの前提条件は、簡潔な[デスクトップインストールガイド](INSTALL.md)を参照してください。v0.0.105 およびそれ以前のソースのみのリリースにはバイナリーがありません。v0.0.106 以降で、対応するインストーラーと `.sha256` ファイルがリリースの **Assets** にあるものを使用してください。
+インストール先、更新、セキュリティ、リリースの前提条件は、簡潔な
+[デスクトップインストールガイド](INSTALL.md)を参照してください。v0.0.106
+およびそれ以前のソースのみのリリースにはバイナリーがありません。v0.0.107
+以降で、対応するインストーラーと `.sha256` ファイルがリリースの **Assets**
+にあるものを使用してください。
 
 ## インストール / ソースからのビルド
 

@@ -289,7 +289,10 @@ irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts
 curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
 ```
 
-Consulta la [guía breve de instalación de escritorio](INSTALL.md) para ver las ubicaciones, las actualizaciones, la seguridad y los requisitos de publicación. La versión v0.0.105 y las publicaciones anteriores que solo contienen código fuente no incluyen binarios. Usa v0.0.106 o una versión posterior que muestre el instalador correspondiente y su archivo `.sha256` en **Assets**.
+Consulta la [guía breve de instalación de escritorio](INSTALL.md) para ver las ubicaciones, las
+actualizaciones, la seguridad y los requisitos de publicación. La versión v0.0.106 y las
+publicaciones anteriores que solo contienen código fuente no incluyen binarios. Usa v0.0.107 o una
+versión posterior que muestre el instalador correspondiente y su archivo `.sha256` en **Assets**.
 
 ## Instalación / compilación desde el código fuente
 

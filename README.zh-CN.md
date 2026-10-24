@@ -288,7 +288,9 @@ irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts
 curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
 ```
 
-安装位置、更新、安全和发布前提请参阅简明的[桌面安装指南](INSTALL.md)。v0.0.105 及更早的源码发布版本均不含二进制文件。请使用 v0.0.106 或更高版本，并确认相应安装程序及 `.sha256` 文件列在发布页的 **Assets** 中。
+安装位置、更新、安全和发布前提请参阅简明的[桌面安装指南](INSTALL.md)。v0.0.106
+及更早的源码发布版本均不含二进制文件。请使用 v0.0.107 或更高版本，并确认相应安装程序及
+`.sha256` 文件列在发布页的 **Assets** 中。
 
 ## 安装 / 从源码构建
 

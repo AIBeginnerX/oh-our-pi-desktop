@@ -289,7 +289,9 @@ irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts
 curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
 ```
 
-설치 위치, 업데이트, 보안, 릴리스 조건은 [데스크톱 설치 안내](INSTALL.md)를 참고하세요. v0.0.105 및 그 이전의 소스 전용 릴리스에는 바이너리가 없습니다. v0.0.106 이상에서 해당 설치 파일과 `.sha256` 파일이 **Assets**에 있는 릴리스를 사용하세요.
+설치 위치, 업데이트, 보안, 릴리스 조건은 [데스크톱 설치 안내](INSTALL.md)를 참고하세요.
+v0.0.106 및 그 이전의 소스 전용 릴리스에는 바이너리가 없습니다. v0.0.107 이상에서 해당
+설치 파일과 `.sha256` 파일이 **Assets**에 있는 릴리스를 사용하세요.
 
 ## 설치 / 소스에서 빌드
 
