@@ -39,6 +39,7 @@ describe("ZCode provider", () => {
     ).pipe(
       Effect.map((snapshot) => {
         expect(snapshot.installed).toBe(false);
+        expect(snapshot.diagnosis).toBe("runtime-missing");
         expect(snapshot.status).toBe("error");
         expect(snapshot.message).toContain("npm i -g zcode-acp-server");
       }),

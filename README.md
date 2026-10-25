@@ -1,4 +1,4 @@
-# OoP (oh-our-pi)
+# OOP (oh-our-pi)
 
 **One desktop app to control the coding agents you already use, with an optional multi-model team on top.**
 
@@ -9,13 +9,13 @@ English | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本�
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
 ![Status: early](https://img.shields.io/badge/status-early-orange)
 
-OoP runs on your own computer, wraps the coding-agent CLIs you already have (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) and gives them one chat-style workspace. You use it from a desktop app, a browser, or your phone. It is **not** a hosted service: you bring your own subscriptions and API keys, and your code stays on your machine.
+OOP runs on your own computer, wraps the coding-agent CLIs you already have (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) and gives them one chat-style workspace. You use it from a desktop app, a browser, or your phone. It is **not** a hosted service: you bring your own subscriptions and API keys, and your code stays on your machine.
 
-OoP is a fork of [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc. (MIT licensed), based on upstream v0.0.44. The current OoP version is in [`OOP_RELEASE.json`](OOP_RELEASE.json). Big thanks to the T3 Code team: almost all of the foundation here is their work.
+OOP is a fork of [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc. (MIT licensed), based on upstream v0.0.44. The current OOP version is in [`OOP_RELEASE.json`](OOP_RELEASE.json). Big thanks to the T3 Code team: almost all of the foundation here is their work.
 
 ## Contents
 
-- [Why OoP?](#why-oop)
+- [Why OOP?](#why-oop)
 - [Screenshot tour](#screenshot-tour)
 - [Feature reference](#feature-reference)
 - [Supported providers](#supported-providers)
@@ -30,26 +30,26 @@ OoP is a fork of [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc.
 - [Repo map](#repo-map)
 - [Status, contributing, license](#status-and-roadmap-honesty)
 
-## Why OoP?
+## Why OOP?
 
-Coding agents are good, but each one lives in its own terminal or app, with its own login, history and approval prompts. OoP puts them side by side.
+Coding agents are good, but each one lives in its own terminal or app, with its own login, history and approval prompts. OOP puts them side by side.
 
 - **One place for many agents.** Switch between Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode and MiniMax Code per thread, with the same diff, terminal and approval flow.
 - **Let several models share a task.** OOP Crew lets one "brain" model hand routine work to cheaper workers, hard work to an expert, and have an auditor review the result.
 - **Stay in control.** Four permission modes, a diff panel with checkpoints you can restore, and a usage page so costs do not surprise you.
 - **Work away from the keyboard.** Pair your phone to the computer that runs the agents and keep an eye on (or steer) long tasks.
-- **Keep it local.** Projects, provider logins and agent work stay on your machine. There is no OoP account and no OoP server.
+- **Keep it local.** Projects, provider logins and agent work stay on your machine. There is no OOP account and no OOP server.
 
 Who it is for: developers who already pay for one or more coding-agent subscriptions or API plans,
 accept an early unsigned desktop app, and want one control surface. If you want a polished, signed,
-auto-updating product, the upstream T3 Code is the better fit today.
+auto-updating product, the upstream project is the better fit today.
 
 ### 30-second tour
 
-![OoP main chat view with composer, model picker and permission mode](docs/screenshots/chat.png)
+![OOP main chat view with composer, model picker and permission mode](docs/screenshots/chat.png)
 _Main chat view: pick a provider and model, set the permission mode, and follow the thread._
 
-1. Open OoP and sign in to one provider (Settings → Providers).
+1. Open OOP and sign in to one provider (Settings → Providers).
 2. Add a project folder and start a thread.
 3. Pick a model and a permission mode in the composer, then send a message.
 4. Review the result in the diff panel; restore from a checkpoint if you do not like it.
@@ -69,7 +69,7 @@ _Chat: composer with model picker and permission mode below the thread timeline.
 
 ### OOP Crew
 
-One chat, several models. The chat's own model is the **brain**; it plans and talks to you. A **worker** takes routine work (searches, edits, tests), an **expert** takes hard implementation, and an **auditor** reviews turns that changed files. Presets are **OOP pick**, **Speed**, **Quality** and **Budget**, and you can override the model per role. If a crew model fails (for example, out of credit), OoP hands the task to another signed-in model of the same level. Small, test-passing changes of 20 lines or fewer are not audited.
+One chat, several models. The chat's own model is the **brain**; it plans and talks to you. A **worker** takes routine work (searches, edits, tests), an **expert** takes hard implementation, and an **auditor** reviews turns that changed files. Presets are **OOP pick**, **Speed**, **Quality** and **Budget**, and you can override the model per role. If a crew model fails (for example, out of credit), OOP hands the task to another signed-in model of the same level. Small, test-passing changes of 20 lines or fewer are not audited.
 
 **When to use it:** larger tasks where you want cheap models for the bulk and a strong model for review. **Open it:** **Crew** next to the model picker in the composer. Crew work shows live under **Workflows** and **Agents** in the right panel.
 
@@ -81,7 +81,7 @@ _OOP Crew: one chat, several models, with a live board of who is doing what._
 
 ### Providers
 
-Install, update and sign in to each provider in one place. The card shows whether the CLI is installed, whether it is signed in, and offers **Install** (when `npm` is on your `PATH`) or **Update now** when OoP knows which installer owns the CLI.
+Install, update and sign in to each provider in one place. The card shows whether the CLI is installed, whether it is signed in, and offers **Install** (when `npm` is on your `PATH`) or **Update now** when OOP knows which installer owns the CLI.
 
 **Open it:** Settings → Providers.
 
@@ -136,7 +136,7 @@ _Permission modes: from Supervised to Full access._
 
 ### Thread goals
 
-Describe what should be true when the chat is done. While the goal is open, OoP continues the thread after each finished turn until the agent reports `GOAL COMPLETE`, reports `GOAL BLOCKED: <reason>`, or the number of automatic continuations you chose runs out. With Crew, a turn that changed files only counts after its audit.
+Describe what should be true when the chat is done. While the goal is open, OOP continues the thread after each finished turn until the agent reports `GOAL COMPLETE`, reports `GOAL BLOCKED: <reason>`, or the number of automatic continuations you chose runs out. With Crew, a turn that changed files only counts after its audit.
 
 **Open it:** **Goal** next to **Crew** in the composer. Use **Stop goal** to end it.
 
@@ -179,14 +179,14 @@ _Built-in terminal alongside the chat._
 
 ### Dark theme
 
-![OoP in the dark theme](docs/screenshots/dark.png)
+![OOP in the dark theme](docs/screenshots/dark.png)
 _Dark theme._
 
 ### Phone-size web client
 
 The same web UI works in a phone browser once you pair it (see [Connect from your phone](#connect-from-your-phone)).
 
-![OoP web client at phone size](docs/screenshots/mobile.png)
+![OOP web client at phone size](docs/screenshots/mobile.png)
 _The web client at phone size._
 
 ### Remote access settings
@@ -200,35 +200,35 @@ _Settings → Connections: remote access and pairing (codes masked)._
 
 ## Feature reference
 
-"Added in OoP" means the fork's docs and code mark it as OoP-specific. "From T3 Code" means it is part of upstream (v0.0.44) as far as the docs and code show; the fork has not done a file-level diff, so treat the split as approximate.
+"Added in OOP" means the fork's docs and code mark it as OOP-specific. "Upstream" means it is part of upstream (v0.0.44) as far as the docs and code show; the fork has not done a file-level diff, so treat the split as approximate.
 
 | Feature                               | What it does                                                                               | Where                                             | Origin                                              |
 | ------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------- | --------------------------------------------------- |
-| OOP Crew                              | Brain model delegates to worker, expert and auditor models; presets and per-role overrides | Composer → Crew; right panel → Workflows / Agents | Added in OoP                                        |
-| Thread goals                          | Keeps a thread going until checks pass or the goal is blocked                              | Composer → Goal                                   | Added in OoP                                        |
-| Project memories                      | Suggests saved project memories from the composer                                          | Composer, memory button                           | Added in OoP                                        |
-| Local role preferences                | Save a preferred model for implementation or review per environment, with recommendations  | Composer model picker                             | Added in OoP                                        |
-| Z.AI / MiniMax presets                | OpenCode-based provider presets                                                            | Settings → Providers → Add                        | Added in OoP (paid requests untested)               |
-| ZCode (GLM) provider                  | Z.AI's agent over ACP                                                                      | Settings → Providers                              | Added in OoP                                        |
-| MiniMax Code provider                 | MiniMax's agent over ACP                                                                   | Settings → Providers                              | Added in OoP                                        |
-| One-click provider install / update   | Install or update provider CLIs from the provider card                                     | Settings → Providers                              | Added in OoP (exact delta from upstream unverified) |
-| Verify macOS build                    | Checks an OoP `.dmg` for integrity, strict code signature and startup on the server Mac    | Chat header → Verify macOS build                  | Added in OoP                                        |
-| Phone connect dialog                  | One-click phone pairing QR for the desktop app, optional own relay                         | Sidebar → Connect mobile                          | Added in OoP (desktop app only)                     |
-| Own Cloudflare relay                  | A Worker you deploy yourself so a phone can reach your desktop from any network            | `infra/oop-relay`                                 | Added in OoP, early                                 |
-| Local-folder updater                  | Packaged OoP builds can pick up newer packages from a folder you point them at             | Packaged macOS / Windows builds                   | Added in OoP, early, untested by others             |
-| Multi-provider sessions               | Threads, turns, checkpoints across providers                                               | Everywhere                                        | From T3 Code                                        |
-| Permission modes                      | Supervised, Auto-accept edits, Auto, Full access                                           | Composer; Settings → General                      | From T3 Code                                        |
-| Diff panel and checkpoints            | Review and restore agent changes                                                           | Right panel → Diff                                | From T3 Code                                        |
-| Source control                        | Clone, commit, publish, pull requests via provider CLIs                                    | Settings → Source Control                         | From T3 Code                                        |
-| Built-in terminal                     | Terminal per thread on the server machine                                                  | Inside a thread                                   | From T3 Code                                        |
-| Reports in chat                       | Charts, stat cards, progress bars, mermaid flows                                           | In replies                                        | From T3 Code                                        |
-| Workflow view                         | Live diagram of tool calls and subagents                                                   | Right panel, `mod+alt+w`                          | From T3 Code                                        |
-| Usage page                            | Token and estimated cost history                                                           | Sidebar, `mod+u`                                  | From T3 Code (ZCode and MiniMax rows are OoP)       |
-| SnapShots                             | Capture a window into your draft (off by default; macOS, Windows, Linux Wayland)           | Settings → SnapShots                              | From T3 Code (attribution unverified)               |
-| Remote access                         | LAN pairing, Tailscale HTTPS, SSH environments                                             | Settings → Connections                            | From T3 Code                                        |
-| Device panel                          | Watch and tap an iOS Simulator or Android Emulator next to a thread                        | Right panel → Device                              | From T3 Code (untested here)                        |
-| Background service                    | `t3 service install` on macOS (launchd) and Linux (systemd user unit); not Windows         | CLI                                               | From T3 Code (untested here)                        |
-| Keybindings, project settings, themes | Customizable shortcuts, per-project overrides, appearance                                  | Settings                                          | From T3 Code                                        |
+| OOP Crew                              | Brain model delegates to worker, expert and auditor models; presets and per-role overrides | Composer → Crew; right panel → Workflows / Agents | Added in OOP                                        |
+| Thread goals                          | Keeps a thread going until checks pass or the goal is blocked                              | Composer → Goal                                   | Added in OOP                                        |
+| Project memories                      | Suggests saved project memories from the composer                                          | Composer, memory button                           | Added in OOP                                        |
+| Local role preferences                | Save a preferred model for implementation or review per environment, with recommendations  | Composer model picker                             | Added in OOP                                        |
+| Z.AI / MiniMax presets                | OpenCode-based provider presets                                                            | Settings → Providers → Add                        | Added in OOP (paid requests untested)               |
+| ZCode (GLM) provider                  | Z.AI's agent over ACP                                                                      | Settings → Providers                              | Added in OOP                                        |
+| MiniMax Code provider                 | MiniMax's agent over ACP                                                                   | Settings → Providers                              | Added in OOP                                        |
+| One-click provider install / update   | Install or update provider CLIs from the provider card                                     | Settings → Providers                              | Added in OOP (exact delta from upstream unverified) |
+| Verify macOS build                    | Checks an OOP `.dmg` for integrity, strict code signature and startup on the server Mac    | Chat header → Verify macOS build                  | Added in OOP                                        |
+| Phone connect dialog                  | One-click phone pairing QR for the desktop app, optional own relay                         | Sidebar → Connect mobile                          | Added in OOP (desktop app only)                     |
+| Own Cloudflare relay                  | A Worker you deploy yourself so a phone can reach your desktop from any network            | `infra/oop-relay`                                 | Added in OOP, early                                 |
+| Local-folder updater                  | Packaged OOP builds can pick up newer packages from a folder you point them at             | Packaged macOS / Windows builds                   | Added in OOP, early, untested by others             |
+| Multi-provider sessions               | Threads, turns, checkpoints across providers                                               | Everywhere                                        | Upstream                                        |
+| Permission modes                      | Supervised, Auto-accept edits, Auto, Full access                                           | Composer; Settings → General                      | Upstream                                        |
+| Diff panel and checkpoints            | Review and restore agent changes                                                           | Right panel → Diff                                | Upstream                                        |
+| Source control                        | Clone, commit, publish, pull requests via provider CLIs                                    | Settings → Source Control                         | Upstream                                        |
+| Built-in terminal                     | Terminal per thread on the server machine                                                  | Inside a thread                                   | Upstream                                        |
+| Reports in chat                       | Charts, stat cards, progress bars, mermaid flows                                           | In replies                                        | Upstream                                        |
+| Workflow view                         | Live diagram of tool calls and subagents                                                   | Right panel, `mod+alt+w`                          | Upstream                                        |
+| Usage page                            | Token and estimated cost history                                                           | Sidebar, `mod+u`                                  | Upstream (ZCode and MiniMax rows are OOP)       |
+| SnapShots                             | Capture a window into your draft (off by default; macOS, Windows, Linux Wayland)           | Settings → SnapShots                              | Upstream (attribution unverified)               |
+| Remote access                         | LAN pairing, Tailscale HTTPS, SSH environments                                             | Settings → Connections                            | Upstream                                        |
+| Device panel                          | Watch and tap an iOS Simulator or Android Emulator next to a thread                        | Right panel → Device                              | Upstream (untested here)                        |
+| Background service                    | `t3 service install` on macOS (launchd) and Linux (systemd user unit); not Windows         | CLI                                               | Upstream (untested here)                        |
+| Keybindings, project settings, themes | Customizable shortcuts, per-project overrides, appearance                                  | Settings                                          | Upstream                                        |
 
 ## Supported providers
 
@@ -310,7 +310,7 @@ node scripts/macos.mjs start     # optional: run an isolated dev copy of the des
 node scripts/macos.mjs package   # builds an ad hoc signed DMG into release/macos/
 ```
 
-Open the DMG from `release/macos/` and drag the app to `/Applications/OoP.app` (source build).
+Open the DMG from `release/macos/` and drag the app to `/Applications/OOP.app` (source build).
 
 ### Windows (x64, experimental)
 
@@ -321,7 +321,7 @@ set OOP_WINDOWS_UPDATE_DIRECTORY=%CD%\release\windows
 node scripts\windows.mjs package
 ```
 
-The installer (`OoP-<version>-x64.exe`) is written to `release\windows`.
+The installer (`OOP-<version>-x64.exe`) is written to `release\windows`.
 
 ### Generic dev path (any OS)
 
@@ -354,7 +354,7 @@ The agents, files and provider logins stay on your computer (the **host**). Your
 ```mermaid
 graph LR
     P["Phone<br/>(browser or native app)"] -->|"one-time pairing link / QR"| N["Network route<br/>LAN, Tailscale, or your own relay"]
-    N --> S["OoP server on your computer<br/>(checks the pairing, keeps a session)"]
+    N --> S["OOP server on your computer<br/>(checks the pairing, keeps a session)"]
     S --> C["Provider CLIs<br/>Codex, Claude Code, Cursor, ..."]
     C --> F["Your project files"]
 ```
@@ -372,10 +372,10 @@ Pick the simplest route that works for you, in this order.
 
 ### a) Same Wi-Fi / LAN (simplest)
 
-**Prerequisites:** the OoP desktop app running on your computer, and a phone on the same network.
+**Prerequisites:** the OOP desktop app running on your computer, and a phone on the same network.
 
 1. In the desktop app, click the phone icon in the sidebar (**Connect mobile**).
-2. If the dialog says mobile connections are off, click **Allow mobile connections**. OoP restarts once; the setting persists.
+2. If the dialog says mobile connections are off, click **Allow mobile connections**. OOP restarts once; the setting persists.
 3. A one-time QR code appears. If several addresses are offered, pick the one your phone can reach (the **LAN** entry for the same Wi-Fi).
 4. Scan the QR code with the phone camera and open the link in the phone browser. The phone is now paired. Pairing authorizes that device for later visits, so you do not need the original code again.
 
@@ -410,7 +410,7 @@ If port 443 is taken, pick another with `--tailscale-serve-port`. Tailscale traf
 
 ### c) Your own Cloudflare relay (away from home, no Tailscale)
 
-OoP includes a small Cloudflare Worker in [`infra/oop-relay`](infra/oop-relay/README.md) that you deploy to **your own** Cloudflare account. The desktop dials out to it, so no router setup is needed and the phone can connect from any network while the desktop is online.
+OOP includes a small Cloudflare Worker in [`infra/oop-relay`](infra/oop-relay/README.md) that you deploy to **your own** Cloudflare account. The desktop dials out to it, so no router setup is needed and the phone can connect from any network while the desktop is online.
 
 1. Deploy the Worker as described in [`infra/oop-relay/README.md`](infra/oop-relay/README.md) (`npx wrangler login`, `npx wrangler deploy`, then `npx wrangler secret put OOP_RELAY_SECRET`).
 2. In the desktop app: Connect mobile → **Use away from home**. Paste the shown secret into the Worker secret, enter the relay address and **Save**.
@@ -419,25 +419,25 @@ OoP includes a small Cloudflare Worker in [`infra/oop-relay`](infra/oop-relay/RE
 > [!NOTE]
 > One deployment serves one desktop. Cloudflare terminates TLS for the relay, so traffic is visible to the Cloudflare account that runs it. Phones still have to sign in to the desktop with a pairing code. This route is new and the least tested of the three.
 
-**What about T3 Connect?** T3 Code also ships "T3 Connect", a tunnel service that relies on cloud sign-in and servers operated by the upstream project. **OoP does not operate any hosted service**, and this fork has not tested T3 Connect, so this guide does not cover it.
+**What about the upstream tunnel service?** The upstream project also ships a tunnel service that relies on cloud sign-in and servers operated by the upstream project. **OOP does not operate any hosted service**, and this fork has not tested it, so this guide does not cover it.
 
 ### Native app or browser?
 
 |                     | Phone browser                                                                   | Native iOS / Android app                                                    |
 | ------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| What it is          | The OoP web UI served by your computer                                          | The T3 Code mobile app, published by the upstream project (not OoP-branded) |
-| Install             | Nothing                                                                         | App Store / Google Play listing of T3 Code                                  |
+| What it is          | The OOP web UI served by your computer                                          | The upstream project's mobile app (not OOP-branded)             |
+| Install             | Nothing                                                                         | The upstream project's App Store / Google Play listing |
 | Connect             | Open the pairing link or scan the QR code                                       | Add an environment: scan the QR code or paste the pairing URL               |
 | Tested by this fork | Web UI checked at phone size; pairing from a real phone not separately verified | **No**                                                                      |
 
 ![Phone-size web client connected through a pairing link](docs/screenshots/mobile.png)
-_A phone browser connected to OoP._
+_A phone browser connected to OOP._
 
-The fork preserves the protocol and authentication identifiers (`internal_protocol_and_auth_identifiers_preserved` in [`UPSTREAM.json`](UPSTREAM.json)), so the upstream app should be able to pair with an OoP server. **The fork has not tested the native mobile app**, so treat that as unconfirmed. The upstream docs describe the app's connection settings under Settings → Environments. Use the browser if anything misbehaves.
+The fork preserves the protocol and authentication identifiers (`internal_protocol_and_auth_identifiers_preserved` in [`UPSTREAM.json`](UPSTREAM.json)), so the upstream app should be able to pair with an OOP server. **The fork has not tested the native mobile app**, so treat that as unconfirmed. The upstream docs describe the app's connection settings under Settings → Environments. Use the browser if anything misbehaves.
 
 ### Push notifications
 
-The upstream docs say phone push notifications (agent finished, failed, needs approval) require signing in to T3 Connect, and that a direct or Tailscale connection alone does not enable them. Because OoP does not operate T3 Connect and the fork has not tested it, **do not expect push notifications with the routes above.** Keep the phone page open, or check back on the thread.
+The upstream docs say phone push notifications (agent finished, failed, needs approval) require signing in to the upstream tunnel service, and that a direct or Tailscale connection alone does not enable them. Because OOP does not operate that service and the fork has not tested it, **do not expect push notifications with the routes above.** Keep the phone page open, or check back on the thread.
 
 ### Revoke a device
 
@@ -448,24 +448,24 @@ The upstream docs say phone push notifications (agent finished, failed, needs ap
 
 ## How updates work
 
-Source builds do not update themselves from GitHub; rebuild them as described below. For an installed binary, quit OoP and rerun the matching installer command to update. Your user data is preserved.
+Source builds do not update themselves from GitHub; rebuild them as described below. For an installed binary, quit OOP and rerun the matching installer command to update. Your user data is preserved.
 
 1. `git pull`
 2. Rebuild / package again (see [Install](#install--build-from-source)) and reinstall.
 
-Each release is published as **one commit** (titled `OoP <version> source`), a tag named `v<version>`, and a GitHub Release. Your data in `~/.oop-desktop/userdata` is kept across updates. To hear about new versions, use **Watch → Custom → Releases** on the GitHub repository; older versions have only a tag.
+Each release is published as **one commit** (titled `OOP <version> source`), a tag named `v<version>`, and a GitHub Release. Your data in `~/.oop-desktop/userdata` is kept across updates. To hear about new versions, use **Watch → Custom → Releases** on the GitHub repository; older versions have only a tag.
 
 An app you built yourself offers your next build in the app, from the folder it was built for: `release\windows` on Windows (set above), `release/macos` on macOS. On macOS, `package` writes only the DMG, so also build the update package after it:
 
 ```bash
 V=<version>
-node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
-  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
-  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OOP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OOP-$V-arm64-update.pkg
 ```
 
 > [!NOTE]
-> Server update notices in the app and `t3 update` come from upstream T3 Code. They are not an OoP update channel.
+> Server update notices in the app and `t3 update` come from the upstream project. They are not an OOP update channel.
 
 ## Security and privacy
 
@@ -476,12 +476,12 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **Costs:** every provider uses your own subscription or API credit. Crew multiplies usage by running several models per chat. The Usage page shows estimates, not your bill.
 - **API keys** are stored on the server side, on your machine. The Antigravity Gemini API key is stored **in plain text** in settings.
 - **Never commit `.env` files or keys**, and do not paste them into issues or logs.
-- **Upstream installers install T3 Code, not OoP:** the `t3.codes` install scripts, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, and the App Store / Play listings all belong to the upstream project. Use the OoP desktop installer above or build OoP from this repo.
+- **Upstream installers install the upstream app, not OOP:** the `t3.codes` install scripts, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, and the App Store / Play listings all belong to the upstream project. Use the OOP desktop installer above or build OOP from this repo.
 - **The CLI is still named `t3`**, which can clash with an upstream install.
 - **Source builds are ad hoc signed**, with no Developer ID and no notarization. The binary installer verifies SHA-256 and does not bypass Gatekeeper quarantine or SmartScreen.
 - **The local-folder updater** trusts whoever can write to the update folder; its SHA-256 check only detects corruption.
 
-**Telemetry.** OoP has no servers and the maintainers receive nothing from your app. The server code inherited from upstream contains an anonymous PostHog usage reporter (it uses the upstream project's key, `us.i.posthog.com`); OoP turns it **off by default**, so nothing is sent unless you opt in. To opt in, set `T3CODE_TELEMETRY_ENABLED=true` in the server's environment before it starts (see [`docs/user/telemetry.md`](docs/user/telemetry.md)). When enabled, events cover provider, model, reasoning effort, permission mode, turn result, duration and main-agent token totals, tied to a hashed account or installation identifier, and per the docs never include prompts, responses, file contents, authentication tokens or conversation IDs.
+**Telemetry.** OOP has no servers and the maintainers receive nothing from your app. The server code inherited from upstream contains an anonymous PostHog usage reporter (it uses the upstream project's key, `us.i.posthog.com`); OOP turns it **off by default**, so nothing is sent unless you opt in. To opt in, set `T3CODE_TELEMETRY_ENABLED=true` in the server's environment before it starts (see [`docs/user/telemetry.md`](docs/user/telemetry.md)). When enabled, events cover provider, model, reasoning effort, permission mode, turn result, duration and main-agent token totals, tied to a hashed account or installation identifier, and per the docs never include prompts, responses, file contents, authentication tokens or conversation IDs.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -508,21 +508,21 @@ Sign in with the provider's own command (see [Supported providers](#supported-pr
 You need Node.js 24.x, 24.13.1 or newer, and pnpm 11.10.0. Other Node majors are rejected.
 
 **Where is my data?**
-OoP's server state (threads, settings, the local database) is in `~/.oop-desktop/userdata`. The desktop binary is installed separately from this data. Provider logins live in each provider CLI's own folders, not here.
+OOP's server state (threads, settings, the local database) is in `~/.oop-desktop/userdata`. The desktop binary is installed separately from this data. Provider logins live in each provider CLI's own folders, not here.
 
 **How do I update a binary install?**
-Quit OoP, then rerun the matching install command. User data is preserved.
+Quit OOP, then rerun the matching install command. User data is preserved.
 
-**How do I reset OoP?**
-Quit the app, then move `~/.oop-desktop/userdata` aside (do not delete it until you are sure). OoP starts fresh next time. Your project folders are untouched.
+**How do I reset OOP?**
+Quit the app, then move `~/.oop-desktop/userdata` aside (do not delete it until you are sure). OOP starts fresh next time. Your project folders are untouched.
 
 **How do I uninstall?**
-Quit the app and remove `~/Applications/OoP.app` (binary install; or the path set by `OOP_INSTALL_DIR`) or `/Applications/OoP.app` (source build), uninstall OoP from Windows Settings, or remove `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop`, and the Linux menu entry. Optionally remove `~/.oop-desktop` to delete its data. Provider CLIs are installed separately and are not removed.
+Quit the app and remove `~/Applications/OOP.app` (binary install; or the path set by `OOP_INSTALL_DIR`) or `/Applications/OOP.app` (source build), uninstall OOP from Windows Settings, or remove `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop`, and the Linux menu entry. Optionally remove `~/.oop-desktop` to delete its data. Provider CLIs are installed separately and are not removed.
 
 **Will this cost me money?**
-OoP itself is free. The providers it runs use your own subscription or API credit. Crew uses several models per chat, and the Usage page shows estimated (not billed) costs.
+OOP itself is free. The providers it runs use your own subscription or API credit. Crew uses several models per chat, and the Usage page shows estimated (not billed) costs.
 
-**Can I use the upstream T3 Code mobile app?**
+**Can I use the upstream mobile app?**
 It should pair, but the fork has not tested it. See [Native app or browser](#native-app-or-browser).
 
 ## Repo map
@@ -542,7 +542,7 @@ See [`AGENTS.md`](AGENTS.md) for how the codebase is organized and the conventio
 
 ## Status and roadmap honesty
 
-OoP is **early**. Expect bugs. macOS Apple Silicon is the only platform the fork actually tests; Windows is experimental; Intel Mac, Linux, the native mobile app, push notifications and paid Z.AI / MiniMax requests are untested. There is no promised roadmap: the maintainer fixes what they hit and publishes releases when they are ready.
+OOP is **early**. Expect bugs. macOS Apple Silicon is the only platform the fork actually tests; Windows is experimental; Intel Mac, Linux, the native mobile app, push notifications and paid Z.AI / MiniMax requests are untested. There is no promised roadmap: the maintainer fixes what they hit and publishes releases when they are ready.
 
 ## Contributing
 
@@ -552,4 +552,4 @@ This repo is a **release mirror**. Issues are welcome. Pull requests are reviewe
 
 [MIT](LICENSE). The original notice, "Copyright (c) 2026 T3 Tools Inc.", must stay in place, and this fork's modifications are MIT-licensed too.
 
-OoP is built on [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc. and the pingdotgg team. Provider names (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, ZCode, MiniMax, Z.AI) belong to their respective owners; OoP is not affiliated with them.
+OOP is built on [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc. and the pingdotgg team. Provider names (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, ZCode, MiniMax, Z.AI) belong to their respective owners; OOP is not affiliated with them.

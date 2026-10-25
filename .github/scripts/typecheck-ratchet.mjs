@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Typecheck ratchet for OoP CI. Runs every workspace package's `typecheck` script one at a time
+ * Typecheck ratchet for OOP CI. Runs every workspace package's `typecheck` script one at a time
  * and counts errors per file and error code. CI fails when any count grows past
  * `.github/typecheck-baseline.json`, or when a package fails without reporting a type error (a
  * crash or out-of-memory kill), so existing debt is recorded and can only shrink.

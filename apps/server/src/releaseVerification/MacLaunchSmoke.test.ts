@@ -268,7 +268,7 @@ interface WorldOptions {
 }
 
 const makeWorld = (runDir: string, origin: string, options: WorldOptions) => {
-  const appPath = NodePath.join(runDir, "launch", "OoP.app");
+  const appPath = NodePath.join(runDir, "launch", "OOP.app");
   const procs = new Map([
     [OTHER, { ppid: 1, stat: "Ss", startedAt: lstart(Date.UTC(2024, 0, 1)) }],
   ]);
@@ -388,7 +388,7 @@ const makeRunDir = Effect.acquireRelease(
   Effect.promise(async () => {
     // Short and real: the helper refuses a runDir over 54 bytes, and /tmp is a symlink on macOS.
     const dir = await NodeFSP.realpath(await NodeFSP.mkdtemp("/tmp/t3v-"));
-    await NodeFSP.mkdir(NodePath.join(dir, "launch", "OoP.app"), { recursive: true });
+    await NodeFSP.mkdir(NodePath.join(dir, "launch", "OOP.app"), { recursive: true });
     return dir;
   }),
   (dir) => Effect.promise(() => NodeFSP.rm(dir, { recursive: true, force: true })),
@@ -464,7 +464,7 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("launchSmoke", (
         const launch = s.world.calls.find((call) => call.name === "env");
         expect(launch?.args.slice(0, 6)).toEqual([...STRIPPED_LAUNCH, "-l", "JavaScript", "-e"]);
         expect(launch?.args).toHaveLength(9);
-        expect(launch?.args[7]).toBe(NodePath.join(s.runDir, "launch", "OoP.app"));
+        expect(launch?.args[7]).toBe(NodePath.join(s.runDir, "launch", "OOP.app"));
         expect(decodeJson(launch?.args[8] ?? "{}")).toEqual(buildLaunchEnvironment(s.runDir));
         const folders = yield* Effect.promise(() => NodeFSP.readdir(s.runDir));
         expect(folders.sort()).toEqual(["electron-user-data", "launch", "t3-home", "tmp"]);
@@ -622,7 +622,7 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("launchSmoke", (
   it.live("leaves an app alone when it is not the private copy or predates the request", () =>
     Effect.gen(function* () {
       const cases: ReadonlyArray<WorldOptions> = [
-        { bundlePath: "/Applications/OoP.app" },
+        { bundlePath: "/Applications/OOP.app" },
         { appStartedMsAgo: 60_000 },
       ];
       for (const options of cases) {

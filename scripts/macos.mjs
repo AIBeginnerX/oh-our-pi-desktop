@@ -10,6 +10,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
+import { macDmgName } from "./oop-release-names.mjs";
+
 export const SOURCE_ROOT = NodePath.resolve(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
   "..",
@@ -17,13 +19,13 @@ export const SOURCE_ROOT = NodePath.resolve(
 export const PACKAGE_MANAGER_VERSION = "11.10.0";
 export const MIN_NODE_VERSION = [24, 13, 1];
 /**
- * Where the OoP Mac app looks for updates first: OoP/release/macos in Google Drive for desktop,
+ * Where the OOP Mac app looks for updates first: OOP/release/macos in Google Drive for desktop,
  * whose root is named after the account and is "My Drive" or, on a Korean Mac, "내 드라이브".
  * The source's own release/macos stays the last candidate.
  */
 export const MAC_DRIVE_UPDATE_CANDIDATES = [
-  "~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos",
-  "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos",
+  "~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos",
+  "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos",
 ];
 const MARKER = ".oop-macos-owned.json";
 const LOCK = ".oop-macos.lock";
@@ -184,7 +186,7 @@ export async function releaseVersion(sourceRoot) {
     typeof release.version !== "string" ||
     !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(release.version)
   ) {
-    throw new Error("OOP_RELEASE.json must contain a stable OoP version such as 0.0.45");
+    throw new Error("OOP_RELEASE.json must contain a stable OOP version such as 0.0.45");
   }
   return release.version;
 }
@@ -605,9 +607,9 @@ export async function verifyMacDmgArtifact(
       ["attach", "-readonly", "-nobrowse", "-noautoopen", "-mountpoint", mountPoint, dmgPath],
       { timeout: 60_000 },
     );
-    const appPath = NodePath.join(mountPoint, "OoP.app");
+    const appPath = NodePath.join(mountPoint, "OOP.app");
     const app = await NodeFSP.lstat(appPath).catch(() => undefined);
-    if (!app?.isDirectory()) throw new Error(`Expected OoP.app inside DMG: ${dmgPath}`);
+    if (!app?.isDirectory()) throw new Error(`Expected OOP.app inside DMG: ${dmgPath}`);
     await runner("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath], {
       timeout: 120_000,
     });
@@ -668,7 +670,7 @@ export async function packageDmg(
   const destination = candidate
     ? NodePath.join(paths.artifactRoot, `${stamp}-candidate`)
     : NodePath.join(paths.source, "release", "macos");
-  const fileName = `OoP-${appVersion}-arm64.dmg`;
+  const fileName = macDmgName(appVersion);
   await NodeFSP.mkdir(destination, { recursive: true });
   if (!candidate) {
     // A failed replacement must not leave a prior success record for this version.
@@ -746,12 +748,12 @@ export async function packageDmg(
         notarized: false,
         signing: { requestedMode: signing.mode, expectedTeamId: signing.teamId },
         verification:
-          "final copied DMG SHA-256, image integrity, internal OoP.app strict/deep signature, and a codesign Developer ID Application/Team requirement test passed; revocation, notarization, Gatekeeper, installer trust, passkeys, UI, and runtime behavior not exercised",
+          "final copied DMG SHA-256, image integrity, internal OOP.app strict/deep signature, and a codesign Developer ID Application/Team requirement test passed; revocation, notarization, Gatekeeper, installer trust, passkeys, UI, and runtime behavior not exercised",
       }
     : {
         ...built,
         verification:
-          "final copied DMG SHA-256, image integrity, and internal OoP.app strict/deep signature passed; UI, integrations, and notarization not exercised",
+          "final copied DMG SHA-256, image integrity, and internal OOP.app strict/deep signature passed; UI, integrations, and notarization not exercised",
       };
   const metadataTempPrefix = NodePath.join(
     destination,
@@ -800,7 +802,7 @@ export async function main(
       return;
     }
     const appVersion = await releaseVersion(paths.source);
-    // Web/server versions select upstream remote CLI artifacts; the OoP shell
+    // Web/server versions select upstream remote CLI artifacts; the OOP shell
     // release must not make those clients request an unrelated upstream tag.
     await runner(
       process.execPath,

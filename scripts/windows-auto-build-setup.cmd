@@ -1,5 +1,5 @@
 @echo off
-rem Double-click once on the Windows build PC: from then on a newer OoP version in this folder
+rem Double-click once on the Windows build PC: from then on a newer OOP version in this folder
 rem is built and published to release\windows automatically every 10 minutes while you are signed in.
 rem To stop it, run: node scripts\windows.mjs unschedule
 pushd "%~dp0.."

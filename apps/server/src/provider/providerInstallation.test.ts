@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream";
 import { layerTest as settingsLayerTest } from "../serverSettings.ts";
 import { CodexInstallation } from "./CodexInstallation.ts";
 import { AntigravityInstallation } from "./AntigravityInstallation.ts";
+import { NpmCliInstallation } from "./NpmCliInstallation.ts";
 import type { ProviderInstance } from "./ProviderDriver.ts";
 import { makeProviderInstallation } from "./providerInstallation.ts";
 import { ProviderInstanceRegistry } from "./Services/ProviderInstanceRegistry.ts";
@@ -116,6 +117,20 @@ const makeHarness = Effect.fn("providerInstallation.test.makeHarness")(function*
               calls.push("remove");
             }),
         }),
+        Layer.mock(NpmCliInstallation)({
+          start: ({ driver: npmDriver }) =>
+            Effect.sync(() => {
+              calls.push(`npm-start:${npmDriver}`);
+              return { ...state, driver: npmDriver, phase: "succeeded" as const };
+            }),
+          remove: ({ driver: npmDriver }) =>
+            Effect.sync(() => {
+              calls.push(`npm-remove:${npmDriver}`);
+              return { ...state, driver: npmDriver };
+            }),
+          state: Effect.succeed(state),
+          changes: Stream.empty,
+        }),
       ),
     ),
   );
@@ -123,6 +138,37 @@ const makeHarness = Effect.fn("providerInstallation.test.makeHarness")(function*
 });
 
 describe("provider installation routing", () => {
+  it.effect("routes the npm-backed CLIs to the fixed npm install and refreshes the provider", () =>
+    Effect.gen(function* () {
+      const minimaxId = ProviderInstanceId.make("minimax-key");
+      const harness = yield* makeHarness({
+        instance: instance(ProviderDriverKind.make("minimax"), minimaxId),
+      });
+      const result = yield* harness.router.start({ instanceId: minimaxId });
+      assert.equal(result.phase, "succeeded");
+      assert.deepEqual(harness.calls, ["npm-start:minimax", "refresh"]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects npm install cancellation and uninstalls through npm", () =>
+    Effect.gen(function* () {
+      const zcodeId = ProviderInstanceId.make("zcode-key");
+      const harness = yield* makeHarness({
+        instance: instance(ProviderDriverKind.make("zcode"), zcodeId),
+      });
+      const cancelled = yield* Effect.flip(
+        harness.router.cancel({
+          instanceId: zcodeId,
+          operationId: "npm-install-zcode-acp-server" as never,
+        }),
+      );
+      assert.match(cancelled.detail, /nothing to cancel/);
+      yield* harness.router.remove({ instanceId: zcodeId });
+      assert.include(harness.calls, "npm-remove:zcode");
+      assert.include(harness.calls, "refresh");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("allows explicit installation while the provider is disabled", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness();

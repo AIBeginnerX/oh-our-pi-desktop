@@ -15,9 +15,18 @@ import {
   CommandShortcut,
 } from "./ui/command";
 import { ThreadSearchMatchExcerpt } from "./ThreadSearchMatch";
+import { Button } from "./ui/button";
+
+interface CommandPaletteResultsNotice {
+  message: string;
+  actionLabel: string;
+  onAction: () => void;
+}
 
 interface CommandPaletteResultsProps {
   emptyStateMessage?: string;
+  /** Shown with or without results, for a search that only partly ran. */
+  notice?: CommandPaletteResultsNotice;
   groups: ReadonlyArray<CommandPaletteGroup>;
   highlightedItemValue?: string | null;
   isActionsOnly: boolean;
@@ -26,40 +35,69 @@ interface CommandPaletteResultsProps {
 }
 
 export function CommandPaletteResults(props: CommandPaletteResultsProps) {
+  const notice = props.notice ? <ResultsNotice notice={props.notice} /> : null;
   if (props.groups.length === 0) {
     return (
-      <div className="py-10 text-center text-sm text-muted-foreground">
-        {props.emptyStateMessage ??
-          (props.isActionsOnly
-            ? "No matching actions."
-            : "No matching commands, projects, or threads.")}
-      </div>
+      <>
+        {notice}
+        <div className="py-10 text-center text-sm text-muted-foreground">
+          {props.emptyStateMessage ??
+            (props.isActionsOnly
+              ? "No matching actions."
+              : "No matching commands, projects, or threads.")}
+        </div>
+      </>
     );
   }
 
   return (
-    <CommandList>
-      {props.groups.map((group) => (
-        <CommandGroup items={group.items} key={group.value}>
-          <CommandGroupLabel>{group.label}</CommandGroupLabel>
-          <CommandCollection>
-            {(item) =>
-              item.disabled ? (
-                <DisabledCommandPaletteResultRow item={item} key={item.value} />
-              ) : (
-                <CommandPaletteResultRow
-                  item={item}
-                  key={item.value}
-                  keybindings={props.keybindings}
-                  isActive={props.highlightedItemValue === item.value}
-                  onExecuteItem={props.onExecuteItem}
-                />
-              )
-            }
-          </CommandCollection>
-        </CommandGroup>
-      ))}
-    </CommandList>
+    <>
+      {notice}
+      <CommandList>
+        {props.groups.map((group) => (
+          <CommandGroup items={group.items} key={group.value}>
+            <CommandGroupLabel>{group.label}</CommandGroupLabel>
+            <CommandCollection>
+              {(item) =>
+                item.disabled ? (
+                  <DisabledCommandPaletteResultRow item={item} key={item.value} />
+                ) : (
+                  <CommandPaletteResultRow
+                    item={item}
+                    key={item.value}
+                    keybindings={props.keybindings}
+                    isActive={props.highlightedItemValue === item.value}
+                    onExecuteItem={props.onExecuteItem}
+                  />
+                )
+              }
+            </CommandCollection>
+          </CommandGroup>
+        ))}
+      </CommandList>
+    </>
+  );
+}
+
+function ResultsNotice(props: { notice: CommandPaletteResultsNotice }) {
+  return (
+    <div
+      role="status"
+      className="mx-2 mt-2 flex items-center gap-2 rounded-md border border-warning/30 bg-warning/8 px-2 py-1.5 text-warning-foreground text-xs"
+    >
+      <span className="min-w-0 flex-1">{props.notice.message}</span>
+      <Button
+        size="compact"
+        variant="outline"
+        // Keep focus in the search input so typing continues after a retry.
+        onMouseDown={(event) => {
+          event.preventDefault();
+        }}
+        onClick={props.notice.onAction}
+      >
+        {props.notice.actionLabel}
+      </Button>
+    </div>
   );
 }
 

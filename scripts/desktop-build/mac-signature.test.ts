@@ -11,13 +11,13 @@ describe("macOS package signature gate", () => {
   it("verifies the packaged app and rejects a failed verification before export", async () => {
     const distDir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mac-signature-gate-"));
     try {
-      const appPath = NodePath.join(distDir, "mac-arm64", "OoP.app");
+      const appPath = NodePath.join(distDir, "mac-arm64", "OOP.app");
       await NodeFSP.mkdir(appPath, { recursive: true });
       const verified: string[] = [];
       await expect(
         verifyMacPackagedAppSignatures({
           distDir,
-          productName: "OoP",
+          productName: "OOP",
           verify: async (path) => {
             verified.push(path);
           },
@@ -27,7 +27,7 @@ describe("macOS package signature gate", () => {
       await expect(
         verifyMacPackagedAppSignatures({
           distDir,
-          productName: "OoP",
+          productName: "OOP",
           verify: async () => {
             throw new Error("invalid resource seal");
           },
@@ -43,8 +43,8 @@ describe("macOS package signature gate", () => {
     try {
       await NodeFSP.mkdir(NodePath.join(distDir, "mac-arm64", "Wrong.app"), { recursive: true });
       await expect(
-        verifyMacPackagedAppSignatures({ distDir, productName: "OoP", verify: async () => {} }),
-      ).rejects.toThrow(/No packaged OoP\.app bundle/u);
+        verifyMacPackagedAppSignatures({ distDir, productName: "OOP", verify: async () => {} }),
+      ).rejects.toThrow(/No packaged OOP\.app bundle/u);
     } finally {
       await NodeFSP.rm(distDir, { recursive: true, force: true });
     }

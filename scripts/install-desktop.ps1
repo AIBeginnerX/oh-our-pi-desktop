@@ -1,4 +1,4 @@
-# OoP Desktop, not the upstream T3 Code CLI. Windows PowerShell 5.1+.
+# OOP Desktop, not the upstream CLI. Windows PowerShell 5.1+.
 # irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex
 # OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 & {
@@ -19,11 +19,13 @@
         $version = $release.tag_name -replace "^v", ""
     }
     if ($version -notmatch "^\d+\.\d+\.\d+$") { throw "OOP_VERSION must be a stable version such as 0.0.106." }
-    $asset = "OoP-$version-$arch.exe"
+    # Releases before 0.0.110 named their files OoP.
+    $assetPrefix = if ([version]$version -lt [version]"0.0.110") { "OoP" } else { "OOP" }
+    $asset = "$assetPrefix-$version-$arch.exe"
     $temp = Join-Path ([IO.Path]::GetTempPath()) ("oop-install-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Path $temp | Out-Null
     try {
-        Write-Host "Downloading OoP $version for Windows-$arch..."
+        Write-Host "Downloading OOP $version for Windows-$arch..."
         $installer = Join-Path $temp $asset
         Invoke-WebRequest -Uri "$base/v$version/$asset" -OutFile $installer -UseBasicParsing -TimeoutSec 1800
         $checksum = Join-Path $temp "$asset.sha256"
@@ -34,8 +36,8 @@
         if ($actual -ne $expected) { throw "SHA-256 mismatch; nothing was installed." }
         # electron-builder's assisted NSIS installer supports silent, per-user installation.
         $process = Start-Process -FilePath $installer -ArgumentList "/S", "/currentuser" -Wait -PassThru
-        if ($process.ExitCode -ne 0) { throw "OoP setup failed with exit code $($process.ExitCode)." }
-        Write-Host "Installed OoP $version. Open OoP from the Start menu."
+        if ($process.ExitCode -ne 0) { throw "OOP setup failed with exit code $($process.ExitCode)." }
+        Write-Host "Installed OOP $version. Open OOP from the Start menu."
     }
     finally {
         Remove-Item -LiteralPath $temp -Recurse -Force

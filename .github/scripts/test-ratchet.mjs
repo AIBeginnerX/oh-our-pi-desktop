@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Test ratchet for OoP CI. Runs every workspace package's `test` script one package at a time and
+ * Test ratchet for OOP CI. Runs every workspace package's `test` script one package at a time and
  * compares the failing tests with `.github/test-quarantine.json`. CI fails on any failure that is
  * not quarantined, or when a package fails without naming a failing test (a crash, a suite that
  * cannot load, or a runner other than Vitest), so known breakage is recorded and can only shrink.

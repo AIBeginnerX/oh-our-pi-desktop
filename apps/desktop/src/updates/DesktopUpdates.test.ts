@@ -913,7 +913,7 @@ describe("DesktopUpdates", () => {
 });
 
 /**
- * Runs `body` against an updater configured as packaged OoP on arm64 macOS:
+ * Runs `body` against an updater configured as packaged OOP on arm64 macOS:
  * a real update folder, resources directory and user data directory, with
  * `/usr/bin/open` and `xattr` faked.
  */
@@ -974,7 +974,7 @@ const testTrustRuntime = (
 const encodeUnknownJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 describe("DesktopUpdates local package mode", () => {
-  it.effect("is off for a build that is not OoP, even with a config file present", () =>
+  it.effect("is off for a build that is not OOP, even with a config file present", () =>
     runLocalPackage(
       ({ harness, updates }) =>
         Effect.gen(function* () {
@@ -1179,7 +1179,7 @@ describe("DesktopUpdates local package mode", () => {
     runLocalPackage(({ fixture, harness, updates }) =>
       Effect.gen(function* () {
         const desktopState = yield* DesktopState.DesktopState;
-        yield* Effect.promise(() => fixture.publish({ version: "1.2.4", content: "new OoP" }));
+        yield* Effect.promise(() => fixture.publish({ version: "1.2.4", content: "new OOP" }));
         yield* updates.check("manual");
 
         const download = yield* updates.download;
@@ -1191,7 +1191,7 @@ describe("DesktopUpdates local package mode", () => {
 
         const [stagedPath] = yield* Effect.promise(() => fixture.stagedPackagePaths());
         assert.isDefined(stagedPath);
-        assert.equal(yield* Effect.promise(() => NodeFSP.readFile(stagedPath!, "utf8")), "new OoP");
+        assert.equal(yield* Effect.promise(() => NodeFSP.readFile(stagedPath!, "utf8")), "new OOP");
         assert.isEmpty(installerCommands(harness));
 
         const install = yield* updates.install;
@@ -1816,4 +1816,53 @@ describe("DesktopUpdates local package mode", () => {
       }),
     ),
   );
+});
+
+describe("DesktopUpdates.resolveInstallScope", () => {
+  const base = {
+    isPackaged: true,
+    appImagePath: Option.none<string>(),
+    homeDirectory: "/Users/u",
+    path: NodePath.posix,
+  } as const;
+  const mac = (bundle: string) => ({
+    ...base,
+    platform: "darwin" as const,
+    appPath: `${bundle}/Contents/Resources/app.asar`,
+    resourcesPath: `${bundle}/Contents/Resources`,
+  });
+
+  it("classifies where the app runs from without reporting the path", () => {
+    assert.equal(DesktopUpdates.resolveInstallScope(mac("/Applications/OOP.app")), "system");
+    assert.equal(DesktopUpdates.resolveInstallScope(mac("/Users/u/Applications/OOP.app")), "user");
+    assert.equal(DesktopUpdates.resolveInstallScope(mac("/Volumes/Disk/OOP.app")), "other");
+    // A sibling folder that only shares the home prefix is not inside home.
+    assert.equal(DesktopUpdates.resolveInstallScope(mac("/Users/u2/OOP.app")), "other");
+    assert.equal(
+      DesktopUpdates.resolveInstallScope({
+        ...base,
+        homeDirectory: "/home/u",
+        platform: "linux",
+        appImagePath: Option.some("/home/u/.local/share/oop-desktop/OOP.AppImage"),
+        appPath: "/tmp/.mount_OOP/resources/app.asar",
+        resourcesPath: "/tmp/.mount_OOP/resources",
+      }),
+      "user",
+    );
+    assert.equal(
+      DesktopUpdates.resolveInstallScope({
+        ...base,
+        homeDirectory: "C:\\Users\\u",
+        platform: "win32",
+        path: NodePath.win32,
+        appPath: "C:\\Users\\u\\AppData\\Local\\Programs\\OOP\\resources\\app.asar",
+        resourcesPath: "C:\\Users\\u\\AppData\\Local\\Programs\\OOP\\resources",
+      }),
+      "user",
+    );
+    assert.equal(
+      DesktopUpdates.resolveInstallScope({ ...mac("/Applications/OOP.app"), isPackaged: false }),
+      "development",
+    );
+  });
 });

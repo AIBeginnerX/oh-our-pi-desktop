@@ -1,4 +1,8 @@
-import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import type {
+  DesktopBuildInfo,
+  DesktopUpdateActionResult,
+  DesktopUpdateState,
+} from "@t3tools/contracts";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
@@ -82,14 +86,14 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
   const action = resolveDesktopUpdateButtonAction(state);
   const localPackage = isLocalPackageUpdate(state);
   if (action === "download") {
-    return `This Mac has Apple Silicon, but ${localPackage ? "OoP" : "T3 Code"} is still running the Intel build under Rosetta. ${localPackage ? "Prepare the available update" : "Download the available update"} to switch to the native Apple Silicon build.`;
+    return `This Mac has Apple Silicon, but ${localPackage ? "OOP" : "OOP"} is still running the Intel build under Rosetta. ${localPackage ? "Prepare the available update" : "Download the available update"} to switch to the native Apple Silicon build.`;
   }
   if (action === "install") {
     return localPackage
-      ? "This Mac has Apple Silicon, but OoP is still running the Intel build under Rosetta. Open the prepared installer to switch to the native Apple Silicon build."
-      : "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+      ? "This Mac has Apple Silicon, but OOP is still running the Intel build under Rosetta. Open the prepared installer to switch to the native Apple Silicon build."
+      : "This Mac has Apple Silicon, but OOP is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
   }
-  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return "This Mac has Apple Silicon, but OOP is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
@@ -161,9 +165,9 @@ export function getDesktopUpdateInstallConfirmationMessage(
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
   if (state.installMode === "local-package") {
-    return `Open the installer${version ? ` for OoP ${version}` : ""}?\n\nOoP will quit and running tasks will stop. macOS Installer will ask for your administrator password. Finish the installation, then reopen OoP from Applications.`;
+    return `Open the installer${version ? ` for OOP ${version}` : ""}?\n\nOoP will quit and running tasks will stop. macOS Installer will ask for your administrator password. Finish the installation, then reopen OOP from Applications.`;
   }
-  return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
+  return `Install update${version ? ` ${version}` : ""} and restart OOP?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {
@@ -208,4 +212,35 @@ export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
   return (
     state.status !== "checking" && state.status !== "downloading" && state.status !== "disabled"
   );
+}
+
+const BUILD_DISTRIBUTION_LABEL: Record<DesktopBuildInfo["distribution"], string> = {
+  private: "Private build",
+  public: "Public release",
+  development: "Development run",
+};
+
+const BUILD_UPDATE_SOURCE_LABEL: Record<DesktopBuildInfo["updateSource"], string> = {
+  "local-folder": "Local update folder",
+  "release-feed": "Release feed",
+  none: "Not configured",
+};
+
+const BUILD_INSTALL_SCOPE_LABEL: Record<DesktopBuildInfo["installScope"], string> = {
+  system: "Applications folder (all users)",
+  user: "Your home folder",
+  development: "Source checkout",
+  other: "Another location",
+};
+
+/** The About section's build facts, in display order. */
+export function describeDesktopBuild(
+  build: DesktopBuildInfo,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  return [
+    { label: "Distribution", value: BUILD_DISTRIBUTION_LABEL[build.distribution] },
+    { label: "Commit", value: build.commit ?? "Not recorded" },
+    { label: "Updates from", value: BUILD_UPDATE_SOURCE_LABEL[build.updateSource] },
+    { label: "Installed in", value: BUILD_INSTALL_SCOPE_LABEL[build.installScope] },
+  ];
 }

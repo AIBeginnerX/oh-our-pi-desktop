@@ -16,8 +16,9 @@ import {
   signedExtractedSha1s,
 } from "../apps/desktop/src/updates/LocalPkgReleaseBinding.ts";
 import { developerIdRequirement } from "./macos.mjs";
+import { RELEASE_FILE_NAME, macUpdatePkgName } from "./oop-release-names.mjs";
 
-const APP_NAME = "OoP.app";
+const APP_NAME = "OOP.app";
 const UPDATE_FEED_NAME = "oop-update.json";
 const SIGNING_MODE = "developer-id";
 const USAGE =
@@ -37,14 +38,14 @@ function isStableFeedVersion(version) {
 export function localUpdateFeed(version, pkg, size, sha256) {
   if (
     !isStableFeedVersion(version) ||
-    pkg !== `OoP-${version}-arm64-update.pkg` ||
+    pkg !== macUpdatePkgName(version) ||
     !Number.isSafeInteger(size) ||
     size <= 0 ||
     size > MAX_UPDATE_PACKAGE_SIZE ||
     typeof sha256 !== "string" ||
     !/^[a-f0-9]{64}$/u.test(sha256)
   ) {
-    throw new Error("Invalid local OoP update package metadata.");
+    throw new Error("Invalid local OOP update package metadata.");
   }
   return { schemaVersion: 1, platform: "darwin", arch: "arm64", version, pkg, size, sha256 };
 }
@@ -89,7 +90,7 @@ export function componentPlist() {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><array><dict>
-<key>RootRelativeBundlePath</key><string>Applications/OoP.app</string>
+<key>RootRelativeBundlePath</key><string>Applications/OOP.app</string>
 <key>BundleIsRelocatable</key><false/>
 <key>BundleIsVersionChecked</key><false/>
 <key>BundleHasStrictIdentifier</key><true/>
@@ -102,7 +103,7 @@ export function distributionXml(version) {
   if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("Invalid package version.");
   return `<?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
-  <title>OoP ${version} 설치</title>
+  <title>OOP ${version} 설치</title>
   ${releaseProductElement(version)}
   <welcome file="welcome.html"/>
   <options customize="never" require-scripts="true" rootVolumeOnly="true" hostArchitectures="arm64"/>
@@ -116,21 +117,21 @@ export function distributionXml(version) {
 
 export function welcomeHtml() {
   return `<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><title>OoP 설치</title></head><body>
-<h1>OoP 설치</h1>
-<p>이 설치 프로그램은 OoP를 /Applications/OoP.app에 설치합니다. 처음 설치할 때와 새 버전으로 업데이트할 때 모두 이 파일을 씁니다.</p>
+<html lang="ko"><head><meta charset="utf-8"><title>OOP 설치</title></head><body>
+<h1>OOP 설치</h1>
+<p>이 설치 프로그램은 OOP를 /Applications/OOP.app에 설치합니다. 처음 설치할 때와 새 버전으로 업데이트할 때 모두 이 파일을 씁니다.</p>
 <h2>설치 전에</h2>
 <ol>
-<li>OoP가 실행 중이면 Cmd+Q로 완전히 종료합니다. 창을 닫는 것만으로는 종료되지 않습니다.</li>
+<li>OOP가 실행 중이면 Cmd+Q로 완전히 종료합니다. 창을 닫는 것만으로는 종료되지 않습니다.</li>
 <li>계속을 누르고, 물어보면 관리자 암호를 입력합니다.</li>
 </ol>
 <h2>처음 설치하는 Mac이라면</h2>
 <ol>
-<li>설치가 끝나면 응용 프로그램 폴더에서 OoP를 엽니다. 보안 경고 없이 열리도록 설치 과정에서 처리합니다.</li>
+<li>설치가 끝나면 응용 프로그램 폴더에서 OOP를 엽니다. 보안 경고 없이 열리도록 설치 과정에서 처리합니다.</li>
 <li>첫 실행 안내가 업데이트 폴더(NAS 공유 폴더) 연결, 에이전트 로그인, 프로젝트 가져오기를 차례로 도와줍니다.</li>
 <li>대화·프로젝트·설정은 Mac마다 따로 저장되므로 새 Mac은 빈 상태로 시작합니다.</li>
 </ol>
-<p>업데이트할 때는 기존 대화와 설정이 그대로 유지되고, 이전 앱은 /Library/Application Support/OoP/Updates에 백업됩니다.</p>
+<p>업데이트할 때는 기존 대화와 설정이 그대로 유지되고, 이전 앱은 /Library/Application Support/OOP/Updates에 백업됩니다.</p>
 </body></html>
 `;
 }
@@ -145,9 +146,9 @@ export function welcomeHtml() {
 export function targetProcessCheck({ pgrep = "/usr/bin/pgrep", ps = "/bin/ps" } = {}) {
   if (![pgrep, ps].every((tool) => /^\/[\w./-]+$/u.test(tool)))
     throw new Error("Invalid process tool path.");
-  return `  targetExe="$target/Contents/MacOS/OoP"
+  return `  targetExe="$target/Contents/MacOS/$exe"
   blocked=''
-  rc=0; pids=$(${pgrep} -x OoP) || rc=$?
+  rc=0; pids=$(${pgrep} -x "$exe") || rc=$?
   if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then echo "Could not list OOP processes (pgrep exit $rc)." >&2; exit 1; fi
   for pid in $pids; do
     if comm=$(${ps} -o comm= -p "$pid" 2>/dev/null); then
@@ -157,7 +158,7 @@ export function targetProcessCheck({ pgrep = "/usr/bin/pgrep", ps = "/bin/ps" } 
         *) echo "OOP pid $pid has an unverifiable executable path '$comm'." >&2; blocked=1 ;;
       esac
     else
-      rc=0; again=$(${pgrep} -x OoP) || rc=$?
+      rc=0; again=$(${pgrep} -x "$exe") || rc=$?
       if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then echo "Could not recheck OOP pid $pid (pgrep exit $rc)." >&2; exit 1; fi
       case " $(printf '%s ' $again)" in *" $pid "*) echo "OOP pid $pid is still running but ps could not read it." >&2; blocked=1 ;; esac
     fi
@@ -170,7 +171,7 @@ export function preinstallScript(version) {
   if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("Invalid package version.");
   return `#!/bin/sh
 set -eu
-target=/Applications/OoP.app
+target=/Applications/OOP.app
 if [ "$(/usr/bin/id -u)" != '0' ]; then echo 'System installation requires administrator authorization.' >&2; exit 1; fi
 if [ -L "$target" ]; then echo 'OOP install path is a symlink; refusing replacement.' >&2; exit 1; fi
 if [ -e "$target" ]; then
@@ -179,10 +180,11 @@ if [ -e "$target" ]; then
   id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist") || exit 1
   name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist") || exit 1
   exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$plist") || exit 1
-  if [ "$id" != '${RELEASE_BUNDLE_ID}' ] || [ "$name" != 'OoP' ] || [ "$exe" != 'OoP' ]; then
+  # Up to 0.0.109 the bundle was named OoP; on a case-insensitive volume it is found at the same path.
+  if [ "$id" != '${RELEASE_BUNDLE_ID}' ] || { [ "$name" != 'OOP' ] && [ "$name" != 'OoP' ]; } || [ "$exe" != "$name" ]; then
     echo 'The existing application is not the expected OOP bundle.' >&2; exit 1
   fi
-${targetProcessCheck()}  parent='/Library/Application Support/OoP'
+${targetProcessCheck()}  parent='/Library/Application Support/OOP'
   backups="$parent/Updates"
   for path in "$parent" "$backups"; do
     if [ -e "$path" ] || [ -L "$path" ]; then
@@ -195,7 +197,7 @@ ${targetProcessCheck()}  parent='/Library/Application Support/OoP'
   done
   backupDir="$backups/before-${version}-$(/bin/date +%Y%m%d%H%M%S)-$$"
   /bin/mkdir -m 700 "$backupDir"
-  backup="$backupDir/OoP.app"
+  backup="$backupDir/OOP.app"
   /usr/bin/ditto "$target" "$backup"
   if [ ! -f "$backup/Contents/Info.plist" ]; then echo 'Could not back up the existing OOP app.' >&2; exit 1; fi
   echo "OOP app backup: $backup"
@@ -208,16 +210,22 @@ export function postinstallScript(version) {
   if (!/^\d+\.\d+\.\d+$/u.test(version)) throw new Error("Invalid package version.");
   return `#!/bin/sh
 set -eu
-target=/Applications/OoP.app
+target=/Applications/OOP.app
+# An upgrade over the legacy OoP.app keeps the folder's old casing; give it the current name.
+actual=$(cd /Applications && for entry in [Oo][Oo][Pp].app; do [ -d "$entry" ] && printf '%s' "$entry"; done)
+if [ -n "$actual" ] && [ "$actual" != 'OOP.app' ]; then
+  /bin/mv "/Applications/$actual" "/Applications/.OOP.app.rename-$$"
+  /bin/mv "/Applications/.OOP.app.rename-$$" "$target"
+fi
 if [ -L "$target" ] || [ ! -d "$target" ]; then echo 'Installed OOP bundle missing or unsafe.' >&2; exit 1; fi
 plist="$target/Contents/Info.plist"
 id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist") || exit 1
 name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' "$plist") || exit 1
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$plist") || exit 1
-if [ "$id" != '${RELEASE_BUNDLE_ID}' ] || [ "$name" != 'OoP' ] || [ "$version" != '${version}' ]; then
+if [ "$id" != '${RELEASE_BUNDLE_ID}' ] || [ "$name" != 'OOP' ] || [ "$version" != '${version}' ]; then
   echo 'Installed OOP identity or version is incorrect.' >&2; exit 1
 fi
-# A first install from a downloaded package can leave the app quarantined; clear it so OoP
+# A first install from a downloaded package can leave the app quarantined; clear it so OOP
 # opens without the Gatekeeper "Open Anyway" step. Exits 0 when nothing is quarantined.
 /usr/bin/xattr -d -r com.apple.quarantine "$target"
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$target" || exit 1
@@ -278,16 +286,16 @@ export function run(command, args, timeout = 120_000, { rejectStderr = false } =
 export function validateAppMetadata(metadata, expectedVersion) {
   if (
     metadata.identifier !== RELEASE_BUNDLE_ID ||
-    metadata.name !== "OoP" ||
-    metadata.executable !== "OoP" ||
+    metadata.name !== "OOP" ||
+    metadata.executable !== "OOP" ||
     metadata.version !== expectedVersion
   ) {
     throw new Error("DMG contains an unexpected app identity or version.");
   }
   if (metadata.architectures.length !== 1 || metadata.architectures[0] !== "arm64") {
-    throw new Error("DMG must contain the native arm64 OoP executable.");
+    throw new Error("DMG must contain the native arm64 OOP executable.");
   }
-  if (!metadata.oopProfileEmbedded) throw new Error("DMG lacks the OoP desktop build profile.");
+  if (!metadata.oopProfileEmbedded) throw new Error("DMG lacks the OOP desktop build profile.");
 }
 
 const MAX_BINDING_BYTES = 64 * 1024;
@@ -341,7 +349,7 @@ export async function assertReleaseBinding(pkgPath, version, runCommand = run) {
 
 async function inspectApp(appPath, runCommand) {
   const plist = NodePath.join(appPath, "Contents", "Info.plist");
-  const executable = NodePath.join(appPath, "Contents", "MacOS", "OoP");
+  const executable = NodePath.join(appPath, "Contents", "MacOS", "OOP");
   const read = async (key) =>
     (await runCommand("/usr/libexec/PlistBuddy", ["-c", `Print :${key}`, plist], 10_000)).trim();
   const architectures = (await runCommand("/usr/bin/lipo", ["-archs", executable], 10_000))
@@ -376,7 +384,7 @@ function mountedDeviceFromPlist(plist, mountPoint) {
 // Output names of this shape belong to the canonical build of that exact version, the only build that locks
 // and moves the feed. Any other build must not overwrite a package the feed may reference by SHA. Matched
 // case-insensitively because macOS volumes usually are.
-const CANONICAL_PACKAGE_NAME = /^OoP-\d+\.\d+\.\d+-arm64-update\.pkg$/iu;
+const CANONICAL_PACKAGE_NAME = /^OOP-\d+\.\d+\.\d+-arm64-update\.pkg$/iu;
 const PUBLISH_LOCK_NAME = ".oop-update-publish.lock";
 
 function compareStableVersions(left, right) {
@@ -389,7 +397,7 @@ function compareStableVersions(left, right) {
 async function readPublishedFeed(feedPath) {
   const invalid = () =>
     new Error(
-      `The published OoP update feed ${feedPath} is not an exact local update feed; fix or remove it before publishing.`,
+      `The published OOP update feed ${feedPath} is not an exact local update feed; fix or remove it before publishing.`,
     );
   let feed;
   try {
@@ -417,7 +425,7 @@ async function readPublishedFeed(feedPath) {
 
 const RELEASE_MARKER_NAME = "OOP_RELEASE.json";
 
-const signedCandidateName = (version) => `OoP-${version}-arm64-signed-candidate.pkg`;
+const signedCandidateName = (version) => `OOP-${version}-arm64-signed-candidate.pkg`;
 
 // Like macos.mjs: the real path of the deepest existing ancestor, so a symlinked parent cannot hide the target.
 async function canonicalFuturePath(target) {
@@ -540,7 +548,7 @@ async function buildSignedCandidate(input, dependencies) {
   return manifest;
 }
 
-// A canonical build (output OoP-<version>-arm64-update.pkg) publishes the feed last, and only for a version
+// A canonical build (output named by macUpdatePkgName) publishes the feed last, and only for a version
 // strictly newer than the current feed. It holds an exclusive lock directory beside the feed from reading the
 // feed through the feed rename, so concurrent publishers cannot both pass the version check. A lock left by a
 // killed publisher is never broken automatically. A crash after the package renames but before the feed rename
@@ -555,19 +563,19 @@ export async function buildOopUpdatePkg(input, dependencies = {}) {
     !input.output.endsWith(".pkg") ||
     (input.signingMode !== undefined && input.signingMode !== SIGNING_MODE)
   ) {
-    throw new Error("Invalid OoP installer package input.");
+    throw new Error("Invalid OOP installer package input.");
   }
   if (input.signingMode !== undefined) return buildSignedCandidate(input, dependencies);
   const outDir = NodePath.dirname(input.output);
   const packageName = NodePath.basename(input.output);
-  const publishFeed = packageName === `OoP-${input.version}-arm64-update.pkg`;
+  const publishFeed = packageName === macUpdatePkgName(input.version);
   if (!publishFeed && CANONICAL_PACKAGE_NAME.test(packageName)) {
     throw new Error(
       `${packageName} is reserved for the canonical build of that version; use another output name for version ${input.version}.`,
     );
   }
   if (publishFeed && !isStableFeedVersion(input.version))
-    throw new Error("Invalid stable OoP update feed version.");
+    throw new Error("Invalid stable OOP update feed version.");
   const dmgStat = await NodeFSP.lstat(input.dmg);
   if (!dmgStat.isFile()) throw new Error("DMG must be a regular file, not a symlink.");
   await NodeFSP.mkdir(outDir, { recursive: true });
@@ -578,7 +586,7 @@ export async function buildOopUpdatePkg(input, dependencies = {}) {
   } catch (error) {
     if (error.code === "EEXIST") {
       throw new Error(
-        `Another OoP update publish may be running: ${lockPath} exists. Remove it manually only after confirming no publisher is running.`,
+        `Another OOP update publish may be running: ${lockPath} exists. Remove it manually only after confirming no publisher is running.`,
         { cause: error },
       );
     }
@@ -590,7 +598,7 @@ export async function buildOopUpdatePkg(input, dependencies = {}) {
     const previousFeed = await readPublishedFeed(NodePath.join(outDir, UPDATE_FEED_NAME));
     if (previousFeed && compareStableVersions(input.version, previousFeed.version) <= 0) {
       throw new Error(
-        `OoP update ${input.version} is already published or older than the published feed version ${previousFeed.version}; use a newer version to preserve the active feed.`,
+        `OOP update ${input.version} is already published or older than the published feed version ${previousFeed.version}; use a newer version to preserve the active feed.`,
       );
     }
     manifest = await buildPackage(input, dependencies, true);
@@ -603,7 +611,7 @@ export async function buildOopUpdatePkg(input, dependencies = {}) {
     const manual = `releasing ${lockPath} failed (${error.message}); remove it manually after confirming no publisher is running.`;
     throw failure
       ? new Error(`${failure.message}; additionally, ${manual}`, { cause: failure })
-      : new Error(`OoP update ${input.version} was published, but ${manual}`, { cause: error });
+      : new Error(`OOP update ${input.version} was published, but ${manual}`, { cause: error });
   }
   if (failure) throw failure;
   return manifest;
@@ -646,7 +654,7 @@ async function finalizeSignedPackage(
 ) {
   const signedDirectory = NodePath.join(work, "signed");
   await NodeFSP.mkdir(signedDirectory, { mode: 0o700 });
-  const signedPackage = NodePath.join(signedDirectory, `OoP-${input.version}-arm64-update.pkg`);
+  const signedPackage = NodePath.join(signedDirectory, macUpdatePkgName(input.version));
   await helper.signPackage(signing, unsignedPackage, signedPackage);
   await assertReleaseBinding(signedPackage, input.version, runCommand);
   const { submissionId } = await helper.notarizeAndStaple(signing, signedPackage);
@@ -675,7 +683,7 @@ function signedCandidateManifest(input, signing, packageDigest, inputDmgDigest, 
     inputDmgSha256: inputDmgDigest,
     componentIdentifier: RELEASE_PACKAGE_ID,
     appBundleIdentifier: RELEASE_BUNDLE_ID,
-    appInstallPath: "/Applications/OoP.app",
+    appInstallPath: "/Applications/OOP.app",
     distribution: "internal-candidate",
     shippable: false,
     packageSigned: true,
@@ -685,7 +693,7 @@ function signedCandidateManifest(input, signing, packageDigest, inputDmgDigest, 
     signing: { mode: SIGNING_MODE, expectedTeamId: signing.teamId },
     notarization: { submissionId },
     validation:
-      "Input DMG hash, image integrity, OoP identity/profile/arm64, mounted and copied app strict signatures with the Developer ID Application Team requirement, a whole-app.asar scan that found only the expected developer-id trust marker (not proof of the active main entry; the input DMG is trusted to come from the artifact builder), installer package Developer ID Installer pin, notary service Accepted verdict, stapler validation, pkgutil/spctl notarized-package assessment, release binding, and final package hash passed. Not verified: Installer execution, offline Gatekeeper behavior, certificate revocation, app usability, runtime update admission. The notary submission covered the installer package; the app itself was not separately notarized or assessed.",
+      "Input DMG hash, image integrity, OOP identity/profile/arm64, mounted and copied app strict signatures with the Developer ID Application Team requirement, a whole-app.asar scan that found only the expected developer-id trust marker (not proof of the active main entry; the input DMG is trusted to come from the artifact builder), installer package Developer ID Installer pin, notary service Accepted verdict, stapler validation, pkgutil/spctl notarized-package assessment, release binding, and final package hash passed. Not verified: Installer execution, offline Gatekeeper behavior, certificate revocation, app usability, runtime update admission. The notary submission covered the installer package; the app itself was not separately notarized or assessed.",
   };
 }
 
@@ -756,7 +764,7 @@ async function buildPackage(input, dependencies, publishFeed, signed = undefined
       );
       const mountedApp = NodePath.join(mountPoint, APP_NAME);
       const mountedStat = await NodeFSP.lstat(mountedApp);
-      if (!mountedStat.isDirectory()) throw new Error("Expected OoP.app directory inside DMG.");
+      if (!mountedStat.isDirectory()) throw new Error("Expected OOP.app directory inside DMG.");
       await runCommand(
         "/usr/bin/codesign",
         ["--verify", "--deep", "--strict", "--verbose=2", mountedApp],
@@ -872,9 +880,9 @@ async function buildPackage(input, dependencies, publishFeed, signed = undefined
           inputDmgSha256: actualDigest,
           componentIdentifier: RELEASE_PACKAGE_ID,
           appBundleIdentifier: RELEASE_BUNDLE_ID,
-          appInstallPath: "/Applications/OoP.app",
+          appInstallPath: "/Applications/OOP.app",
           validation:
-            "Input DMG hash, image integrity, OoP identity/profile/arm64, mounted and copied app strict signatures, and output package hash passed. Installer execution and app usability not verified.",
+            "Input DMG hash, image integrity, OOP identity/profile/arm64, mounted and copied app strict signatures, and output package hash passed. Installer execution and app usability not verified.",
           packageSigned: false,
           appNotarized: false,
         };
@@ -910,10 +918,10 @@ async function buildPackage(input, dependencies, publishFeed, signed = undefined
   }
 }
 
-const RELEASE_ARTIFACT_NAME = /^OoP-(\d+\.\d+\.\d+)-/u;
+const RELEASE_ARTIFACT_NAME = RELEASE_FILE_NAME;
 
 /**
- * Build files a publish of `publishedVersion` makes obsolete: every OoP-<version>-* file older than
+ * Build files a publish of `publishedVersion` makes obsolete: every OOP-<version>-* file (either casing) older than
  * both the published version and the newest version before it. Newer, unpublished leftovers stay.
  */
 export function releaseArtifactsToPrune(names, publishedVersion) {
@@ -956,10 +964,7 @@ if (
       `${args.signingMode ? "Signed candidate package (internal, not shippable)" : "Installer package"}: ${args.output}\nSHA-256: ${result.packageSha256}`,
     );
     // Only a published canonical build retires older builds; a failed cleanup never fails the publish.
-    if (
-      !args.signingMode &&
-      NodePath.basename(args.output) === `OoP-${args.version}-arm64-update.pkg`
-    ) {
+    if (!args.signingMode && NodePath.basename(args.output) === macUpdatePkgName(args.version)) {
       try {
         const removed = await pruneOldReleases(NodePath.dirname(args.output), args.version);
         if (removed.length > 0)

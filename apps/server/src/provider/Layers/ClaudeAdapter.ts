@@ -1639,7 +1639,7 @@ const CLAUDE_SETTING_SOURCES = [
 ] as const satisfies ReadonlyArray<SettingSource>;
 
 /**
- * "oop-claude-route/v1" — the OoP-observed Claude SDK control profile a
+ * "oop-claude-route/v1" — the OOP-observed Claude SDK control profile a
  * publish-step admission reports as `routeConfigSha256`: SHA-256 lowercase
  * hex of the whitespace-free UTF-8 JSON of this flat object with keys
  * sorted lexicographically. Every key is present; an optional value absent

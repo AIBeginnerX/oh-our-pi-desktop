@@ -944,7 +944,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("ReleaseVerification
         expect(final.checks.find((check) => check.id === "launch-smoke")?.status).toBe("timed-out");
         expect(final.checks).toHaveLength(RELEASE_VERIFICATION_REQUIRED_CHECKS.length);
         expect(yield* fileSystem.exists(`${runDir}/${LAUNCH_UNCONFIRMED_MARKER}`)).toBe(true);
-        expect(yield* fileSystem.exists(`${runDir}/launch/OoP.app`)).toBe(true);
+        expect(yield* fileSystem.exists(`${runDir}/launch/OOP.app`)).toBe(true);
       }),
     );
 
@@ -1355,8 +1355,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("ReleaseVerification
         yield* fileSystem.remove(workspace.dmgPath);
         const artifact = {
           workspaceRoot: workspace.root,
-          relativePath: `release/macos/OoP-${RELEASE_TEST_VERSION}-arm64.dmg`,
-          fileName: `OoP-${RELEASE_TEST_VERSION}-arm64.dmg`,
+          relativePath: `release/macos/OOP-${RELEASE_TEST_VERSION}-arm64.dmg`,
+          fileName: `OOP-${RELEASE_TEST_VERSION}-arm64.dmg`,
           appVersion: RELEASE_TEST_VERSION,
           sha256: "a".repeat(64),
           size: 1,

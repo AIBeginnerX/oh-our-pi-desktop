@@ -27,9 +27,9 @@ if (
   );
 }
 const assets = [
-  [values.mac, `OoP-${values.version}-arm64.dmg`],
-  [values.windows, `OoP-${values.version}-x64.exe`],
-  [values.linux, `OoP-${values.version}-x86_64.AppImage`],
+  [values.mac, `OOP-${values.version}-arm64.dmg`],
+  [values.windows, `OOP-${values.version}-x64.exe`],
+  [values.linux, `OOP-${values.version}-x86_64.AppImage`],
 ];
 // Reject a missing, misnamed, or empty platform file before creating any output.
 for (const [source, name] of assets) {

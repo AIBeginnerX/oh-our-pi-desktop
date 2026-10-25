@@ -25,7 +25,7 @@ export const makeProviderAuthService = Effect.gen(function* () {
         instanceId,
         operation,
         detail: instance
-          ? "This provider does not support sign-in in T3 Code."
+          ? "This provider does not support sign-in in OOP."
           : "This provider instance is no longer available.",
       });
     }

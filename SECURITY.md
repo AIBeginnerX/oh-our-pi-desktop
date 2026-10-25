@@ -16,7 +16,7 @@ Please do not open a public issue for a vulnerability. Never post API keys, toke
 - Secret storage and leakage into logs or the UI.
 - The local-folder updater (package verification and staging).
 
-Out of scope: bugs in the provider CLIs themselves (Codex, Claude Code, Cursor, and so on), issues that need an already-compromised machine, and problems in upstream T3 Code services (`t3.codes`, T3 Connect, upstream installers). Report those to the respective project.
+Out of scope: bugs in the provider CLIs themselves (Codex, Claude Code, Cursor, and so on), issues that need an already-compromised machine, and problems in upstream services (`t3.codes`, the upstream tunnel service, upstream installers). Report those to the respective project.
 
 ## Things to know
 

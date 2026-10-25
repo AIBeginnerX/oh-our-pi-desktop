@@ -61,6 +61,31 @@ const updateState = (overrides: Partial<DesktopUpdateState>): DesktopUpdateState
 const local = { installMode: "local-package" } as const;
 
 describe("setup notifications", () => {
+  it("offers one-click install for a structured missing-runtime diagnosis", () => {
+    expect(
+      canInstallMissingProvider(
+        provider("minimax", {
+          driver: ProviderDriverKind.make("minimax"),
+          installed: false,
+          status: "error",
+          diagnosis: "runtime-missing",
+          message: "Install MiniMax Code (npm i -g @minimax-ai/code)",
+        }),
+      ),
+    ).toBe(true);
+    // Other diagnoses stay manual: the server has no fixed install command for them.
+    expect(
+      canInstallMissingProvider(
+        provider("zcode", {
+          driver: ProviderDriverKind.make("zcode"),
+          installed: true,
+          status: "warning",
+          diagnosis: "runtime-error",
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it("flags an unreachable update folder only for failed local-folder checks", () => {
     expect(
       isUpdateFolderUnreachable(updateState({ ...local, status: "error", errorContext: "check" })),

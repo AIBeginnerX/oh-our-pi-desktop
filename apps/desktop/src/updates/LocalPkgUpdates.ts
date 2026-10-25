@@ -26,7 +26,7 @@ import {
 export { LocalPkgUpdateError };
 
 /**
- * Local-folder updates for the OoP macOS and Windows builds: a manifest next to
+ * Local-folder updates for the OOP macOS and Windows builds: a manifest next to
  * an update `.pkg` (macOS) or setup `.exe` (Windows) in a (possibly
  * network-mounted) folder is checked, the package is copied into a private
  * staging folder, and the macOS Installer or the Windows setup is opened on the
@@ -404,6 +404,14 @@ export const isNewerVersion = (
  * Reads and validates the folder manifest. `None` means the folder offers
  * nothing newer than the running app (equal or older is never offered).
  */
+
+/**
+ * A release file named `OOP<suffix>`, or `OoP<suffix>`: builds up to 0.0.110 publish the legacy
+ * casing, and a feed folder cannot hold both names.
+ */
+export const isReleasePackageName = (name: string, suffix: string) =>
+  name === `OOP${suffix}` || name === `OoP${suffix}`;
+
 export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(function* (input: {
   readonly sourceDirectory: string;
   readonly currentVersion: string;
@@ -435,10 +443,12 @@ export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(fun
   const candidate = parseStableVersion(manifest.version);
   if (
     Option.isNone(candidate) ||
-    manifest.pkg !==
-      (manifest.platform === "win32"
-        ? `OoP-${manifest.version}-${manifest.arch}.exe`
-        : `OoP-${manifest.version}-${manifest.arch}-update.pkg`)
+    !isReleasePackageName(
+      manifest.pkg,
+      manifest.platform === "win32"
+        ? `-${manifest.version}-${manifest.arch}.exe`
+        : `-${manifest.version}-${manifest.arch}-update.pkg`,
+    )
   ) {
     return yield* new LocalPkgUpdateError({ reason: "manifest-invalid" });
   }
@@ -583,6 +593,47 @@ export const removeStagedPackage = (input: {
       ).pipe(Effect.ignore)
     : Effect.void;
 };
+
+const STAGED_PACKAGE_VERSION = /-((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-/;
+
+/**
+ * Startup retention: removes `stage-*` directories whose every package is a version the running
+ * app already is or has passed, since the install they were staged for has completed. A newer
+ * package may still be open in the Installer or its setup, and an unrecognised file is not ours
+ * to judge, so either keeps its directory. Returns the removed directories.
+ */
+export const pruneInstalledStages = Effect.fn("desktop.updates.localPkg.pruneInstalledStages")(
+  function* (input: { readonly stagingRoot: string; readonly currentVersion: string }) {
+    const current = parseStableVersion(input.currentVersion);
+    if (Option.isNone(current)) return [];
+    const stagingRoot = NodePath.resolve(input.stagingRoot);
+    const entries = yield* Effect.promise(() =>
+      NodeFSP.readdir(stagingRoot, { withFileTypes: true }).catch(() => []),
+    );
+    const removed: string[] = [];
+    for (const entry of entries) {
+      // Dirent types come from lstat, so a symlink named like a stage is never followed.
+      if (!entry.isDirectory() || !entry.name.startsWith(STAGE_DIRECTORY_PREFIX)) continue;
+      const directory = NodePath.join(stagingRoot, entry.name);
+      const files = yield* Effect.promise(() => NodeFSP.readdir(directory).catch(() => []));
+      const installed =
+        files.length > 0 &&
+        files.every((name) => {
+          const version = parseStableVersion(STAGED_PACKAGE_VERSION.exec(name)?.[1] ?? "");
+          return Option.isSome(version) && !isNewerVersion(version.value, current.value);
+        });
+      if (!installed) continue;
+      const deleted = yield* Effect.promise(() =>
+        NodeFSP.rm(directory, { recursive: true, force: true }).then(
+          () => true,
+          () => false,
+        ),
+      );
+      if (deleted) removed.push(directory);
+    }
+    return removed;
+  },
+);
 
 /**
  * Copies the manifest's package into a new `stage-*` directory (0700) as an
@@ -762,7 +813,7 @@ export const openInstaller = Effect.fn("desktop.updates.localPkg.openInstaller")
 });
 
 /**
- * Starts the staged Windows setup as its own process, so it keeps running after OoP quits to
+ * Starts the staged Windows setup as its own process, so it keeps running after OOP quits to
  * let the installer replace the app. The setup shows its own pages and asks for confirmation.
  */
 export const launchSetup = (stagedPath: string) =>

@@ -276,6 +276,27 @@ export interface DesktopRuntimeInfo {
   runningUnderArm64Translation: boolean;
 }
 
+/** Where the running desktop build came from, for the About section. Computed at runtime. */
+export interface DesktopBuildInfo {
+  /** Short source commit the build was made from; null when the build carries none. */
+  commit: string | null;
+  /** private: built with a local update folder; public: a published release; development: unpackaged. */
+  distribution: "private" | "public" | "development";
+  /**
+   * Where the running app is installed, as a kind rather than a path: update state never carries
+   * filesystem paths. system: /Applications; user: inside the home folder.
+   */
+  installScope: "system" | "user" | "development" | "other";
+  updateSource: "local-folder" | "release-feed" | "none";
+}
+
+export const DesktopBuildInfoSchema = Schema.Struct({
+  commit: Schema.NullOr(Schema.String),
+  distribution: Schema.Literals(["private", "public", "development"]),
+  installScope: Schema.Literals(["system", "user", "development", "other"]),
+  updateSource: Schema.Literals(["local-folder", "release-feed", "none"]),
+});
+
 export interface DesktopUpdateState {
   enabled: boolean;
   status: DesktopUpdateStatus;
@@ -299,6 +320,8 @@ export interface DesktopUpdateState {
   installMode?: "local-package";
   /** True when this build knows the network share its local updates come from. */
   canOpenUpdateSource?: boolean;
+  /** Absent from desktop builds predating it. */
+  build?: DesktopBuildInfo;
 }
 
 export interface DesktopUpdateReleaseNote {
@@ -332,6 +355,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   canRetry: Schema.Boolean,
   installMode: Schema.optionalKey(Schema.Literal("local-package")),
   canOpenUpdateSource: Schema.optionalKey(Schema.Boolean),
+  build: Schema.optionalKey(DesktopBuildInfoSchema),
 });
 
 export interface DesktopUpdateActionResult {

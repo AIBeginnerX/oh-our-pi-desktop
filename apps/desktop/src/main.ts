@@ -96,7 +96,7 @@ const desktopEnvironmentLayer = Layer.unwrap(
 const isOopDesktopBuild = (environment: DesktopEnvironment.DesktopEnvironment["Service"]) =>
   Option.getOrUndefined(environment.buildProfileName) === "oop-desktop";
 
-// OoP runs its own server on the remote, at the app's version and in its own
+// OOP runs its own server on the remote, at the app's version and in its own
 // home folder so it never opens an upstream T3 database there; the archive
 // comes from this device's release folder (see localRuntimeArchives below).
 // Other builds use their archive release as before. Development can point the

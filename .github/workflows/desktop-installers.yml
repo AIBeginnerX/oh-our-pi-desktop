@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Stable OoP version already tagged on main
+        description: Stable OOP version already tagged on main
         required: true
         type: string
 
@@ -21,26 +21,35 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
 
+      # Every later job builds and publishes the tag's commit, not whatever main points at now,
+      # so a retry after main has moved still produces and attaches the tagged release.
       - id: release
-        name: Bind the build to tagged main
+        name: Bind the build to the release tag
         shell: bash
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == refs/heads/main ]]
-          [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          source_version="$(node -p "require('./OOP_RELEASE.json').version")"
-          [[ "$REQUESTED_VERSION" == "$source_version" ]]
-          tag_sha="$(git rev-list -n 1 "v$REQUESTED_VERSION")"
-          [[ "$tag_sha" == "$GITHUB_SHA" ]]
+          fail() { echo "$1" >&2; exit 1; }
+          [[ "$REQUESTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "Version must be X.Y.Z."
+          if [[ "$GITHUB_REF" != refs/heads/main && "$GITHUB_REF" != "refs/tags/v$REQUESTED_VERSION" ]]; then
+            fail "Dispatch from main or from the v$REQUESTED_VERSION tag."
+          fi
+          tag_sha="$(git rev-list -n 1 "v$REQUESTED_VERSION")" || fail "Tag v$REQUESTED_VERSION does not exist."
+          git merge-base --is-ancestor "$tag_sha" refs/remotes/origin/main ||
+            fail "Tag v$REQUESTED_VERSION is not on main."
+          source_version="$(git show "$tag_sha:OOP_RELEASE.json" | node -e 'let s="";process.stdin.on("data",(c)=>s+=c).on("end",()=>console.log(JSON.parse(s).version))')"
+          [[ "$REQUESTED_VERSION" == "$source_version" ]] ||
+            fail "The tagged OOP_RELEASE.json is $source_version, not $REQUESTED_VERSION."
           echo "version=$REQUESTED_VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$tag_sha" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.label }}
@@ -54,24 +63,25 @@ jobs:
             platform: mac
             target: dmg
             arch: arm64
-            asset: OoP-${{ needs.preflight.outputs.version }}-arm64.dmg
+            asset: OOP-${{ needs.preflight.outputs.version }}-arm64.dmg
           - label: Windows x64
             runner: windows-2025
             platform: win
             target: nsis
             arch: x64
-            asset: OoP-${{ needs.preflight.outputs.version }}-x64.exe
+            asset: OOP-${{ needs.preflight.outputs.version }}-x64.exe
           - label: Linux x64
             runner: ubuntu-24.04
             platform: linux
             target: AppImage
             arch: x64
-            asset: OoP-${{ needs.preflight.outputs.version }}-x86_64.AppImage
+            asset: OOP-${{ needs.preflight.outputs.version }}-x86_64.AppImage
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.preflight.outputs.sha }}
           persist-credentials: false
 
       - name: Setup Vite+
@@ -115,7 +125,7 @@ jobs:
       - name: Build desktop bundle
         run: vp run build:desktop
 
-      - name: Package OoP installer
+      - name: Package OOP installer
         shell: bash
         env:
           VERSION: ${{ needs.preflight.outputs.version }}
@@ -149,11 +159,78 @@ jobs:
           name: installer-${{ matrix.platform }}-${{ matrix.arch }}
           path: public-installer/${{ matrix.asset }}
           if-no-files-found: error
-          retention-days: 1
+          # Long enough to re-run a failed publish with these exact bytes.
+          retention-days: 7
+
+  verify-install:
+    name: Install and launch ${{ matrix.label }}
+    needs: [preflight, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-14
+            platform: mac
+            arch: arm64
+            asset: OOP-${{ needs.preflight.outputs.version }}-arm64.dmg
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            arch: x64
+            asset: OOP-${{ needs.preflight.outputs.version }}-x64.exe
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            asset: OOP-${{ needs.preflight.outputs.version }}-x86_64.AppImage
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Download the installer built for this release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: installer-${{ matrix.platform }}-${{ matrix.arch }}
+          path: verify-input
+
+      - name: Install Linux GUI runtime
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1
+
+      # Install, launch to readiness, reinstall, launch, and uninstall the exact artifact that the
+      # publish job will attach. Nothing is uploaded unless every platform passes.
+      - name: Verify install, launch, reinstall, and uninstall
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          ASSET: ${{ matrix.asset }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          if [[ "$PLATFORM" == linux ]]; then
+            xvfb-run -a node scripts/verify-desktop-install.mjs --installer "verify-input/$ASSET" --version "$VERSION"
+          else
+            node scripts/verify-desktop-install.mjs --installer "verify-input/$ASSET" --version "$VERSION"
+          fi
 
   publish:
     name: Verify and attach all installers
-    needs: [preflight, build]
+    needs: [preflight, build, verify-install]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -161,6 +238,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ needs.preflight.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -179,23 +257,45 @@ jobs:
           set -euo pipefail
           node scripts/prepare-desktop-install-assets.mjs \
             --version "$VERSION" \
-            --mac "release-input/OoP-$VERSION-arm64.dmg" \
-            --windows "release-input/OoP-$VERSION-x64.exe" \
-            --linux "release-input/OoP-$VERSION-x86_64.AppImage" \
+            --mac "release-input/OOP-$VERSION-arm64.dmg" \
+            --windows "release-input/OOP-$VERSION-x64.exe" \
+            --linux "release-input/OOP-$VERSION-x86_64.AppImage" \
             --out release-ready
 
-      - name: Verify release and upload without overwriting
+      # A retry only fills in what is missing: an asset already attached must match these bytes
+      # exactly, and one that differs is never replaced.
+      - name: Verify release and attach missing assets without overwriting
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.preflight.outputs.version }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.sha }}
         run: |
           set -euo pipefail
-          tag_sha="$(git rev-list -n 1 "v$VERSION")"
-          [[ "$tag_sha" == "$GITHUB_SHA" ]]
-          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null
-          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length' | grep -vq '^0$'; then
-            echo "Release v$VERSION already has assets; refusing to overwrite." >&2
+          git fetch --no-tags origin "+refs/tags/v$VERSION:refs/tags/v$VERSION"
+          [[ "$(git rev-list -n 1 "v$VERSION")" == "$SOURCE_SHA" ]] || {
+            echo "Tag v$VERSION moved after the build started; refusing to publish." >&2
             exit 1
+          }
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null
+          attached="$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          mkdir -p attached-assets
+          missing=()
+          for file in release-ready/*; do
+            name="$(basename "$file")"
+            if grep -Fxq -- "$name" <<<"$attached"; then
+              gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir attached-assets
+              if ! cmp -s "$file" "attached-assets/$name"; then
+                echo "$name is already attached with different bytes; refusing to overwrite." >&2
+                exit 1
+              fi
+              echo "$name is already attached with identical bytes."
+            else
+              missing+=("$file")
+            fi
+          done
+          if ((${#missing[@]} > 0)); then
+            gh release upload "v$VERSION" "${missing[@]}" --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Every asset was already attached."
           fi
-          gh release upload "v$VERSION" release-ready/* --repo "$GITHUB_REPOSITORY"

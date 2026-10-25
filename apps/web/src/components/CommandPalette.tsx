@@ -103,7 +103,10 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
-import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
+import {
+  refreshArchivedThreadsForEnvironment,
+  useArchivedThreadSnapshots,
+} from "../lib/archivedThreadsState";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -864,7 +867,28 @@ function OpenCommandPaletteDialog(props: {
     () => (archivedSearchQuery === "" ? [] : environmentIds),
     [archivedSearchQuery, environmentIds],
   );
-  const { snapshots: archivedSnapshots } = useArchivedThreadSnapshots(archivedSearchEnvironmentIds);
+  const {
+    snapshots: archivedSnapshots,
+    isLoading: archivedSearchLoading,
+    failedEnvironmentIds: archivedSearchFailedEnvironmentIds,
+  } = useArchivedThreadSnapshots(archivedSearchEnvironmentIds);
+  // A failed archive must not read as "no archived match": say which part of the search is
+  // missing and let the user retry just those environments.
+  const archivedSearchNotice =
+    archivedSearchQuery === "" || archivedSearchFailedEnvironmentIds.length === 0
+      ? undefined
+      : {
+          message:
+            archivedSearchFailedEnvironmentIds.length === 1
+              ? "Archived threads in one environment could not be searched."
+              : `Archived threads in ${archivedSearchFailedEnvironmentIds.length} environments could not be searched.`,
+          actionLabel: "Retry",
+          onAction: () => {
+            for (const environmentId of archivedSearchFailedEnvironmentIds) {
+              refreshArchivedThreadsForEnvironment(environmentId);
+            }
+          },
+        };
   const archivedThreadShells = useMemo<ReadonlyArray<ThreadShell>>(
     () =>
       archivedSearchQuery === ""
@@ -3118,6 +3142,7 @@ function OpenCommandPaletteDialog(props: {
         isActionsOnly={isActionsOnly}
         keybindings={keybindings}
         onExecuteItem={executeItem}
+        {...(archivedSearchNotice ? { notice: archivedSearchNotice } : {})}
         {...(addProjectCloneFlow?.step === "repository"
           ? {
               emptyStateMessage:
@@ -3135,7 +3160,9 @@ function OpenCommandPaletteDialog(props: {
                   }
                 : threadSearch.isPending
                   ? { emptyStateMessage: "Searching thread messages…" }
-                  : {})}
+                  : archivedSearchQuery !== "" && archivedSearchLoading
+                    ? { emptyStateMessage: "Searching archived threads…" }
+                    : {})}
       />
     </CommandPaletteContent>
   );

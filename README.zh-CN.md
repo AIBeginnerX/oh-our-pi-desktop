@@ -1,4 +1,4 @@
-# OoP (oh-our-pi)
+# OOP (oh-our-pi)
 
 **一个桌面应用，统一控制你已经在用的编码智能体，还可以在其上叠加可选的多模型团队。**
 
@@ -9,13 +9,13 @@
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
 ![Status: early](https://img.shields.io/badge/status-early-orange)
 
-OoP 运行在你自己的电脑上，封装你已经装好的编码智能体 CLI（Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code），并为它们提供一个统一的对话式工作区。你可以通过桌面应用、浏览器或手机来使用它。它**不是**托管服务：订阅和 API 密钥都用你自己的，代码始终留在你的电脑上。
+OOP 运行在你自己的电脑上，封装你已经装好的编码智能体 CLI（Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code），并为它们提供一个统一的对话式工作区。你可以通过桌面应用、浏览器或手机来使用它。它**不是**托管服务：订阅和 API 密钥都用你自己的，代码始终留在你的电脑上。
 
-OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT 许可）的分支，基于上游 v0.0.44。当前的 OoP 版本见 [`OOP_RELEASE.json`](OOP_RELEASE.json)。非常感谢 T3 Code 团队：这里几乎所有的基础工作都出自他们之手。
+OOP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT 许可）的分支，基于上游 v0.0.44。当前的 OOP 版本见 [`OOP_RELEASE.json`](OOP_RELEASE.json)。非常感谢 T3 Code 团队：这里几乎所有的基础工作都出自他们之手。
 
 ## 目录
 
-- [为什么选择 OoP？](#为什么选择-oop)
+- [为什么选择 OOP？](#为什么选择-oop)
 - [截图巡览](#截图巡览)
 - [功能参考](#功能参考)
 - [支持的提供商](#支持的提供商)
@@ -30,26 +30,26 @@ OoP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 - [仓库结构](#仓库结构)
 - [状态、贡献与许可证](#状态与路线图说明)
 
-## 为什么选择 OoP？
+## 为什么选择 OOP？
 
-编码智能体都很好用，但每一个都待在自己的终端或应用里，有各自的登录、历史记录和审批提示。OoP 把它们放到了一起。
+编码智能体都很好用，但每一个都待在自己的终端或应用里，有各自的登录、历史记录和审批提示。OOP 把它们放到了一起。
 
 - **一处管理多个智能体。** 按线程在 Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode 和 MiniMax Code 之间切换，diff、终端和审批流程都保持一致。
 - **让多个模型分担同一项任务。** OOP Crew 让一个“brain”（大脑）模型把日常工作交给更便宜的 worker，把难题交给 expert，并由 auditor 审查结果。
 - **始终掌控全局。** 四种权限模式、带可恢复检查点的 diff 面板，以及让费用不再出人意料的用量页面。
 - **离开键盘也能工作。** 把手机与运行智能体的电脑配对，随时关注（或指挥）耗时较长的任务。
-- **一切留在本地。** 项目、提供商登录和智能体的工作都留在你的电脑上。没有 OoP 账号，也没有 OoP 服务器。
+- **一切留在本地。** 项目、提供商登录和智能体的工作都留在你的电脑上。没有 OOP 账号，也没有 OOP 服务器。
 
 适合已经订阅一个或多个编码智能体服务或 API 套餐、能接受早期且未签名的桌面应用，
 并希望使用统一控制界面的开发者。如果你想要一个打磨精良、已签名、可自动更新的产品，
-目前上游的 T3 Code 更合适。
+目前上游项目更合适。
 
 ### 30 秒速览
 
-![OoP 主聊天视图，包含输入框、模型选择器和权限模式](docs/screenshots/chat.png)
+![OOP 主聊天视图，包含输入框、模型选择器和权限模式](docs/screenshots/chat.png)
 _主聊天视图：选择提供商和模型，设置权限模式，并跟进线程。_
 
-1. 打开 OoP，登录一个提供商（Settings → Providers）。
+1. 打开 OOP，登录一个提供商（Settings → Providers）。
 2. 添加一个项目文件夹并新建线程。
 3. 在输入框中选择模型和权限模式，然后发送消息。
 4. 在 diff 面板中查看结果；如果不满意，可以从检查点恢复。
@@ -69,7 +69,7 @@ _聊天：线程时间线下方是带模型选择器和权限模式的输入框�
 
 ### OOP Crew
 
-一个聊天，多个模型。聊天自身的模型就是 **brain**（大脑），负责规划并与你交流。**worker** 承担日常工作（搜索、编辑、测试），**expert** 承担高难度的实现，**auditor** 审查改动过文件的轮次。预设有 **OOP pick**（OOP 精选）、**Speed**（速度）、**Quality**（质量）和 **Budget**（预算），也可以按角色单独指定模型。如果某个 crew 模型出错（例如额度用完），OoP 会把任务交给另一个同级别且已登录的模型。20 行及以内、且测试通过的小改动不会被审查。
+一个聊天，多个模型。聊天自身的模型就是 **brain**（大脑），负责规划并与你交流。**worker** 承担日常工作（搜索、编辑、测试），**expert** 承担高难度的实现，**auditor** 审查改动过文件的轮次。预设有 **OOP pick**（OOP 精选）、**Speed**（速度）、**Quality**（质量）和 **Budget**（预算），也可以按角色单独指定模型。如果某个 crew 模型出错（例如额度用完），OOP 会把任务交给另一个同级别且已登录的模型。20 行及以内、且测试通过的小改动不会被审查。
 
 **适用场景：** 较大的任务，希望大部分工作用便宜的模型完成，再由强模型把关。**打开方式：** 输入框中模型选择器旁边的 **Crew**。Crew 的工作会实时显示在右侧面板的 **Workflows** 和 **Agents** 下。
 
@@ -81,7 +81,7 @@ _OOP Crew：一个聊天，多个模型，并有实时看板显示谁在做什�
 
 ### Providers（提供商）
 
-在一处完成每个提供商的安装、更新和登录。卡片会显示 CLI 是否已安装、是否已登录，并提供 **Install**（当 `npm` 在你的 `PATH` 中时）或 **Update now**（当 OoP 知道是哪个安装器安装了该 CLI 时）。
+在一处完成每个提供商的安装、更新和登录。卡片会显示 CLI 是否已安装、是否已登录，并提供 **Install**（当 `npm` 在你的 `PATH` 中时）或 **Update now**（当 OOP 知道是哪个安装器安装了该 CLI 时）。
 
 **打开方式：** Settings → Providers。
 
@@ -136,7 +136,7 @@ _权限模式：从 Supervised 到 Full access。_
 
 ### 线程目标
 
-描述聊天结束时应当达成的状态。目标未完成期间，每轮结束后 OoP 都会继续推进该线程，直到智能体报告 `GOAL COMPLETE`、报告 `GOAL BLOCKED: <reason>`，或你设定的自动继续次数用完。在使用 Crew 时，改动了文件的轮次只有通过审查后才会计入。
+描述聊天结束时应当达成的状态。目标未完成期间，每轮结束后 OOP 都会继续推进该线程，直到智能体报告 `GOAL COMPLETE`、报告 `GOAL BLOCKED: <reason>`，或你设定的自动继续次数用完。在使用 Crew 时，改动了文件的轮次只有通过审查后才会计入。
 
 **打开方式：** 输入框中 **Crew** 旁边的 **Goal**。使用 **Stop goal** 结束目标。
 
@@ -179,14 +179,14 @@ _与聊天并排的内置终端。_
 
 ### 深色主题
 
-![深色主题下的 OoP](docs/screenshots/dark.png)
+![深色主题下的 OOP](docs/screenshots/dark.png)
 _深色主题。_
 
 ### 手机尺寸的 Web 客户端
 
 配对之后，同一个 Web 界面可以在手机浏览器中使用（参见[从手机连接](#从手机连接)）。
 
-![手机尺寸的 OoP Web 客户端](docs/screenshots/mobile.png)
+![手机尺寸的 OOP Web 客户端](docs/screenshots/mobile.png)
 _手机尺寸的 Web 客户端。_
 
 ### 远程访问设置
@@ -200,35 +200,35 @@ _Settings → Connections：远程访问与配对（配对码已打码）。_
 
 ## 功能参考
 
-“Added in OoP”（OoP 新增）表示本分支的文档和代码将其标记为 OoP 专有。“From T3 Code”（来自 T3 Code）表示据文档和代码所示，它属于上游（v0.0.44）的一部分；本分支没有做过文件级别的 diff，所以这一划分只是大致准确。
+“Added in OOP”（OOP 新增）表示本分支的文档和代码将其标记为 OOP 专有。“Upstream”（来自上游）表示据文档和代码所示，它属于上游（v0.0.44）的一部分；本分支没有做过文件级别的 diff，所以这一划分只是大致准确。
 
 | 功能                   | 作用                                                                                  | 位置                                         | 来源                                             |
 | ---------------------- | ------------------------------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------------ |
-| OOP Crew               | brain 模型把任务委派给 worker、expert 和 auditor 模型；支持预设和按角色覆盖           | 输入框 → Crew；右侧面板 → Workflows / Agents | Added in OoP                                     |
-| 线程目标               | 让线程持续运行，直到检查通过或目标受阻                                                | 输入框 → Goal                                | Added in OoP                                     |
-| 项目记忆               | 在输入框中推荐已保存的项目记忆                                                        | 输入框，记忆按钮                             | Added in OoP                                     |
-| 本地角色偏好           | 按环境为实现或审查保存偏好的模型，并附带推荐                                          | 输入框模型选择器                             | Added in OoP                                     |
-| Z.AI / MiniMax 预设    | 基于 OpenCode 的提供商预设                                                            | Settings → Providers → Add                   | Added in OoP（付费请求未测试）                   |
-| ZCode (GLM) 提供商     | 通过 ACP 接入 Z.AI 的智能体                                                           | Settings → Providers                         | Added in OoP                                     |
-| MiniMax Code 提供商    | 通过 ACP 接入 MiniMax 的智能体                                                        | Settings → Providers                         | Added in OoP                                     |
-| 一键安装 / 更新提供商  | 在提供商卡片上安装或更新提供商 CLI                                                    | Settings → Providers                         | Added in OoP（与上游的具体差异未核实）           |
-| Verify macOS build     | 在服务器所在的 Mac 上检查 OoP `.dmg` 的完整性、严格代码签名和启动情况                 | 聊天标题栏 → Verify macOS build              | Added in OoP                                     |
-| 手机连接对话框         | 桌面应用中一键生成手机配对二维码，可选自有中继                                        | 侧边栏 → Connect mobile                      | Added in OoP（仅桌面应用）                       |
-| 自有 Cloudflare 中继   | 你自行部署的 Worker，让手机可以从任何网络访问你的桌面                                 | `infra/oop-relay`                            | Added in OoP，早期                               |
-| 本地文件夹更新器       | 打包后的 OoP 可以从你指定的文件夹中获取更新的安装包                                   | 打包的 macOS / Windows 版本                  | Added in OoP，早期，未经他人测试                 |
-| 多提供商会话           | 跨提供商的线程、轮次和检查点                                                          | 各处                                         | From T3 Code                                     |
-| 权限模式               | Supervised、Auto-accept edits、Auto、Full access                                      | 输入框；Settings → General                   | From T3 Code                                     |
-| Diff 面板与检查点      | 审查并恢复智能体的改动                                                                | 右侧面板 → Diff                              | From T3 Code                                     |
-| 源代码管理             | 通过提供商 CLI 克隆、提交、发布和发起拉取请求                                         | Settings → Source Control                    | From T3 Code                                     |
-| 内置终端               | 每个线程一个终端，运行在服务器所在机器上                                              | 线程内                                       | From T3 Code                                     |
-| 聊天中的报告           | 图表、统计卡片、进度条、mermaid 流程图                                                | 回复中                                       | From T3 Code                                     |
-| 工作流视图             | 工具调用和子智能体的实时图表                                                          | 右侧面板，`mod+alt+w`                        | From T3 Code                                     |
-| 用量页面               | token 和估算费用历史                                                                  | 侧边栏，`mod+u`                              | From T3 Code（ZCode 和 MiniMax 两行为 OoP 新增） |
-| SnapShots              | 把窗口截取到你的草稿中（默认关闭；macOS、Windows、Linux Wayland）                     | Settings → SnapShots                         | From T3 Code（归属未核实）                       |
-| 远程访问               | 局域网配对、Tailscale HTTPS、SSH 环境                                                 | Settings → Connections                       | From T3 Code                                     |
-| 设备面板               | 在线程旁观看并点按 iOS 模拟器或 Android 模拟器                                        | 右侧面板 → Device                            | From T3 Code（此处未测试）                       |
-| 后台服务               | macOS（launchd）和 Linux（systemd 用户单元）上的 `t3 service install`；不支持 Windows | CLI                                          | From T3 Code（此处未测试）                       |
-| 快捷键、项目设置、主题 | 可自定义的快捷键、按项目的覆盖设置、外观                                              | Settings                                     | From T3 Code                                     |
+| OOP Crew               | brain 模型把任务委派给 worker、expert 和 auditor 模型；支持预设和按角色覆盖           | 输入框 → Crew；右侧面板 → Workflows / Agents | Added in OOP                                     |
+| 线程目标               | 让线程持续运行，直到检查通过或目标受阻                                                | 输入框 → Goal                                | Added in OOP                                     |
+| 项目记忆               | 在输入框中推荐已保存的项目记忆                                                        | 输入框，记忆按钮                             | Added in OOP                                     |
+| 本地角色偏好           | 按环境为实现或审查保存偏好的模型，并附带推荐                                          | 输入框模型选择器                             | Added in OOP                                     |
+| Z.AI / MiniMax 预设    | 基于 OpenCode 的提供商预设                                                            | Settings → Providers → Add                   | Added in OOP（付费请求未测试）                   |
+| ZCode (GLM) 提供商     | 通过 ACP 接入 Z.AI 的智能体                                                           | Settings → Providers                         | Added in OOP                                     |
+| MiniMax Code 提供商    | 通过 ACP 接入 MiniMax 的智能体                                                        | Settings → Providers                         | Added in OOP                                     |
+| 一键安装 / 更新提供商  | 在提供商卡片上安装或更新提供商 CLI                                                    | Settings → Providers                         | Added in OOP（与上游的具体差异未核实）           |
+| Verify macOS build     | 在服务器所在的 Mac 上检查 OOP `.dmg` 的完整性、严格代码签名和启动情况                 | 聊天标题栏 → Verify macOS build              | Added in OOP                                     |
+| 手机连接对话框         | 桌面应用中一键生成手机配对二维码，可选自有中继                                        | 侧边栏 → Connect mobile                      | Added in OOP（仅桌面应用）                       |
+| 自有 Cloudflare 中继   | 你自行部署的 Worker，让手机可以从任何网络访问你的桌面                                 | `infra/oop-relay`                            | Added in OOP，早期                               |
+| 本地文件夹更新器       | 打包后的 OOP 可以从你指定的文件夹中获取更新的安装包                                   | 打包的 macOS / Windows 版本                  | Added in OOP，早期，未经他人测试                 |
+| 多提供商会话           | 跨提供商的线程、轮次和检查点                                                          | 各处                                         | Upstream                                     |
+| 权限模式               | Supervised、Auto-accept edits、Auto、Full access                                      | 输入框；Settings → General                   | Upstream                                     |
+| Diff 面板与检查点      | 审查并恢复智能体的改动                                                                | 右侧面板 → Diff                              | Upstream                                     |
+| 源代码管理             | 通过提供商 CLI 克隆、提交、发布和发起拉取请求                                         | Settings → Source Control                    | Upstream                                     |
+| 内置终端               | 每个线程一个终端，运行在服务器所在机器上                                              | 线程内                                       | Upstream                                     |
+| 聊天中的报告           | 图表、统计卡片、进度条、mermaid 流程图                                                | 回复中                                       | Upstream                                     |
+| 工作流视图             | 工具调用和子智能体的实时图表                                                          | 右侧面板，`mod+alt+w`                        | Upstream                                     |
+| 用量页面               | token 和估算费用历史                                                                  | 侧边栏，`mod+u`                              | Upstream（ZCode 和 MiniMax 两行为 OOP 新增） |
+| SnapShots              | 把窗口截取到你的草稿中（默认关闭；macOS、Windows、Linux Wayland）                     | Settings → SnapShots                         | Upstream（归属未核实）                       |
+| 远程访问               | 局域网配对、Tailscale HTTPS、SSH 环境                                                 | Settings → Connections                       | Upstream                                     |
+| 设备面板               | 在线程旁观看并点按 iOS 模拟器或 Android 模拟器                                        | 右侧面板 → Device                            | Upstream（此处未测试）                       |
+| 后台服务               | macOS（launchd）和 Linux（systemd 用户单元）上的 `t3 service install`；不支持 Windows | CLI                                          | Upstream（此处未测试）                       |
+| 快捷键、项目设置、主题 | 可自定义的快捷键、按项目的覆盖设置、外观                                              | Settings                                     | Upstream                                     |
 
 ## 支持的提供商
 
@@ -310,7 +310,7 @@ node scripts/macos.mjs start     # optional: run an isolated dev copy of the des
 node scripts/macos.mjs package   # builds an ad hoc signed DMG into release/macos/
 ```
 
-打开 `release/macos/` 中的 DMG，把应用拖到 `/Applications/OoP.app`。
+打开 `release/macos/` 中的 DMG，把应用拖到 `/Applications/OOP.app`。
 
 ### Windows（x64，实验性）
 
@@ -321,7 +321,7 @@ set OOP_WINDOWS_UPDATE_DIRECTORY=%CD%\release\windows
 node scripts\windows.mjs package
 ```
 
-安装程序（`OoP-<version>-x64.exe`）会写入 `release\windows`。
+安装程序（`OOP-<version>-x64.exe`）会写入 `release\windows`。
 
 ### 通用开发路径（任意操作系统）
 
@@ -354,7 +354,7 @@ vp run dev    # server + web; open the pairing URL it prints
 ```mermaid
 graph LR
     P["手机<br/>（浏览器或原生应用）"] -->|"一次性配对链接 / 二维码"| N["网络路径<br/>局域网、Tailscale 或你自己的中继"]
-    N --> S["你电脑上的 OoP 服务器<br/>（校验配对，保持会话）"]
+    N --> S["你电脑上的 OOP 服务器<br/>（校验配对，保持会话）"]
     S --> C["提供商 CLI<br/>Codex、Claude Code、Cursor 等"]
     C --> F["你的项目文件"]
 ```
@@ -372,10 +372,10 @@ graph LR
 
 ### a) 同一 Wi-Fi / 局域网（最简单）
 
-**前提条件：** 电脑上运行着 OoP 桌面应用，并且手机在同一网络中。
+**前提条件：** 电脑上运行着 OOP 桌面应用，并且手机在同一网络中。
 
 1. 在桌面应用中，点击侧边栏的手机图标（**Connect mobile**）。
-2. 如果对话框提示移动连接已关闭，请点击 **Allow mobile connections**。OoP 会重启一次；该设置会被保留。
+2. 如果对话框提示移动连接已关闭，请点击 **Allow mobile connections**。OOP 会重启一次；该设置会被保留。
 3. 会出现一个一次性二维码。如果提供了多个地址，请选择手机能够访问的那个（同一 Wi-Fi 下选 **LAN** 项）。
 4. 用手机相机扫描二维码，并在手机浏览器中打开链接。手机就配对好了。配对会授权该设备以后继续访问，所以不需要再次输入原来的配对码。
 
@@ -410,7 +410,7 @@ tailscale serve --https=443 off   # remove the mapping later
 
 ### c) 你自己的 Cloudflare 中继（离家使用，不用 Tailscale）
 
-OoP 在 [`infra/oop-relay`](infra/oop-relay/README.md) 中附带了一个小型 Cloudflare Worker，部署到**你自己的** Cloudflare 账号即可。桌面端主动向它建立连接，因此无需设置路由器，只要桌面在线，手机就能从任何网络连接。
+OOP 在 [`infra/oop-relay`](infra/oop-relay/README.md) 中附带了一个小型 Cloudflare Worker，部署到**你自己的** Cloudflare 账号即可。桌面端主动向它建立连接，因此无需设置路由器，只要桌面在线，手机就能从任何网络连接。
 
 1. 按照 [`infra/oop-relay/README.md`](infra/oop-relay/README.md) 部署该 Worker（`npx wrangler login`、`npx wrangler deploy`，然后 `npx wrangler secret put OOP_RELAY_SECRET`）。
 2. 在桌面应用中：Connect mobile → **Use away from home**。把显示的密钥粘贴到 Worker 的 secret 中，输入中继地址并点击 **Save**。
@@ -419,25 +419,25 @@ OoP 在 [`infra/oop-relay`](infra/oop-relay/README.md) 中附带了一个小型 
 > [!NOTE]
 > 一次部署只服务一台桌面。Cloudflare 会为中继终结 TLS，因此运行它的那个 Cloudflare 账号可以看到流量。手机仍然需要用配对码登录桌面。这条路径是新增的，三者中测试最少。
 
-**那 T3 Connect 呢？** T3 Code 还提供了“T3 Connect”，这是一个依赖云端登录和上游项目所运营服务器的隧道服务。**OoP 不运营任何托管服务**，并且本分支没有测试过 T3 Connect，所以本指南不涉及它。
+**那上游的隧道服务呢？** 上游项目还提供了一个依赖云端登录和上游项目所运营服务器的隧道服务。**OOP 不运营任何托管服务**，并且本分支没有测试过它，所以本指南不涉及它。
 
 ### 原生应用还是浏览器？
 
 |                | 手机浏览器                                          | iOS / Android 原生应用                             |
 | -------------- | --------------------------------------------------- | -------------------------------------------------- |
-| 它是什么       | 由你的电脑提供的 OoP Web 界面                       | 由上游项目发布的 T3 Code 移动应用（不带 OoP 品牌） |
-| 安装           | 无需安装                                            | App Store / Google Play 上的 T3 Code 商店页面      |
+| 它是什么       | 由你的电脑提供的 OOP Web 界面                       | 由上游项目发布的移动应用（不带 OOP 品牌） |
+| 安装           | 无需安装                                            | 上游项目在 App Store / Google Play 上的商店页面      |
 | 连接           | 打开配对链接或扫描二维码                            | 添加环境：扫描二维码或粘贴配对 URL                 |
 | 本分支是否测试 | 已按手机尺寸检查 Web 界面；尚未单独在真机上验证配对 | **否**                                             |
 
 ![通过配对链接连接的手机尺寸 Web 客户端](docs/screenshots/mobile.png)
-_连接到 OoP 的手机浏览器。_
+_连接到 OOP 的手机浏览器。_
 
-本分支保留了协议和认证标识符（见 [`UPSTREAM.json`](UPSTREAM.json) 中的 `internal_protocol_and_auth_identifiers_preserved`），因此上游应用应该可以与 OoP 服务器配对。**本分支没有测试过原生移动应用**，所以请将其视为未经确认。上游文档在 Settings → Environments 下介绍了应用的连接设置。如果出现任何异常，请改用浏览器。
+本分支保留了协议和认证标识符（见 [`UPSTREAM.json`](UPSTREAM.json) 中的 `internal_protocol_and_auth_identifiers_preserved`），因此上游应用应该可以与 OOP 服务器配对。**本分支没有测试过原生移动应用**，所以请将其视为未经确认。上游文档在 Settings → Environments 下介绍了应用的连接设置。如果出现任何异常，请改用浏览器。
 
 ### 推送通知
 
-上游文档说，手机推送通知（智能体完成、失败、需要审批）要求登录 T3 Connect，仅使用直连或 Tailscale 连接无法启用。由于 OoP 不运营 T3 Connect，且本分支没有测试过它，**请不要指望上述路径能收到推送通知。** 请保持手机页面打开，或者稍后回来查看线程。
+上游文档说，手机推送通知（智能体完成、失败、需要审批）要求登录上游的隧道服务，仅使用直连或 Tailscale 连接无法启用。由于 OOP 不运营该服务，且本分支没有测试过它，**请不要指望上述路径能收到推送通知。** 请保持手机页面打开，或者稍后回来查看线程。
 
 ### 撤销设备
 
@@ -448,24 +448,24 @@ _连接到 OoP 的手机浏览器。_
 
 ## 更新机制
 
-源码构建不会从 GitHub 自动更新，请按下方步骤重新构建。若要更新二进制安装版本，请退出 OoP 并重新运行对应的安装命令。用户数据会保留。
+源码构建不会从 GitHub 自动更新，请按下方步骤重新构建。若要更新二进制安装版本，请退出 OOP 并重新运行对应的安装命令。用户数据会保留。
 
 1. `git pull`
 2. 重新构建 / 打包（参见[安装](#安装--从源码构建)）并重新安装。
 
-每个版本都以**一次提交**（标题为 `OoP <version> source`）、名为 `v<version>` 的标签和一个 GitHub Release 发布。你在 `~/.oop-desktop/userdata` 中的数据在更新后会被保留。想了解新版本，请在 GitHub 仓库上开启 **Watch → Custom → Releases**；较早的版本只有标签。
+每个版本都以**一次提交**（标题为 `OOP <version> source`）、名为 `v<version>` 的标签和一个 GitHub Release 发布。你在 `~/.oop-desktop/userdata` 中的数据在更新后会被保留。想了解新版本，请在 GitHub 仓库上开启 **Watch → Custom → Releases**；较早的版本只有标签。
 
 你自己构建的应用会从构建时设定的文件夹中找到你的下一次构建，并在应用内提示更新：Windows 上是上面设置的 `release\windows`，macOS 上是 `release/macos`。macOS 的 `package` 只生成 DMG，因此还需要接着构建更新包：
 
 ```bash
 V=<version>
-node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
-  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
-  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OOP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OOP-$V-arm64-update.pkg
 ```
 
 > [!NOTE]
-> 应用内的服务器更新提示和 `t3 update` 来自上游 T3 Code，并不是 OoP 的更新渠道。
+> 应用内的服务器更新提示和 `t3 update` 来自上游项目，并不是 OOP 的更新渠道。
 
 ## 安全与隐私
 
@@ -476,12 +476,12 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **费用：** 每个提供商都使用你自己的订阅或 API 额度。Crew 在每个聊天中运行多个模型，会成倍增加用量。Usage 页面显示的是估算值，不是你的账单。
 - **API 密钥**保存在服务器端，也就是你的机器上。Antigravity 的 Gemini API 密钥在设置中以**明文**保存。
 - **切勿提交 `.env` 文件或密钥**，也不要把它们粘贴到 issue 或日志中。
-- **上游安装程序安装的是 T3 Code，而不是 OoP：** `t3.codes` 的安装脚本、`npx t3`、Homebrew `t3-code`、winget `T3Tools.T3Code`，以及 App Store / Play 商店页面，都属于上游项目。请使用上面的 OoP 桌面安装程序，或从本仓库构建 OoP。
+- **上游安装程序安装的是上游应用，而不是 OOP：** `t3.codes` 的安装脚本、`npx t3`、Homebrew `t3-code`、winget `T3Tools.T3Code`，以及 App Store / Play 商店页面，都属于上游项目。请使用上面的 OOP 桌面安装程序，或从本仓库构建 OOP。
 - **CLI 仍然叫 `t3`**，可能与上游的安装冲突。
 - **源码构建产物是临时签名的**，没有 Developer ID，也未经公证。二进制安装程序会验证 SHA-256，不会绕过 Gatekeeper 隔离属性或 SmartScreen。
 - **本地文件夹更新器**信任任何能写入更新文件夹的人；它的 SHA-256 校验只能检测数据损坏。
 
-**遥测。** OoP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（使用上游项目的密钥和 `us.i.posthog.com`）；OoP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。
+**遥测。** OOP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（使用上游项目的密钥和 `us.i.posthog.com`）；OOP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。
 
 如需报告安全漏洞，请参见 [SECURITY.md](SECURITY.md)。
 
@@ -508,21 +508,21 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 你需要 Node.js 24.x（24.13.1 或更高版本）和 pnpm 11.10.0。其他 Node 主版本会被拒绝。
 
 **我的数据在哪里？**
-OoP 的服务器状态（线程、设置、本地数据库）位于 `~/.oop-desktop/userdata`。桌面二进制程序与这些数据分开安装。提供商的登录信息保存在各提供商 CLI 自己的文件夹中，不在这里。
+OOP 的服务器状态（线程、设置、本地数据库）位于 `~/.oop-desktop/userdata`。桌面二进制程序与这些数据分开安装。提供商的登录信息保存在各提供商 CLI 自己的文件夹中，不在这里。
 
 **如何更新二进制安装版本？**
-退出 OoP，然后重新运行对应的安装命令。用户数据会保留。
+退出 OOP，然后重新运行对应的安装命令。用户数据会保留。
 
-**如何重置 OoP？**
-退出应用，然后把 `~/.oop-desktop/userdata` 移到一边（在确定之前不要删除）。OoP 下次启动时会是全新状态。你的项目文件夹不会受影响。
+**如何重置 OOP？**
+退出应用，然后把 `~/.oop-desktop/userdata` 移到一边（在确定之前不要删除）。OOP 下次启动时会是全新状态。你的项目文件夹不会受影响。
 
 **如何卸载？**
-退出应用，然后删除 `~/Applications/OoP.app`（macOS；或 `OOP_INSTALL_DIR` 指定的路径），在 Windows 设置中卸载 OoP，或在 Linux 上删除 `~/.local/bin/oop-desktop`、`~/.local/share/oop-desktop` 和桌面菜单项。也可以删除 `~/.oop-desktop` 来清除它的数据。提供商 CLI 是单独安装的，不会被移除。
+退出应用，然后删除 `~/Applications/OOP.app`（macOS；或 `OOP_INSTALL_DIR` 指定的路径），在 Windows 设置中卸载 OOP，或在 Linux 上删除 `~/.local/bin/oop-desktop`、`~/.local/share/oop-desktop` 和桌面菜单项。也可以删除 `~/.oop-desktop` 来清除它的数据。提供商 CLI 是单独安装的，不会被移除。
 
 **这会花我的钱吗？**
-OoP 本身免费。它所运行的提供商使用你自己的订阅或 API 额度。Crew 在每个聊天中使用多个模型，Usage 页面显示的是估算（而非实际计费）的费用。
+OOP 本身免费。它所运行的提供商使用你自己的订阅或 API 额度。Crew 在每个聊天中使用多个模型，Usage 页面显示的是估算（而非实际计费）的费用。
 
-**我能使用上游的 T3 Code 移动应用吗？**
+**我能使用上游的移动应用吗？**
 它应该可以配对，但本分支没有测试过。参见[原生应用还是浏览器](#原生应用还是浏览器)。
 
 ## 仓库结构
@@ -542,7 +542,7 @@ OoP 本身免费。它所运行的提供商使用你自己的订阅或 API 额�
 
 ## 状态与路线图说明
 
-OoP 尚处于**早期**。难免有 bug。本分支实际测试过的平台只有 macOS Apple Silicon；Windows 是实验性的；Intel Mac、Linux、原生移动应用、推送通知以及付费的 Z.AI / MiniMax 请求均未测试。没有承诺的路线图：维护者修复自己遇到的问题，并在准备就绪时发布新版本。
+OOP 尚处于**早期**。难免有 bug。本分支实际测试过的平台只有 macOS Apple Silicon；Windows 是实验性的；Intel Mac、Linux、原生移动应用、推送通知以及付费的 Z.AI / MiniMax 请求均未测试。没有承诺的路线图：维护者修复自己遇到的问题，并在准备就绪时发布新版本。
 
 ## 贡献
 
@@ -552,4 +552,4 @@ OoP 尚处于**早期**。难免有 bug。本分支实际测试过的平台只�
 
 [MIT](LICENSE)。必须保留原始声明“Copyright (c) 2026 T3 Tools Inc.”，本分支的修改同样采用 MIT 许可。
 
-OoP 构建于 T3 Tools Inc. 和 pingdotgg 团队的 [T3 Code](https://github.com/pingdotgg/t3code) 之上。提供商名称（Codex、Claude Code、Cursor、Grok、OpenCode、Antigravity、ZCode、MiniMax、Z.AI）归其各自所有者所有；OoP 与它们没有关联。
+OOP 构建于 T3 Tools Inc. 和 pingdotgg 团队的 [T3 Code](https://github.com/pingdotgg/t3code) 之上。提供商名称（Codex、Claude Code、Cursor、Grok、OpenCode、Antigravity、ZCode、MiniMax、Z.AI）归其各自所有者所有；OOP 与它们没有关联。

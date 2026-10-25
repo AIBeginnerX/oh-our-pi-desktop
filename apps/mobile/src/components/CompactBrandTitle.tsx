@@ -32,7 +32,7 @@ export function CompactBrandTitle(
   return (
     <View
       aria-level={1}
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel="OOP, Threads"
       accessible
       role="heading"
       className="flex-row items-center gap-1.5"

@@ -32,7 +32,7 @@ function Invoke-WebRequest {
     if ($script:downloadFailure) { throw "fixture HTTP failure" }
     if ($Uri.EndsWith(".sha256")) {
         $hash = if ($script:badHash) { "0" * 64 } else { $digest }
-        [IO.File]::WriteAllText($OutFile, "$hash  OoP-1.2.3-x64.exe`n")
+        [IO.File]::WriteAllText($OutFile, "$hash  OOP-1.2.3-x64.exe`n")
     } else {
         Copy-Item -LiteralPath $fixture -Destination $OutFile
     }
@@ -63,7 +63,7 @@ try {
     $env:OOP_RELEASE_BASE_URL = "https://fixture.invalid/releases/download"
     Invoke-RestMethod -Uri "https://fixture.invalid/install-desktop.ps1" | Invoke-Expression
     if ($script:launches.Count -ne 1 -or ($script:launches[0] -join " ") -ne "/S /currentuser") { throw "Incorrect NSIS arguments." }
-    if ($script:downloads.Count -ne 2 -or -not $script:downloads[0].EndsWith("/v1.2.3/OoP-1.2.3-x64.exe")) { throw "Wrong release asset." }
+    if ($script:downloads.Count -ne 2 -or -not $script:downloads[0].EndsWith("/v1.2.3/OOP-1.2.3-x64.exe")) { throw "Wrong release asset." }
     Write-Host "PASS Windows download, checksum, silent per-user launch and exit wait"
 
     $script:badHash = $true

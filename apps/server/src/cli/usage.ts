@@ -45,7 +45,7 @@ export class OwnedUsageDatabaseMissingError extends Schema.TaggedError<OwnedUsag
   { dbPath: Schema.String },
 ) {
   override get message(): string {
-    return `No T3 Code database found at ${this.dbPath}. Run on the machine and --base-dir that hold the thread; this command never creates one.`;
+    return `No OOP database found at ${this.dbPath}. Run on the machine and --base-dir that hold the thread; this command never creates one.`;
   }
 }
 
@@ -54,7 +54,7 @@ export class OwnedUsageDatabaseIncompatibleError extends Schema.TaggedError<Owne
   { dbPath: Schema.String },
 ) {
   override get message(): string {
-    return `${this.dbPath} is not a readable T3 Code state database (its orchestration event store is missing or unreadable).`;
+    return `${this.dbPath} is not a readable OOP state database (its orchestration event store is missing or unreadable).`;
   }
 }
 
@@ -80,7 +80,7 @@ const summarizeFailure = (dbPath: string | undefined, error: unknown): string =>
   if (error instanceof OwnedUsageDatabaseIncompatibleError) return error.message;
   if (error instanceof OwnedUsageStoreError) return error.message;
   if (dbPath === undefined) {
-    return "Could not resolve the T3 Code database location for owned usage. Check the server logs for the underlying condition.";
+    return "Could not resolve the OOP database location for owned usage. Check the server logs for the underlying condition.";
   }
   const text = error instanceof Error ? error.message : "";
   if (/no such table/i.test(text)) {

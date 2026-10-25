@@ -26,7 +26,7 @@ export const makeReleaseWorkspace = (version = RELEASE_TEST_VERSION) =>
     const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-verify-workspace-" });
     yield* fileSystem.writeFileString(path.join(root, "OOP_RELEASE.json"), encodeJson({ version }));
     yield* fileSystem.makeDirectory(path.join(root, "release", "macos"), { recursive: true });
-    const dmgPath = path.join(root, "release", "macos", `OoP-${version}-arm64.dmg`);
+    const dmgPath = path.join(root, "release", "macos", `OOP-${version}-arm64.dmg`);
     yield* fileSystem.writeFileString(dmgPath, RELEASE_TEST_DMG_CONTENTS);
     return { root, dmgPath };
   });
@@ -133,7 +133,7 @@ export const makeFakeMacTools = (options: {
       const contents = NodePath.join(appPath, "Contents");
       await NodeFSP.mkdir(NodePath.join(contents, "MacOS"), { recursive: true });
       await NodeFSP.writeFile(NodePath.join(contents, "Info.plist"), "<plist/>");
-      await NodeFSP.writeFile(NodePath.join(contents, "MacOS", "OoP"), "#!/bin/sh\n");
+      await NodeFSP.writeFile(NodePath.join(contents, "MacOS", "OOP"), "#!/bin/sh\n");
     });
 
   const processRunner: FakeMacTools["processRunner"] = {
@@ -156,7 +156,7 @@ export const makeFakeMacTools = (options: {
           state.mounted = true;
           if (options.attach === "timeout") return timedOut;
           const mountPoint = input.args[input.args.indexOf("-mountpoint") + 1] ?? "";
-          yield* buildApp(NodePath.join(mountPoint, "OoP.app"));
+          yield* buildApp(NodePath.join(mountPoint, "OOP.app"));
           return output(0);
         }
         if (name === "hdiutil" && verb === "detach") {
@@ -167,12 +167,12 @@ export const makeFakeMacTools = (options: {
         }
         if (name === "plutil") {
           const key = input.args[1];
-          return output(0, `${key === "CFBundleExecutable" ? "OoP" : options.version}\n`);
+          return output(0, `${key === "CFBundleExecutable" ? "OOP" : options.version}\n`);
         }
         if (name === "codesign") {
           yield* options.onCodesign ?? Effect.void;
           const target = input.args.at(-1) ?? "";
-          const onCopy = target.endsWith(`${NodePath.sep}launch${NodePath.sep}OoP.app`);
+          const onCopy = target.endsWith(`${NodePath.sep}launch${NodePath.sep}OOP.app`);
           if (onCopy && options.copyCodesignExit) {
             return output(options.copyCodesignExit, "", "invalid signature");
           }

@@ -4,6 +4,7 @@ import type {
   ModelCapabilities,
   ServerProvider,
   ServerProviderAuth,
+  ServerProviderDiagnosis,
   ServerProviderSkill,
   ServerProviderSlashCommand,
   ServerProviderModel,
@@ -53,6 +54,7 @@ const isProviderCommandNotFoundError = Schema.is(ProviderCommandNotFoundError);
 
 export interface ProviderProbeResult {
   readonly installed: boolean;
+  readonly diagnosis?: ServerProviderDiagnosis;
   readonly version: string | null;
   readonly status: Exclude<ServerProviderState, "disabled">;
   readonly auth: ServerProviderAuth;
@@ -231,6 +233,7 @@ export function buildServerProvider(input: {
       : {}),
     enabled: input.enabled,
     installed: input.probe.installed,
+    ...(input.probe.diagnosis ? { diagnosis: input.probe.diagnosis } : {}),
     version: input.probe.version,
     status: input.enabled ? input.probe.status : "disabled",
     auth: input.probe.auth,

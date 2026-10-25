@@ -1045,6 +1045,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    bundledSkills: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:bundled-skills",
+      tag: WS_METHODS.serverListBundledSkills,
+    }),
+    installBundledSkill: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:install-bundled-skill",
+      tag: WS_METHODS.serverInstallBundledSkill,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,

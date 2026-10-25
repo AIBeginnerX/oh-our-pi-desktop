@@ -134,9 +134,7 @@ export class PortalCaptureShortcut {
     if (this.managedByHyprland)
       throw new Error("Change the capture binding in your Hyprland config, then save it.");
     if (!this.hasSession || this.version < 2)
-      throw new Error(
-        "Open your desktop's shortcut settings and allow T3 Code's capture shortcut.",
-      );
+      throw new Error("Open your desktop's shortcut settings and allow OOP's capture shortcut.");
     await this.call({
       destination: this.owner,
       path: PATH,
@@ -164,7 +162,7 @@ export class PortalCaptureShortcut {
       // This failed session is closing, so retry can register a fresh one.
       shortcutCanRetry: !this.managedByHyprland,
       shortcutMessage: this.managedByHyprland
-        ? "Couldn't connect to Hyprland shortcuts. Make sure xdg-desktop-portal-hyprland is running, then restart T3 Code."
+        ? "Couldn't connect to Hyprland shortcuts. Make sure xdg-desktop-portal-hyprland is running, then restart OOP."
         : error instanceof Error
           ? error.message
           : "Could not register the capture shortcut.",
@@ -304,7 +302,7 @@ export class PortalCaptureShortcut {
             shortcutMessage:
               this.version >= 2
                 ? "Shortcut permission wasn't granted. Open shortcut permissions to allow it."
-                : "Shortcut permission wasn't granted. Allow T3 Code in your desktop's shortcut settings.",
+                : "Shortcut permission wasn't granted. Allow OOP in your desktop's shortcut settings.",
           });
           return undefined;
         }
@@ -327,7 +325,7 @@ export class PortalCaptureShortcut {
         shortcutPending: false,
         shortcutMessage: shortcut
           ? "Managed by Hyprland. Add the binding to your config and save it."
-          : "Hyprland did not register the capture action. Check that xdg-desktop-portal-hyprland is running, then restart T3 Code.",
+          : "Hyprland did not register the capture action. Check that xdg-desktop-portal-hyprland is running, then restart OOP.",
       });
       return;
     }

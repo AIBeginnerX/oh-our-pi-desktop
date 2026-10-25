@@ -16,9 +16,9 @@ changes.
 Changes apply to the current chat. Use **Use this crew for new chats** to make them the default;
 in a new, unsent chat the changes set the default directly.
 
-If a crew model fails, for example because its account is out of credit, OoP hands the same task to another signed-in model of the same level and shows the switch on the board. A provider that just failed sits out new tasks for ten minutes; one that is out of credit or signed out sits out until OoP checks its status again. Only when every model in that chain fails does the chat's own model do the task itself.
+If a crew model fails, for example because its account is out of credit, OOP hands the same task to another signed-in model of the same level and shows the switch on the board. A provider that just failed sits out new tasks for ten minutes; one that is out of credit or signed out sits out until OOP checks its status again. Only when every model in that chain fails does the chat's own model do the task itself.
 
-When the auditor asks for changes, or a crew task finishes after the brain has already answered, OoP sends the brain a follow-up turn with that report so it can fix the work or update its answer. Audit fixes stop after two rounds per message you send. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
+When the auditor asks for changes, or a crew task finishes after the brain has already answered, OOP sends the brain a follow-up turn with that report so it can fix the work or update its answer. Audit fixes stop after two rounds per message you send. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
 
 Each piece of crew work runs as its own chat named `Crew Worker · …`, `Crew Expert · …`, or
 `Crew Auditor · …` in the same workspace, and is settled when it finishes. In the sidebar these
@@ -32,6 +32,6 @@ the brain's own subagents instead of separate chats. They start faster and share
 session, and they appear in the brain chat's work log. Roles on other providers still run as crew
 chats.
 
-The crew tools reach the brain through T3 Code's agent tools, which Claude, Codex, and Antigravity
+The crew tools reach the brain through OOP's agent tools, which Claude, Codex, and Antigravity
 chats use. Any signed-in model can serve as a worker, expert, or auditor, including GLM through
 [ZCode](./providers-zcode.md) and [MiniMax Code](./providers-minimax.md).

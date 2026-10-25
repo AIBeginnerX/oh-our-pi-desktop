@@ -124,6 +124,7 @@ import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDi
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
+import { layer as npmCliLayer, NpmCliInstallation } from "./provider/NpmCliInstallation.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -142,6 +143,7 @@ import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
+import * as BundledSkills from "./skills/BundledSkills.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
@@ -2709,6 +2711,23 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.providerInstallRemove, providerInstallation.remove(input), {
             "rpc.aggregate": "provider",
           }),
+        [WS_METHODS.serverListBundledSkills]: () =>
+          observeRpcEffect(
+            WS_METHODS.serverListBundledSkills,
+            BundledSkills.listBundledSkills(BundledSkills.processBundledSkillHost()).pipe(
+              Effect.provide(normalizerContext),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.serverInstallBundledSkill]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverInstallBundledSkill,
+            BundledSkills.installBundledSkill(BundledSkills.processBundledSkillHost(), input).pipe(
+              Effect.provide(normalizerContext),
+              Effect.provideService(Crypto.Crypto, crypto),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverUpdateServer]: (input) =>
           observeRpcEffect(WS_METHODS.serverUpdateServer, serverUpdate.update(input), {
             "rpc.aggregate": "server",
@@ -4206,6 +4225,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               Layer.provide(Layer.succeed(OrchestrationEventStore, orchestrationEventStore)),
               Layer.provide(AgentSessionScanner.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
+              Layer.provide(npmCliLayer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.

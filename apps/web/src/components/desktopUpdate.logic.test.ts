@@ -203,7 +203,7 @@ describe("desktop update button state", () => {
     expect(getDesktopUpdateButtonTooltip(state)).toContain("prepared");
     expect(getDesktopUpdateButtonTooltip(state)).toContain("open the installer");
     expect(getDesktopUpdateInstallConfirmationMessage(state)).toBe(
-      "Open the installer for OoP 1.1.0?\n\nOoP will quit and running tasks will stop. macOS Installer will ask for your administrator password. Finish the installation, then reopen OoP from Applications.",
+      "Open the installer for OOP 1.1.0?\n\nOoP will quit and running tasks will stop. macOS Installer will ask for your administrator password. Finish the installation, then reopen OOP from Applications.",
     );
   });
 
@@ -372,7 +372,7 @@ describe("desktop update UI helpers", () => {
     expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
   });
 
-  it("uses the OoP product name for the local-package warning", () => {
+  it("uses the OOP product name for the local-package warning", () => {
     const state = Object.assign(
       {
         ...baseState,
@@ -385,8 +385,8 @@ describe("desktop update UI helpers", () => {
     );
 
     const description = getArm64IntelBuildWarningDescription(state);
-    expect(description).toContain("OoP");
-    expect(description).not.toContain("T3 Code");
+    expect(description).toContain("OOP");
+    expect(description).not.toContain("T3");
     expect(description).toContain("Prepare the available update");
   });
 
@@ -396,7 +396,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.1",
       }),
-    ).toContain("Install update 1.1.1 and restart T3 Code?");
+    ).toContain("Install update 1.1.1 and restart OOP?");
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {
@@ -405,7 +405,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: null,
         downloadedVersion: null,
       }),
-    ).toContain("Install update and restart T3 Code?");
+    ).toContain("Install update and restart OOP?");
   });
 
   it("keeps the same install confirmation copy across desktop platforms", () => {
@@ -415,7 +415,7 @@ describe("desktop update UI helpers", () => {
         downloadedVersion: "1.1.0",
       }),
     ).toBe(
-      "Install update 1.1.0 and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
+      "Install update 1.1.0 and restart OOP?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.",
     );
   });
 });

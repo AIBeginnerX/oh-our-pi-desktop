@@ -32,7 +32,7 @@ const MESSAGES: Record<(typeof REASONS)[number], string> = {
   "folder-unavailable":
     "The local update folder could not be read. Check that it is mounted and try again.",
   "drive-folder-unavailable":
-    "OOP could not find its update folder in Google Drive (OoP/release). Install Google Drive for desktop, sign in, and make the OoP folder available offline; OOP checks again every few minutes.",
+    "OOP could not find its update folder in Google Drive (OOP/release). Install Google Drive for desktop, sign in, and make the OOP folder available offline; OOP checks again every few minutes.",
   "manifest-invalid":
     "The update manifest in the local update folder is invalid. Rebuild the update package.",
   "manifest-unsupported": "The update in the local update folder is not built for this Mac.",

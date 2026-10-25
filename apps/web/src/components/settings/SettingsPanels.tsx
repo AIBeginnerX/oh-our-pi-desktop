@@ -4,7 +4,7 @@ import { NotificationSettings } from "./NotificationSettings";
 import { ArchiveIcon, ArchiveX, CheckIcon, ChevronRightIcon, SettingsIcon } from "lucide-react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { CSSProperties, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
@@ -52,6 +52,7 @@ import * as Schema from "effect/Schema";
 import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
 import {
   canCheckForUpdate,
+  describeDesktopBuild,
   getDisplayedAppVersion,
   getDesktopUpdateActionLabel,
   getDesktopUpdateButtonTooltip,
@@ -451,6 +452,21 @@ function AboutVersionSection() {
           </Tooltip>
         }
       />
+      {updateState?.build ? (
+        <SettingsRow
+          title="Build"
+          description={
+            <span className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">
+              {describeDesktopBuild(updateState.build).map((fact) => (
+                <Fragment key={fact.label}>
+                  <span>{fact.label}</span>
+                  <code className="break-all text-foreground/80">{fact.value}</code>
+                </Fragment>
+              ))}
+            </span>
+          }
+        />
+      ) : null}
       {hasDesktopBridge && !isLocalPackage ? (
         <SettingsRow
           title="Update track"
@@ -3351,7 +3367,7 @@ export function GeneralSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("open-source-licenses")}
-          description="Notices for dependencies, assets, and optional tools used by T3 Code."
+          description="Notices for dependencies, assets, and optional tools used by OOP."
           control={
             <Button
               render={<Link to="/settings/open-source-licenses" />}

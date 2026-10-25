@@ -51,6 +51,19 @@ const ServerConfigIssues = ForwardCompatibleArray(ServerConfigIssue);
 export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
 export type ServerProviderState = typeof ServerProviderState.Type;
 
+/**
+ * Why a provider entry is not usable right now, when the probe can tell. Absent means the
+ * probe found no specific blocker (healthy, or a transient failure the message already
+ * describes). `disabled` is a settings choice, not a failure.
+ */
+export const ServerProviderDiagnosis = Schema.Literals([
+  "disabled",
+  "runtime-missing",
+  "runtime-error",
+  "api-key-invalid",
+]);
+export type ServerProviderDiagnosis = typeof ServerProviderDiagnosis.Type;
+
 export const ServerProviderAuthStatus = Schema.Literals([
   "authenticated",
   "unauthenticated",
@@ -236,6 +249,7 @@ export const ServerProvider = Schema.Struct({
   ),
   enabled: Schema.Boolean,
   installed: Schema.Boolean,
+  diagnosis: Schema.optionalKey(ServerProviderDiagnosis),
   version: Schema.NullOr(TrimmedNonEmptyString),
   status: ServerProviderState,
   auth: ServerProviderAuth,

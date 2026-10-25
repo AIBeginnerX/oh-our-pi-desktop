@@ -45,15 +45,15 @@ async function fixture(t, { platform = "Linux", checksum = "valid", missing = fa
   const extension = platform === "Darwin" ? "dmg" : "AppImage";
   if (platform === "Darwin") {
     const source = path.join(root, "image");
-    await fs.mkdir(path.join(source, "OoP.app", "Contents"), { recursive: true });
-    await fs.writeFile(path.join(source, "OoP.app", "Contents", "fixture"), "new app");
+    await fs.mkdir(path.join(source, "OOP.app", "Contents"), { recursive: true });
+    await fs.writeFile(path.join(source, "OOP.app", "Contents", "fixture"), "new app");
     const image = path.join(root, "fixture.dmg");
     const created = await run("hdiutil", [
       "create",
       "-srcfolder",
       source,
       "-volname",
-      "OoP fixture",
+      "OOP fixture",
       "-format",
       "UDZO",
       image,
@@ -118,8 +118,8 @@ test(
     assert.match(launch.output, /fixture-appimage:1:one two words/);
     assert.deepEqual(setup.requested, [
       "/install-desktop.sh",
-      "/v1.2.3/OoP-1.2.3-x86_64.AppImage",
-      "/v1.2.3/OoP-1.2.3-x86_64.AppImage.sha256",
+      "/v1.2.3/OOP-1.2.3-x86_64.AppImage",
+      "/v1.2.3/OOP-1.2.3-x86_64.AppImage.sha256",
     ]);
     const entry = await fs.readFile(
       path.join(setup.env.OOP_INSTALL_DIR, "share", "applications", "oop-desktop.desktop"),
@@ -135,7 +135,7 @@ for (const scenario of [{ checksum: "bad" }, { checksum: "missing" }, { missing:
     { timeout: 30_000 },
     async (t) => {
       const setup = await fixture(t, scenario);
-      const previous = path.join(setup.env.OOP_INSTALL_DIR, "share", "oop-desktop", "OoP.AppImage");
+      const previous = path.join(setup.env.OOP_INSTALL_DIR, "share", "oop-desktop", "OOP.AppImage");
       await fs.mkdir(path.dirname(previous), { recursive: true });
       await fs.writeFile(previous, "previous app");
       const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
@@ -160,7 +160,7 @@ test(
   { skip: process.platform !== "darwin", timeout: 60_000 },
   async (t) => {
     const setup = await fixture(t, { platform: "Darwin" });
-    const previous = path.join(setup.env.OOP_INSTALL_DIR, "OoP.app", "Contents");
+    const previous = path.join(setup.env.OOP_INSTALL_DIR, "OOP.app", "Contents");
     await fs.mkdir(previous, { recursive: true });
     await fs.writeFile(path.join(previous, "stale"), "old app");
     const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
@@ -170,10 +170,60 @@ test(
   },
 );
 
+for (const approved of [true, false]) {
+  test(
+    `macOS installer routes a location the user cannot change through the approval dialog: ${approved ? "approved" : "declined"}`,
+    { skip: process.platform !== "darwin", timeout: 60_000 },
+    async (t) => {
+      const setup = await fixture(t, { platform: "Darwin" });
+      const dir = setup.env.OOP_INSTALL_DIR;
+      const previous = path.join(dir, "OOP.app", "Contents");
+      await fs.mkdir(previous, { recursive: true });
+      await fs.writeFile(path.join(previous, "stale"), "old app");
+      // Stands in for the macOS authorization dialog; approval grants the access an
+      // administrator would have, refusal changes nothing.
+      const calls = path.join(setup.root, "osascript-calls");
+      await fs.writeFile(
+        path.join(setup.root, "tools", "osascript"),
+        approved
+          ? `#!/bin/sh\nprintf '%s\\n' "$@" > "${calls}"\nshift 6\nchmod u+w "$3" "$3/OOP.app"\nexec /bin/sh "$@"\n`
+          : `#!/bin/sh\nprintf '%s\\n' "$@" > "${calls}"\necho "User canceled." >&2\nexit 1\n`,
+        { mode: 0o755 },
+      );
+      await fs.chmod(path.join(dir, "OOP.app"), 0o555);
+      await fs.chmod(dir, 0o555);
+      let result;
+      try {
+        result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+      } finally {
+        await fs.chmod(dir, 0o755);
+        await fs.chmod(path.join(dir, "OOP.app"), 0o755);
+      }
+      const invocation = (await fs.readFile(calls, "utf8")).trim().split("\n");
+      assert.match(invocation[3] ?? "", /with administrator privileges/);
+      assert.deepEqual(invocation.slice(-2), [invocation.at(-2), dir]);
+      assert.match(result.output, /macOS will ask for approval/);
+      if (approved) {
+        assert.equal(result.code, 0, result.output);
+        assert.equal(await fs.readFile(path.join(previous, "fixture"), "utf8"), "new app");
+        await assert.rejects(fs.stat(path.join(previous, "stale")), { code: "ENOENT" });
+      } else {
+        assert.notEqual(result.code, 0);
+        assert.match(result.output, /existing app was not changed/);
+        assert.equal(await fs.readFile(path.join(previous, "stale"), "utf8"), "old app");
+      }
+      assert.deepEqual(
+        (await fs.readdir(dir)).filter((name) => name.startsWith(".oop-install")),
+        [],
+      );
+    },
+  );
+}
+
 test("release preparation emits verified hashes for all three installers", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "oop-install-assets-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const names = ["OoP-1.2.3-arm64.dmg", "OoP-1.2.3-x64.exe", "OoP-1.2.3-x86_64.AppImage"];
+  const names = ["OOP-1.2.3-arm64.dmg", "OOP-1.2.3-x64.exe", "OOP-1.2.3-x86_64.AppImage"];
   for (const name of names) await fs.writeFile(path.join(root, name), `fixture-${name}`);
   const out = path.join(root, "out");
   const result = await run(process.execPath, [

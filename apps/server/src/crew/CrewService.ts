@@ -47,6 +47,14 @@ import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEng
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as CrewRuntimeStateLive from "../persistence/Layers/CrewRuntimeState.ts";
+import { CrewRuntimeState } from "../persistence/Services/CrewRuntimeState.ts";
+import type { CrewFollowUpCheckpoint } from "../persistence/Services/CrewRuntimeState.ts";
+import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
+import { OrchestrationCommandReceiptRepository } from "../persistence/Services/OrchestrationCommandReceipts.ts";
+import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
+import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
+import { CrewFollowUpRecoveryJson, CrewTaskRecoveryJson } from "./crewRecoveryState.ts";
 import {
   CREW_MAX_FIX_ROUNDS,
   CREW_MAX_FOLLOW_UPS,
@@ -123,11 +131,13 @@ export class CrewService extends Context.Service<
 
 interface CrewAttempt {
   readonly model: string;
-  threadId?: ThreadId;
-  error?: string;
+  threadId?: ThreadId | undefined;
+  messageId?: MessageId | undefined;
+  error?: string | undefined;
 }
 
 interface CrewTaskRecord {
+  readonly taskId: string;
   readonly leadThreadId: ThreadId;
   readonly leadTurnId: TurnId | null;
   readonly role: CrewRole;
@@ -138,8 +148,15 @@ interface CrewTaskRecord {
   collected: boolean;
   /** The lead's board has this task's task.completed, so nothing waits on it any more. */
   ended: boolean;
+  auditState: "none" | "pending" | "delivered" | "skipped";
   readonly done: Deferred.Deferred<void>;
+  readonly lock: Semaphore.Semaphore;
 }
+
+const encodeTaskRecovery = Schema.encodeEffect(CrewTaskRecoveryJson);
+const decodeTaskRecovery = Schema.decodeEffect(CrewTaskRecoveryJson);
+const encodeFollowUpRecovery = Schema.encodeEffect(CrewFollowUpRecoveryJson);
+const decodeFollowUpRecovery = Schema.decodeEffect(CrewFollowUpRecoveryJson);
 
 export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -148,6 +165,9 @@ export const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const checkpointDiffs = yield* CheckpointDiffQuery.CheckpointDiffQuery;
   const crypto = yield* Crypto.Crypto;
+  const recovery = yield* CrewRuntimeState;
+  const receipts = yield* OrchestrationCommandReceiptRepository;
+  const turns = yield* ProjectionTurnRepository;
 
   // Watchers outlive the tool call that started them, so they run in the service's own scope.
   const watcherScope = yield* Scope.make("sequential");
@@ -155,8 +175,6 @@ export const make = Effect.gen(function* () {
 
   const tasks = new Map<string, CrewTaskRecord>();
   const auditedTurns = new Set<string>();
-  // Audit reports that asked for changes, waiting for the lead to be idle.
-  const pendingAudits = new Map<ThreadId, string[]>();
   const followUpLock = yield* Semaphore.make(1);
   const failedProviders = new Map<string, number>();
   // A billing or sign-in failure lasts until the provider's status is checked again (the
@@ -192,6 +210,43 @@ export const make = Effect.gen(function* () {
   const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const fail = (reason: string) => Effect.fail(new CrewError({ reason }));
+
+  const persistTask = (record: Omit<CrewTaskRecord, "done" | "lock">) =>
+    Effect.gen(function* () {
+      const updatedAt = yield* nowIso;
+      const recordJson = yield* encodeTaskRecovery({
+        version: 1,
+        taskId: record.taskId,
+        leadThreadId: record.leadThreadId,
+        leadTurnId: record.leadTurnId,
+        role: record.role,
+        subject: record.subject,
+        attempts: record.attempts,
+        report: record.report,
+        collected: record.collected,
+        ended: record.ended,
+        auditState: record.auditState,
+      }).pipe(Effect.mapError(() => new CrewError({ reason: "Could not encode crew state." })));
+      yield* recovery
+        .saveTask({
+          task_id: record.taskId,
+          lead_thread_id: record.leadThreadId,
+          record_json: recordJson,
+          updated_at: updatedAt,
+        })
+        .pipe(Effect.mapError(() => new CrewError({ reason: "Could not persist crew state." })));
+    });
+
+  const updateTask = (
+    record: CrewTaskRecord,
+    patch: Partial<Pick<CrewTaskRecord, "report" | "collected" | "ended" | "auditState">>,
+  ) =>
+    record.lock.withPermits(1)(
+      Effect.gen(function* () {
+        yield* persistTask({ ...record, ...patch });
+        Object.assign(record, patch);
+      }),
+    );
 
   const shellOf = (threadId: ThreadId) =>
     snapshots
@@ -292,13 +347,15 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.ignore);
 
   const launchCrewThread = Effect.fn("CrewService.launchCrewThread")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly messageId: MessageId;
     readonly lead: OrchestrationThreadShell;
     readonly role: CrewRole;
     readonly option: CrewModelOption;
     readonly subject: string;
     readonly prompt: string;
   }) {
-    const threadId = ThreadId.make(yield* uuid);
+    const threadId = input.threadId;
     const createdAt = yield* nowIso;
     const interactionMode = input.role === "auditor" ? "plan" : "default";
     yield* engine.dispatch({
@@ -320,7 +377,7 @@ export const make = Effect.gen(function* () {
       commandId: CommandId.make(`server:crew-turn:${threadId}`),
       threadId,
       message: {
-        messageId: MessageId.make(yield* uuid),
+        messageId: input.messageId,
         role: "user",
         text: input.prompt,
         attachments: [],
@@ -367,7 +424,7 @@ export const make = Effect.gen(function* () {
         Effect.orElseSucceed(() => ({ testsPassed: false, changesRequested: true })),
       );
 
-  /** The last message the user wrote in a lead thread, skipping OoP's crew follow-ups. */
+  /** The last message the user wrote in a lead thread, skipping OOP's crew follow-ups. */
   const latestRequestText = (threadId: ThreadId) =>
     snapshots.getThreadDetailById(threadId).pipe(
       Effect.map((thread) =>
@@ -387,8 +444,15 @@ export const make = Effect.gen(function* () {
     extra: Record<string, unknown> = {},
   ) =>
     Effect.gen(function* () {
-      if (record.collected || record.role === "auditor") return;
-      record.collected = true;
+      const changed = yield* record.lock.withPermits(1)(
+        Effect.gen(function* () {
+          if (record.collected || record.role === "auditor") return false;
+          yield* persistTask({ ...record, collected: true });
+          record.collected = true;
+          return true;
+        }),
+      );
+      if (!changed) return;
       yield* appendActivity({
         threadId: record.leadThreadId,
         kind: "task.collected",
@@ -428,13 +492,18 @@ export const make = Effect.gen(function* () {
    */
   const queueAuditFix = (record: CrewTaskRecord, report: string | null) =>
     Effect.gen(function* () {
-      if (auditVerdict(report) !== "needs-changes" || report === null) return;
+      if (record.auditState !== "none") return;
       const current = followUpRound(yield* latestUserText(record.leadThreadId));
-      if (current.fixes >= CREW_MAX_FIX_ROUNDS || current.round >= CREW_MAX_FOLLOW_UPS) return;
-      pendingAudits.set(record.leadThreadId, [
-        ...(pendingAudits.get(record.leadThreadId) ?? []),
-        report,
-      ]);
+      if (
+        auditVerdict(report) !== "needs-changes" ||
+        report === null ||
+        current.fixes >= CREW_MAX_FIX_ROUNDS ||
+        current.round >= CREW_MAX_FOLLOW_UPS
+      ) {
+        yield* updateTask(record, { auditState: "skipped" });
+        return;
+      }
+      yield* updateTask(record, { auditState: "pending" });
       yield* appendActivity({
         threadId: record.leadThreadId,
         kind: "crew.follow-up",
@@ -442,6 +511,58 @@ export const make = Effect.gen(function* () {
         turnId: record.leadTurnId,
         payload: { reason: "audit" },
       });
+    });
+
+  const decodeFollowUp = (checkpoint: CrewFollowUpCheckpoint) =>
+    Effect.gen(function* () {
+      const data = yield* decodeFollowUpRecovery(checkpoint.record_json).pipe(
+        Effect.mapError(() => new CrewError({ reason: "Invalid crew delivery checkpoint." })),
+      );
+      if (
+        data.command.commandId !== checkpoint.command_id ||
+        data.command.message.messageId !== checkpoint.message_id ||
+        data.command.threadId !== checkpoint.lead_thread_id
+      )
+        return yield* fail("Crew delivery checkpoint identities do not match.");
+      return data;
+    });
+
+  const finishFollowUp = (
+    checkpoint: CrewFollowUpCheckpoint,
+    data: typeof CrewFollowUpRecoveryJson.Type,
+  ) =>
+    Effect.gen(function* () {
+      const collected: CrewTaskRecord[] = [];
+      const audits: CrewTaskRecord[] = [];
+      for (const taskId of data.taskIds) {
+        const record = tasks.get(taskId);
+        if (
+          record === undefined ||
+          record.role === "auditor" ||
+          record.leadThreadId !== checkpoint.lead_thread_id
+        )
+          return yield* fail("Crew delivery refers to an unknown task.");
+        collected.push(record);
+      }
+      for (const taskId of data.auditTaskIds) {
+        const record = tasks.get(taskId);
+        if (
+          record === undefined ||
+          record.role !== "auditor" ||
+          record.leadThreadId !== checkpoint.lead_thread_id
+        )
+          return yield* fail("Crew delivery refers to an unknown audit.");
+        audits.push(record);
+      }
+      yield* recovery.acknowledgeFollowUp(checkpoint.delivery_id, yield* nowIso);
+      for (const record of collected) {
+        yield* markCollected(record.taskId, record);
+      }
+      for (const record of audits) {
+        if (record.auditState !== "delivered") {
+          yield* updateTask(record, { auditState: "delivered" });
+        }
+      }
     });
 
   /**
@@ -452,6 +573,32 @@ export const make = Effect.gen(function* () {
     followUpLock
       .withPermits(1)(
         Effect.gen(function* () {
+          const checkpoints = yield* recovery.readFollowUps;
+          const pending = checkpoints.find(
+            (checkpoint) =>
+              checkpoint.lead_thread_id === leadId &&
+              checkpoint.delivered_at === null &&
+              checkpoint.rejected_at === null,
+          );
+          if (pending !== undefined) {
+            const data = yield* decodeFollowUp(pending);
+            const receipt = yield* receipts.getByCommandId({ commandId: data.command.commandId });
+            if (Option.isSome(receipt)) {
+              if (receipt.value.aggregateKind !== "thread" || receipt.value.aggregateId !== leadId)
+                return yield* fail("Crew delivery command belongs to another thread.");
+              if (receipt.value.status === "accepted") {
+                yield* finishFollowUp(pending, data);
+                return;
+              }
+              yield* recovery.rejectFollowUp(pending.delivery_id, yield* nowIso);
+            } else {
+              const lead = yield* shellOf(leadId);
+              if (Option.isNone(lead) || !leadIdle(lead.value)) return;
+              yield* engine.dispatch(data.command);
+              yield* finishFollowUp(pending, data);
+              return;
+            }
+          }
           const lead = yield* shellOf(leadId);
           if (Option.isNone(lead) || isCrewThreadTitle(lead.value.title) || !leadIdle(lead.value))
             return;
@@ -460,13 +607,17 @@ export const make = Effect.gen(function* () {
           );
           if (records.some(([, record]) => record.role === "auditor" && record.report === null))
             return;
-          const audits = pendingAudits.get(leadId) ?? [];
+          const auditRecords = records.filter(([, record]) => record.auditState === "pending");
+          const audits = auditRecords.flatMap(([, record]) =>
+            record.report?.result === null || record.report?.result === undefined
+              ? []
+              : [record.report.result],
+          );
           const late = records.filter(
             ([, record]) =>
               record.role !== "auditor" && record.report !== null && !record.collected,
           );
           if (audits.length === 0 && late.length === 0) return;
-          pendingAudits.delete(leadId);
           const plan = planFollowUp({
             current: followUpRound(yield* latestUserText(leadId)),
             audits,
@@ -477,31 +628,58 @@ export const make = Effect.gen(function* () {
               report: record.report?.result ?? null,
             })),
           });
-          for (const [taskId, record] of late) {
-            yield* markCollected(taskId, record, plan.prompt === null ? { dropped: true } : {});
+          if (plan.prompt === null) {
+            for (const [taskId, record] of late) {
+              yield* markCollected(taskId, record, { dropped: true });
+            }
+            for (const [, record] of auditRecords) {
+              yield* updateTask(record, { auditState: "skipped" });
+            }
+            return;
           }
-          if (plan.prompt === null) return;
           const createdAt = yield* nowIso;
+          const deliveryId = yield* uuid;
+          const data: typeof CrewFollowUpRecoveryJson.Type = {
+            version: 1,
+            taskIds: late.map(([taskId]) => taskId),
+            auditTaskIds: auditRecords.map(([taskId]) => taskId),
+            command: {
+              type: "thread.turn.start",
+              commandId: CommandId.make(`server:crew-follow-up:${deliveryId}`),
+              threadId: leadId,
+              message: {
+                messageId: MessageId.make(yield* uuid),
+                role: "user",
+                text: plan.prompt,
+                attachments: [],
+              },
+              runtimeMode: lead.value.runtimeMode,
+              interactionMode: lead.value.interactionMode,
+              createdAt,
+            },
+          };
+          const recordJson = yield* encodeFollowUpRecovery(data).pipe(
+            Effect.mapError(() => new CrewError({ reason: "Could not encode crew delivery." })),
+          );
+          const checkpoint: CrewFollowUpCheckpoint = {
+            delivery_id: deliveryId,
+            lead_thread_id: leadId,
+            command_id: data.command.commandId,
+            message_id: data.command.message.messageId,
+            record_json: recordJson,
+            created_at: createdAt,
+            delivered_at: null,
+            rejected_at: null,
+          };
+          yield* recovery.prepareFollowUp(checkpoint);
+          yield* engine.dispatch(data.command);
+          yield* finishFollowUp(checkpoint, data);
           yield* appendActivity({
             threadId: leadId,
             kind: "crew.follow-up",
             summary: "OOP Crew sent the lead a follow-up turn",
             turnId: lead.value.latestTurn?.turnId ?? null,
             payload: { reason: audits.length > 0 ? "audit" : "results", results: late.length },
-          });
-          yield* engine.dispatch({
-            type: "thread.turn.start",
-            commandId: CommandId.make(`server:crew-follow-up:${leadId}:${yield* uuid}`),
-            threadId: leadId,
-            message: {
-              messageId: MessageId.make(yield* uuid),
-              role: "user",
-              text: plan.prompt,
-              attachments: [],
-            },
-            runtimeMode: lead.value.runtimeMode,
-            interactionMode: lead.value.interactionMode,
-            createdAt,
           });
         }),
       )
@@ -532,7 +710,8 @@ export const make = Effect.gen(function* () {
       };
       const finish = (report: Omit<CrewTaskReport, "taskId" | "role">) =>
         Effect.gen(function* () {
-          record.report = { taskId: input.taskId, role: record.role, ...report };
+          const result = { taskId: input.taskId, role: record.role, ...report };
+          yield* updateTask(record, { report: result });
           yield* Deferred.succeed(record.done, undefined);
         });
 
@@ -541,7 +720,10 @@ export const make = Effect.gen(function* () {
           continue;
         const previous = record.attempts.at(-1);
         const attempt: CrewAttempt = { model: `${option.label} (${option.providerLabel})` };
+        attempt.threadId = ThreadId.make(yield* uuid);
+        attempt.messageId = MessageId.make(yield* uuid);
         record.attempts.push(attempt);
+        yield* persistTask(record);
         yield* appendActivity({
           threadId: input.lead.id,
           kind: previous === undefined ? "task.started" : "task.progress",
@@ -567,6 +749,8 @@ export const make = Effect.gen(function* () {
         });
         const launched = yield* Effect.exit(
           launchCrewThread({
+            threadId: attempt.threadId,
+            messageId: attempt.messageId,
             lead: input.lead,
             role: record.role,
             option,
@@ -576,6 +760,7 @@ export const make = Effect.gen(function* () {
         );
         if (Exit.isFailure(launched)) {
           attempt.error = "could not start";
+          yield* persistTask(record);
           yield* markFailed(option.selection.instanceId, attempt.error);
           continue;
         }
@@ -604,12 +789,13 @@ export const make = Effect.gen(function* () {
               ...(record.role === "auditor" ? { verdict: auditVerdict(reply) } : {}),
             },
           });
-          record.ended = true;
+          yield* updateTask(record, { ended: true });
           yield* settleThread(threadId);
           yield* flushFollowUps(record.leadThreadId);
           return;
         }
         attempt.error = (yield* lastErrorOf(threadId)) ?? "the turn failed";
+        yield* persistTask(record);
         yield* markFailed(option.selection.instanceId, attempt.error);
         yield* settleThread(threadId);
       }
@@ -623,7 +809,7 @@ export const make = Effect.gen(function* () {
         turnId: input.leadTurnId,
         payload: { ...base, status: "failed", summary: reportExcerpt(report) },
       });
-      record.ended = true;
+      yield* updateTask(record, { ended: true });
       yield* flushFollowUps(record.leadThreadId);
     });
 
@@ -665,6 +851,7 @@ export const make = Effect.gen(function* () {
     }
     const taskId = yield* uuid;
     const record: CrewTaskRecord = {
+      taskId,
       leadThreadId: input.lead.id,
       leadTurnId: input.leadTurnId,
       role: input.role,
@@ -673,8 +860,11 @@ export const make = Effect.gen(function* () {
       report: null,
       collected: false,
       ended: false,
+      auditState: "none",
       done: yield* Deferred.make<void>(),
+      lock: yield* Semaphore.make(1),
     };
+    yield* persistTask(record);
     tasks.set(taskId, record);
     yield* runTask({ ...input, taskId, record, chain }).pipe(
       Effect.catchCause((cause) =>
@@ -863,25 +1053,199 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  yield* Effect.scoped(
+  const readRecoveredOutcome = (record: CrewTaskRecord) =>
     Effect.gen(function* () {
-      const events = yield* engine.subscribeDomainEvents;
-      yield* Stream.runForEach(events, (event) =>
-        event.type === "thread.turn-diff-completed"
-          ? maybeAudit(event.payload).pipe(
-              Effect.catchCause((cause) => Effect.logWarning("crew audit skipped", { cause })),
-              Effect.andThen(flushFollowUps(event.payload.threadId)),
-            )
-          : event.type === "thread.session-set" &&
-              event.payload.session.status !== "running" &&
-              event.payload.session.status !== "starting"
-            ? flushFollowUps(event.payload.threadId)
-            : Effect.void,
+      const attempt = record.attempts.at(-1);
+      if (attempt?.threadId === undefined || attempt.messageId === undefined) {
+        return Option.some<Pick<CrewTaskReport, "status" | "result">>({
+          status: "interrupted",
+          result: "The server stopped before the worker start was recorded.",
+        });
+      }
+      const workerTurns = yield* turns.listByThreadId({ threadId: attempt.threadId });
+      const turn = workerTurns.find(
+        (candidate) => candidate.pendingMessageId === attempt.messageId,
       );
-    }),
+      if (turn === undefined) {
+        return Option.some<Pick<CrewTaskReport, "status" | "result">>({
+          status: "interrupted",
+          result: "The original worker turn is no longer available.",
+        });
+      }
+      if (turn.state === "pending" || turn.state === "running") {
+        return Option.none<Pick<CrewTaskReport, "status" | "result">>();
+      }
+      const detail = yield* snapshots.getThreadDetailById(attempt.threadId);
+      const reply = Option.isSome(detail)
+        ? (detail.value.messages
+            .find(
+              (message) => message.id === turn.assistantMessageId && message.turnId === turn.turnId,
+            )
+            ?.text.slice(0, RESULT_TEXT_LIMIT) ?? null)
+        : null;
+      const status =
+        turn.state === "completed"
+          ? "completed"
+          : turn.state === "error"
+            ? "failed"
+            : "interrupted";
+      const reportStatus =
+        status === "completed" && record.role !== "auditor" ? crewReportStatus(reply) : "done";
+      return Option.some<Pick<CrewTaskReport, "status" | "result">>({
+        status: reportStatus === "done" ? status : reportStatus,
+        result: reply,
+      });
+    });
+
+  const recoverTask = (record: CrewTaskRecord) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let report = record.report;
+        if (report === null) {
+          // Subscribe before reading: a worker can finish while the snapshot is being read.
+          const events = yield* engine.subscribeDomainEvents;
+          const current = yield* readRecoveredOutcome(record);
+          const observed = Option.isSome(current)
+            ? current
+            : yield* events.pipe(
+                Stream.filter((event) => event.aggregateId === record.attempts.at(-1)?.threadId),
+                Stream.mapEffect(() => readRecoveredOutcome(record)),
+                Stream.filter(Option.isSome),
+                Stream.map((outcome) => outcome.value),
+                Stream.runHead,
+              );
+          const outcome = Option.getOrElse(observed, () => ({
+            status: "interrupted" as const,
+            result: null,
+          }));
+          report = {
+            taskId: record.taskId,
+            role: record.role,
+            ...outcome,
+          };
+          yield* updateTask(record, { report });
+        }
+        yield* Deferred.succeed(record.done, undefined);
+        if (record.role === "auditor" && report.status === "completed") {
+          yield* queueAuditFix(record, report.result);
+        }
+        if (!record.ended) {
+          yield* appendActivity({
+            threadId: record.leadThreadId,
+            kind: "task.completed",
+            summary: `${CREW_ROLE_LABEL[record.role]} recovered: ${record.subject}`,
+            turnId: record.leadTurnId,
+            payload: {
+              taskId: record.taskId,
+              title: record.subject,
+              agentKind: "agent",
+              crewRole: record.role,
+              status: report.status === "interrupted" ? "stopped" : report.status,
+              ...(report.result === null ? {} : { summary: reportExcerpt(report.result) }),
+              ...(record.role === "auditor" ? { verdict: auditVerdict(report.result) } : {}),
+            },
+          });
+          yield* updateTask(record, { ended: true });
+        }
+        yield* flushFollowUps(record.leadThreadId);
+      }),
+    );
+
+  const restoreTasks = Effect.gen(function* () {
+    const checkpoints = yield* recovery.readTasks;
+    for (const checkpoint of checkpoints) {
+      const state = yield* decodeTaskRecovery(checkpoint.record_json).pipe(
+        Effect.mapError(() => new CrewError({ reason: "Invalid crew task checkpoint." })),
+      );
+      if (
+        state.taskId !== checkpoint.task_id ||
+        state.leadThreadId !== checkpoint.lead_thread_id ||
+        (state.report !== null &&
+          (state.report.taskId !== state.taskId ||
+            state.report.role !== state.role ||
+            state.report.status === "starting" ||
+            state.report.status === "running")) ||
+        (state.collected && state.report === null) ||
+        (state.auditState === "pending" &&
+          (state.role !== "auditor" ||
+            state.report === null ||
+            auditVerdict(state.report.result) !== "needs-changes"))
+      )
+        return yield* fail("Crew task checkpoint identities or states do not match.");
+      const record: CrewTaskRecord = {
+        ...state,
+        attempts: state.attempts.map((attempt) => ({ ...attempt })),
+        done: yield* Deferred.make<void>(),
+        lock: yield* Semaphore.make(1),
+      };
+      tasks.set(record.taskId, record);
+      if (record.role === "auditor" && record.leadTurnId !== null) {
+        auditedTurns.add(`${record.leadThreadId}:${record.leadTurnId}`);
+      }
+    }
+    // An acknowledged delivery may have been interrupted before updating its task checkpoints.
+    for (const checkpoint of yield* recovery.readFollowUps) {
+      const data = yield* decodeFollowUp(checkpoint);
+      if (checkpoint.delivered_at !== null) {
+        const receipt = yield* receipts.getByCommandId({ commandId: data.command.commandId });
+        if (
+          Option.isNone(receipt) ||
+          receipt.value.status !== "accepted" ||
+          receipt.value.aggregateKind !== "thread" ||
+          receipt.value.aggregateId !== checkpoint.lead_thread_id
+        )
+          return yield* fail("Crew delivery acknowledgement has no accepted command receipt.");
+        yield* finishFollowUp(checkpoint, data);
+      }
+    }
+    for (const record of tasks.values()) {
+      if (record.report !== null) {
+        yield* recoverTask(record);
+      } else {
+        yield* recoverTask(record).pipe(
+          Effect.catchCause((cause) => Effect.logWarning("crew recovery paused", { cause })),
+          Effect.forkIn(watcherScope),
+        );
+      }
+    }
+  });
+
+  // Subscribe before restoring so nothing that happens during the restore is missed. Neither may
+  // stop the service from starting: a failure is logged and crew delegation still works.
+  const events = yield* Effect.suspend(() => engine.subscribeDomainEvents).pipe(
+    Effect.map(Option.some),
+    Effect.catchCause((cause) =>
+      Effect.logWarning("crew event watcher could not start", { cause }).pipe(
+        Effect.as(Option.none()),
+      ),
+    ),
+  );
+  yield* restoreTasks.pipe(
+    Effect.catchCause((cause) => Effect.logWarning("crew restore failed", { cause })),
+  );
+  if (Option.isNone(events)) return CrewService.of({ roster, delegate, wait });
+  yield* Stream.runForEach(events.value, (event) =>
+    event.type === "thread.turn-diff-completed"
+      ? maybeAudit(event.payload).pipe(
+          Effect.catchCause((cause) => Effect.logWarning("crew audit skipped", { cause })),
+          Effect.andThen(flushFollowUps(event.payload.threadId)),
+        )
+      : event.type === "thread.session-set" &&
+          event.payload.session.status !== "running" &&
+          event.payload.session.status !== "starting"
+        ? flushFollowUps(event.payload.threadId)
+        : Effect.void,
   ).pipe(Effect.forkIn(watcherScope));
 
   return CrewService.of({ roster, delegate, wait });
 });
 
-export const layer = Layer.effect(CrewService, make);
+export const layer = Layer.effect(CrewService, make).pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      CrewRuntimeStateLive.layer,
+      OrchestrationCommandReceiptRepositoryLive,
+      ProjectionTurnRepositoryLive,
+    ),
+  ),
+);

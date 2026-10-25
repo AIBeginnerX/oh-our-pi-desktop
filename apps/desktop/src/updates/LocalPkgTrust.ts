@@ -20,7 +20,12 @@ import {
   type TrustPolicy,
 } from "./LocalPkgTrustPolicy.ts";
 import { hasReleaseBinding, signedExtractedSha1s } from "./LocalPkgReleaseBinding.ts";
-import { isNewerVersion, parseStableVersion, type StagedPkg } from "./LocalPkgUpdates.ts";
+import {
+  isNewerVersion,
+  isReleasePackageName,
+  parseStableVersion,
+  type StagedPkg,
+} from "./LocalPkgUpdates.ts";
 
 /**
  * Publisher trust for a staged local update package, from the public macOS
@@ -376,8 +381,12 @@ export const parseSpctlAssessment = Effect.fnUntraced(function* (
 });
 
 /** What `LocalPkgUpdates.stage` produces from a validated manifest (arm64 is the manifest's only arch). */
-const canonicalStagedPath = (staged: StagedPkg) =>
-  `${staged.directory}/OoP-${staged.version}-arm64-update.pkg`;
+const isCanonicalStagedPath = (staged: StagedPkg) =>
+  staged.path.startsWith(`${staged.directory}/`) &&
+  isReleasePackageName(
+    staged.path.slice(staged.directory.length + 1),
+    `-${staged.version}-arm64-update.pkg`,
+  );
 
 /**
  * The staged path is app-generated, but it ends up in tool argv and is matched
@@ -385,7 +394,7 @@ const canonicalStagedPath = (staged: StagedPkg) =>
  * nothing that could break or spoof a report line.
  */
 const isTrustableStagedPath = (staged: StagedPkg) =>
-  staged.path === canonicalStagedPath(staged) &&
+  isCanonicalStagedPath(staged) &&
   staged.path.startsWith("/") &&
   staged.path.length <= MAX_STAGED_PATH &&
   !staged.path.includes('"') &&

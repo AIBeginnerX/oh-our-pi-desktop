@@ -85,6 +85,26 @@ export const resolveUserDataPath = Effect.gen(function* () {
     : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
 }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
+/**
+ * The short commit a build reports: an explicit override, else the hash the packager embedded in
+ * the app's package.json. Unpackaged runs report none.
+ */
+export const resolveBuildCommitHash = (
+  environment: DesktopEnvironment.DesktopEnvironment["Service"],
+  fileSystem: FileSystem.FileSystem,
+): Effect.Effect<Option.Option<string>> => {
+  const override = Option.flatMap(environment.commitHashOverride, normalizeCommitHash);
+  if (Option.isSome(override)) return Effect.succeed(override);
+  if (!environment.isPackaged) return Effect.succeed(Option.none());
+  return fileSystem.readFileString(environment.path.join(environment.appRoot, "package.json")).pipe(
+    Effect.flatMap(decodeAppPackageMetadata),
+    Effect.map((parsed) =>
+      Option.fromNullishOr(parsed.t3codeCommitHash).pipe(Option.flatMap(normalizeCommitHash)),
+    ),
+    Effect.orElseSucceed(() => Option.none<string>()),
+  );
+};
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const assets = yield* DesktopAssets.DesktopAssets;
@@ -93,40 +113,12 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const commitHashCache = yield* Ref.make<Option.Option<Option.Option<string>>>(Option.none());
 
-  const resolveEmbeddedCommitHash = Effect.gen(function* () {
-    const packageJsonPath = environment.path.join(environment.appRoot, "package.json");
-    const raw = yield* fileSystem.readFileString(packageJsonPath).pipe(Effect.option);
-    return yield* Option.match(raw, {
-      onNone: () => Effect.succeed(Option.none<string>()),
-      onSome: (value) =>
-        decodeAppPackageMetadata(value).pipe(
-          Effect.map((parsed) =>
-            Option.fromNullishOr(parsed.t3codeCommitHash).pipe(Option.flatMap(normalizeCommitHash)),
-          ),
-          Effect.orElseSucceed(() => Option.none<string>()),
-        ),
-    });
-  });
-
   const resolveAboutCommitHash = Effect.gen(function* () {
     const cached = yield* Ref.get(commitHashCache);
     if (Option.isSome(cached)) {
       return cached.value;
     }
-
-    const override = Option.flatMap(environment.commitHashOverride, normalizeCommitHash);
-    if (Option.isSome(override)) {
-      yield* Ref.set(commitHashCache, Option.some(override));
-      return override;
-    }
-
-    if (!environment.isPackaged) {
-      const empty = Option.none<string>();
-      yield* Ref.set(commitHashCache, Option.some(empty));
-      return empty;
-    }
-
-    const commitHash = yield* resolveEmbeddedCommitHash;
+    const commitHash = yield* resolveBuildCommitHash(environment, fileSystem);
     yield* Ref.set(commitHashCache, Option.some(commitHash));
     return commitHash;
   });

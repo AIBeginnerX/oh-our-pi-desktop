@@ -10,7 +10,7 @@ import {
 } from "./brand-assets.ts";
 
 describe("brand-assets", () => {
-  it("maps OoP web icons into a packaged client", () => {
+  it("maps OOP web icons into a packaged client", () => {
     expect(resolveWebIconOverrides("oop", "apps/server/dist/client")).toEqual([
       {
         sourceRelativePath: BRAND_ASSET_PATHS.oopWebFaviconIco,

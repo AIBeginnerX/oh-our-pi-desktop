@@ -126,7 +126,7 @@ describe("LocalPkgSource child helper", () => {
     // try to open them rather than reject the request as malformed.
     for (const path of [
       "\\\\nas\\share\\release\\windows\\oop-update.json",
-      "C:\\OoP\\release\\windows\\oop-update.json",
+      "C:\\OOP\\release\\windows\\oop-update.json",
     ]) {
       const result = NodeChildProcess.spawnSync(workerCommand.command, workerCommand.args, {
         input: `${encodeJson({ op: "open", path })}\n`,

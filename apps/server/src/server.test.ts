@@ -204,6 +204,7 @@ import {
   AntigravityInstallationError,
 } from "./provider/AntigravityInstallation.ts";
 import { CodexInstallation } from "./provider/CodexInstallation.ts";
+import { NpmCliInstallation } from "./provider/NpmCliInstallation.ts";
 import type { ProviderInstance } from "./provider/ProviderDriver.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
 import { ProviderAdapterRequestError, type ProviderAdapterError } from "./provider/Errors.ts";
@@ -1366,6 +1367,12 @@ const buildAppUnderTest = (options?: {
             Layer.mock(AntigravityInstallation)({
               managedDirectory: "unused-test-antigravity-runtime",
               ...options?.layers?.antigravityInstallation,
+            }),
+            Layer.mock(NpmCliInstallation)({
+              start: () => Effect.die("npm install is not exercised here"),
+              remove: () => Effect.die("npm uninstall is not exercised here"),
+              state: Effect.die("npm install state is not exercised here"),
+              changes: Stream.die("npm install changes are not exercised here"),
             }),
             Layer.mock(ProviderSessionDirectory.ProviderSessionDirectory)({
               upsert: () => Effect.void,

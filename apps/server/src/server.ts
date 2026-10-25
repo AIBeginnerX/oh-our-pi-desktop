@@ -75,6 +75,7 @@ import * as ProviderEventLoggers from "./provider/Layers/ProviderEventLoggers.ts
 import { ProviderServiceLive } from "./provider/Layers/ProviderService.ts";
 import { ProviderAuthServiceLive } from "./provider/Layers/ProviderAuthService.ts";
 import { CodexInstallation } from "./provider/CodexInstallation.ts";
+import { layer as npmCliLayer, NpmCliInstallation } from "./provider/NpmCliInstallation.ts";
 import { AntigravityInstallation } from "./provider/AntigravityInstallation.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry.ts";
@@ -654,7 +655,9 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   // with explicit `providerInstances` entries on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
 ).pipe(
-  Layer.provideMerge(Layer.mergeAll(AntigravityInstallation.layer, CodexInstallation.layer)),
+  Layer.provideMerge(
+    Layer.mergeAll(AntigravityInstallation.layer, CodexInstallation.layer, npmCliLayer),
+  ),
   // Shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).
@@ -913,12 +916,14 @@ const makeServerLayer = Layer.unwrap(
                     ),
                   }),
                   Effect.tap((recovered) =>
-                    recovered ? Effect.logInfo("T3 Connect managed tunnel recovered") : Effect.void,
+                    recovered
+                      ? Effect.logInfo("OOP Connect managed tunnel recovered")
+                      : Effect.void,
                   ),
                   Effect.catchCause((cause) =>
                     Cause.hasInterrupts(cause)
                       ? Effect.interrupt
-                      : Effect.logWarning("Failed to recover the T3 Connect managed tunnel", {
+                      : Effect.logWarning("Failed to recover the OOP Connect managed tunnel", {
                           cause,
                         }),
                   ),
@@ -937,9 +942,9 @@ const makeServerLayer = Layer.unwrap(
             const wantsCliLink = hasCloudPublicConfig
               ? yield* CloudCliState.readCliDesiredCloudLink.pipe(
                   Effect.catch((cause) =>
-                    Effect.logWarning("Failed to read the desired T3 Connect link", { cause }).pipe(
-                      Effect.as(false),
-                    ),
+                    Effect.logWarning("Failed to read the desired OOP Connect link", {
+                      cause,
+                    }).pipe(Effect.as(false)),
                   ),
                 )
               : false;
@@ -949,7 +954,7 @@ const makeServerLayer = Layer.unwrap(
             const desiredCliLinkMode = wantsCliLink
               ? yield* CloudCliState.readCliDesiredLinkMode.pipe(
                   Effect.catch((cause) =>
-                    Effect.logWarning("Failed to read the desired T3 Connect link mode", {
+                    Effect.logWarning("Failed to read the desired OOP Connect link mode", {
                       cause,
                     }).pipe(Effect.as("managed" as const)),
                   ),
@@ -962,7 +967,7 @@ const makeServerLayer = Layer.unwrap(
                 ? false
                 : yield* startManagedCloudTunnelIfOriginConfirmed(localOrigin).pipe(
                     Effect.catch((cause) =>
-                      Effect.logWarning("Failed to start the confirmed T3 Connect tunnel", {
+                      Effect.logWarning("Failed to start the confirmed OOP Connect tunnel", {
                         cause,
                       }).pipe(Effect.as(false)),
                     ),
@@ -973,12 +978,12 @@ const makeServerLayer = Layer.unwrap(
               Effect.tap((started) =>
                 started
                   ? Effect.logWarning(
-                      "T3 Connect started the stored tunnel without relay confirmation",
+                      "OOP Connect started the stored tunnel without relay confirmation",
                     )
                   : Effect.void,
               ),
               Effect.catch((cause) =>
-                Effect.logWarning("Failed to start the stored T3 Connect tunnel", { cause }),
+                Effect.logWarning("Failed to start the stored OOP Connect tunnel", { cause }),
               ),
               Effect.asVoid,
             );
@@ -993,13 +998,13 @@ const makeServerLayer = Layer.unwrap(
             ).pipe(
               Effect.tap((result) =>
                 result.status === "ready"
-                  ? Effect.logInfo("T3 Connect managed tunnel recovery registered")
+                  ? Effect.logInfo("OOP Connect managed tunnel recovery registered")
                   : Effect.void,
               ),
               Effect.catchCause((cause) =>
                 Cause.hasInterrupts(cause)
                   ? Effect.interrupt
-                  : Effect.logWarning("Failed to register T3 Connect managed tunnel recovery", {
+                  : Effect.logWarning("Failed to register OOP Connect managed tunnel recovery", {
                       cause,
                     }).pipe(Effect.as({ status: "unavailable" as const })),
               ),
@@ -1044,10 +1049,10 @@ const makeServerLayer = Layer.unwrap(
                 Effect.tap((mode) =>
                   mode === null
                     ? Effect.void
-                    : Effect.logInfo("T3 Connect desired link reconciled on startup"),
+                    : Effect.logInfo("OOP Connect desired link reconciled on startup"),
                 ),
                 Effect.catch((cause) =>
-                  Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
+                  Effect.logWarning("Failed to reconcile OOP Connect desired link on startup", {
                     cause,
                   }).pipe(Effect.as(null)),
                 ),

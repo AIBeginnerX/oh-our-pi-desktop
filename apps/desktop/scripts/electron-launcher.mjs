@@ -16,8 +16,8 @@ const devBundleIdSuffix = NodePath.basename(repoRoot)
   .toLowerCase()
   .replaceAll(/[^a-z0-9]+/g, "");
 const isOopBuild = process.env.T3CODE_DESKTOP_BUILD_PROFILE_NAME === "oop-desktop";
-const APP_DISPLAY_NAME = isOopBuild ? "OoP" : isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
-const APP_PERMISSION_NAME = isOopBuild ? "OoP" : "T3 Code";
+const APP_DISPLAY_NAME = isOopBuild ? "OOP" : isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
+const APP_PERMISSION_NAME = isOopBuild ? "OOP" : "T3 Code";
 const APP_BUNDLE_ID = isDevelopment
   ? `com.t3tools.t3code.dev.${devBundleIdSuffix || "local"}`
   : "com.t3tools.t3code";

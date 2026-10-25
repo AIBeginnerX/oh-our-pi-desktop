@@ -9,8 +9,12 @@ export function canInstallMissingProvider(provider: ServerProvider): boolean {
   return (
     provider.enabled &&
     !provider.installed &&
-    provider.versionAdvisory?.canUpdate === true &&
-    provider.versionAdvisory.updateCommand !== null
+    // The npm-backed CLIs (MiniMax Code, ZCode, OpenCode) report the structured
+    // missing-runtime diagnosis, and the server installs those with a fixed
+    // `npm install -g <package>`; the advisory path stays for the download-based ones.
+    (provider.diagnosis === "runtime-missing" ||
+      (provider.versionAdvisory?.canUpdate === true &&
+        provider.versionAdvisory.updateCommand !== null))
   );
 }
 

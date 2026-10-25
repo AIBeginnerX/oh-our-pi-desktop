@@ -386,7 +386,7 @@ const runHomebrew = Effect.fn("runHomebrew")(function* (
  * branch that names a package manager, installer, or Homebrew has evidence that
  * it owns that path. An install with no such evidence gets an npm update when
  * npm is on PATH; npm then adds its own copy, and the runner reports when the
- * copy OoP runs did not change. Installs Homebrew is known to own, mise's
+ * copy OOP runs did not change. Installs Homebrew is known to own, mise's
  * included, stay manual.
  */
 export const resolvePackageManagedProviderMaintenance = Effect.fn(
@@ -540,7 +540,7 @@ export const resolvePackageManagedProviderMaintenance = Effect.fn(
   // Nothing proves who owns this install (on Windows a Node from nvm-windows, Volta, or another
   // prefix often looks like this). With npm on PATH the user can still update in one click: npm
   // installs the latest into its own global prefix, and the runner re-probes afterwards and says
-  // so when the copy OoP runs is a different, still outdated install.
+  // so when the copy OOP runs is a different, still outdated install.
   // A version manager (mise, asdf, proto) owns its installs even when nothing else proves it;
   // an npm copy beside it would never be the one it runs.
   if (yield* isVersionManagerInstall(context)) return manual;
@@ -583,7 +583,7 @@ const isVersionManagerInstall = Effect.fn("isVersionManagerInstall")(function* (
   return VERSION_MANAGER_SCRIPT.test(script);
 });
 
-/** The lock key of an npm update for an install whose owner OoP could not prove. */
+/** The lock key of an npm update for an install whose owner OOP could not prove. */
 export const UNOWNED_NPM_UPDATE_LOCK_KEY = "npm-global:unowned";
 
 /**

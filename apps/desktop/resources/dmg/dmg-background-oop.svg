@@ -14,7 +14,7 @@
       <path d="M708 659V410h76c58 0 90 27 90 79s-32 79-90 79h-76"/>
     </g>
   </svg>
-  <text x="320" y="105" fill="#F8F8F5" font-family="Helvetica" font-size="23" font-weight="700" text-anchor="middle">Drag OoP into Applications.</text>
+  <text x="320" y="105" fill="#F8F8F5" font-family="Helvetica" font-size="23" font-weight="700" text-anchor="middle">Drag OOP into Applications.</text>
   <path d="M270 204Q320 179 370 204M358 190L370 204L351 209" stroke="#BFC3CA" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <text x="320" y="367" fill="#BFC3CA" font-family="Helvetica" font-size="12" text-anchor="middle">Once copied, open it from Applications.</text>
 </svg>

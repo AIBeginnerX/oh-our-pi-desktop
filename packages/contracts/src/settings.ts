@@ -801,7 +801,7 @@ export const MiniMaxCodeSettings = makeProviderSettingsSchema(
 export type MiniMaxCodeSettings = typeof MiniMaxCodeSettings.Type;
 
 /**
- * ZCode, Z.ai's coding agent for GLM. OoP speaks ACP to the `zcode-acp-server` bridge, which runs
+ * ZCode, Z.ai's coding agent for GLM. OOP speaks ACP to the `zcode-acp-server` bridge, which runs
  * `zcode app-server` and reuses the ZCode sign-in.
  */
 export const ZCodeSettings = makeProviderSettingsSchema(
@@ -939,7 +939,7 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Server URL",
-        description: "Leave blank to let T3 Code spawn the server when needed.",
+        description: "Leave blank to let OOP spawn the server when needed.",
         providerSettingsForm: {
           placeholder: "http://127.0.0.1:4096",
           clearWhenEmpty: "omit",

@@ -1,6 +1,6 @@
 # ZCode (GLM)
 
-ZCode is Z.ai's coding agent for GLM models. T3 Code runs it through its own harness, so GLM chats
+ZCode is Z.ai's coding agent for GLM models. OOP runs it through its own harness, so GLM chats
 use ZCode's tools and your ZCode sign-in instead of OpenCode.
 
 ## Set up

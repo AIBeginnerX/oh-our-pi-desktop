@@ -1,5 +1,5 @@
 /**
- * Status checks for third-party coding agents that OoP drives over ACP through the shared Grok ACP
+ * Status checks for third-party coding agents that OOP drives over ACP through the shared Grok ACP
  * adapter (MiniMax Code, ZCode). Each agent supplies its launch command and setup hints; this module
  * answers whether the CLI runs and which models its ACP agent advertises.
  */
@@ -187,7 +187,7 @@ export function acpProbeMessage(
   timedOut: boolean,
 ): string {
   return timedOut
-    ? `${agent.presentation.displayName} is taking longer than usual to start. OoP checks it again on the next refresh.`
+    ? `${agent.presentation.displayName} is taking longer than usual to start. OOP checks it again on the next refresh.`
     : agent.noAnswerMessage;
 }
 
@@ -215,6 +215,7 @@ export const checkAcpAgentProviderStatus = Effect.fn("checkAcpAgentProviderStatu
   if (!settings.enabled) {
     return snapshot({
       installed: false,
+      diagnosis: "disabled",
       version: null,
       status: "warning",
       auth: { status: "unknown" },
@@ -240,6 +241,7 @@ export const checkAcpAgentProviderStatus = Effect.fn("checkAcpAgentProviderStatu
     const missing = isCommandMissingCause(versionResult.failure);
     return snapshot({
       installed: !missing,
+      ...(missing ? { diagnosis: "runtime-missing" as const } : {}),
       version: null,
       status: "error",
       auth: { status: "unknown" },
@@ -258,6 +260,7 @@ export const checkAcpAgentProviderStatus = Effect.fn("checkAcpAgentProviderStatu
   if (versionResult.success.value.code !== 0) {
     return snapshot({
       installed: true,
+      diagnosis: "runtime-error",
       version: null,
       status: "error",
       auth: { status: "unknown" },
@@ -296,7 +299,12 @@ export const checkAcpAgentProviderStatus = Effect.fn("checkAcpAgentProviderStatu
       status: metadata === undefined ? "warning" : "ready",
       // These agents keep their own sign-in; a signed-out CLI fails the first session instead.
       auth: { status: "unknown", label: agent.authLabel },
-      ...(metadata === undefined ? { message: acpProbeMessage(agent, initializeTimedOut) } : {}),
+      ...(metadata === undefined
+        ? {
+            ...(initializeTimedOut ? {} : { diagnosis: "runtime-error" as const }),
+            message: acpProbeMessage(agent, initializeTimedOut),
+          }
+        : {}),
     },
     { models, slashCommands: metadata?.slashCommands ?? [COMPACT_SLASH_COMMAND] },
   );

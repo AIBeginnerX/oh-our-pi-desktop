@@ -1,11 +1,13 @@
 #!/bin/sh
-# OoP Desktop, not the upstream T3 Code CLI. No Node or build tools required.
+# OOP Desktop, not the upstream CLI. No Node or build tools required.
 # curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
 # OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
-# OOP_INSTALL_DIR overrides ~/Applications (macOS) or ~/.local (Linux).
+# OOP_INSTALL_DIR overrides ~/Applications (macOS) or ~/.local (Linux). On macOS an existing
+# /Applications/OOP.app is updated in place instead of adding a second copy; a location the
+# current user cannot change is replaced only after the macOS administrator approval dialog.
 set -eu
 
-fail() { printf 'OoP install: %s\n' "$1" >&2; exit 1; }
+fail() { printf 'OOP install: %s\n' "$1" >&2; exit 1; }
 repo="AIBeginnerX/oh-our-pi-desktop"
 base="${OOP_RELEASE_BASE_URL:-https://github.com/$repo/releases/download}"
 command -v curl >/dev/null 2>&1 || fail "curl is required."
@@ -29,25 +31,52 @@ if [ -z "$version" ]; then
   version="${version#v}"
 fi
 printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || fail "OOP_VERSION must be a stable version such as 0.0.106."
-asset="OoP-$version-$asset_arch.$extension"
+# Releases before 0.0.110 named their files OoP.
+asset_prefix=OOP
+IFS=. read -r major minor patch <<EOF
+$version
+EOF
+if [ "$major" -eq 0 ] && [ "$minor" -eq 0 ] && [ "$patch" -lt 110 ]; then asset_prefix=OoP; fi
+asset="$asset_prefix-$version-$asset_arch.$extension"
+
+# Decide where the app goes and whether macOS must approve it before anything is downloaded.
+install_dir=
+needs_admin=false
+if [ "$platform" = mac ]; then
+  if [ -n "${OOP_INSTALL_DIR:-}" ]; then
+    install_dir="$OOP_INSTALL_DIR"
+  elif [ -e /Applications/OOP.app ] && [ ! -e "$HOME/Applications/OOP.app" ]; then
+    install_dir=/Applications
+  else
+    install_dir="$HOME/Applications"
+  fi
+  if [ -d "$install_dir" ]; then
+    if [ ! -w "$install_dir" ] || { [ -e "$install_dir/OOP.app" ] && [ ! -w "$install_dir/OOP.app" ]; }; then
+      needs_admin=true
+    fi
+  elif ! mkdir -p "$install_dir" 2>/dev/null; then
+    needs_admin=true
+  fi
+  if "$needs_admin"; then
+    command -v osascript >/dev/null 2>&1 ||
+      fail "$install_dir needs administrator approval, but the macOS approval dialog is unavailable. Set OOP_INSTALL_DIR to a folder you own."
+    printf '%s is managed by an administrator; macOS will ask for approval before replacing OOP.app.\n' "$install_dir"
+  fi
+  if [ "$install_dir" != /Applications ] && [ -e /Applications/OOP.app ]; then
+    printf 'Note: /Applications/OOP.app also exists; remove one copy to avoid opening an outdated app.\n'
+  fi
+fi
+
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/oop-install.XXXXXX")"
 mounted=false
-staged=
-install_dir=
 cleanup() {
   if "$mounted"; then hdiutil detach "$tmp/mount" -quiet || true; fi
-  if [ -n "$staged" ] && [ -d "$staged" ]; then
-    if [ -e "$staged/previous.app" ] && [ ! -e "$install_dir/OoP.app" ]; then
-      mv "$staged/previous.app" "$install_dir/OoP.app"
-    fi
-    rm -rf "$staged"
-  fi
   rm -rf "$tmp"
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-printf 'Downloading OoP %s for %s-%s...\n' "$version" "$platform" "$arch"
+printf 'Downloading OOP %s for %s-%s...\n' "$version" "$platform" "$arch"
 curl -fSL --connect-timeout 20 --max-time 1800 "$base/v$version/$asset" -o "$tmp/$asset" ||
   fail "No downloadable $asset. This release may be source-only; see the repository's Releases page."
 curl -fsSL --connect-timeout 20 --max-time 60 "$base/v$version/$asset.sha256" -o "$tmp/checksum" ||
@@ -64,43 +93,66 @@ fi
 [ "$actual" = "$expected" ] || fail "SHA-256 mismatch; nothing was installed."
 
 if [ "$platform" = mac ]; then
-  install_dir="${OOP_INSTALL_DIR:-$HOME/Applications}"
-  mkdir -p "$install_dir" "$tmp/mount"
+  mkdir -p "$tmp/mount"
   hdiutil attach "$tmp/$asset" -mountpoint "$tmp/mount" -nobrowse -readonly -quiet
   mounted=true
-  [ -d "$tmp/mount/OoP.app" ] || fail "The disk image does not contain OoP.app."
-  # Copy into a new directory first; never merge new files into an older app bundle.
-  staged="$(mktemp -d "$install_dir/.oop-install.XXXXXX")"
-  if ! ditto "$tmp/mount/OoP.app" "$staged/OoP.app"; then
-    rm -rf "$staged"
-    fail "Could not copy OoP.app; the existing app was not changed."
-  fi
-  if [ -e "$install_dir/OoP.app" ]; then
-    mv "$install_dir/OoP.app" "$staged/previous.app"
-  fi
-  if ! mv "$staged/OoP.app" "$install_dir/OoP.app"; then
-    if [ -e "$staged/previous.app" ]; then mv "$staged/previous.app" "$install_dir/OoP.app"; fi
-    rm -rf "$staged"
-    fail "Could not install OoP.app."
+  [ -d "$tmp/mount/$asset_prefix.app" ] || fail "The disk image does not contain $asset_prefix.app."
+  # One replacement routine for both paths: copy into a fresh directory first (never merge new
+  # files into an older bundle), swap, and put the previous app back if anything fails.
+  cat > "$tmp/replace.sh" <<'REPLACE'
+#!/bin/sh
+set -eu
+src="$1"
+dir="$2"
+mkdir -p "$dir"
+staged="$(mktemp -d "$dir/.oop-install.XXXXXX")"
+restore() {
+  if [ -e "$staged/previous.app" ] && [ ! -e "$dir/OOP.app" ]; then
+    mv "$staged/previous.app" "$dir/OOP.app"
   fi
   rm -rf "$staged"
-  printf 'Installed %s/OoP.app. Open it from Finder.\n' "$install_dir"
+}
+trap restore EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+ditto "$src" "$staged/OOP.app" || { echo "Could not copy OOP.app; the existing app was not changed." >&2; exit 1; }
+# An administrator replacement keeps the owner the previous app had.
+if [ "$(id -u)" = 0 ] && [ -e "$dir/OOP.app" ]; then
+  chown -R "$(stat -f '%u:%g' "$dir/OOP.app")" "$staged/OOP.app"
+fi
+if [ -e "$dir/OOP.app" ]; then mv "$dir/OOP.app" "$staged/previous.app"; fi
+mv "$staged/OOP.app" "$dir/OOP.app"
+REPLACE
+  if "$needs_admin"; then
+    # The password goes only to the macOS authorization dialog; this script never sees it.
+    osascript \
+      -e 'on run argv' \
+      -e 'do shell script "/bin/sh " & quoted form of item 1 of argv & " " & quoted form of item 2 of argv & " " & quoted form of item 3 of argv with administrator privileges' \
+      -e 'end run' \
+      "$tmp/replace.sh" "$tmp/mount/$asset_prefix.app" "$install_dir" ||
+      fail "Administrator approval was not given or the replacement failed; the existing app was not changed."
+  else
+    sh "$tmp/replace.sh" "$tmp/mount/$asset_prefix.app" "$install_dir" ||
+      fail "Could not install OOP.app; the existing app was not changed."
+  fi
+  printf 'Installed %s/OOP.app. Open it from Finder.\n' "$install_dir"
   printf 'This unsigned/notarization-free build may require Privacy & Security > Open Anyway.\n'
 else
   prefix="${OOP_INSTALL_DIR:-$HOME/.local}"
   mkdir -p "$prefix/bin" "$prefix/share/oop-desktop" "$prefix/share/applications"
   chmod 755 "$tmp/$asset"
-  mv "$tmp/$asset" "$prefix/share/oop-desktop/OoP.AppImage"
+  rm -f "$prefix/share/oop-desktop/OoP.AppImage"
+  mv "$tmp/$asset" "$prefix/share/oop-desktop/OOP.AppImage"
   cat > "$prefix/bin/oop-desktop" <<'LAUNCHER'
 #!/bin/sh
 export APPIMAGE_EXTRACT_AND_RUN=1
 bin="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-exec "$bin/../share/oop-desktop/OoP.AppImage" "$@"
+exec "$bin/../share/oop-desktop/OOP.AppImage" "$@"
 LAUNCHER
   chmod 755 "$prefix/bin/oop-desktop"
   launcher="$(printf '%s' "$prefix/bin/oop-desktop" | sed 's/\\/\\\\/g; s/"/\\"/g; s/`/\\`/g; s/\$/\\$/g; s/%/%%/g')"
-  printf '[Desktop Entry]\nType=Application\nName=OoP\nExec="%s" %%U\nTerminal=false\nCategories=Development;\nMimeType=x-scheme-handler/t3code;x-scheme-handler/t3code-dev;\n' "$launcher" > "$prefix/share/applications/oop-desktop.desktop"
-  printf 'Installed %s/bin/oop-desktop and the OoP application menu entry.\n' "$prefix"
+  printf '[Desktop Entry]\nType=Application\nName=OOP\nExec="%s" %%U\nTerminal=false\nCategories=Development;\nMimeType=x-scheme-handler/t3code;x-scheme-handler/t3code-dev;\n' "$launcher" > "$prefix/share/applications/oop-desktop.desktop"
+  printf 'Installed %s/bin/oop-desktop and the OOP application menu entry.\n' "$prefix"
   case ":$PATH:" in
     *":$prefix/bin:"*) printf 'Run oop-desktop to start.\n' ;;
     *) printf 'Start with "%s/bin/oop-desktop", or add "%s/bin" to PATH.\n' "$prefix" "$prefix" ;;

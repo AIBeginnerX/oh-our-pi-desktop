@@ -3,11 +3,11 @@ import packageJson from "../package.json" with { type: "json" };
 declare const __T3CODE_BUILD_OOP_RELEASE__: string | undefined;
 
 /**
- * The OoP release this executable belongs to, baked in by
- * scripts/build-oop-cli-archives.mjs; null in every other build. An OoP
+ * The OOP release this executable belongs to, baked in by
+ * scripts/build-oop-cli-archives.mjs; null in every other build. An OOP
  * executable reports and pins its runtime by this version, keeps its data in
  * ~/.oop-desktop, and never downloads a release: its runtimes arrive from an
- * OoP desktop over SSH (see packages/ssh tunnel.ts).
+ * OOP desktop over SSH (see packages/ssh tunnel.ts).
  */
 export const OOP_RELEASE_VERSION: string | null =
   typeof __T3CODE_BUILD_OOP_RELEASE__ === "string" && __T3CODE_BUILD_OOP_RELEASE__ !== ""

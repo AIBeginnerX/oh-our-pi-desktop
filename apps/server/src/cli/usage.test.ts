@@ -382,10 +382,10 @@ describe("t3 usage owned", () => {
         // ever sees the fixed user message.
         expect(failure.flipped).toMatchObject({
           _tag: "UserError",
-          userMessage: expect.stringContaining("No T3 Code database found"),
+          userMessage: expect.stringContaining("No OOP database found"),
           cause: { _tag: "OwnedUsageDatabaseMissingError" },
         });
-        expect(String(failure.flipped)).toContain("No T3 Code database found");
+        expect(String(failure.flipped)).toContain("No OOP database found");
         expect(String(failure.flipped)).toContain(dir);
         // Expected command errors print nothing to stdout.
         expect(stdoutLines(failure.lines)).toEqual([]);
@@ -393,7 +393,7 @@ describe("t3 usage owned", () => {
         // real runner renders on stderr — and never the raw tag, cause
         // detail, or stack the runtime reporter would have dumped.
         const stderrText = failure.errors.join("\n");
-        expect(stderrText).toContain("No T3 Code database found");
+        expect(stderrText).toContain("No OOP database found");
         expect(stderrText).toContain(dir);
         expect(stderrText).not.toContain("OwnedUsageDatabaseMissingError");
         expect(stderrText).not.toContain("    at ");

@@ -279,7 +279,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("switches desktop packaging product names to nightly for nightly builds", () => {
     assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17", true), "OoP");
+    assert.equal(resolveDesktopProductName("0.0.17", true), "OOP");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
   });
 
@@ -720,7 +720,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it.effect("brands an OoP macOS package while preserving its protocol identity", () =>
+  it.effect("brands an OOP macOS package while preserving its protocol identity", () =>
     Effect.gen(function* () {
       const config = yield* createBuildConfig(
         "mac",
@@ -734,11 +734,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         "arm64",
         true,
       );
-      assert.equal(config.productName, "OoP");
-      assert.equal(config.artifactName, "OoP-${version}-${arch}.${ext}");
+      assert.equal(config.productName, "OOP");
+      assert.equal(config.artifactName, "OOP-${version}-${arch}.${ext}");
       assert.equal(config.appId, "com.t3tools.t3code");
       assert.deepStrictEqual(config.dmg, {
-        title: "OoP 1.2.3 Installer",
+        title: "OOP 1.2.3 Installer",
         background: "dmg/dmg-background-oop.png",
         window: { width: 640, height: 432 },
         contents: [
@@ -749,12 +749,12 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         iconTextSize: 12,
       });
       assert.deepStrictEqual((config.mac as { protocols: unknown }).protocols, [
-        { name: "OoP", schemes: ["t3code", "t3code-dev"] },
+        { name: "OOP", schemes: ["t3code", "t3code-dev"] },
       ]);
     }),
   );
 
-  it.effect("accepts only bounded absolute OoP local update directories", () =>
+  it.effect("accepts only bounded absolute OOP local update directories", () =>
     Effect.gen(function* () {
       assert.equal(yield* resolveOopLocalUpdateDirectory(undefined), undefined);
       const directory = `/Volumes/Updates/${"a".repeat(1007)}`;
@@ -783,11 +783,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(yield* resolveOopLocalUpdateCandidates(undefined), undefined);
       assert.equal(yield* resolveOopLocalUpdateCandidates("  "), undefined);
       const drive = [
-        "~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos",
-        "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos",
+        "~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos",
+        "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos",
       ];
       const driveJson =
-        '["~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos","~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos"]';
+        '["~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos","~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos"]';
       assert.deepEqual(yield* resolveOopLocalUpdateCandidates(driveJson), drive);
       assert.equal(
         renderOopLocalUpdateConfig("/Volumes/oop/release/macos", "smb://nas/oop", {
@@ -803,7 +803,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       for (const value of [
         "not json",
         "[]",
-        '["relative/OoP"]',
+        '["relative/OOP"]',
         '["~/../etc"]',
         '["/Volumes/a*b*c/release"]',
         "[7]",
@@ -815,7 +815,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("ships the local update config only in OoP macOS Resources", () =>
+  it.effect("ships the local update config only in OOP macOS Resources", () =>
     Effect.gen(function* () {
       const configuration = yield* createBuildConfig(
         "mac",
@@ -2845,7 +2845,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const mac = candidate.mac as Record<string, unknown>;
 
       assert.equal(candidate.appId, "com.t3tools.t3code");
-      assert.equal(candidate.productName, "OoP");
+      assert.equal(candidate.productName, "OOP");
       assert.match(String(mac.sign), /[\\/]scripts[\\/]sign-macos\.ts$/);
       assert.equal(mac.identity, "Example Holder (ABCDE12345)");
       assert.equal(mac.hardenedRuntime, true);
@@ -3078,7 +3078,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const apps = ["/tmp/dist/mac-arm64/OoP.app", "/tmp/dist/mac/OoP.app"];
+          const apps = ["/tmp/dist/mac-arm64/OOP.app", "/tmp/dist/mac/OOP.app"];
           const commands: Array<{
             readonly command: string;
             readonly args: ReadonlyArray<string>;

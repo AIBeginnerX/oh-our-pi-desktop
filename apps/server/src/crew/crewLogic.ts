@@ -324,7 +324,7 @@ export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string
         ]
       : []),
     "Do not use built-in subagents with other models, or Workflow tools, for work the crew can do. Check every report, combine them into your answer, and say which crew member did what.",
-    "Name every task (the crew_delegate title, the Agent tool description) with a short English summary of its core work, at most eight words, even when you talk with the user in another language; the OoP Agents board shows it.",
+    "Name every task (the crew_delegate title, the Agent tool description) with a short English summary of its core work, at most eight words, even when you talk with the user in another language; the OOP Agents board shows it.",
     "A report with status partial or blocked is not finished: do the rest yourself or hand a follow-up task to the crew.",
     "If a fast-path agent fails, hand that task to crew_delegate. Only when crew_delegate fails or crew_wait reports that every crew model failed, do the task yourself and say so.",
     "</oop_crew>",
@@ -355,7 +355,7 @@ export const CREW_MAX_FOLLOW_UPS = 4;
 
 const FOLLOW_UP_MARKER = /<oop_crew_follow_up round="(\d+)" fixes="(\d+)">/;
 
-/** A lead message OoP sent as a crew follow-up rather than one the user wrote. */
+/** A lead message OOP sent as a crew follow-up rather than one the user wrote. */
 export function isCrewFollowUp(text: string): boolean {
   return FOLLOW_UP_MARKER.test(text);
 }

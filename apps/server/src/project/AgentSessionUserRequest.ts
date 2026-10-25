@@ -37,8 +37,7 @@ const INJECTED_BLOCK_TAGS: ReadonlySet<string> = new Set([
   "local-command-stdout",
   "local-command-stderr",
   "memory_notice",
-  "agent-task",
-  // OoP's crew brief, prepended to each lead turn while the crew is on (crewLogic.crewBrief).
+  // OOP's crew brief, prepended to each lead turn while the crew is on (crewLogic.crewBrief).
   "oop_crew",
   "recalled-memory",
   "recommended_plugins",
@@ -68,6 +67,12 @@ const INJECTED_WRAPPER_SENTENCES: ReadonlyArray<string> = [
 const INJECTED_CONTAINER_TAGS: ReadonlySet<string> = new Set(["conversation_history"]);
 
 /**
+ * Task wrappers a delegating harness puts around a child run's notices
+ * (`<scheduled-task>`, `<…-task>`): the whole family is harness text.
+ */
+const INJECTED_TASK_TAG_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*-task$/;
+
+/**
  * Openings a delegating harness writes as the first real request of a run it
  * spawned. The user never typed these, and a thread whose request is one of
  * them is a delegated task transcript rather than a conversation the user had.
@@ -76,10 +81,12 @@ const INJECTED_CONTAINER_TAGS: ReadonlySet<string> = new Set(["conversation_hist
  * lowercased role label; the launcher matches the harness that starts its
  * children with an optional quoted name and an optional trailing period.
  * Matching the text only: `entrypoint` and `promptSource` are identical on a
- * delegated run and on a conversation a user drives through the SDK.
+ * delegated run and on a conversation a user drives through the SDK. A
+ * harness that names its child run (`You are running as an <harness> <kind>-task
+ * child`) is matched by shape, whichever harness wrote it.
  */
+const DELEGATION_PREAMBLE_PATTERN = /^You are running as an? [\w.-]+ [\w.-]+-task child\b/;
 const DELEGATION_PREAMBLE_PREFIXES: ReadonlyArray<string> = [
-  "You are running as an agent-task child",
   "You are the worker on an OOP crew.",
   "You are the expert on an OOP crew.",
   "You are the auditor on an OOP crew.",
@@ -117,7 +124,7 @@ function textOutsideHarnessMarkup(text: string): string {
     const isContainer = INJECTED_CONTAINER_TAGS.has(tag);
     // Markup nobody recognises is the user's own text, both tags included;
     // only the harness's own tags, and the blocks they wrap, are cut.
-    if (!isContainer && !INJECTED_BLOCK_TAGS.has(tag)) {
+    if (!isContainer && !INJECTED_BLOCK_TAGS.has(tag) && !INJECTED_TASK_TAG_PATTERN.test(tag)) {
       index += opening[0].length;
       continue;
     }
@@ -208,8 +215,11 @@ export function deriveThreadTitleFromUserTexts(texts: Iterable<string>): string 
  */
 export function isDelegationPreambleRequest(request: string): boolean {
   const text = request.trim();
-  return DELEGATION_PREAMBLE_PREFIXES.some(
-    (prefix) => text === prefix || text.startsWith(`${prefix} `) || text.startsWith(`${prefix}.`),
+  return (
+    DELEGATION_PREAMBLE_PATTERN.test(text) ||
+    DELEGATION_PREAMBLE_PREFIXES.some(
+      (prefix) => text === prefix || text.startsWith(`${prefix} `) || text.startsWith(`${prefix}.`),
+    )
   );
 }
 

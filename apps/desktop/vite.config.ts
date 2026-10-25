@@ -36,7 +36,7 @@ if (
   buildProfileName === "oop-desktop" &&
   (typeof upstreamTag !== "string" || !/^v\d+\.\d+\.\d+$/.test(upstreamTag))
 ) {
-  throw new Error("OoP requires a stable UPSTREAM.json source tag for remote CLI downloads.");
+  throw new Error("OOP requires a stable UPSTREAM.json source tag for remote CLI downloads.");
 }
 const publicConfigDefine = {
   __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(

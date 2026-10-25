@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Builds the OoP server archives that a desktop installs on an SSH remote (Linux x64 and arm64,
+// Builds the OOP server archives that a desktop installs on an SSH remote (Linux x64 and arm64,
 // Apple Silicon Mac) into release/cli/v<version>/ with SHA256SUMS; the release step then copies
 // them to Drive.
 // Run on the release Mac after `node scripts/macos.mjs package`:
@@ -272,7 +272,7 @@ export async function main(argv = process.argv.slice(2)) {
         ...process.env,
         PATH: `${NodePath.dirname(node)}${NodePath.delimiter}${basePath}`,
         VP_NODE_VERSION: SEA_NODE_VERSION,
-        // Bakes the OoP identity into the executable (apps/server/src/oopBuild.ts).
+        // Bakes the OOP identity into the executable (apps/server/src/oopBuild.ts).
         T3CODE_OOP_RELEASE: version,
       },
     });

@@ -25,6 +25,11 @@ import {
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import {
+  BundledSkillError,
+  BundledSkillInstallInput,
+  BundledSkillListResult,
+} from "./bundledSkill.ts";
+import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
   EnvironmentAuthorizationError,
@@ -469,6 +474,8 @@ export const WS_METHODS = {
   serverUpdateSettings: "server.updateSettings",
   serverDiscoverSourceControl: "server.discoverSourceControl",
   serverGetTraceDiagnostics: "server.getTraceDiagnostics",
+  serverListBundledSkills: "server.listBundledSkills",
+  serverInstallBundledSkill: "server.installBundledSkill",
   serverGetProcessDiagnostics: "server.getProcessDiagnostics",
   serverGetHostResources: "server.getHostResources",
   serverGetProcessResourceHistory: "server.getProcessResourceHistory",
@@ -713,6 +720,18 @@ const WsProviderInstallRemoveRpc = Rpc.make(WS_METHODS.providerInstallRemove, {
   payload: ProviderSetupInput,
   success: ProviderInstallState,
   error: ProviderSetupRpcError,
+});
+
+const WsServerListBundledSkillsRpc = Rpc.make(WS_METHODS.serverListBundledSkills, {
+  payload: Schema.Struct({}),
+  success: BundledSkillListResult,
+  error: Schema.Union([BundledSkillError, EnvironmentAuthorizationError]),
+});
+
+const WsServerInstallBundledSkillRpc = Rpc.make(WS_METHODS.serverInstallBundledSkill, {
+  payload: BundledSkillInstallInput,
+  success: BundledSkillListResult,
+  error: Schema.Union([BundledSkillError, EnvironmentAuthorizationError]),
 });
 
 const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -1827,6 +1846,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsProviderInstallCancelRpc,
   WsProviderInstallSubscribeRpc,
   WsProviderInstallRemoveRpc,
+  WsServerListBundledSkillsRpc,
+  WsServerInstallBundledSkillRpc,
   WsServerUpdateServerRpc,
   WsServerUpdateServerWithProgressRpc,
   WsServerCommitDesktopUpdateRpc,

@@ -6,6 +6,8 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
+import { macUpdatePkgName } from "./oop-release-names.mjs";
+
 import {
   buildOopUpdatePkg,
   componentPlist,
@@ -28,8 +30,8 @@ import {
 
 const validMetadata = {
   identifier: "com.t3tools.t3code",
-  name: "OoP",
-  executable: "OoP",
+  name: "OOP",
+  executable: "OOP",
   version: "0.0.45",
   architectures: ["arm64"],
   oopProfileEmbedded: true,
@@ -98,11 +100,11 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "Installer metadata replaces exact OoP bundle at system location and preserves repair installs",
+  "Installer metadata replaces exact OOP bundle at system location and preserves repair installs",
   () => {
     const component = componentPlist();
     for (const expected of [
-      "Applications/OoP.app",
+      "Applications/OOP.app",
       "BundleIsRelocatable</key><false/>",
       "BundleIsVersionChecked</key><false/>",
       "BundleHasStrictIdentifier</key><true/>",
@@ -117,7 +119,7 @@ NodeTest.test(
     );
     NodeAssert.match(distribution, /<welcome file="welcome\.html"\/>/u);
     NodeAssert.match(distribution, /<options [^>]*hostArchitectures="arm64"/u);
-    NodeAssert.match(distribution, /<title>OoP 0\.0\.45 설치<\/title>/u);
+    NodeAssert.match(distribution, /<title>OOP 0\.0\.45 설치<\/title>/u);
     NodeAssert.equal(distribution.split("<product").length, 2);
     NodeAssert.ok(distribution.includes(releaseProductElement("0.0.45")));
     NodeAssert.equal(hasReleaseBinding(distribution, "0.0.45"), true);
@@ -127,15 +129,15 @@ NodeTest.test(
       false,
     );
     NodeAssert.match(welcomeHtml(), /<html lang="ko">/u);
-    NodeAssert.match(welcomeHtml(), /\/Applications\/OoP\.app/u);
+    NodeAssert.match(welcomeHtml(), /\/Applications\/OOP\.app/u);
     NodeAssert.doesNotMatch(welcomeHtml(), /<product/u);
     const preinstall = preinstallScript("0.0.45");
     NodeAssert.ok(preinstall.includes(targetProcessCheck()));
-    NodeAssert.match(preinstall, /pids=\$\(\/usr\/bin\/pgrep -x OoP\) \|\| rc=\$\?/u);
-    NodeAssert.doesNotMatch(preinstall, /pgrep -x OoP\) \|\| true/u);
+    NodeAssert.match(preinstall, /pids=\$\(\/usr\/bin\/pgrep -x "\$exe"\) \|\| rc=\$\?/u);
+    NodeAssert.doesNotMatch(preinstall, /pgrep -x "\$exe"\) \|\| true/u);
     NodeAssert.match(preinstall, /\$\(\/bin\/ps -o comm= -p "\$pid"/u);
-    NodeAssert.match(preinstall, /targetExe="\$target\/Contents\/MacOS\/OoP"/u);
-    NodeAssert.doesNotMatch(preinstall, /pgrep -x OoP >\/dev\/null/u);
+    NodeAssert.match(preinstall, /targetExe="\$target\/Contents\/MacOS\/\$exe"/u);
+    NodeAssert.doesNotMatch(preinstall, /pgrep -x "\$exe" >\/dev\/null/u);
     NodeAssert.match(preinstall, /\/Updates/u);
     NodeAssert.match(preinstall, /stat -f %u/u);
     NodeAssert.match(preinstall, /stat -f %Lp/u);
@@ -148,14 +150,14 @@ NodeTest.test(
   },
 );
 
-const targetExecutable = "/Applications/OoP.app/Contents/MacOS/OoP";
-const isolatedExecutable = "/tmp/oop-ui049/OoP.app/Contents/MacOS/OoP";
+const targetExecutable = "/Applications/OOP.app/Contents/MacOS/OOP";
+const isolatedExecutable = "/tmp/oop-ui049/OOP.app/Contents/MacOS/OOP";
 const shellQuote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
 // Runs the real fragment under `set -eu` with fake pgrep/ps. `processes` maps PID to the executable path
 // ps reports, or null when ps fails for it. `pgrepResults` is one `{ exit, pids }` per pgrep call; by default
 // the first call lists every PID and each recheck finds nothing (the null processes really exited). A call past
-// the end exits 99. Every run also asserts pgrep ran at most once plus once per ps failure, always as `-x OoP`.
+// the end exits 99. Every run also asserts pgrep ran at most once plus once per ps failure, always as `-x OOP`.
 async function runTargetProcessCheck(processes, pgrepResults) {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-proc-check-"));
   try {
@@ -192,7 +194,7 @@ async function runTargetProcessCheck(processes, pgrepResults) {
     );
     await NodeFSP.writeFile(
       driver,
-      `#!/bin/sh\nset -eu\ntarget=/Applications/OoP.app\n${targetProcessCheck({ pgrep, ps })}echo passed\n`,
+      `#!/bin/sh\nset -eu\ntarget=/Applications/OOP.app\nexe=OOP\n${targetProcessCheck({ pgrep, ps })}echo passed\n`,
     );
     const result = NodeChildProcess.spawnSync("/bin/sh", [driver], { encoding: "utf8" });
     const pgrepCalls = (await NodeFSP.readFile(callLog, "utf8")).split("\n").filter(Boolean);
@@ -201,7 +203,7 @@ async function runTargetProcessCheck(processes, pgrepResults) {
       `pgrep called ${pgrepCalls.length} times for ${psFailures} ps failures`,
     );
     NodeAssert.ok(
-      pgrepCalls.every((args) => args === "-x OoP"),
+      pgrepCalls.every((args) => args === "-x OOP"),
       pgrepCalls.join("\n"),
     );
     return Object.assign(result, { pgrepCalls });
@@ -216,7 +218,7 @@ NodeTest.test(
     for (const processes of [
       {},
       { 4101: isolatedExecutable },
-      { 4101: "/tmp/OoP copy.app/Contents/MacOS/OoP" },
+      { 4101: "/tmp/OOP copy.app/Contents/MacOS/OOP" },
       { 4102: null },
       { 4101: isolatedExecutable, 4102: null },
     ]) {
@@ -248,7 +250,7 @@ NodeTest.test(
 NodeTest.test(
   "process check blocks when ps does not give an absolute executable path",
   async () => {
-    for (const comm of ["OoP", ""]) {
+    for (const comm of ["OOP", ""]) {
       const result = await runTargetProcessCheck({ 4104: comm });
       NodeAssert.equal(result.status, 1);
       NodeAssert.equal(result.stdout, "");
@@ -354,7 +356,7 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "rejects wrong product, architecture, version, or missing embedded OoP profile",
+  "rejects wrong product, architecture, version, or missing embedded OOP profile",
   () => {
     validateAppMetadata(validMetadata, "0.0.45");
     for (const invalid of [
@@ -368,6 +370,19 @@ NodeTest.test(
     }
   },
 );
+
+NodeTest.test("the feed keeps the legacy OoP package name through 0.0.110, then uses OOP", () => {
+  const sha256 = "a".repeat(64);
+  NodeAssert.equal(macUpdatePkgName("0.0.110"), "OoP-0.0.110-arm64-update.pkg");
+  NodeAssert.equal(macUpdatePkgName("0.0.111"), "OOP-0.0.111-arm64-update.pkg");
+  NodeAssert.equal(macUpdatePkgName("0.1.0"), "OOP-0.1.0-arm64-update.pkg");
+  NodeAssert.equal(
+    localUpdateFeed("0.0.111", "OOP-0.0.111-arm64-update.pkg", 100, sha256).pkg,
+    "OOP-0.0.111-arm64-update.pkg",
+  );
+  NodeAssert.throws(() => localUpdateFeed("0.0.111", "OoP-0.0.111-arm64-update.pkg", 100, sha256));
+  NodeAssert.throws(() => localUpdateFeed("0.0.110", "OOP-0.0.110-arm64-update.pkg", 100, sha256));
+});
 
 NodeTest.test("local update feed requires exact versioned arm64 package metadata", () => {
   const sha256 = "a".repeat(64);
@@ -391,15 +406,15 @@ NodeTest.test("local update feed requires exact versioned arm64 package metadata
   ])
     NodeAssert.throws(
       () => localUpdateFeed(version, pkg, size, digest),
-      /Invalid local OoP update package metadata/u,
+      /Invalid local OOP update package metadata/u,
     );
 });
 
 NodeTest.test("verified DMG becomes a package with a hash-bound, scoped manifest", async () => {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-pkg-test-"));
   try {
-    const dmg = NodePath.join(root, "OoP.dmg");
-    const output = NodePath.join(root, "OoP-0.0.45-update.pkg");
+    const dmg = NodePath.join(root, "OOP.dmg");
+    const output = NodePath.join(root, "OOP-0.0.45-update.pkg");
     await NodeFSP.writeFile(dmg, "trusted image fixture");
     const sha256 = NodeCrypto.createHash("sha256").update("trusted image fixture").digest("hex");
     const calls = [];
@@ -427,7 +442,7 @@ NodeTest.test("verified DMG becomes a package with a hash-bound, scoped manifest
       if (command === "/usr/bin/xar") return fakeToc(shipped.distribution);
       if (command.endsWith("hdiutil") && args[0] === "attach") {
         const mount = args[args.indexOf("-mountpoint") + 1];
-        await NodeFSP.mkdir(NodePath.join(mount, "OoP.app"), { recursive: true });
+        await NodeFSP.mkdir(NodePath.join(mount, "OOP.app"), { recursive: true });
         return "<plist>attached</plist>";
       }
       if (command.endsWith("plutil") && args[0] === "-convert") {
@@ -513,7 +528,7 @@ NodeTest.test(
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-feed-test-"));
     try {
-      const dmg = NodePath.join(root, "OoP.dmg");
+      const dmg = NodePath.join(root, "OOP.dmg");
       const output = NodePath.join(root, "OoP-0.0.50-arm64-update.pkg");
       const feedPath = NodePath.join(root, "oop-update.json");
       await NodeFSP.writeFile(dmg, "trusted image fixture");
@@ -535,7 +550,7 @@ NodeTest.test(
         calls.push(args[0]);
         if (command.endsWith("hdiutil") && args[0] === "attach") {
           mount = args[args.indexOf("-mountpoint") + 1];
-          await NodeFSP.mkdir(NodePath.join(mount, "OoP.app"));
+          await NodeFSP.mkdir(NodePath.join(mount, "OOP.app"));
           return "<plist>attached</plist>";
         }
         if (command.endsWith("plutil") && args[0] === "-convert") {
@@ -586,11 +601,11 @@ NodeTest.test(
             {
               ...input,
               version: invalidVersion,
-              output: NodePath.join(root, `OoP-${invalidVersion}-arm64-update.pkg`),
+              output: NodePath.join(root, macUpdatePkgName(invalidVersion)),
             },
             { run: fakeRun },
           ),
-          /Invalid stable OoP update feed version/u,
+          /Invalid stable OOP update feed version/u,
         );
         NodeAssert.equal(calls.length, callCount);
       }
@@ -621,8 +636,8 @@ NodeTest.test(
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-pkg-fail-"));
     try {
-      const dmg = NodePath.join(root, "OoP.dmg");
-      const output = NodePath.join(root, "OoP-update.pkg");
+      const dmg = NodePath.join(root, "OOP.dmg");
+      const output = NodePath.join(root, "OOP-update.pkg");
       await NodeFSP.writeFile(dmg, "image");
       const sha256 = NodeCrypto.createHash("sha256").update("image").digest("hex");
       await NodeAssert.rejects(
@@ -655,7 +670,7 @@ NodeTest.test(
               if (command.endsWith("hdiutil") && args[0] === "attach") {
                 const mount = args[args.indexOf("-mountpoint") + 1];
                 signatureCalls.mount = mount;
-                await NodeFSP.mkdir(NodePath.join(mount, "OoP.app"));
+                await NodeFSP.mkdir(NodePath.join(mount, "OOP.app"));
                 return "<plist>attached</plist>";
               }
               if (command.endsWith("plutil") && args[0] === "-convert") {
@@ -707,7 +722,7 @@ function deferred() {
 async function withPublishDir(body) {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-publish-test-"));
   try {
-    const dmg = NodePath.join(root, "OoP.dmg");
+    const dmg = NodePath.join(root, "OOP.dmg");
     const outDir = NodePath.join(root, "out");
     await NodeFSP.writeFile(dmg, "trusted image fixture");
     await body({
@@ -727,7 +742,7 @@ function startBuild(
   { dmg, outDir },
   version,
   {
-    output = NodePath.join(outDir, `OoP-${version}-arm64-update.pkg`),
+    output = NodePath.join(outDir, macUpdatePkgName(version)),
     hook,
     tarList = "Distribution\n",
     tarDistribution,
@@ -741,7 +756,7 @@ function startBuild(
     await hook?.(command, args);
     if (command.endsWith("hdiutil") && args[0] === "attach") {
       mount = args[args.indexOf("-mountpoint") + 1];
-      await NodeFSP.mkdir(NodePath.join(mount, "OoP.app"));
+      await NodeFSP.mkdir(NodePath.join(mount, "OOP.app"));
       return "<plist>attached</plist>";
     }
     if (command.endsWith("plutil") && args[0] === "-convert") {
@@ -768,7 +783,7 @@ function startBuild(
 
 // A published version: its package, both sidecars, and the exact feed pointing at it.
 async function seedPublished({ outDir, feedPath }, version) {
-  const pkg = `OoP-${version}-arm64-update.pkg`;
+  const pkg = macUpdatePkgName(version);
   const bytes = `published ${version}`;
   await NodeFSP.mkdir(outDir, { recursive: true });
   await NodeFSP.writeFile(NodePath.join(outDir, pkg), bytes);
@@ -806,11 +821,11 @@ NodeTest.test(
     const sha256 = "a".repeat(64);
     NodeAssert.throws(
       () => localUpdateFeed(["0.0.50"], "OoP-0.0.50-arm64-update.pkg", 100, sha256),
-      /Invalid local OoP update package metadata/u,
+      /Invalid local OOP update package metadata/u,
     );
     NodeAssert.throws(
       () => localUpdateFeed("0.0.50", "OoP-0.0.50-arm64-update.pkg", 100, [sha256]),
-      /Invalid local OoP update package metadata/u,
+      /Invalid local OOP update package metadata/u,
     );
   },
 );
@@ -1029,7 +1044,7 @@ NodeTest.test(
   async () => {
     await withPublishDir(async (dir) => {
       await seedPublished(dir, "0.0.58");
-      const output = NodePath.join(dir.outDir, "OoP-0.0.59-arm64-candidate.pkg");
+      const output = NodePath.join(dir.outDir, "OOP-0.0.59-arm64-candidate.pkg");
       await NodeFSP.writeFile(output, "existing candidate package");
       await NodeFSP.writeFile(`${output}.sha256`, "existing candidate hash\n");
       await NodeFSP.writeFile(`${output}.json`, '{"existing":"candidate"}\n');
@@ -1086,7 +1101,7 @@ NodeTest.test(
       const blockRelease = () => NodeFSP.writeFile(NodePath.join(dir.lockPath, "foreign"), "");
       const published = startBuild(dir, "0.0.59", { hook: blockRelease });
       await NodeAssert.rejects(published.result, (error) => {
-        NodeAssert.match(error.message, /^OoP update 0\.0\.59 was published, but releasing /u);
+        NodeAssert.match(error.message, /^OOP update 0\.0\.59 was published, but releasing /u);
         NodeAssert.ok(error.message.includes(dir.lockPath));
         NodeAssert.match(
           error.message,
@@ -1141,7 +1156,7 @@ NodeTest.test(
     await withPublishDir(async (dir) => {
       await seedPublished(dir, "0.0.58");
       const before = await snapshot(dir.outDir);
-      const name = "OoP-0.0.57-arm64-rollback.pkg";
+      const name = "OOP-0.0.57-arm64-rollback.pkg";
       const manifest = await startBuild(dir, "0.0.57", { output: NodePath.join(dir.outDir, name) })
         .result;
       const after = await snapshot(dir.outDir);
@@ -1159,12 +1174,12 @@ NodeTest.test(
 
 NodeTest.describe("old release cleanup", () => {
   const names = [
-    "OoP-0.0.9-arm64.dmg",
+    "OOP-0.0.9-arm64.dmg",
     "OoP-0.0.10-arm64-update.pkg",
     "OoP-0.0.10-arm64-update.pkg.json",
-    "OoP-0.0.11-arm64.dmg",
-    "OoP-0.0.11-arm64.dmg.sha256",
-    "OoP-0.0.12-arm64.dmg",
+    "OOP-0.0.11-arm64.dmg",
+    "OOP-0.0.11-arm64.dmg.sha256",
+    "OOP-0.0.12-arm64.dmg",
     "OoP-0.0.13-arm64-update.pkg",
     "oop-update.json",
     "LOCAL_UPDATE_STATUS.json",
@@ -1172,7 +1187,7 @@ NodeTest.describe("old release cleanup", () => {
 
   NodeTest.it("keeps the published version and the one before it, by version order", () => {
     NodeAssert.deepEqual(releaseArtifactsToPrune(names, "0.0.12"), [
-      "OoP-0.0.9-arm64.dmg",
+      "OOP-0.0.9-arm64.dmg",
       "OoP-0.0.10-arm64-update.pkg",
       "OoP-0.0.10-arm64-update.pkg.json",
     ]);
@@ -1182,14 +1197,14 @@ NodeTest.describe("old release cleanup", () => {
     const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-prune-"));
     try {
       for (const name of names) await NodeFSP.writeFile(NodePath.join(dir, name), "");
-      await NodeFSP.mkdir(NodePath.join(dir, "OoP-0.0.1-arm64-folder"));
+      await NodeFSP.mkdir(NodePath.join(dir, "OOP-0.0.1-arm64-folder"));
       await pruneOldReleases(dir, "0.0.12");
       NodeAssert.deepEqual((await NodeFSP.readdir(dir)).sort(), [
         "LOCAL_UPDATE_STATUS.json",
-        "OoP-0.0.1-arm64-folder",
-        "OoP-0.0.11-arm64.dmg",
-        "OoP-0.0.11-arm64.dmg.sha256",
-        "OoP-0.0.12-arm64.dmg",
+        "OOP-0.0.1-arm64-folder",
+        "OOP-0.0.11-arm64.dmg",
+        "OOP-0.0.11-arm64.dmg.sha256",
+        "OOP-0.0.12-arm64.dmg",
         "OoP-0.0.13-arm64-update.pkg",
         "oop-update.json",
       ]);

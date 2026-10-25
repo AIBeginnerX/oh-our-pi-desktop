@@ -69,7 +69,7 @@ const callNames = (tools: FakeMacTools) =>
     if (call.name === "ditto" || call.name === "ps") return call.name;
     if (call.name === "env") return "env osascript";
     if (call.name === "kill") return `kill ${call.args[1]}`;
-    if (call.name === "codesign" && (call.args.at(-1) ?? "").endsWith("/launch/OoP.app")) {
+    if (call.name === "codesign" && (call.args.at(-1) ?? "").endsWith("/launch/OOP.app")) {
       return "codesign copy";
     }
     return `${call.name} ${call.args[0]}`;
@@ -85,8 +85,8 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("MacArtifactRunner",
         const located = yield* locateArtifact(workspace.root);
 
         expect(located).toMatchObject({
-          fileName: `OoP-${VERSION}-arm64.dmg`,
-          relativePath: `release/macos/OoP-${VERSION}-arm64.dmg`,
+          fileName: `OOP-${VERSION}-arm64.dmg`,
+          relativePath: `release/macos/OOP-${VERSION}-arm64.dmg`,
           appVersion: VERSION,
         });
         expect(located.dmgPath).toBe(yield* fileSystem.realPath(workspace.dmgPath));
@@ -121,7 +121,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("MacArtifactRunner",
         const fileSystem = yield* FileSystem.FileSystem;
         const workspace = yield* makeWorkspace();
         yield* fileSystem.remove(workspace.dmgPath);
-        yield* fileSystem.writeFileString(`${workspace.dmgPath}.sha256`, "deadbeef  OoP.dmg\n");
+        yield* fileSystem.writeFileString(`${workspace.dmgPath}.sha256`, "deadbeef  OOP.dmg\n");
         yield* fileSystem.writeFileString(`${workspace.dmgPath}.json`, '{"verification":"passed"}');
 
         const error = yield* locateArtifact(workspace.root).pipe(Effect.flip);
@@ -155,7 +155,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("MacArtifactRunner",
           const outside = yield* fileSystem.makeTempDirectoryScoped();
           yield* fileSystem.makeDirectory(path.join(outside, "macos"), { recursive: true });
           yield* fileSystem.writeFileString(
-            path.join(outside, "macos", `OoP-${VERSION}-arm64.dmg`),
+            path.join(outside, "macos", `OOP-${VERSION}-arm64.dmg`),
             "outside",
           );
           yield* fileSystem.writeFileString(
@@ -677,7 +677,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("MacArtifactRunner",
         yield* run;
 
         const runDir = hereRunDir(patches);
-        const copy = `${runDir}/launch/OoP.app`;
+        const copy = `${runDir}/launch/OOP.app`;
         // One short folder holds everything: the launched app's sockets must fit in 103 bytes.
         expect(runDir).toBe(`${tempRoot}/t3v-attempt-test-1`);
         expect(Buffer.byteLength(runDir)).toBeLessThanOrEqual(54);
@@ -692,11 +692,11 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("MacArtifactRunner",
           "rm -rfx",
         ]);
         const ditto = tools.calls.find((call) => call.name === "ditto");
-        expect(ditto?.args).toEqual([`${runDir}/mnt/OoP.app`, copy]);
+        expect(ditto?.args).toEqual([`${runDir}/mnt/OOP.app`, copy]);
 
         // The copy is checked with exactly the flags the mounted app was.
         const signatures = tools.calls.filter((call) => call.name === "codesign");
-        expect(signatures.map((call) => call.args.at(-1))).toEqual([`${runDir}/mnt/OoP.app`, copy]);
+        expect(signatures.map((call) => call.args.at(-1))).toEqual([`${runDir}/mnt/OOP.app`, copy]);
         expect(signatures[1]?.args.slice(0, -1)).toEqual(signatures[0]?.args.slice(0, -1));
 
         // The launcher is `env -u ELECTRON_RUN_AS_NODE /usr/bin/osascript ...`, given the copy and
@@ -797,7 +797,7 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("MacArtifactRunner",
         expect(patches.at(-1)?.error).toContain(LAUNCH_MAY_RUN_NOTE);
         expect(patches.some((patch) => patch.runDir === null)).toBe(false);
         expect(yield* fileSystem.exists(`${runDir}/${LAUNCH_UNCONFIRMED_MARKER}`)).toBe(true);
-        expect(yield* fileSystem.exists(`${runDir}/launch/OoP.app`)).toBe(true);
+        expect(yield* fileSystem.exists(`${runDir}/launch/OOP.app`)).toBe(true);
         // Nothing unidentified was signalled, and nothing was deleted.
         expect(tools.calls.some((call) => call.name === "ps" || call.name === "kill")).toBe(false);
         expect(callNames(tools)).not.toContain("rm -rfx");

@@ -274,6 +274,19 @@ function turnColumns(
   return columns;
 }
 
+/**
+ * The steps a turn graph draws: every step that has not settled, then the newest settled ones up
+ * to the cap. A long-running call that started early must stay visible however busy the turn got.
+ */
+function visibleSteps(sorted: ReadonlyArray<ToolStep>): ToolStep[] {
+  if (sorted.length <= MAX_TURN_STEPS) return [...sorted];
+  const keep = new Set(sorted.filter((step) => !isSettledState(step.state)).slice(-MAX_TURN_STEPS));
+  for (let index = sorted.length - 1; index >= 0 && keep.size < MAX_TURN_STEPS; index -= 1) {
+    keep.add(sorted[index]!);
+  }
+  return sorted.filter((step) => keep.has(step));
+}
+
 /** One graph per turn that called tools, oldest turn first. */
 export function turnGraphs(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -360,13 +373,16 @@ export function turnGraphs(
   const turns = [...byTurn.entries()]
     .map(([turnId, turnSteps]) => ({
       turnId,
-      steps: turnSteps
-        .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id))
-        .slice(-MAX_TURN_STEPS),
+      total: turnSteps.length,
+      steps: visibleSteps(
+        turnSteps.sort(
+          (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
+        ),
+      ),
     }))
     .sort((a, b) => (a.steps[0]?.startedAt ?? "").localeCompare(b.steps[0]?.startedAt ?? ""));
 
-  return turns.map(({ turnId, steps: turnSteps }, index) => {
+  return turns.map(({ turnId, total, steps: turnSteps }, index) => {
     const columns = turnColumns(turnSteps);
     const waveById = new Map(columns.flatMap((column, wave) => column.map((id) => [id, wave])));
     const nodes: WorkflowNode[] = turnSteps.map((step) => ({
@@ -394,7 +410,9 @@ export function turnGraphs(
       id: `turn:${turnId}`,
       kind: "turn",
       turnId,
-      name: `Turn ${index + 1} · ${turnSteps.length} step${turnSteps.length === 1 ? "" : "s"}`,
+      name: `Turn ${index + 1} · ${total} step${total === 1 ? "" : "s"}${
+        total > turnSteps.length ? ` · ${total - turnSteps.length} older hidden` : ""
+      }`,
       status: graphStatus(nodes),
       startedAt: turnSteps[0]?.startedAt ?? "",
       updatedAt: last?.completedAt ?? last?.startedAt ?? "",
@@ -555,8 +573,8 @@ function withThinkingFrontier(graph: WorkflowGraph): WorkflowGraph {
 /**
  * Lines a turn or crew graph up with whether its turn is still running. The brain works exactly
  * while its turn runs. Once a turn ends nothing in it is still working: a tool step whose
- * completion never arrived settles as done, and a crew task with no final report reads as
- * stopped until one arrives. A running turn with no step running gets a thinking frontier.
+ * completion never arrived and a crew task with no final report both read as stopped, never as
+ * done, until a report arrives. A running turn with no step running gets a thinking frontier.
  */
 export function settleWithTurn(graph: WorkflowGraph, activeTurnId: string | null): WorkflowGraph {
   const settled = settleNodesWithTurn(graph, activeTurnId);
@@ -576,10 +594,9 @@ function settleNodesWithTurn(graph: WorkflowGraph, activeTurnId: string | null):
         ? "running"
         : "completed"
       : !live && node.state === "running"
-        ? graph.kind === "crew"
-          ? "cancelled"
-          : "completed"
+        ? "cancelled"
         : node.state;
+    const unconfirmed = graph.kind === "turn" && state !== node.state;
     if (state === node.state && (state === "running" || node.info.completedAt !== undefined)) {
       return node;
     }
@@ -591,7 +608,13 @@ function settleNodesWithTurn(graph: WorkflowGraph, activeTurnId: string | null):
       info:
         state === "running"
           ? info
-          : { ...info, completedAt: node.info.completedAt ?? graph.updatedAt },
+          : {
+              ...info,
+              ...(unconfirmed && info.progress === undefined
+                ? { progress: "Turn ended before this step reported completion" }
+                : {}),
+              completedAt: node.info.completedAt ?? graph.updatedAt,
+            },
     };
   });
   if (!changed) return graph;

@@ -1,6 +1,6 @@
 # Product usage data
 
-OoP does not report product usage by default. Nothing is sent to any third party unless you turn it on.
+OOP does not report product usage by default. Nothing is sent to any third party unless you turn it on.
 
 To opt in, set `T3CODE_TELEMETRY_ENABLED=true` in the server's environment before starting it.
 

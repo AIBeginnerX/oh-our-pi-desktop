@@ -36,7 +36,7 @@ const CrewDelegateInput = Schema.Struct({
   title: Schema.optional(
     TrimmedNonEmptyString.annotate({
       description:
-        "A short English summary of the task's core work, at most eight words; the OoP Agents board shows it.",
+        "A short English summary of the task's core work, at most eight words; the OOP Agents board shows it.",
     }),
   ),
 });
@@ -89,7 +89,7 @@ const CrewRosterTool = Tool.make("crew_roster", {
   .annotate(Tool.OpenWorld, false);
 
 const CrewDelegateTool = Tool.make("crew_delegate", {
-  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace as its own thread. Returns at once with a taskId; start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OoP hands the same task to another model of the same level on its own. Fails when the crew is off; then do the work yourself.`,
+  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace as its own thread. Returns at once with a taskId; start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to another model of the same level on its own. Fails when the crew is off; then do the work yourself.`,
   parameters: CrewDelegateInput,
   success: CrewDelegateResult,
   failure: CrewToolError,

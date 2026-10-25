@@ -1,4 +1,4 @@
-# OoP (oh-our-pi)
+# OOP (oh-our-pi)
 
 **Una app de escritorio para controlar los agentes de programación que ya usas, con un equipo opcional de varios modelos por encima.**
 
@@ -9,13 +9,13 @@
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
 ![Status: early](https://img.shields.io/badge/status-early-orange)
 
-OoP se ejecuta en tu propio ordenador, envuelve las CLI de agentes de programación que ya tienes (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) y les da un único espacio de trabajo en forma de chat. Lo usas desde una app de escritorio, un navegador o tu teléfono. **No** es un servicio alojado: traes tus propias suscripciones y claves de API, y tu código se queda en tu máquina.
+OOP se ejecuta en tu propio ordenador, envuelve las CLI de agentes de programación que ya tienes (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) y les da un único espacio de trabajo en forma de chat. Lo usas desde una app de escritorio, un navegador o tu teléfono. **No** es un servicio alojado: traes tus propias suscripciones y claves de API, y tu código se queda en tu máquina.
 
-OoP es un fork de [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc. (licencia MIT), basado en la versión upstream v0.0.44. La versión actual de OoP está en [`OOP_RELEASE.json`](OOP_RELEASE.json). Muchas gracias al equipo de T3 Code: casi toda la base de este proyecto es obra suya.
+OOP es un fork de [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc. (licencia MIT), basado en la versión upstream v0.0.44. La versión actual de OOP está en [`OOP_RELEASE.json`](OOP_RELEASE.json). Muchas gracias al equipo de T3 Code: casi toda la base de este proyecto es obra suya.
 
 ## Contenido
 
-- [¿Por qué OoP?](#por-qué-oop)
+- [¿Por qué OOP?](#por-qué-oop)
 - [Recorrido por las capturas](#recorrido-por-las-capturas)
 - [Referencia de funciones](#referencia-de-funciones)
 - [Proveedores compatibles](#proveedores-compatibles)
@@ -30,27 +30,27 @@ OoP es un fork de [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc
 - [Mapa del repositorio](#mapa-del-repositorio)
 - [Estado, contribución, licencia](#estado-y-honestidad-sobre-la-hoja-de-ruta)
 
-## ¿Por qué OoP?
+## ¿Por qué OOP?
 
-Los agentes de programación son buenos, pero cada uno vive en su propia terminal o app, con su propio inicio de sesión, su historial y sus avisos de aprobación. OoP los pone lado a lado.
+Los agentes de programación son buenos, pero cada uno vive en su propia terminal o app, con su propio inicio de sesión, su historial y sus avisos de aprobación. OOP los pone lado a lado.
 
 - **Un solo lugar para muchos agentes.** Cambia entre Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode y MiniMax Code por hilo, con el mismo flujo de diff, terminal y aprobaciones.
 - **Deja que varios modelos compartan una tarea.** OOP Crew permite que un modelo "brain" (cerebro) delegue el trabajo rutinario en workers más baratos y el trabajo difícil en un expert, y que un auditor revise el resultado.
 - **Mantén el control.** Cuatro modos de permisos, un panel de diff con checkpoints que puedes restaurar y una página de uso para que los costes no te sorprendan.
 - **Trabaja lejos del teclado.** Empareja tu teléfono con el ordenador que ejecuta los agentes y vigila (o dirige) las tareas largas.
-- **Todo en local.** Los proyectos, los inicios de sesión de los proveedores y el trabajo de los agentes se quedan en tu máquina. No hay cuenta de OoP ni servidor de OoP.
+- **Todo en local.** Los proyectos, los inicios de sesión de los proveedores y el trabajo de los agentes se quedan en tu máquina. No hay cuenta de OOP ni servidor de OOP.
 
 Para desarrolladores que ya pagan una o más suscripciones o planes de API de agentes de
 programación, aceptan una aplicación de escritorio temprana y sin firma, y quieren una única
 superficie de control. Si buscas un producto pulido, firmado y con actualización automática, hoy
-encaja mejor T3 Code, el proyecto original (upstream).
+encaja mejor el proyecto original (upstream).
 
 ### Recorrido de 30 segundos
 
-![Vista principal del chat de OoP con el compositor, el selector de modelo y el modo de permisos](docs/screenshots/chat.png)
+![Vista principal del chat de OOP con el compositor, el selector de modelo y el modo de permisos](docs/screenshots/chat.png)
 _Vista principal del chat: elige un proveedor y un modelo, define el modo de permisos y sigue el hilo._
 
-1. Abre OoP e inicia sesión en un proveedor (Settings → Providers).
+1. Abre OOP e inicia sesión en un proveedor (Settings → Providers).
 2. Añade una carpeta de proyecto y empieza un hilo.
 3. Elige un modelo y un modo de permisos en el compositor y envía un mensaje.
 4. Revisa el resultado en el panel de diff; restaura desde un checkpoint si no te gusta.
@@ -70,7 +70,7 @@ _Chat: compositor con selector de modelo y modo de permisos bajo la línea de ti
 
 ### OOP Crew
 
-Un chat, varios modelos. El modelo propio del chat es el **brain** (cerebro); planifica y habla contigo. Un **worker** (trabajador) se encarga del trabajo rutinario (búsquedas, ediciones, pruebas), un **expert** (experto) se encarga de la implementación difícil y un **auditor** revisa los turnos que modificaron archivos. Los ajustes preestablecidos son **OOP pick**, **Speed** (velocidad), **Quality** (calidad) y **Budget** (presupuesto), y puedes cambiar el modelo de cada rol. Si un modelo del crew falla (por ejemplo, por quedarse sin crédito), OoP pasa la tarea a otro modelo con sesión iniciada del mismo nivel. Los cambios pequeños de 20 líneas o menos que pasan las pruebas no se auditan.
+Un chat, varios modelos. El modelo propio del chat es el **brain** (cerebro); planifica y habla contigo. Un **worker** (trabajador) se encarga del trabajo rutinario (búsquedas, ediciones, pruebas), un **expert** (experto) se encarga de la implementación difícil y un **auditor** revisa los turnos que modificaron archivos. Los ajustes preestablecidos son **OOP pick**, **Speed** (velocidad), **Quality** (calidad) y **Budget** (presupuesto), y puedes cambiar el modelo de cada rol. Si un modelo del crew falla (por ejemplo, por quedarse sin crédito), OOP pasa la tarea a otro modelo con sesión iniciada del mismo nivel. Los cambios pequeños de 20 líneas o menos que pasan las pruebas no se auditan.
 
 **Cuándo usarlo:** tareas grandes en las que quieres modelos baratos para el grueso del trabajo y un modelo potente para la revisión. **Cómo abrirlo:** **Crew**, junto al selector de modelo en el compositor. El trabajo del Crew se muestra en vivo en **Workflows** y **Agents** en el panel derecho.
 
@@ -82,7 +82,7 @@ _OOP Crew: un chat, varios modelos, con un tablero en vivo de quién hace qué._
 
 ### Providers
 
-Instala, actualiza e inicia sesión en cada proveedor desde un solo lugar. La tarjeta indica si la CLI está instalada y si hay sesión iniciada, y ofrece **Install** (cuando `npm` está en tu `PATH`) o **Update now** cuando OoP sabe qué instalador es el dueño de la CLI.
+Instala, actualiza e inicia sesión en cada proveedor desde un solo lugar. La tarjeta indica si la CLI está instalada y si hay sesión iniciada, y ofrece **Install** (cuando `npm` está en tu `PATH`) o **Update now** cuando OOP sabe qué instalador es el dueño de la CLI.
 
 **Cómo abrirlo:** Settings → Providers.
 
@@ -137,7 +137,7 @@ _Modos de permisos: de Supervised a Full access._
 
 ### Objetivos del hilo
 
-Describe qué debe ser cierto cuando el chat termine. Mientras el objetivo siga abierto, OoP continúa el hilo después de cada turno terminado hasta que el agente informe `GOAL COMPLETE`, informe `GOAL BLOCKED: <reason>` o se agote el número de continuaciones automáticas que elegiste. Con Crew, un turno que modificó archivos solo cuenta después de su auditoría.
+Describe qué debe ser cierto cuando el chat termine. Mientras el objetivo siga abierto, OOP continúa el hilo después de cada turno terminado hasta que el agente informe `GOAL COMPLETE`, informe `GOAL BLOCKED: <reason>` o se agote el número de continuaciones automáticas que elegiste. Con Crew, un turno que modificó archivos solo cuenta después de su auditoría.
 
 **Cómo abrirlo:** **Goal**, junto a **Crew** en el compositor. Usa **Stop goal** para terminarlo.
 
@@ -180,14 +180,14 @@ _Terminal integrada junto al chat._
 
 ### Tema oscuro
 
-![OoP con el tema oscuro](docs/screenshots/dark.png)
+![OOP con el tema oscuro](docs/screenshots/dark.png)
 _Tema oscuro._
 
 ### Cliente web en tamaño de teléfono
 
 La misma interfaz web funciona en el navegador de un teléfono una vez que lo emparejas (consulta [Conectar desde tu teléfono](#conectar-desde-tu-teléfono)).
 
-![Cliente web de OoP en tamaño de teléfono](docs/screenshots/mobile.png)
+![Cliente web de OOP en tamaño de teléfono](docs/screenshots/mobile.png)
 _El cliente web en tamaño de teléfono._
 
 ### Ajustes de acceso remoto
@@ -201,35 +201,35 @@ _Settings → Connections: acceso remoto y emparejamiento (códigos ocultos)._
 
 ## Referencia de funciones
 
-"Added in OoP" (añadido en OoP) significa que la documentación y el código del fork lo marcan como específico de OoP. "From T3 Code" (de T3 Code) significa que forma parte del upstream (v0.0.44) hasta donde muestran la documentación y el código; el fork no ha hecho una comparación archivo por archivo, así que toma la división como aproximada.
+"Added in OOP" (añadido en OOP) significa que la documentación y el código del fork lo marcan como específico de OOP. "Upstream" (del proyecto original) significa que forma parte del upstream (v0.0.44) hasta donde muestran la documentación y el código; el fork no ha hecho una comparación archivo por archivo, así que toma la división como aproximada.
 
 | Función                                                | Qué hace                                                                                                  | Dónde                                                 | Origen                                                         |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- |
-| OOP Crew                                               | El modelo brain delega en modelos worker, expert y auditor; presets y cambios por rol                     | Compositor → Crew; panel derecho → Workflows / Agents | Added in OoP                                                   |
-| Objetivos del hilo                                     | Mantiene un hilo en marcha hasta que pasan las comprobaciones o el objetivo se bloquea                    | Compositor → Goal                                     | Added in OoP                                                   |
-| Memorias del proyecto                                  | Sugiere memorias de proyecto guardadas desde el compositor                                                | Compositor, botón de memoria                          | Added in OoP                                                   |
-| Preferencias locales de roles                          | Guarda un modelo preferido para implementación o revisión por entorno, con recomendaciones                | Selector de modelo del compositor                     | Added in OoP                                                   |
-| Presets de Z.AI / MiniMax                              | Presets de proveedor basados en OpenCode                                                                  | Settings → Providers → Add                            | Added in OoP (solicitudes de pago sin probar)                  |
-| Proveedor ZCode (GLM)                                  | El agente de Z.AI sobre ACP                                                                               | Settings → Providers                                  | Added in OoP                                                   |
-| Proveedor MiniMax Code                                 | El agente de MiniMax sobre ACP                                                                            | Settings → Providers                                  | Added in OoP                                                   |
-| Instalación / actualización de proveedores con un clic | Instala o actualiza las CLI de los proveedores desde la tarjeta del proveedor                             | Settings → Providers                                  | Added in OoP (diferencia exacta con el upstream sin verificar) |
-| Verify macOS build                                     | Comprueba la integridad de un `.dmg` de OoP, la firma de código estricta y el arranque en el Mac servidor | Encabezado del chat → Verify macOS build              | Added in OoP                                                   |
-| Diálogo de conexión del teléfono                       | QR de emparejamiento del teléfono con un clic para la app de escritorio, con relay propio opcional        | Barra lateral → Connect mobile                        | Added in OoP (solo app de escritorio)                          |
-| Relay propio en Cloudflare                             | Un Worker que despliegas tú mismo para que un teléfono llegue a tu escritorio desde cualquier red         | `infra/oop-relay`                                     | Added in OoP, temprano                                         |
-| Actualizador desde carpeta local                       | Las compilaciones empaquetadas de OoP pueden recoger paquetes más nuevos de una carpeta que les indiques  | Compilaciones empaquetadas de macOS / Windows         | Added in OoP, temprano, sin probar por terceros                |
-| Sesiones multiproveedor                                | Hilos, turnos y checkpoints entre proveedores                                                             | Por todas partes                                      | From T3 Code                                                   |
-| Modos de permisos                                      | Supervised, Auto-accept edits, Auto, Full access                                                          | Compositor; Settings → General                        | From T3 Code                                                   |
-| Panel de diff y checkpoints                            | Revisa y restaura los cambios del agente                                                                  | Panel derecho → Diff                                  | From T3 Code                                                   |
-| Control de código fuente                               | Clonar, commit, publicar y pull requests mediante las CLI de los proveedores                              | Settings → Source Control                             | From T3 Code                                                   |
-| Terminal integrada                                     | Una terminal por hilo en la máquina del servidor                                                          | Dentro de un hilo                                     | From T3 Code                                                   |
-| Informes en el chat                                    | Gráficos, tarjetas de estadísticas, barras de progreso, flujos mermaid                                    | En las respuestas                                     | From T3 Code                                                   |
-| Vista de workflows                                     | Diagrama en vivo de llamadas a herramientas y subagentes                                                  | Panel derecho, `mod+alt+w`                            | From T3 Code                                                   |
-| Página Usage                                           | Historial de tokens y coste estimado                                                                      | Barra lateral, `mod+u`                                | From T3 Code (las filas de ZCode y MiniMax son de OoP)         |
-| SnapShots                                              | Captura una ventana en tu borrador (desactivado por defecto; macOS, Windows, Linux Wayland)               | Settings → SnapShots                                  | From T3 Code (atribución sin verificar)                        |
-| Acceso remoto                                          | Emparejamiento por LAN, Tailscale HTTPS, entornos SSH                                                     | Settings → Connections                                | From T3 Code                                                   |
-| Panel de dispositivo                                   | Mira y toca un simulador de iOS o un emulador de Android junto a un hilo                                  | Panel derecho → Device                                | From T3 Code (sin probar aquí)                                 |
-| Servicio en segundo plano                              | `t3 service install` en macOS (launchd) y Linux (unidad de usuario de systemd); no en Windows             | CLI                                                   | From T3 Code (sin probar aquí)                                 |
-| Atajos de teclado, ajustes de proyecto, temas          | Atajos personalizables, cambios por proyecto, apariencia                                                  | Settings                                              | From T3 Code                                                   |
+| OOP Crew                                               | El modelo brain delega en modelos worker, expert y auditor; presets y cambios por rol                     | Compositor → Crew; panel derecho → Workflows / Agents | Added in OOP                                                   |
+| Objetivos del hilo                                     | Mantiene un hilo en marcha hasta que pasan las comprobaciones o el objetivo se bloquea                    | Compositor → Goal                                     | Added in OOP                                                   |
+| Memorias del proyecto                                  | Sugiere memorias de proyecto guardadas desde el compositor                                                | Compositor, botón de memoria                          | Added in OOP                                                   |
+| Preferencias locales de roles                          | Guarda un modelo preferido para implementación o revisión por entorno, con recomendaciones                | Selector de modelo del compositor                     | Added in OOP                                                   |
+| Presets de Z.AI / MiniMax                              | Presets de proveedor basados en OpenCode                                                                  | Settings → Providers → Add                            | Added in OOP (solicitudes de pago sin probar)                  |
+| Proveedor ZCode (GLM)                                  | El agente de Z.AI sobre ACP                                                                               | Settings → Providers                                  | Added in OOP                                                   |
+| Proveedor MiniMax Code                                 | El agente de MiniMax sobre ACP                                                                            | Settings → Providers                                  | Added in OOP                                                   |
+| Instalación / actualización de proveedores con un clic | Instala o actualiza las CLI de los proveedores desde la tarjeta del proveedor                             | Settings → Providers                                  | Added in OOP (diferencia exacta con el upstream sin verificar) |
+| Verify macOS build                                     | Comprueba la integridad de un `.dmg` de OOP, la firma de código estricta y el arranque en el Mac servidor | Encabezado del chat → Verify macOS build              | Added in OOP                                                   |
+| Diálogo de conexión del teléfono                       | QR de emparejamiento del teléfono con un clic para la app de escritorio, con relay propio opcional        | Barra lateral → Connect mobile                        | Added in OOP (solo app de escritorio)                          |
+| Relay propio en Cloudflare                             | Un Worker que despliegas tú mismo para que un teléfono llegue a tu escritorio desde cualquier red         | `infra/oop-relay`                                     | Added in OOP, temprano                                         |
+| Actualizador desde carpeta local                       | Las compilaciones empaquetadas de OOP pueden recoger paquetes más nuevos de una carpeta que les indiques  | Compilaciones empaquetadas de macOS / Windows         | Added in OOP, temprano, sin probar por terceros                |
+| Sesiones multiproveedor                                | Hilos, turnos y checkpoints entre proveedores                                                             | Por todas partes                                      | Upstream                                                   |
+| Modos de permisos                                      | Supervised, Auto-accept edits, Auto, Full access                                                          | Compositor; Settings → General                        | Upstream                                                   |
+| Panel de diff y checkpoints                            | Revisa y restaura los cambios del agente                                                                  | Panel derecho → Diff                                  | Upstream                                                   |
+| Control de código fuente                               | Clonar, commit, publicar y pull requests mediante las CLI de los proveedores                              | Settings → Source Control                             | Upstream                                                   |
+| Terminal integrada                                     | Una terminal por hilo en la máquina del servidor                                                          | Dentro de un hilo                                     | Upstream                                                   |
+| Informes en el chat                                    | Gráficos, tarjetas de estadísticas, barras de progreso, flujos mermaid                                    | En las respuestas                                     | Upstream                                                   |
+| Vista de workflows                                     | Diagrama en vivo de llamadas a herramientas y subagentes                                                  | Panel derecho, `mod+alt+w`                            | Upstream                                                   |
+| Página Usage                                           | Historial de tokens y coste estimado                                                                      | Barra lateral, `mod+u`                                | Upstream (las filas de ZCode y MiniMax son de OOP)         |
+| SnapShots                                              | Captura una ventana en tu borrador (desactivado por defecto; macOS, Windows, Linux Wayland)               | Settings → SnapShots                                  | Upstream (atribución sin verificar)                        |
+| Acceso remoto                                          | Emparejamiento por LAN, Tailscale HTTPS, entornos SSH                                                     | Settings → Connections                                | Upstream                                                   |
+| Panel de dispositivo                                   | Mira y toca un simulador de iOS o un emulador de Android junto a un hilo                                  | Panel derecho → Device                                | Upstream (sin probar aquí)                                 |
+| Servicio en segundo plano                              | `t3 service install` en macOS (launchd) y Linux (unidad de usuario de systemd); no en Windows             | CLI                                                   | Upstream (sin probar aquí)                                 |
+| Atajos de teclado, ajustes de proyecto, temas          | Atajos personalizables, cambios por proyecto, apariencia                                                  | Settings                                              | Upstream                                                   |
 
 ## Proveedores compatibles
 
@@ -312,7 +312,7 @@ node scripts/macos.mjs start     # optional: run an isolated dev copy of the des
 node scripts/macos.mjs package   # builds an ad hoc signed DMG into release/macos/
 ```
 
-Abre el DMG de `release/macos/` y arrastra la app a `/Applications/OoP.app`.
+Abre el DMG de `release/macos/` y arrastra la app a `/Applications/OOP.app`.
 
 ### Windows (x64, experimental)
 
@@ -323,7 +323,7 @@ set OOP_WINDOWS_UPDATE_DIRECTORY=%CD%\release\windows
 node scripts\windows.mjs package
 ```
 
-El instalador (`OoP-<version>-x64.exe`) se escribe en `release\windows`.
+El instalador (`OOP-<version>-x64.exe`) se escribe en `release\windows`.
 
 ### Ruta de desarrollo genérica (cualquier sistema operativo)
 
@@ -356,7 +356,7 @@ Los agentes, los archivos y los inicios de sesión de los proveedores se quedan 
 ```mermaid
 graph LR
     P["Teléfono<br/>(navegador o app nativa)"] -->|"enlace de emparejamiento de un solo uso / QR"| N["Ruta de red<br/>LAN, Tailscale o tu propio relay"]
-    N --> S["Servidor de OoP en tu ordenador<br/>(comprueba el emparejamiento, mantiene una sesión)"]
+    N --> S["Servidor de OOP en tu ordenador<br/>(comprueba el emparejamiento, mantiene una sesión)"]
     S --> C["CLI de proveedores<br/>Codex, Claude Code, Cursor, ..."]
     C --> F["Los archivos de tu proyecto"]
 ```
@@ -374,10 +374,10 @@ Elige la ruta más sencilla que te funcione, en este orden.
 
 ### a) Mismo Wi-Fi / LAN (lo más sencillo)
 
-**Requisitos previos:** la app de escritorio de OoP en ejecución en tu ordenador y un teléfono en la misma red.
+**Requisitos previos:** la app de escritorio de OOP en ejecución en tu ordenador y un teléfono en la misma red.
 
 1. En la app de escritorio, haz clic en el icono del teléfono de la barra lateral (**Connect mobile**).
-2. Si el diálogo dice que las conexiones móviles están desactivadas, haz clic en **Allow mobile connections**. OoP se reinicia una vez; el ajuste se conserva.
+2. Si el diálogo dice que las conexiones móviles están desactivadas, haz clic en **Allow mobile connections**. OOP se reinicia una vez; el ajuste se conserva.
 3. Aparece un código QR de un solo uso. Si se ofrecen varias direcciones, elige la que tu teléfono pueda alcanzar (la entrada **LAN** para el mismo Wi-Fi).
 4. Escanea el código QR con la cámara del teléfono y abre el enlace en el navegador del teléfono. El teléfono ya está emparejado. El emparejamiento autoriza ese dispositivo para visitas posteriores, así que no necesitas el código original otra vez.
 
@@ -412,7 +412,7 @@ Si el puerto 443 está ocupado, elige otro con `--tailscale-serve-port`. El trá
 
 ### c) Tu propio relay de Cloudflare (fuera de casa, sin Tailscale)
 
-OoP incluye un pequeño Worker de Cloudflare en [`infra/oop-relay`](infra/oop-relay/README.md) que despliegas en **tu propia** cuenta de Cloudflare. El escritorio marca hacia él, así que no hace falta configurar el router y el teléfono puede conectarse desde cualquier red mientras el escritorio esté en línea.
+OOP incluye un pequeño Worker de Cloudflare en [`infra/oop-relay`](infra/oop-relay/README.md) que despliegas en **tu propia** cuenta de Cloudflare. El escritorio marca hacia él, así que no hace falta configurar el router y el teléfono puede conectarse desde cualquier red mientras el escritorio esté en línea.
 
 1. Despliega el Worker como se describe en [`infra/oop-relay/README.md`](infra/oop-relay/README.md) (`npx wrangler login`, `npx wrangler deploy` y luego `npx wrangler secret put OOP_RELAY_SECRET`).
 2. En la app de escritorio: Connect mobile → **Use away from home**. Pega el secreto que se muestra en el secreto del Worker, introduce la dirección del relay y pulsa **Save**.
@@ -421,25 +421,25 @@ OoP incluye un pequeño Worker de Cloudflare en [`infra/oop-relay`](infra/oop-re
 > [!NOTE]
 > Un despliegue sirve a un escritorio. Cloudflare termina el TLS del relay, así que el tráfico es visible para la cuenta de Cloudflare que lo ejecuta. Los teléfonos aún tienen que iniciar sesión en el escritorio con un código de emparejamiento. Esta ruta es nueva y la menos probada de las tres.
 
-**¿Y T3 Connect?** T3 Code también incluye "T3 Connect", un servicio de túnel que depende del inicio de sesión en la nube y de servidores operados por el proyecto upstream. **OoP no opera ningún servicio alojado** y este fork no ha probado T3 Connect, así que esta guía no lo cubre.
+**¿Y el servicio de túnel upstream?** El proyecto upstream también incluye un servicio de túnel que depende del inicio de sesión en la nube y de servidores operados por el proyecto upstream. **OOP no opera ningún servicio alojado** y este fork no lo ha probado, así que esta guía no lo cubre.
 
 ### ¿App nativa o navegador?
 
 |                       | Navegador del teléfono                                                                                          | App nativa de iOS / Android                                                    |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Qué es                | La interfaz web de OoP servida por tu ordenador                                                                 | La app móvil de T3 Code, publicada por el proyecto upstream (sin la marca OoP) |
-| Instalación           | Nada                                                                                                            | Ficha de T3 Code en App Store / Google Play                                    |
+| Qué es                | La interfaz web de OOP servida por tu ordenador                                                                 | La app móvil del proyecto upstream (sin la marca OOP) |
+| Instalación           | Nada                                                                                                            | Ficha del proyecto upstream en App Store / Google Play                                    |
 | Conexión              | Abre el enlace de emparejamiento o escanea el código QR                                                         | Añade un entorno: escanea el código QR o pega la URL de emparejamiento         |
 | Probado por este fork | Interfaz web comprobada en tamaño de teléfono; emparejamiento desde un teléfono real no verificado por separado | **No**                                                                         |
 
 ![Cliente web en tamaño de teléfono conectado mediante un enlace de emparejamiento](docs/screenshots/mobile.png)
-_Un navegador de teléfono conectado a OoP._
+_Un navegador de teléfono conectado a OOP._
 
-El fork conserva los identificadores de protocolo y autenticación (`internal_protocol_and_auth_identifiers_preserved` en [`UPSTREAM.json`](UPSTREAM.json)), así que la app upstream debería poder emparejarse con un servidor de OoP. **El fork no ha probado la app móvil nativa**, así que considéralo sin confirmar. La documentación upstream describe los ajustes de conexión de la app en Settings → Environments. Usa el navegador si algo falla.
+El fork conserva los identificadores de protocolo y autenticación (`internal_protocol_and_auth_identifiers_preserved` en [`UPSTREAM.json`](UPSTREAM.json)), así que la app upstream debería poder emparejarse con un servidor de OOP. **El fork no ha probado la app móvil nativa**, así que considéralo sin confirmar. La documentación upstream describe los ajustes de conexión de la app en Settings → Environments. Usa el navegador si algo falla.
 
 ### Notificaciones push
 
-La documentación upstream dice que las notificaciones push del teléfono (el agente terminó, falló o necesita aprobación) requieren iniciar sesión en T3 Connect, y que una conexión directa o por Tailscale por sí sola no las activa. Como OoP no opera T3 Connect y el fork no lo ha probado, **no esperes notificaciones push con las rutas anteriores.** Mantén abierta la página en el teléfono o vuelve a mirar el hilo más tarde.
+La documentación upstream dice que las notificaciones push del teléfono (el agente terminó, falló o necesita aprobación) requieren iniciar sesión en el servicio de túnel upstream, y que una conexión directa o por Tailscale por sí sola no las activa. Como OOP no opera ese servicio y el fork no lo ha probado, **no esperes notificaciones push con las rutas anteriores.** Mantén abierta la página en el teléfono o vuelve a mirar el hilo más tarde.
 
 ### Revocar un dispositivo
 
@@ -450,24 +450,24 @@ La documentación upstream dice que las notificaciones push del teléfono (el ag
 
 ## Cómo funcionan las actualizaciones
 
-Las compilaciones desde el código fuente no se actualizan solas desde GitHub; vuelve a compilarlas con los pasos de abajo. Para actualizar una instalación binaria, cierra OoP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
+Las compilaciones desde el código fuente no se actualizan solas desde GitHub; vuelve a compilarlas con los pasos de abajo. Para actualizar una instalación binaria, cierra OOP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
 
 1. `git pull`
 2. Vuelve a compilar / empaquetar (consulta [Instalación](#instalación--compilación-desde-el-código-fuente)) y reinstala.
 
-Cada versión se publica como **un solo commit** (titulado `OoP <version> source`), una etiqueta llamada `v<version>` y un GitHub Release. Tus datos en `~/.oop-desktop/userdata` se conservan entre actualizaciones. Para enterarte de las versiones nuevas, activa **Watch → Custom → Releases** en el repositorio de GitHub; las versiones anteriores solo tienen etiqueta.
+Cada versión se publica como **un solo commit** (titulado `OOP <version> source`), una etiqueta llamada `v<version>` y un GitHub Release. Tus datos en `~/.oop-desktop/userdata` se conservan entre actualizaciones. Para enterarte de las versiones nuevas, activa **Watch → Custom → Releases** en el repositorio de GitHub; las versiones anteriores solo tienen etiqueta.
 
 Una app que compilaste tú mismo te ofrece dentro de la app tu siguiente compilación, desde la carpeta fijada al compilarla: `release\windows` en Windows (configurada arriba) y `release/macos` en macOS. En macOS, `package` solo genera el DMG, así que después compila también el paquete de actualización:
 
 ```bash
 V=<version>
-node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
-  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
-  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OOP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OOP-$V-arm64-update.pkg
 ```
 
 > [!NOTE]
-> Los avisos de actualización del servidor en la app y `t3 update` provienen de T3 Code upstream. No son un canal de actualización de OoP.
+> Los avisos de actualización del servidor en la app y `t3 update` provienen del proyecto upstream. No son un canal de actualización de OOP.
 
 ## Seguridad y privacidad
 
@@ -478,12 +478,12 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **Costes:** cada proveedor usa tu propia suscripción o crédito de API. Crew multiplica el uso al ejecutar varios modelos por chat. La página Usage muestra estimaciones, no tu factura.
 - **Las claves de API** se guardan en el lado del servidor, en tu máquina. La clave de API de Gemini de Antigravity se guarda **en texto plano** en los ajustes.
 - **No subas nunca archivos `.env` ni claves a un commit**, y no los pegues en issues ni en registros.
-- **Los instaladores upstream instalan T3 Code, no OoP:** los scripts de instalación de `t3.codes`, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code` y las fichas de App Store / Play pertenecen al proyecto upstream. Usa el instalador de escritorio de OoP de arriba o compila OoP desde este repositorio.
+- **Los instaladores upstream instalan la app upstream, no OOP:** los scripts de instalación de `t3.codes`, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code` y las fichas de App Store / Play pertenecen al proyecto upstream. Usa el instalador de escritorio de OOP de arriba o compila OOP desde este repositorio.
 - **La CLI sigue llamándose `t3`**, lo que puede chocar con una instalación upstream.
 - **Las compilaciones desde el código fuente están firmadas ad hoc**, sin Developer ID y sin notarización. El instalador binario verifica SHA-256 y no elude la cuarentena de Gatekeeper ni SmartScreen.
 - **El actualizador desde carpeta local** confía en quien pueda escribir en la carpeta de actualización; su comprobación SHA-256 solo detecta corrupción.
 
-**Telemetría.** OoP no tiene servidores y los mantenedores no reciben nada de tu app. El código del servidor heredado del upstream contiene un reportero anónimo de uso con PostHog (usa la clave del proyecto upstream y `us.i.posthog.com`); OoP lo deja **desactivado por defecto**, así que no se envía nada salvo que lo actives. Para activarlo, define `T3CODE_TELEMETRY_ENABLED=true` en el entorno del servidor antes de que arranque (consulta [`docs/user/telemetry.md`](docs/user/telemetry.md)). Cuando está activado, los eventos cubren proveedor, modelo, esfuerzo de razonamiento, modo de permisos, resultado del turno, duración y totales de tokens del agente principal, asociados a un identificador de cuenta o instalación con hash, y según la documentación nunca incluyen prompts, respuestas, contenido de archivos, tokens de autenticación ni IDs de conversación.
+**Telemetría.** OOP no tiene servidores y los mantenedores no reciben nada de tu app. El código del servidor heredado del upstream contiene un reportero anónimo de uso con PostHog (usa la clave del proyecto upstream y `us.i.posthog.com`); OOP lo deja **desactivado por defecto**, así que no se envía nada salvo que lo actives. Para activarlo, define `T3CODE_TELEMETRY_ENABLED=true` en el entorno del servidor antes de que arranque (consulta [`docs/user/telemetry.md`](docs/user/telemetry.md)). Cuando está activado, los eventos cubren proveedor, modelo, esfuerzo de razonamiento, modo de permisos, resultado del turno, duración y totales de tokens del agente principal, asociados a un identificador de cuenta o instalación con hash, y según la documentación nunca incluyen prompts, respuestas, contenido de archivos, tokens de autenticación ni IDs de conversación.
 
 Para informar de una vulnerabilidad, consulta [SECURITY.md](SECURITY.md).
 
@@ -510,21 +510,21 @@ Inicia sesión con el comando propio del proveedor (consulta [Proveedores compat
 Necesitas Node.js 24.x, 24.13.1 o posterior, y pnpm 11.10.0. Se rechazan otras versiones mayores de Node.
 
 **¿Dónde están mis datos?**
-El estado del servidor de OoP (hilos, ajustes, la base de datos local) está en `~/.oop-desktop/userdata`. El binario de escritorio se instala por separado de estos datos. Los inicios de sesión de los proveedores viven en las carpetas propias de la CLI de cada proveedor, no aquí.
+El estado del servidor de OOP (hilos, ajustes, la base de datos local) está en `~/.oop-desktop/userdata`. El binario de escritorio se instala por separado de estos datos. Los inicios de sesión de los proveedores viven en las carpetas propias de la CLI de cada proveedor, no aquí.
 
 **¿Cómo actualizo una instalación binaria?**
-Cierra OoP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
+Cierra OOP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
 
-**¿Cómo restablezco OoP?**
-Cierra la app y aparta `~/.oop-desktop/userdata` (no lo borres hasta estar seguro). OoP empezará de cero la próxima vez. Las carpetas de tus proyectos no se tocan.
+**¿Cómo restablezco OOP?**
+Cierra la app y aparta `~/.oop-desktop/userdata` (no lo borres hasta estar seguro). OOP empezará de cero la próxima vez. Las carpetas de tus proyectos no se tocan.
 
 **¿Cómo lo desinstalo?**
-Cierra la app y elimina `~/Applications/OoP.app` (macOS, o la ruta indicada por `OOP_INSTALL_DIR`), desinstala OoP desde la configuración de Windows o elimina `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop` y la entrada del menú en Linux. Opcionalmente, elimina `~/.oop-desktop` para borrar sus datos. Las CLI de los proveedores se instalan por separado y no se eliminan.
+Cierra la app y elimina `~/Applications/OOP.app` (macOS, o la ruta indicada por `OOP_INSTALL_DIR`), desinstala OOP desde la configuración de Windows o elimina `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop` y la entrada del menú en Linux. Opcionalmente, elimina `~/.oop-desktop` para borrar sus datos. Las CLI de los proveedores se instalan por separado y no se eliminan.
 
 **¿Me costará dinero?**
-OoP en sí es gratuito. Los proveedores que ejecuta usan tu propia suscripción o crédito de API. Crew usa varios modelos por chat, y la página Usage muestra costes estimados (no facturados).
+OOP en sí es gratuito. Los proveedores que ejecuta usan tu propia suscripción o crédito de API. Crew usa varios modelos por chat, y la página Usage muestra costes estimados (no facturados).
 
-**¿Puedo usar la app móvil de T3 Code upstream?**
+**¿Puedo usar la app móvil upstream?**
 Debería emparejarse, pero el fork no lo ha probado. Consulta [App nativa o navegador](#app-nativa-o-navegador).
 
 ## Mapa del repositorio
@@ -544,7 +544,7 @@ Consulta [`AGENTS.md`](AGENTS.md) para ver cómo está organizado el código y q
 
 ## Estado y honestidad sobre la hoja de ruta
 
-OoP está en fase **temprana**. Espera errores. macOS con Apple Silicon es la única plataforma que el fork prueba de verdad; Windows es experimental; Mac Intel, Linux, la app móvil nativa, las notificaciones push y las solicitudes de pago de Z.AI / MiniMax están sin probar. No hay una hoja de ruta prometida: el mantenedor arregla lo que se encuentra y publica versiones cuando están listas.
+OOP está en fase **temprana**. Espera errores. macOS con Apple Silicon es la única plataforma que el fork prueba de verdad; Windows es experimental; Mac Intel, Linux, la app móvil nativa, las notificaciones push y las solicitudes de pago de Z.AI / MiniMax están sin probar. No hay una hoja de ruta prometida: el mantenedor arregla lo que se encuentra y publica versiones cuando están listas.
 
 ## Contribuir
 
@@ -554,4 +554,4 @@ Este repositorio es un **espejo de versiones**. Los issues son bienvenidos. Los 
 
 [MIT](LICENSE). El aviso original, "Copyright (c) 2026 T3 Tools Inc.", debe mantenerse, y las modificaciones de este fork también tienen licencia MIT.
 
-OoP está construido sobre [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc. y el equipo de pingdotgg. Los nombres de los proveedores (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, ZCode, MiniMax, Z.AI) pertenecen a sus respectivos dueños; OoP no está afiliado con ellos.
+OOP está construido sobre [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc. y el equipo de pingdotgg. Los nombres de los proveedores (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, ZCode, MiniMax, Z.AI) pertenecen a sus respectivos dueños; OOP no está afiliado con ellos.

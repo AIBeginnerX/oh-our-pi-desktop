@@ -22,7 +22,7 @@ export const ZCODE_PRESENTATION = {
 export const ZCODE_SETUP_HINT =
   "Install ZCode and the ACP bridge (npm i -g zcode-acp-server), then run `zcode login zai`.";
 
-// ZCode switches models only inside its own app; the bridge cannot change them per session, so OoP
+// ZCode switches models only inside its own app; the bridge cannot change them per session, so OOP
 // offers the one GLM model ZCode has selected.
 const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
   {

@@ -44,7 +44,27 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
     return {
       headline: "Disabled",
       detail:
-        provider.message ?? "This provider is installed but disabled for new sessions in T3 Code.",
+        provider.message ?? "This provider is installed but disabled for new sessions in OOP.",
+    };
+  }
+  // The structured diagnosis says why the provider is unusable, so the headline
+  // names the cause instead of the generic probe outcome.
+  if (provider.diagnosis === "runtime-missing") {
+    return {
+      headline: "Runtime not installed",
+      detail: provider.message ?? "CLI not detected on PATH.",
+    };
+  }
+  if (provider.diagnosis === "api-key-invalid") {
+    return {
+      headline: "API key rejected",
+      detail: provider.message ?? "The provider rejected the configured API key.",
+    };
+  }
+  if (provider.diagnosis === "runtime-error") {
+    return {
+      headline: "Runtime error",
+      detail: provider.message ?? "The provider runtime failed to start.",
     };
   }
   if (!provider.installed) {
@@ -83,6 +103,16 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
     headline: "Available",
     detail: provider.message ?? null,
   };
+}
+
+/**
+ * The install command a missing-runtime provider's message carries (`npm i -g <pkg>`), so the
+ * card can offer a one-click copy. Null when the runtime is not the problem or the message
+ * names no command.
+ */
+export function getProviderInstallCommand(provider: ServerProvider | undefined): string | null {
+  if (provider?.diagnosis !== "runtime-missing" || !provider.message) return null;
+  return /npm (?:i|install) -g [A-Za-z0-9@/._-]+/.exec(provider.message)?.[0] ?? null;
 }
 
 /**

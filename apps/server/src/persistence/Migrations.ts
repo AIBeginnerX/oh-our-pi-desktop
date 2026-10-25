@@ -75,6 +75,7 @@ import Migration0060 from "./Migrations/060_ProjectSkillManagedSend.ts";
 import Migration0061 from "./Migrations/061_ProjectSkillLifecycle.ts";
 import Migration0062 from "./Migrations/062_ProjectSkillTrialReconciliation.ts";
 import Migration0063 from "./Migrations/063_ProjectionThreadsParentThreadId.ts";
+import Migration0064 from "./Migrations/064_CrewRuntimeState.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -150,6 +151,7 @@ const migrationEntries = [
   [61, "ProjectSkillLifecycle", Migration0061],
   [62, "ProjectSkillTrialReconciliation", Migration0062],
   [63, "ProjectionThreadsParentThreadId", Migration0063],
+  [64, "CrewRuntimeState", Migration0064],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

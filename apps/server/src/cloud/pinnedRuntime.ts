@@ -286,10 +286,10 @@ const installPinnedRuntime = Effect.fn("cloud.pinned_runtime.ensure_installed")(
     yield* input.validate(paths);
     return paths;
   }
-  // OoP runtimes arrive from an OoP desktop over SSH; the upstream feed has none.
+  // OOP runtimes arrive from an OOP desktop over SSH; the upstream feed has none.
   if (OOP_RELEASE_VERSION !== null) {
     return yield* new PinnedRuntimeInstallError({
-      step: `finding OoP ${input.version} in ${paths.versionDir}. ${OOP_UPDATE_MESSAGE}`,
+      step: `finding OOP ${input.version} in ${paths.versionDir}. ${OOP_UPDATE_MESSAGE}`,
     });
   }
   if (versionDirExists) {

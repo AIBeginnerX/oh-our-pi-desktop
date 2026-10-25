@@ -68,6 +68,16 @@ describe("MiniMax Code provider", () => {
     }),
   );
 
+  it.effect("reports a disabled provider with the disabled diagnosis", () =>
+    checkMiniMaxProviderStatus(settings({ enabled: false })).pipe(
+      Effect.map((snapshot) => {
+        expect(snapshot.enabled).toBe(false);
+        expect(snapshot.diagnosis).toBe("disabled");
+      }),
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
   it.effect("tells the user how to install and sign in when the CLI is missing", () =>
     checkMiniMaxProviderStatus(
       settings({ enabled: true, binaryPath: "/nonexistent/oop-test/mcode" }),
@@ -75,6 +85,7 @@ describe("MiniMax Code provider", () => {
       Effect.map((snapshot) => {
         expect(snapshot.installed).toBe(false);
         expect(snapshot.status).toBe("error");
+        expect(snapshot.diagnosis).toBe("runtime-missing");
         expect(snapshot.message).toContain("mcode login --region global");
       }),
       Effect.provide(NodeServices.layer),
@@ -242,7 +253,7 @@ describe("acpConfigOptionModels", () => {
       noAnswerMessage: "MiniMax Code did not answer. If you are signed out, run mcode login.",
     };
     expect(acpProbeMessage(agent, true)).toBe(
-      "MiniMax Code is taking longer than usual to start. OoP checks it again on the next refresh.",
+      "MiniMax Code is taking longer than usual to start. OOP checks it again on the next refresh.",
     );
     expect(acpProbeMessage(agent, false)).toBe(agent.noAnswerMessage);
   });

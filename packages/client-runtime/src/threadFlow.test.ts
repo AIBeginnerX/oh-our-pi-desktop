@@ -243,14 +243,55 @@ describe("flows and the running turn", () => {
     crewTask("task.started", "2026-10-14T01:00:01.000Z", "task-a"),
   ];
 
-  it("settles a finished turn: open tool steps done, unreported crew tasks stopped, brain idle", () => {
+  it("settles a finished turn: unreported steps and crew tasks stopped, never done, brain idle", () => {
     const flows = threadFlows({ activities, agents, activeTurnId: null });
     const turn = flows.find((flow) => flow.kind === "turn");
     const crew = flows.find((flow) => flow.kind === "crew");
-    expect(turn?.nodes.map((node) => node.state)).toEqual(["completed"]);
-    expect(turn?.status).toBe("completed");
+    expect(turn?.nodes.map((node) => node.state)).toEqual(["cancelled"]);
+    expect(turn?.nodes[0]?.info.progress).toBeDefined();
+    expect(turn?.status).toBe("cancelled");
     expect(crew?.nodes.map((node) => node.state)).toEqual(["completed", "cancelled"]);
     expect(crew?.nodes.every((node) => node.info.completedAt !== undefined)).toBe(true);
+  });
+
+  it("keeps reported completions done when the turn ends", () => {
+    const flows = threadFlows({
+      activities: [
+        tool("tool.started", "2026-10-14T01:00:00.000Z", "read", "Read", "inProgress"),
+        tool("tool.completed", "2026-10-14T01:00:01.000Z", "read", "Read", "completed"),
+        tool("tool.started", "2026-10-14T01:00:02.000Z", "edit", "Edit", "inProgress"),
+      ],
+      agents,
+      activeTurnId: null,
+    });
+    const turn = flows.find((flow) => flow.kind === "turn");
+    expect(turn?.nodes.map((node) => [node.id, node.state])).toEqual([
+      ["read", "completed"],
+      ["edit", "cancelled"],
+    ]);
+    expect(turn?.nodes[0]?.info.progress).toBeUndefined();
+  });
+
+  it("keeps an early running step past the step cap and counts the hidden history", () => {
+    const at = (second: number) =>
+      `2026-10-14T01:${String(Math.floor(second / 60)).padStart(2, "0")}:${String(second % 60).padStart(2, "0")}.000Z`;
+    const history = Array.from({ length: 70 }, (_, index) => [
+      tool("tool.started", at(index + 1), `step-${index}`, "Read", "inProgress"),
+      tool("tool.completed", at(index + 1), `step-${index}`, "Read", "completed"),
+    ]).flat();
+    const live = threadFlows({
+      activities: [tool("tool.started", at(0), "long-build", "Bash", "inProgress"), ...history],
+      agents,
+      activeTurnId: "turn-1",
+    }).find((flow) => flow.kind === "turn");
+    const ids = live?.nodes.map((node) => node.id) ?? [];
+    expect(ids).toContain("long-build");
+    expect(live?.nodes.find((node) => node.id === "long-build")?.state).toBe("running");
+    expect(ids).toHaveLength(60);
+    expect(ids.at(-1)).toBe("step-69");
+    expect(ids).not.toContain("step-10");
+    expect(live?.name).toBe("Turn 1 · 71 steps · 11 older hidden");
+    expect(live?.status).toBe("running");
   });
 
   it("keeps a running turn flowing while its agent thinks between steps", () => {

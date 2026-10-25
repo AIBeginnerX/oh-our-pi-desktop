@@ -103,7 +103,7 @@ export function showDesktopUpdateDownloadedToast(
     description: (
       <>
         {localPackage
-          ? "Open the installer to finish. Complete installation, then reopen T3 Code from Applications."
+          ? "Open the installer to finish. Complete installation, then reopen OOP from Applications."
           : "Restart the app from the update button to install it."}
         {releaseUrl ? <ReleaseNotesLink releaseUrl={releaseUrl} shell={shell} /> : null}
       </>

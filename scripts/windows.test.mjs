@@ -183,14 +183,14 @@ NodeTest.test("keeps only the published installer and the one before it", () => 
   ]);
 });
 
-NodeTest.test("looks for the OoP folder of Google Drive on G: unless told otherwise", () => {
+NodeTest.test("looks for the OOP folder of Google Drive on G: unless told otherwise", () => {
   NodeAssert.deepEqual(driveRootCandidates({}), WINDOWS_DRIVE_ROOTS);
-  NodeAssert.deepEqual(WINDOWS_DRIVE_ROOTS, ["G:\\My Drive\\OoP", "G:\\내 드라이브\\OoP"]);
-  NodeAssert.deepEqual(driveRootCandidates({ OOP_DRIVE_ROOT: " H:\\My Drive\\OoP " }), [
-    "H:\\My Drive\\OoP",
+  NodeAssert.deepEqual(WINDOWS_DRIVE_ROOTS, ["G:\\My Drive\\OOP", "G:\\내 드라이브\\OOP"]);
+  NodeAssert.deepEqual(driveRootCandidates({ OOP_DRIVE_ROOT: " H:\\My Drive\\OOP " }), [
+    "H:\\My Drive\\OOP",
   ]);
-  NodeAssert.deepEqual(windowsDriveUpdateCandidates(["G:\\My Drive\\OoP\\", "H:\\x"]), [
-    "G:\\My Drive\\OoP\\release\\windows",
+  NodeAssert.deepEqual(windowsDriveUpdateCandidates(["G:\\My Drive\\OOP\\", "H:\\x"]), [
+    "G:\\My Drive\\OOP\\release\\windows",
     "H:\\x\\release\\windows",
   ]);
 });
@@ -248,7 +248,7 @@ NodeTest.test("trims a long log to its last lines", () => {
 
 NodeTest.test("copies the runner log to Drive trimmed and leaves the local log alone", async () => {
   const cacheRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oop-runner-log-"));
-  const driveRoot = NodePath.join(cacheRoot, "drive", "OoP");
+  const driveRoot = NodePath.join(cacheRoot, "drive", "OOP");
   NodeFS.mkdirSync(NodePath.join(cacheRoot, "runner"), { recursive: true });
   const local = NodePath.join(cacheRoot, "runner", "auto-build.log");
   const text = `${"old line\n".repeat(20)}new line\n`;
@@ -262,7 +262,7 @@ NodeTest.test("copies the runner log to Drive trimmed and leaves the local log a
   NodeAssert.ok(copied.endsWith("new line\n") && Buffer.byteLength(copied) <= 30);
   // A Drive that cannot be written is logged, never thrown.
   NodeFS.writeFileSync(NodePath.join(cacheRoot, "blocked"), "a file, not a folder");
-  await copyRunnerLog(cacheRoot, NodePath.join(cacheRoot, "blocked", "OoP"));
+  await copyRunnerLog(cacheRoot, NodePath.join(cacheRoot, "blocked", "OOP"));
 });
 
 NodeTest.test("moves the task off the NAS only once Drive carries the build", () => {

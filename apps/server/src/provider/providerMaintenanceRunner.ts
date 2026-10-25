@@ -36,7 +36,7 @@ import {
 import type { ProviderMaintenanceCapabilities } from "./providerMaintenance.ts";
 import { collectUint8StreamText } from "../stream/collectUint8StreamText.ts";
 const OTHER_COPY_RUNS_MESSAGE =
-  "npm installed the update, but the copy OoP runs was installed another way and did not change. Update it with the tool you installed it with, or set the provider's binary path to the npm copy.";
+  "npm installed the update, but the copy OOP runs was installed another way and did not change. Update it with the tool you installed it with, or set the provider's binary path to the npm copy.";
 const isServerProviderUpdateError = Schema.is(ServerProviderUpdateError);
 
 const UPDATE_TIMEOUT_MS = 5 * 60_000;
@@ -419,7 +419,7 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                   message:
                     targetVersion !== undefined
                       ? "This version is no longer recommended or this installer cannot install a specific version. Refresh provider settings."
-                      : "The latest provider version is incompatible with this T3 Code release. Review provider settings.",
+                      : "The latest provider version is incompatible with this OOP release. Review provider settings.",
                 }),
               );
             }
@@ -472,8 +472,8 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
             const stillOutdated =
               targetVersion === undefined &&
               verifiedProviders.some((verifiedProvider) => isOutdatedProvider(verifiedProvider));
-            // After an npm update of an install OoP could not trace, a provider that is still
-            // installed but did not move is another copy that OoP runs instead of the npm one.
+            // After an npm update of an install OOP could not trace, a provider that is still
+            // installed but did not move is another copy that OOP runs instead of the npm one.
             const otherCopyRuns =
               update.lockKey === UNOWNED_NPM_UPDATE_LOCK_KEY &&
               verifiedProviders.length > 0 &&
@@ -487,9 +487,9 @@ export const make = Effect.fn("ProviderMaintenanceRunner.make")(function* () {
                   (couldNotVerify || stillOutdated) && otherCopyRuns
                     ? OTHER_COPY_RUNS_MESSAGE
                     : couldNotVerify
-                      ? "Update command completed, but T3 Code could not verify the provider version."
+                      ? "Update command completed, but OOP could not verify the provider version."
                       : stillOutdated
-                        ? "Update command completed, but T3 Code still detects an outdated provider version."
+                        ? "Update command completed, but OOP still detects an outdated provider version."
                         : "Provider updated.",
                 output: commandOutput(result),
               }),

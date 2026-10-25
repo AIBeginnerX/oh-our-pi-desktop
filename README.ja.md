@@ -1,4 +1,4 @@
-# OoP (oh-our-pi)
+# OOP (oh-our-pi)
 
 **普段使っているコーディングエージェントを1つのデスクトップアプリで操作できます。必要なら、複数モデルのチームも上に載せられます。**
 
@@ -9,13 +9,13 @@
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
 ![Status: early](https://img.shields.io/badge/status-early-orange)
 
-OoP はあなた自身のコンピューター上で動作し、すでにお持ちのコーディングエージェント CLI (Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code) をラップして、チャット形式の1つのワークスペースにまとめます。デスクトップアプリ、ブラウザ、スマートフォンのいずれからでも使えます。ホスト型サービスでは**ありません**。サブスクリプションや API キーはご自身のものを使い、コードはあなたのマシンの外に出ません。
+OOP はあなた自身のコンピューター上で動作し、すでにお持ちのコーディングエージェント CLI (Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code) をラップして、チャット形式の1つのワークスペースにまとめます。デスクトップアプリ、ブラウザ、スマートフォンのいずれからでも使えます。ホスト型サービスでは**ありません**。サブスクリプションや API キーはご自身のものを使い、コードはあなたのマシンの外に出ません。
 
-OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (MIT ライセンス) のフォークで、アップストリームの v0.0.44 をベースにしています。現在の OoP のバージョンは [`OOP_RELEASE.json`](OOP_RELEASE.json) にあります。ここにある基盤のほとんどは T3 Code チームの成果です。心から感謝します。
+OOP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (MIT ライセンス) のフォークで、アップストリームの v0.0.44 をベースにしています。現在の OOP のバージョンは [`OOP_RELEASE.json`](OOP_RELEASE.json) にあります。ここにある基盤のほとんどは T3 Code チームの成果です。心から感謝します。
 
 ## 目次
 
-- [なぜ OoP なのか](#なぜ-oop-なのか)
+- [なぜ OOP なのか](#なぜ-oop-なのか)
 - [スクリーンショットツアー](#スクリーンショットツアー)
 - [機能リファレンス](#機能リファレンス)
 - [対応プロバイダー](#対応プロバイダー)
@@ -30,27 +30,27 @@ OoP は T3 Tools Inc. による [T3 Code](https://github.com/pingdotgg/t3code) (
 - [リポジトリマップ](#リポジトリマップ)
 - [ステータス、コントリビュート、ライセンス](#ステータスとロードマップの正直なところ)
 
-## なぜ OoP なのか
+## なぜ OOP なのか
 
-コーディングエージェントは優秀ですが、それぞれが独自のターミナルやアプリの中にあり、ログインも履歴も承認プロンプトもバラバラです。OoP はそれらを並べて使えるようにします。
+コーディングエージェントは優秀ですが、それぞれが独自のターミナルやアプリの中にあり、ログインも履歴も承認プロンプトもバラバラです。OOP はそれらを並べて使えるようにします。
 
 - **多くのエージェントを1か所で。** スレッドごとに Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code を切り替えられ、diff、ターミナル、承認の流れは共通です。
 - **複数のモデルでタスクを分担。** OOP Crew では、1つの「brain」モデルが日常的な作業を安価な worker に、難しい作業を expert に任せ、auditor が結果をレビューします。
 - **主導権はあなたに。** 4つの権限モード、復元できるチェックポイント付きの diff パネル、コストで驚かないための使用量ページを備えています。
 - **キーボードから離れても作業。** スマートフォンをエージェントが動いているコンピューターとペアリングして、長いタスクを見守ったり、操作したりできます。
-- **すべてローカルに。** プロジェクト、プロバイダーのログイン、エージェントの作業内容はあなたのマシンに残ります。OoP のアカウントも OoP のサーバーもありません。
+- **すべてローカルに。** プロジェクト、プロバイダーのログイン、エージェントの作業内容はあなたのマシンに残ります。OOP のアカウントも OOP のサーバーもありません。
 
 対象となる方: すでに1つ以上のコーディングエージェントのサブスクリプションや API
 プランを利用し、初期段階の未署名デスクトップアプリを使用でき、1つの操作画面に
 まとめたい開発者。洗練された署名済みの自動更新プロダクトをお求めなら、
-現時点ではアップストリームの T3 Code のほうが向いています。
+現時点ではアップストリームのプロジェクトのほうが向いています。
 
 ### 30秒ツアー
 
-![OoP main chat view with composer, model picker and permission mode](docs/screenshots/chat.png)
+![OOP main chat view with composer, model picker and permission mode](docs/screenshots/chat.png)
 _メインのチャット画面: プロバイダーとモデルを選び、権限モードを設定して、スレッドを追いかけます。_
 
-1. OoP を開き、1つのプロバイダーにサインインします (Settings → Providers)。
+1. OOP を開き、1つのプロバイダーにサインインします (Settings → Providers)。
 2. プロジェクトのフォルダーを追加して、スレッドを開始します。
 3. コンポーザーでモデルと権限モードを選び、メッセージを送ります。
 4. diff パネルで結果を確認します。気に入らなければチェックポイントから復元できます。
@@ -70,7 +70,7 @@ _チャット: スレッドのタイムラインの下に、モデルピッカ�
 
 ### OOP Crew
 
-1つのチャットで、複数のモデルを使います。そのチャット自身のモデルが **brain** (頭脳役) で、計画を立ててあなたと対話します。**worker** (作業役) は日常的な作業 (検索、編集、テスト) を、**expert** (専門家役) は難しい実装を担当し、**auditor** (監査役) はファイルを変更したターンをレビューします。プリセットは **OOP pick**、**Speed**、**Quality**、**Budget** で、ロールごとにモデルを上書きすることもできます。Crew のモデルが失敗した場合 (たとえばクレジット切れ)、OoP は同じレベルの別のサインイン済みモデルにタスクを引き継ぎます。テストが通る20行以下の小さな変更は監査されません。
+1つのチャットで、複数のモデルを使います。そのチャット自身のモデルが **brain** (頭脳役) で、計画を立ててあなたと対話します。**worker** (作業役) は日常的な作業 (検索、編集、テスト) を、**expert** (専門家役) は難しい実装を担当し、**auditor** (監査役) はファイルを変更したターンをレビューします。プリセットは **OOP pick**、**Speed**、**Quality**、**Budget** で、ロールごとにモデルを上書きすることもできます。Crew のモデルが失敗した場合 (たとえばクレジット切れ)、OOP は同じレベルの別のサインイン済みモデルにタスクを引き継ぎます。テストが通る20行以下の小さな変更は監査されません。
 
 **使いどころ:** 大部分は安価なモデルに任せ、レビューは強力なモデルにさせたい大きめのタスク。**開き方:** コンポーザーのモデルピッカーの隣にある **Crew**。Crew の作業は、右パネルの **Workflows** と **Agents** にリアルタイムで表示されます。
 
@@ -82,7 +82,7 @@ _OOP Crew: 1つのチャットで複数のモデルを使い、誰が何をし�
 
 ### Providers
 
-各プロバイダーのインストール、アップデート、サインインを1か所で行えます。カードには、CLI がインストールされているか、サインイン済みかが表示され、`npm` が `PATH` にある場合は **Install**、OoP がどのインストーラーが CLI を管理しているか把握している場合は **Update now** を選べます。
+各プロバイダーのインストール、アップデート、サインインを1か所で行えます。カードには、CLI がインストールされているか、サインイン済みかが表示され、`npm` が `PATH` にある場合は **Install**、OOP がどのインストーラーが CLI を管理しているか把握している場合は **Update now** を選べます。
 
 **開き方:** Settings → Providers。
 
@@ -137,7 +137,7 @@ _権限モード: Supervised から Full access まで。_
 
 ### スレッドゴール
 
-チャットが終わったときに何が成り立っているべきかを記述します。ゴールが開いている間、エージェントが `GOAL COMPLETE` を報告するか、`GOAL BLOCKED: <reason>` を報告するか、あなたが選んだ自動継続の回数を使い切るまで、OoP は各ターンの終了後にスレッドを継続します。Crew を使う場合、ファイルを変更したターンは監査を通ったときにのみカウントされます。
+チャットが終わったときに何が成り立っているべきかを記述します。ゴールが開いている間、エージェントが `GOAL COMPLETE` を報告するか、`GOAL BLOCKED: <reason>` を報告するか、あなたが選んだ自動継続の回数を使い切るまで、OOP は各ターンの終了後にスレッドを継続します。Crew を使う場合、ファイルを変更したターンは監査を通ったときにのみカウントされます。
 
 **開き方:** コンポーザーの **Crew** の隣にある **Goal**。終了するには **Stop goal** を使います。
 
@@ -180,14 +180,14 @@ _チャットと並んだ内蔵ターミナル。_
 
 ### ダークテーマ
 
-![OoP in the dark theme](docs/screenshots/dark.png)
+![OOP in the dark theme](docs/screenshots/dark.png)
 _ダークテーマ。_
 
 ### スマートフォンサイズの Web クライアント
 
 ペアリングすれば、同じ Web UI をスマートフォンのブラウザでも使えます ([スマートフォンから接続する](#スマートフォンから接続する)を参照)。
 
-![OoP web client at phone size](docs/screenshots/mobile.png)
+![OOP web client at phone size](docs/screenshots/mobile.png)
 _スマートフォンサイズの Web クライアント。_
 
 ### リモートアクセス設定
@@ -201,35 +201,35 @@ _Settings → Connections: リモートアクセスとペアリング (コード
 
 ## 機能リファレンス
 
-「Added in OoP (OoP で追加)」は、フォークのドキュメントとコードが OoP 固有のものとして示していることを意味します。「From T3 Code (T3 Code 由来)」は、ドキュメントとコードから判断する限りアップストリーム (v0.0.44) の一部であることを意味します。フォークではファイル単位の差分確認を行っていないため、この区分はおおよそのものとして扱ってください。
+「Added in OOP (OOP で追加)」は、フォークのドキュメントとコードが OOP 固有のものとして示していることを意味します。「Upstream (アップストリーム由来)」は、ドキュメントとコードから判断する限りアップストリーム (v0.0.44) の一部であることを意味します。フォークではファイル単位の差分確認を行っていないため、この区分はおおよそのものとして扱ってください。
 
 | 機能                                                  | 内容                                                                                                | 場所                                           | 由来                                                  |
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------- |
-| OOP Crew                                              | brain モデルが worker、expert、auditor モデルに委任します。プリセットとロールごとの上書きがあります | Composer → Crew、右パネル → Workflows / Agents | Added in OoP (OoP で追加)                             |
-| スレッドゴール                                        | チェックが通るか、ゴールがブロックされるまでスレッドを継続します                                    | Composer → Goal                                | Added in OoP                                          |
-| プロジェクトメモリ                                    | コンポーザーから、保存済みのプロジェクトメモリを提案します                                          | コンポーザー、メモリボタン                     | Added in OoP                                          |
-| ローカルのロール設定                                  | 実装用・レビュー用の好みのモデルを環境ごとに保存でき、おすすめも表示されます                        | コンポーザーのモデルピッカー                   | Added in OoP                                          |
-| Z.AI / MiniMax プリセット                             | OpenCode ベースのプロバイダープリセット                                                             | Settings → Providers → Add                     | Added in OoP (有料リクエストは未テスト)               |
-| ZCode (GLM) プロバイダー                              | Z.AI のエージェントを ACP 経由で利用します                                                          | Settings → Providers                           | Added in OoP                                          |
-| MiniMax Code プロバイダー                             | MiniMax のエージェントを ACP 経由で利用します                                                       | Settings → Providers                           | Added in OoP                                          |
-| ワンクリックのプロバイダーインストール / アップデート | プロバイダーのカードから、プロバイダー CLI をインストールまたはアップデートします                   | Settings → Providers                           | Added in OoP (アップストリームとの正確な差分は未検証) |
-| Verify macOS build                                    | OoP の `.dmg` について、整合性、厳密なコード署名、サーバー Mac での起動を確認します                 | チャットヘッダー → Verify macOS build          | Added in OoP                                          |
-| スマートフォン接続ダイアログ                          | デスクトップアプリ向けのワンクリックのスマートフォンペアリング QR。独自のリレーも任意で設定できます | サイドバー → Connect mobile                    | Added in OoP (デスクトップアプリのみ)                 |
-| 独自の Cloudflare リレー                              | 自分でデプロイする Worker で、どのネットワークからでもスマートフォンからデスクトップに接続できます  | `infra/oop-relay`                              | Added in OoP、初期段階                                |
-| ローカルフォルダーのアップデーター                    | パッケージ版の OoP が、指定したフォルダーにある新しいパッケージを取得できます                       | パッケージ版の macOS / Windows ビルド          | Added in OoP、初期段階、他者による検証なし            |
-| マルチプロバイダーのセッション                        | プロバイダーをまたいだスレッド、ターン、チェックポイント                                            | あらゆる場所                                   | From T3 Code (T3 Code 由来)                           |
-| 権限モード                                            | Supervised、Auto-accept edits、Auto、Full access                                                    | コンポーザー、Settings → General               | From T3 Code                                          |
-| Diff パネルとチェックポイント                         | エージェントの変更を確認して復元します                                                              | 右パネル → Diff                                | From T3 Code                                          |
-| ソース管理                                            | プロバイダー CLI 経由のクローン、コミット、公開、プルリクエスト                                     | Settings → Source Control                      | From T3 Code                                          |
-| 内蔵ターミナル                                        | サーバーマシン上のスレッドごとのターミナル                                                          | スレッド内                                     | From T3 Code                                          |
-| チャット内レポート                                    | チャート、統計カード、進捗バー、mermaid のフロー図                                                  | 返信内                                         | From T3 Code                                          |
-| ワークフロービュー                                    | ツール呼び出しとサブエージェントのリアルタイム図                                                    | 右パネル、`mod+alt+w`                          | From T3 Code                                          |
-| Usage ページ                                          | トークンと推定コストの履歴                                                                          | サイドバー、`mod+u`                            | From T3 Code (ZCode と MiniMax の行は OoP)            |
-| SnapShots                                             | ウィンドウをキャプチャして下書きに取り込みます (デフォルトはオフ。macOS、Windows、Linux Wayland)    | Settings → SnapShots                           | From T3 Code (帰属は未検証)                           |
-| リモートアクセス                                      | LAN ペアリング、Tailscale HTTPS、SSH 環境                                                           | Settings → Connections                         | From T3 Code                                          |
-| デバイスパネル                                        | iOS Simulator や Android Emulator をスレッドの隣で表示し、タップ操作もできます                      | 右パネル → Device                              | From T3 Code (ここでは未テスト)                       |
-| バックグラウンドサービス                              | macOS (launchd) と Linux (systemd ユーザーユニット) での `t3 service install`。Windows は非対応     | CLI                                            | From T3 Code (ここでは未テスト)                       |
-| キーバインド、プロジェクト設定、テーマ                | カスタマイズ可能なショートカット、プロジェクトごとの上書き、外観                                    | Settings                                       | From T3 Code                                          |
+| OOP Crew                                              | brain モデルが worker、expert、auditor モデルに委任します。プリセットとロールごとの上書きがあります | Composer → Crew、右パネル → Workflows / Agents | Added in OOP (OOP で追加)                             |
+| スレッドゴール                                        | チェックが通るか、ゴールがブロックされるまでスレッドを継続します                                    | Composer → Goal                                | Added in OOP                                          |
+| プロジェクトメモリ                                    | コンポーザーから、保存済みのプロジェクトメモリを提案します                                          | コンポーザー、メモリボタン                     | Added in OOP                                          |
+| ローカルのロール設定                                  | 実装用・レビュー用の好みのモデルを環境ごとに保存でき、おすすめも表示されます                        | コンポーザーのモデルピッカー                   | Added in OOP                                          |
+| Z.AI / MiniMax プリセット                             | OpenCode ベースのプロバイダープリセット                                                             | Settings → Providers → Add                     | Added in OOP (有料リクエストは未テスト)               |
+| ZCode (GLM) プロバイダー                              | Z.AI のエージェントを ACP 経由で利用します                                                          | Settings → Providers                           | Added in OOP                                          |
+| MiniMax Code プロバイダー                             | MiniMax のエージェントを ACP 経由で利用します                                                       | Settings → Providers                           | Added in OOP                                          |
+| ワンクリックのプロバイダーインストール / アップデート | プロバイダーのカードから、プロバイダー CLI をインストールまたはアップデートします                   | Settings → Providers                           | Added in OOP (アップストリームとの正確な差分は未検証) |
+| Verify macOS build                                    | OOP の `.dmg` について、整合性、厳密なコード署名、サーバー Mac での起動を確認します                 | チャットヘッダー → Verify macOS build          | Added in OOP                                          |
+| スマートフォン接続ダイアログ                          | デスクトップアプリ向けのワンクリックのスマートフォンペアリング QR。独自のリレーも任意で設定できます | サイドバー → Connect mobile                    | Added in OOP (デスクトップアプリのみ)                 |
+| 独自の Cloudflare リレー                              | 自分でデプロイする Worker で、どのネットワークからでもスマートフォンからデスクトップに接続できます  | `infra/oop-relay`                              | Added in OOP、初期段階                                |
+| ローカルフォルダーのアップデーター                    | パッケージ版の OOP が、指定したフォルダーにある新しいパッケージを取得できます                       | パッケージ版の macOS / Windows ビルド          | Added in OOP、初期段階、他者による検証なし            |
+| マルチプロバイダーのセッション                        | プロバイダーをまたいだスレッド、ターン、チェックポイント                                            | あらゆる場所                                   | Upstream (アップストリーム由来)                           |
+| 権限モード                                            | Supervised、Auto-accept edits、Auto、Full access                                                    | コンポーザー、Settings → General               | Upstream                                          |
+| Diff パネルとチェックポイント                         | エージェントの変更を確認して復元します                                                              | 右パネル → Diff                                | Upstream                                          |
+| ソース管理                                            | プロバイダー CLI 経由のクローン、コミット、公開、プルリクエスト                                     | Settings → Source Control                      | Upstream                                          |
+| 内蔵ターミナル                                        | サーバーマシン上のスレッドごとのターミナル                                                          | スレッド内                                     | Upstream                                          |
+| チャット内レポート                                    | チャート、統計カード、進捗バー、mermaid のフロー図                                                  | 返信内                                         | Upstream                                          |
+| ワークフロービュー                                    | ツール呼び出しとサブエージェントのリアルタイム図                                                    | 右パネル、`mod+alt+w`                          | Upstream                                          |
+| Usage ページ                                          | トークンと推定コストの履歴                                                                          | サイドバー、`mod+u`                            | Upstream (ZCode と MiniMax の行は OOP)            |
+| SnapShots                                             | ウィンドウをキャプチャして下書きに取り込みます (デフォルトはオフ。macOS、Windows、Linux Wayland)    | Settings → SnapShots                           | Upstream (帰属は未検証)                           |
+| リモートアクセス                                      | LAN ペアリング、Tailscale HTTPS、SSH 環境                                                           | Settings → Connections                         | Upstream                                          |
+| デバイスパネル                                        | iOS Simulator や Android Emulator をスレッドの隣で表示し、タップ操作もできます                      | 右パネル → Device                              | Upstream (ここでは未テスト)                       |
+| バックグラウンドサービス                              | macOS (launchd) と Linux (systemd ユーザーユニット) での `t3 service install`。Windows は非対応     | CLI                                            | Upstream (ここでは未テスト)                       |
+| キーバインド、プロジェクト設定、テーマ                | カスタマイズ可能なショートカット、プロジェクトごとの上書き、外観                                    | Settings                                       | Upstream                                          |
 
 ## 対応プロバイダー
 
@@ -313,7 +313,7 @@ node scripts/macos.mjs start     # optional: run an isolated dev copy of the des
 node scripts/macos.mjs package   # builds an ad hoc signed DMG into release/macos/
 ```
 
-`release/macos/` から DMG を開き、アプリを `/Applications/OoP.app` にドラッグします。
+`release/macos/` から DMG を開き、アプリを `/Applications/OOP.app` にドラッグします。
 
 ### Windows (x64、実験的)
 
@@ -324,7 +324,7 @@ set OOP_WINDOWS_UPDATE_DIRECTORY=%CD%\release\windows
 node scripts\windows.mjs package
 ```
 
-インストーラー (`OoP-<version>-x64.exe`) は `release\windows` に出力されます。
+インストーラー (`OOP-<version>-x64.exe`) は `release\windows` に出力されます。
 
 ### 汎用の開発手順 (任意の OS)
 
@@ -357,7 +357,7 @@ vp run dev    # server + web; open the pairing URL it prints
 ```mermaid
 graph LR
     P["スマートフォン<br/>(ブラウザまたはネイティブアプリ)"] -->|"一度きりのペアリングリンク / QR"| N["ネットワーク経路<br/>LAN、Tailscale、または独自のリレー"]
-    N --> S["お使いのコンピューター上の OoP サーバー<br/>(ペアリングを確認し、セッションを保持)"]
+    N --> S["お使いのコンピューター上の OOP サーバー<br/>(ペアリングを確認し、セッションを保持)"]
     S --> C["プロバイダー CLI<br/>Codex、Claude Code、Cursor、..."]
     C --> F["プロジェクトのファイル"]
 ```
@@ -375,10 +375,10 @@ graph LR
 
 ### a) 同じ Wi-Fi / LAN (最もシンプル)
 
-**前提条件:** コンピューターで OoP デスクトップアプリが動いていて、スマートフォンが同じネットワークにあること。
+**前提条件:** コンピューターで OOP デスクトップアプリが動いていて、スマートフォンが同じネットワークにあること。
 
 1. デスクトップアプリで、サイドバーのスマートフォンアイコン (**Connect mobile**) をクリックします。
-2. モバイル接続がオフだとダイアログに表示されたら、**Allow mobile connections** をクリックします。OoP が一度再起動し、設定は保持されます。
+2. モバイル接続がオフだとダイアログに表示されたら、**Allow mobile connections** をクリックします。OOP が一度再起動し、設定は保持されます。
 3. 一度きりの QR コードが表示されます。複数のアドレスが表示された場合は、スマートフォンから到達できるものを選びます (同じ Wi-Fi なら **LAN** のエントリ)。
 4. スマートフォンのカメラで QR コードをスキャンし、スマートフォンのブラウザでリンクを開きます。これでスマートフォンがペアリングされました。ペアリングによってそのデバイスは以降のアクセスも認可されるため、元のコードを再度使う必要はありません。
 
@@ -413,7 +413,7 @@ tailscale serve --https=443 off   # remove the mapping later
 
 ### c) 独自の Cloudflare リレー (外出先から、Tailscale なし)
 
-OoP には小さな Cloudflare Worker が [`infra/oop-relay`](infra/oop-relay/README.md) に含まれていて、**あなた自身の** Cloudflare アカウントにデプロイします。デスクトップ側から外向きに接続するため、ルーターの設定は不要で、デスクトップがオンラインであれば、スマートフォンはどのネットワークからでも接続できます。
+OOP には小さな Cloudflare Worker が [`infra/oop-relay`](infra/oop-relay/README.md) に含まれていて、**あなた自身の** Cloudflare アカウントにデプロイします。デスクトップ側から外向きに接続するため、ルーターの設定は不要で、デスクトップがオンラインであれば、スマートフォンはどのネットワークからでも接続できます。
 
 1. [`infra/oop-relay/README.md`](infra/oop-relay/README.md) の説明に従って Worker をデプロイします (`npx wrangler login`、`npx wrangler deploy`、続いて `npx wrangler secret put OOP_RELAY_SECRET`)。
 2. デスクトップアプリで Connect mobile → **Use away from home** を選びます。表示されたシークレットを Worker のシークレットに貼り付け、リレーのアドレスを入力して **Save** します。
@@ -422,25 +422,25 @@ OoP には小さな Cloudflare Worker が [`infra/oop-relay`](infra/oop-relay/RE
 > [!NOTE]
 > 1つのデプロイは1台のデスクトップ用です。リレーでは Cloudflare が TLS を終端するため、通信内容は、それを運用している Cloudflare アカウントから見えます。スマートフォンは引き続き、ペアリングコードでデスクトップにサインインする必要があります。この経路は新しく、3つの中で最もテストされていません。
 
-**T3 Connect はどうですか?** T3 Code には「T3 Connect」というトンネルサービスも付属していますが、これはクラウドへのサインインと、アップストリームのプロジェクトが運営するサーバーに依存します。**OoP はホスト型サービスを一切運営しておらず**、このフォークでは T3 Connect をテストしていないため、このガイドでは扱いません。
+**アップストリームのトンネルサービスはどうですか?** アップストリームのプロジェクトにはトンネルサービスも付属していますが、これはクラウドへのサインインと、アップストリームのプロジェクトが運営するサーバーに依存します。**OOP はホスト型サービスを一切運営しておらず**、このフォークではそれをテストしていないため、このガイドでは扱いません。
 
 ### ネイティブアプリかブラウザか
 
 |                        | スマートフォンのブラウザ                                                                      | ネイティブの iOS / Android アプリ                                                                  |
 | ---------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| 概要                   | お使いのコンピューターが配信する OoP の Web UI                                                | アップストリームのプロジェクトが公開している T3 Code のモバイルアプリ (OoP ブランドではありません) |
-| インストール           | 不要                                                                                          | T3 Code の App Store / Google Play のページ                                                        |
+| 概要                   | お使いのコンピューターが配信する OOP の Web UI                                                | アップストリームのプロジェクトが公開しているモバイルアプリ (OOP ブランドではありません) |
+| インストール           | 不要                                                                                          | アップストリームのプロジェクトの App Store / Google Play のページ                                                        |
 | 接続                   | ペアリングリンクを開くか、QR コードをスキャンします                                           | 環境を追加します: QR コードをスキャンするか、ペアリング URL を貼り付けます                         |
 | このフォークでのテスト | Web UI はスマートフォンサイズで確認済み。実機のスマートフォンからのペアリングは個別には未検証 | **未テスト**                                                                                       |
 
 ![Phone-size web client connected through a pairing link](docs/screenshots/mobile.png)
-_OoP に接続したスマートフォンのブラウザ。_
+_OOP に接続したスマートフォンのブラウザ。_
 
-このフォークはプロトコルと認証の識別子を維持しているため ([`UPSTREAM.json`](UPSTREAM.json) の `internal_protocol_and_auth_identifiers_preserved`)、アップストリームのアプリは OoP サーバーとペアリングできるはずです。**ただし、フォークではネイティブのモバイルアプリをテストしていない**ため、未確認として扱ってください。アップストリームのドキュメントでは、アプリの接続設定は Settings → Environments に記載されています。不具合があればブラウザを使ってください。
+このフォークはプロトコルと認証の識別子を維持しているため ([`UPSTREAM.json`](UPSTREAM.json) の `internal_protocol_and_auth_identifiers_preserved`)、アップストリームのアプリは OOP サーバーとペアリングできるはずです。**ただし、フォークではネイティブのモバイルアプリをテストしていない**ため、未確認として扱ってください。アップストリームのドキュメントでは、アプリの接続設定は Settings → Environments に記載されています。不具合があればブラウザを使ってください。
 
 ### プッシュ通知
 
-アップストリームのドキュメントによると、スマートフォンへのプッシュ通知 (エージェントの完了、失敗、承認待ち) には T3 Connect へのサインインが必要で、直接接続や Tailscale 接続だけでは有効になりません。OoP は T3 Connect を運営しておらず、フォークでもテストしていないため、**上記の経路ではプッシュ通知は期待しないでください。** スマートフォンのページを開いたままにするか、スレッドをときどき確認してください。
+アップストリームのドキュメントによると、スマートフォンへのプッシュ通知 (エージェントの完了、失敗、承認待ち) には アップストリームのトンネルサービスへのサインインが必要で、直接接続や Tailscale 接続だけでは有効になりません。OOP はそのサービスを運営しておらず、フォークでもテストしていないため、**上記の経路ではプッシュ通知は期待しないでください。** スマートフォンのページを開いたままにするか、スレッドをときどき確認してください。
 
 ### デバイスの無効化
 
@@ -451,24 +451,24 @@ _OoP に接続したスマートフォンのブラウザ。_
 
 ## アップデートの仕組み
 
-ソースビルドは GitHub から自動更新されないため、以下の手順で再ビルドしてください。バイナリーインストール版を更新するには、OoP を終了して該当するインストーラーコマンドを再実行してください。ユーザーデータは保持されます。
+ソースビルドは GitHub から自動更新されないため、以下の手順で再ビルドしてください。バイナリーインストール版を更新するには、OOP を終了して該当するインストーラーコマンドを再実行してください。ユーザーデータは保持されます。
 
 1. `git pull`
 2. 再度ビルド / パッケージングして ([インストール](#インストール--ソースからのビルド)を参照)、再インストールします。
 
-各リリースは、**1つのコミット** (タイトルは `OoP <version> source`)、`v<version>` というタグ、GitHub Release として公開されます。`~/.oop-desktop/userdata` にあるデータはアップデートをまたいで保持されます。新しいバージョンの通知を受け取るには、GitHub リポジトリで **Watch → Custom → Releases** を有効にしてください。以前のバージョンにはタグしかありません。
+各リリースは、**1つのコミット** (タイトルは `OOP <version> source`)、`v<version>` というタグ、GitHub Release として公開されます。`~/.oop-desktop/userdata` にあるデータはアップデートをまたいで保持されます。新しいバージョンの通知を受け取るには、GitHub リポジトリで **Watch → Custom → Releases** を有効にしてください。以前のバージョンにはタグしかありません。
 
 自分でビルドしたアプリは、ビルド時に決まったフォルダから次のビルドを見つけ、アプリ内でアップデートを提案します。Windows では上で指定した `release\windows`、macOS では `release/macos` です。macOS の `package` は DMG しか作らないため、続けてアップデートパッケージも作成してください。
 
 ```bash
 V=<version>
-node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
-  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
-  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OOP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OOP-$V-arm64-update.pkg
 ```
 
 > [!NOTE]
-> アプリ内のサーバーアップデート通知と `t3 update` は、アップストリームの T3 Code によるものです。OoP のアップデートチャネルではありません。
+> アプリ内のサーバーアップデート通知と `t3 update` は、アップストリームのプロジェクトによるものです。OOP のアップデートチャネルではありません。
 
 ## セキュリティとプライバシー
 
@@ -479,12 +479,12 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **コスト:** どのプロバイダーも、あなた自身のサブスクリプションまたは API クレジットを使います。Crew は1つのチャットで複数のモデルを動かすため、使用量が増えます。Usage ページが表示するのは推定値で、請求額ではありません。
 - **API キー**は、サーバー側、つまりあなたのマシンに保存されます。Antigravity の Gemini API キーは設定内に**平文で**保存されます。
 - **`.env` ファイルやキーは絶対にコミットしないでください**。Issue やログにも貼り付けないでください。
-- **アップストリームのインストーラーがインストールするのは OoP ではなく T3 Code です:** `t3.codes` のインストールスクリプト、`npx t3`、Homebrew の `t3-code`、winget の `T3Tools.T3Code`、App Store / Play のページは、すべてアップストリームのプロジェクトのものです。上記の OoP デスクトップインストーラーを使うか、このリポジトリからビルドしてください。
+- **アップストリームのインストーラーがインストールするのは OOP ではなくアップストリームのアプリです:** `t3.codes` のインストールスクリプト、`npx t3`、Homebrew の `t3-code`、winget の `T3Tools.T3Code`、App Store / Play のページは、すべてアップストリームのプロジェクトのものです。上記の OOP デスクトップインストーラーを使うか、このリポジトリからビルドしてください。
 - **CLI の名前は今も `t3` のまま**で、アップストリームのインストールと衝突することがあります。
 - **ソースビルドは ad hoc 署名**で、Developer ID も公証もありません。バイナリーインストーラーは SHA-256 を検証し、Gatekeeper の隔離属性や SmartScreen を回避しません。
 - **ローカルフォルダーのアップデーター**は、アップデート用フォルダーに書き込める人を信頼します。SHA-256 のチェックで検出できるのは破損だけです。
 
-**テレメトリー。** OoP にはサーバーがなく、メンテナーがあなたのアプリから何かを受け取ることはありません。アップストリームから引き継いだサーバーコードには、匿名の PostHog 利用状況レポーターが含まれています (アップストリームのプロジェクトのキーと `us.i.posthog.com` を使用)。OoP ではこれを**デフォルトで無効**にしているため、オプトインしない限り何も送信されません。有効にするには、サーバーを起動する前にサーバーの環境で `T3CODE_TELEMETRY_ENABLED=true` を設定してください ([`docs/user/telemetry.md`](docs/user/telemetry.md) を参照)。有効にすると、イベントにはプロバイダー、モデル、推論の強度、権限モード、ターンの結果、所要時間、メインエージェントのトークン合計が含まれ、ハッシュ化されたアカウントまたはインストールの識別子に紐づきます。ドキュメントによれば、プロンプト、応答、ファイルの内容、認証トークン、会話 ID は決して含まれません。
+**テレメトリー。** OOP にはサーバーがなく、メンテナーがあなたのアプリから何かを受け取ることはありません。アップストリームから引き継いだサーバーコードには、匿名の PostHog 利用状況レポーターが含まれています (アップストリームのプロジェクトのキーと `us.i.posthog.com` を使用)。OOP ではこれを**デフォルトで無効**にしているため、オプトインしない限り何も送信されません。有効にするには、サーバーを起動する前にサーバーの環境で `T3CODE_TELEMETRY_ENABLED=true` を設定してください ([`docs/user/telemetry.md`](docs/user/telemetry.md) を参照)。有効にすると、イベントにはプロバイダー、モデル、推論の強度、権限モード、ターンの結果、所要時間、メインエージェントのトークン合計が含まれ、ハッシュ化されたアカウントまたはインストールの識別子に紐づきます。ドキュメントによれば、プロンプト、応答、ファイルの内容、認証トークン、会話 ID は決して含まれません。
 
 脆弱性を報告するには、[SECURITY.md](SECURITY.md) を参照してください。
 
@@ -511,21 +511,21 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 Node.js 24.x の 24.13.1 以降と、pnpm 11.10.0 が必要です。それ以外の Node のメジャーバージョンは受け付けられません。
 
 **データはどこにありますか?**
-OoP のサーバーの状態 (スレッド、設定、ローカルデータベース) は `~/.oop-desktop/userdata` にあります。デスクトップバイナリーはこのデータとは別にインストールされます。プロバイダーのログインは、ここではなく各プロバイダー CLI 自身のフォルダーにあります。
+OOP のサーバーの状態 (スレッド、設定、ローカルデータベース) は `~/.oop-desktop/userdata` にあります。デスクトップバイナリーはこのデータとは別にインストールされます。プロバイダーのログインは、ここではなく各プロバイダー CLI 自身のフォルダーにあります。
 
 **バイナリーインストール版を更新するには?**
-OoP を終了し、該当するインストーラーコマンドを再実行してください。ユーザーデータは保持されます。
+OOP を終了し、該当するインストーラーコマンドを再実行してください。ユーザーデータは保持されます。
 
-**OoP をリセットするには?**
-アプリを終了し、`~/.oop-desktop/userdata` を別の場所に移動してください (確信が持てるまで削除しないでください)。次回は OoP が新しい状態で起動します。プロジェクトのフォルダーには影響しません。
+**OOP をリセットするには?**
+アプリを終了し、`~/.oop-desktop/userdata` を別の場所に移動してください (確信が持てるまで削除しないでください)。次回は OOP が新しい状態で起動します。プロジェクトのフォルダーには影響しません。
 
 **アンインストールするには?**
-アプリを終了し、`~/Applications/OoP.app` (macOS。`OOP_INSTALL_DIR` で指定した場合はその場所) を削除するか、Windows の設定から OoP をアンインストールします。Linux では `~/.local/bin/oop-desktop`、`~/.local/share/oop-desktop`、デスクトップメニュー項目を削除してください。データも削除したい場合は、`~/.oop-desktop` を削除してください。プロバイダー CLI は別にインストールされたものなので、削除されません。
+アプリを終了し、`~/Applications/OOP.app` (macOS。`OOP_INSTALL_DIR` で指定した場合はその場所) を削除するか、Windows の設定から OOP をアンインストールします。Linux では `~/.local/bin/oop-desktop`、`~/.local/share/oop-desktop`、デスクトップメニュー項目を削除してください。データも削除したい場合は、`~/.oop-desktop` を削除してください。プロバイダー CLI は別にインストールされたものなので、削除されません。
 
 **お金はかかりますか?**
-OoP 自体は無料です。OoP が動かすプロバイダーには、あなた自身のサブスクリプションまたは API クレジットが使われます。Crew は1つのチャットで複数のモデルを使い、Usage ページには (請求額ではなく) 推定コストが表示されます。
+OOP 自体は無料です。OOP が動かすプロバイダーには、あなた自身のサブスクリプションまたは API クレジットが使われます。Crew は1つのチャットで複数のモデルを使い、Usage ページには (請求額ではなく) 推定コストが表示されます。
 
-**アップストリームの T3 Code モバイルアプリは使えますか?**
+**アップストリームのモバイルアプリは使えますか?**
 ペアリングできるはずですが、フォークではテストしていません。[ネイティブアプリかブラウザか](#ネイティブアプリかブラウザか)を参照してください。
 
 ## リポジトリマップ
@@ -545,7 +545,7 @@ OoP 自体は無料です。OoP が動かすプロバイダーには、あなた
 
 ## ステータスとロードマップの正直なところ
 
-OoP は**初期段階**です。バグがあるものとお考えください。フォークが実際にテストしているプラットフォームは macOS Apple Silicon だけで、Windows は実験的です。Intel Mac、Linux、ネイティブのモバイルアプリ、プッシュ通知、有料の Z.AI / MiniMax リクエストは未テストです。約束されたロードマップはありません。メンテナーは自分が遭遇した問題を修正し、準備ができたらリリースを公開します。
+OOP は**初期段階**です。バグがあるものとお考えください。フォークが実際にテストしているプラットフォームは macOS Apple Silicon だけで、Windows は実験的です。Intel Mac、Linux、ネイティブのモバイルアプリ、プッシュ通知、有料の Z.AI / MiniMax リクエストは未テストです。約束されたロードマップはありません。メンテナーは自分が遭遇した問題を修正し、準備ができたらリリースを公開します。
 
 ## コントリビュート
 
@@ -555,4 +555,4 @@ OoP は**初期段階**です。バグがあるものとお考えください。
 
 [MIT](LICENSE)。元の著作権表示「Copyright (c) 2026 T3 Tools Inc.」はそのまま残す必要があり、このフォークでの変更も MIT ライセンスです。
 
-OoP は、T3 Tools Inc. と pingdotgg チームによる [T3 Code](https://github.com/pingdotgg/t3code) をベースに構築されています。プロバイダー名 (Codex、Claude Code、Cursor、Grok、OpenCode、Antigravity、ZCode、MiniMax、Z.AI) はそれぞれの所有者に帰属します。OoP はそれらと提携していません。
+OOP は、T3 Tools Inc. と pingdotgg チームによる [T3 Code](https://github.com/pingdotgg/t3code) をベースに構築されています。プロバイダー名 (Codex、Claude Code、Cursor、Grok、OpenCode、Antigravity、ZCode、MiniMax、Z.AI) はそれぞれの所有者に帰属します。OOP はそれらと提携していません。

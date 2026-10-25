@@ -307,7 +307,7 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "release version follows OoP release independently of upstream provenance",
+  "release version follows OOP release independently of upstream provenance",
   async () => {
     const source = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-version-"));
     try {
@@ -327,7 +327,7 @@ NodeTest.test(
       NodeAssert.equal(await releaseVersion(source), "0.0.45");
       for (const version of ["0.0.45-preview.1", "v0.0.45", "00.0.45", "0.0.45\n", null, 45]) {
         await NodeFSP.writeFile(releasePath, JSON.stringify({ version }));
-        await NodeAssert.rejects(releaseVersion(source), /stable OoP version/);
+        await NodeAssert.rejects(releaseVersion(source), /stable OOP version/);
       }
     } finally {
       await NodeFSP.rm(source, { recursive: true, force: true });
@@ -395,8 +395,8 @@ NodeTest.test("desktop build invokes the installed local vp without pnpm exec", 
   );
   // Google Drive comes first; the source's release/macos stays the fallback.
   NodeAssert.deepEqual(JSON.parse(calls[0].options.env.OOP_DESKTOP_UPDATE_CANDIDATES), [
-    "~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos",
-    "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos",
+    "~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos",
+    "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos",
   ]);
   NodeAssert.equal(calls[0].options.env.OOP_DESKTOP_UPDATE_FOLDER_KIND, "google-drive");
 });
@@ -460,7 +460,7 @@ NodeTest.test(
 NodeTest.test("final DMG verifier rejects a copied-byte mismatch before mounting", async () => {
   const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-dmg-hash-"));
   try {
-    const dmg = NodePath.join(root, "OoP.dmg");
+    const dmg = NodePath.join(root, "OOP.dmg");
     await NodeFSP.writeFile(dmg, "different bytes");
     await NodeAssert.rejects(
       verifyMacDmgArtifact(dmg, "expected", async () => {
@@ -478,7 +478,7 @@ NodeTest.test(
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-dmg-seal-"));
     try {
-      const dmg = NodePath.join(root, "OoP.dmg");
+      const dmg = NodePath.join(root, "OOP.dmg");
       const bytes = "fixture dmg bytes";
       const digest = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
       await NodeFSP.writeFile(dmg, bytes);
@@ -486,7 +486,7 @@ NodeTest.test(
       const runner = async (command, args) => {
         calls.push({ command, args });
         if (command.endsWith("hdiutil") && args[0] === "attach") {
-          await NodeFSP.mkdir(NodePath.join(args.at(-2), "OoP.app"));
+          await NodeFSP.mkdir(NodePath.join(args.at(-2), "OOP.app"));
         }
       };
       NodeAssert.equal(await verifyMacDmgArtifact(dmg, digest, runner), digest);
@@ -511,7 +511,7 @@ NodeTest.test(
         verifyMacDmgArtifact(dmg, digest, async (command, args) => {
           failureCalls.push(args[0]);
           if (command.endsWith("hdiutil") && args[0] === "attach")
-            await NodeFSP.mkdir(NodePath.join(args.at(-2), "OoP.app"));
+            await NodeFSP.mkdir(NodePath.join(args.at(-2), "OOP.app"));
           if (command.endsWith("codesign")) throw new Error("invalid seal");
         }),
         /invalid seal/,
@@ -544,9 +544,9 @@ NodeTest.test(
         verifyMacDmgArtifact(dmg, digest, async (_command, args) => {
           symlinkCalls.push(args[0]);
           if (args[0] === "attach")
-            await NodeFSP.symlink(root, NodePath.join(args.at(-2), "OoP.app"));
+            await NodeFSP.symlink(root, NodePath.join(args.at(-2), "OOP.app"));
         }),
-        /Expected OoP\.app/,
+        /Expected OOP\.app/,
       );
       NodeAssert.deepEqual(symlinkCalls, ["verify", "attach", "detach"]);
     } finally {
@@ -560,7 +560,7 @@ NodeTest.test("failed replacement leaves no stale success manifest for that vers
   try {
     const source = NodePath.join(root, "source");
     const destination = NodePath.join(source, "release", "macos");
-    const fileName = "OoP-0.0.44-arm64.dmg";
+    const fileName = "OOP-0.0.44-arm64.dmg";
     await NodeFSP.mkdir(destination, { recursive: true });
     await NodeFSP.writeFile(
       NodePath.join(destination, `${fileName}.json`),
@@ -604,7 +604,7 @@ NodeTest.test(
           JSON.stringify({ version: "0.0.44" }),
         );
       }
-      const fileName = "OoP-0.0.44-arm64.dmg";
+      const fileName = "OOP-0.0.44-arm64.dmg";
       const bytes = "built dmg fixture";
       const digest = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
       await packageDmg(
@@ -614,7 +614,7 @@ NodeTest.test(
             const out = args[args.indexOf("--output-dir") + 1];
             await NodeFSP.writeFile(NodePath.join(out, fileName), bytes);
           } else if (command.endsWith("hdiutil") && args[0] === "attach") {
-            await NodeFSP.mkdir(NodePath.join(args.at(-2), "OoP.app"));
+            await NodeFSP.mkdir(NodePath.join(args.at(-2), "OOP.app"));
           }
         },
         "0.0.44",
@@ -648,7 +648,7 @@ NodeTest.test(
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-dmg-signer-"));
     try {
-      const dmg = NodePath.join(root, "OoP.dmg");
+      const dmg = NodePath.join(root, "OOP.dmg");
       const bytes = "fixture dmg bytes";
       const digest = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
       await NodeFSP.writeFile(dmg, bytes);
@@ -659,7 +659,7 @@ NodeTest.test(
           digest,
           async (command, args) => {
             calls.push({ command, args });
-            if (args[0] === "attach") await NodeFSP.mkdir(NodePath.join(args.at(-2), "OoP.app"));
+            if (args[0] === "attach") await NodeFSP.mkdir(NodePath.join(args.at(-2), "OOP.app"));
             if (signerFails && args.some((arg) => arg.startsWith("-R=")))
               throw new Error("code failed to satisfy specified code requirement(s)");
           },
@@ -694,7 +694,7 @@ NodeTest.test(
         requirement,
         'identifier "com.t3tools.t3code" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "ABCDE12345"',
       );
-      NodeAssert.ok(signed.calls[3].args.at(-1).endsWith("OoP.app"));
+      NodeAssert.ok(signed.calls[3].args.at(-1).endsWith("OOP.app"));
 
       const rejected = await run(true, { teamId: "ABCDE12345" });
       NodeAssert.match(rejected.outcome, /failed to satisfy/);
@@ -709,7 +709,7 @@ NodeTest.test(
 );
 
 const CANDIDATE_VERSION = "0.0.44";
-const CANDIDATE_FILE = `OoP-${CANDIDATE_VERSION}-arm64.dmg`;
+const CANDIDATE_FILE = `OOP-${CANDIDATE_VERSION}-arm64.dmg`;
 const CANDIDATE_BYTES = "candidate dmg fixture";
 
 // A source tree with an accepted release already published for the same version
@@ -769,7 +769,7 @@ function candidateRunner(calls, failure) {
         CANDIDATE_BYTES,
       );
     } else if (args[0] === "attach") {
-      await NodeFSP.mkdir(NodePath.join(args.at(-2), "OoP.app"));
+      await NodeFSP.mkdir(NodePath.join(args.at(-2), "OOP.app"));
     } else if (failure === "signer" && args.some((arg) => arg.startsWith("-R="))) {
       throw new Error("code failed to satisfy specified code requirement(s)");
     }

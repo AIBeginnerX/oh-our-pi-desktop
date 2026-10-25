@@ -1,4 +1,4 @@
-# OoP (oh-our-pi)
+# OOP (oh-our-pi)
 
 **이미 쓰고 계신 코딩 에이전트를 하나의 데스크톱 앱에서 제어하고, 필요하면 여러 모델로 팀까지 꾸릴 수 있습니다.**
 
@@ -9,13 +9,13 @@
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
 ![Status: early](https://img.shields.io/badge/status-early-orange)
 
-OoP는 사용자의 컴퓨터에서 실행되며, 이미 설치해 둔 코딩 에이전트 CLI(Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code)를 감싸서 채팅 형태의 하나의 작업 공간으로 제공합니다. 데스크톱 앱, 브라우저, 휴대폰에서 사용할 수 있습니다. 호스팅 서비스가 **아닙니다**. 구독과 API 키는 직접 준비하셔야 하고, 코드는 사용자의 컴퓨터에만 남습니다.
+OOP는 사용자의 컴퓨터에서 실행되며, 이미 설치해 둔 코딩 에이전트 CLI(Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code)를 감싸서 채팅 형태의 하나의 작업 공간으로 제공합니다. 데스크톱 앱, 브라우저, 휴대폰에서 사용할 수 있습니다. 호스팅 서비스가 **아닙니다**. 구독과 API 키는 직접 준비하셔야 하고, 코드는 사용자의 컴퓨터에만 남습니다.
 
-OoP는 T3 Tools Inc.의 [T3 Code](https://github.com/pingdotgg/t3code)(MIT 라이선스)를 포크한 프로젝트이며, 업스트림 v0.0.44를 기반으로 합니다. 현재 OoP 버전은 [`OOP_RELEASE.json`](OOP_RELEASE.json)에서 확인할 수 있습니다. 기반 코드의 거의 전부가 T3 Code 팀의 작업물입니다. 진심으로 감사드립니다.
+OOP는 T3 Tools Inc.의 [T3 Code](https://github.com/pingdotgg/t3code)(MIT 라이선스)를 포크한 프로젝트이며, 업스트림 v0.0.44를 기반으로 합니다. 현재 OOP 버전은 [`OOP_RELEASE.json`](OOP_RELEASE.json)에서 확인할 수 있습니다. 기반 코드의 거의 전부가 T3 Code 팀의 작업물입니다. 진심으로 감사드립니다.
 
 ## 목차
 
-- [왜 OoP인가요?](#왜-oop인가요)
+- [왜 OOP인가요?](#왜-oop인가요)
 - [스크린샷 둘러보기](#스크린샷-둘러보기)
 - [기능 레퍼런스](#기능-레퍼런스)
 - [지원하는 provider](#지원하는-provider)
@@ -30,27 +30,27 @@ OoP는 T3 Tools Inc.의 [T3 Code](https://github.com/pingdotgg/t3code)(MIT 라�
 - [저장소 구조](#저장소-구조)
 - [현황, 기여, 라이선스](#현황-및-로드맵에-대한-솔직한-안내)
 
-## 왜 OoP인가요?
+## 왜 OOP인가요?
 
-코딩 에이전트는 훌륭하지만, 각각 자기만의 터미널이나 앱, 로그인, 기록, 승인 프롬프트를 가지고 있습니다. OoP는 이들을 나란히 놓아 줍니다.
+코딩 에이전트는 훌륭하지만, 각각 자기만의 터미널이나 앱, 로그인, 기록, 승인 프롬프트를 가지고 있습니다. OOP는 이들을 나란히 놓아 줍니다.
 
 - **여러 에이전트를 한곳에서.** 스레드마다 Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code를 바꿔 가며 쓸 수 있고, diff, 터미널, 승인 흐름은 모두 같습니다.
 - **여러 모델이 하나의 작업을 나눠서.** OOP Crew를 쓰면 하나의 "brain"(총괄 모델)이 반복적인 작업은 저렴한 worker에게, 어려운 작업은 expert에게 맡기고, auditor가 결과를 검토하게 할 수 있습니다.
 - **통제권은 그대로.** 네 가지 권한 모드, 복원할 수 있는 체크포인트가 있는 diff 패널, 비용이 놀라움이 되지 않도록 돕는 사용량 페이지를 제공합니다.
 - **자리를 떠나서도 작업.** 에이전트를 실행하는 컴퓨터에 휴대폰을 페어링해서 오래 걸리는 작업을 지켜보거나 방향을 조정할 수 있습니다.
-- **모든 것을 로컬에.** 프로젝트, provider 로그인, 에이전트 작업이 모두 사용자의 컴퓨터에 남습니다. OoP 계정도, OoP 서버도 없습니다.
+- **모든 것을 로컬에.** 프로젝트, provider 로그인, 에이전트 작업이 모두 사용자의 컴퓨터에 남습니다. OOP 계정도, OOP 서버도 없습니다.
 
 이런 분께 적합합니다. 이미 하나 이상의 코딩 에이전트 구독이나 API 요금제를 쓰고
 있고, 초기 단계의 서명되지 않은 데스크톱 앱을 사용할 수 있으며, 하나의 제어 화면을
 원하는 개발자입니다. 서명되고 자동 업데이트되는 완성형 제품을 원하신다면
-현재로서는 업스트림 T3 Code가 더 잘 맞습니다.
+현재로서는 업스트림 프로젝트가 더 잘 맞습니다.
 
 ### 30초 둘러보기
 
-![작성창, 모델 선택기, 권한 모드가 있는 OoP 메인 채팅 화면](docs/screenshots/chat.png)
+![작성창, 모델 선택기, 권한 모드가 있는 OOP 메인 채팅 화면](docs/screenshots/chat.png)
 _메인 채팅 화면: provider와 모델을 고르고, 권한 모드를 설정한 뒤, 스레드를 따라가 보세요._
 
-1. OoP를 열고 provider 하나에 로그인합니다(Settings → Providers).
+1. OOP를 열고 provider 하나에 로그인합니다(Settings → Providers).
 2. 프로젝트 폴더를 추가하고 스레드를 시작합니다.
 3. 작성창에서 모델과 권한 모드를 고른 뒤 메시지를 보냅니다.
 4. diff 패널에서 결과를 검토하고, 마음에 들지 않으면 체크포인트에서 복원합니다.
@@ -70,7 +70,7 @@ _채팅: 스레드 타임라인 아래에 모델 선택기와 권한 모드가 �
 
 ### OOP Crew
 
-하나의 채팅에 여러 모델이 참여합니다. 채팅 자체의 모델이 **brain**(총괄)이며, 계획을 세우고 사용자와 대화합니다. **worker**(작업자)는 검색, 편집, 테스트 같은 반복 작업을, **expert**(전문가)는 어려운 구현을 맡고, **auditor**(감사자)는 파일을 변경한 턴을 검토합니다. 프리셋은 **OOP pick**(OoP 추천), **Speed**(속도), **Quality**(품질), **Budget**(예산)이며, 역할별로 모델을 직접 지정할 수도 있습니다. crew 모델이 실패하면(예: 크레딧 소진) OoP는 같은 등급의 로그인된 다른 모델에게 작업을 넘깁니다. 테스트를 통과한 20줄 이하의 작은 변경은 감사하지 않습니다.
+하나의 채팅에 여러 모델이 참여합니다. 채팅 자체의 모델이 **brain**(총괄)이며, 계획을 세우고 사용자와 대화합니다. **worker**(작업자)는 검색, 편집, 테스트 같은 반복 작업을, **expert**(전문가)는 어려운 구현을 맡고, **auditor**(감사자)는 파일을 변경한 턴을 검토합니다. 프리셋은 **OOP pick**(OOP 추천), **Speed**(속도), **Quality**(품질), **Budget**(예산)이며, 역할별로 모델을 직접 지정할 수도 있습니다. crew 모델이 실패하면(예: 크레딧 소진) OOP는 같은 등급의 로그인된 다른 모델에게 작업을 넘깁니다. 테스트를 통과한 20줄 이하의 작은 변경은 감사하지 않습니다.
 
 **사용 시점:** 대부분은 저렴한 모델로 처리하고 검토는 강력한 모델에게 맡기고 싶은 규모가 큰 작업. **여는 방법:** 작성창의 모델 선택기 옆에 있는 **Crew**. Crew 작업은 오른쪽 패널의 **Workflows**와 **Agents**에서 실시간으로 볼 수 있습니다.
 
@@ -82,7 +82,7 @@ _OOP Crew: 하나의 채팅, 여러 모델, 누가 무엇을 하고 있는지 �
 
 ### Providers
 
-각 provider의 설치, 업데이트, 로그인을 한곳에서 처리합니다. 카드에는 CLI가 설치되어 있는지, 로그인되어 있는지가 표시되고, `npm`이 `PATH`에 있으면 **Install**을, OoP가 어떤 설치 도구로 CLI를 설치했는지 알고 있으면 **Update now**를 제공합니다.
+각 provider의 설치, 업데이트, 로그인을 한곳에서 처리합니다. 카드에는 CLI가 설치되어 있는지, 로그인되어 있는지가 표시되고, `npm`이 `PATH`에 있으면 **Install**을, OOP가 어떤 설치 도구로 CLI를 설치했는지 알고 있으면 **Update now**를 제공합니다.
 
 **여는 방법:** Settings → Providers.
 
@@ -137,7 +137,7 @@ _권한 모드: Supervised부터 Full access까지._
 
 ### 스레드 목표
 
-채팅이 끝났을 때 무엇이 참이어야 하는지 적어 둡니다. 목표가 열려 있는 동안 OoP는 매 턴이 끝날 때마다 스레드를 이어서 진행하며, 에이전트가 `GOAL COMPLETE`를 보고하거나, `GOAL BLOCKED: <reason>`을 보고하거나, 사용자가 정한 자동 이어가기 횟수가 소진될 때까지 계속합니다. Crew를 쓸 때는 파일을 변경한 턴이 감사를 거친 뒤에야 인정됩니다.
+채팅이 끝났을 때 무엇이 참이어야 하는지 적어 둡니다. 목표가 열려 있는 동안 OOP는 매 턴이 끝날 때마다 스레드를 이어서 진행하며, 에이전트가 `GOAL COMPLETE`를 보고하거나, `GOAL BLOCKED: <reason>`을 보고하거나, 사용자가 정한 자동 이어가기 횟수가 소진될 때까지 계속합니다. Crew를 쓸 때는 파일을 변경한 턴이 감사를 거친 뒤에야 인정됩니다.
 
 **여는 방법:** 작성창에서 **Crew** 옆에 있는 **Goal**. 끝내려면 **Stop goal**을 사용합니다.
 
@@ -180,14 +180,14 @@ _채팅과 나란히 있는 내장 터미널._
 
 ### 다크 테마
 
-![다크 테마의 OoP](docs/screenshots/dark.png)
+![다크 테마의 OOP](docs/screenshots/dark.png)
 _다크 테마._
 
 ### 휴대폰 크기의 웹 클라이언트
 
 페어링만 하면 같은 웹 UI를 휴대폰 브라우저에서도 사용할 수 있습니다([휴대폰에서 연결하기](#휴대폰에서-연결하기) 참고).
 
-![휴대폰 크기의 OoP 웹 클라이언트](docs/screenshots/mobile.png)
+![휴대폰 크기의 OOP 웹 클라이언트](docs/screenshots/mobile.png)
 _휴대폰 크기의 웹 클라이언트._
 
 ### 원격 접속 설정
@@ -201,35 +201,35 @@ _Settings → Connections: 원격 접속과 페어링(코드는 가림)._
 
 ## 기능 레퍼런스
 
-"Added in OoP"(OoP에서 추가)는 포크의 문서와 코드가 OoP 전용으로 표시한 기능을 뜻합니다. "From T3 Code"(T3 Code에서 유래)는 문서와 코드로 확인되는 범위에서 업스트림(v0.0.44)에 포함된 기능을 뜻합니다. 포크에서 파일 단위 diff를 수행한 것은 아니므로, 이 구분은 대략적인 것으로 봐 주세요.
+"Added in OOP"(OOP에서 추가)는 포크의 문서와 코드가 OOP 전용으로 표시한 기능을 뜻합니다. "Upstream"(업스트림에서 유래)는 문서와 코드로 확인되는 범위에서 업스트림(v0.0.44)에 포함된 기능을 뜻합니다. 포크에서 파일 단위 diff를 수행한 것은 아니므로, 이 구분은 대략적인 것으로 봐 주세요.
 
 | 기능                            | 하는 일                                                                                | 위치                                            | 유래                                                    |
 | ------------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------- |
-| OOP Crew                        | brain 모델이 worker, expert, auditor 모델에게 위임. 프리셋과 역할별 지정               | 작성창 → Crew, 오른쪽 패널 → Workflows / Agents | Added in OoP                                            |
-| 스레드 목표                     | 점검을 통과하거나 목표가 막힐 때까지 스레드를 계속 진행                                | 작성창 → Goal                                   | Added in OoP                                            |
-| 프로젝트 메모리                 | 작성창에서 저장된 프로젝트 메모리를 제안                                               | 작성창, 메모리 버튼                             | Added in OoP                                            |
-| 로컬 역할 선호 설정             | 환경마다 구현용 또는 리뷰용 선호 모델을 저장하고 추천을 제공                           | 작성창 모델 선택기                              | Added in OoP                                            |
-| Z.AI / MiniMax 프리셋           | OpenCode 기반 provider 프리셋                                                          | Settings → Providers → Add                      | Added in OoP (유료 요청은 테스트하지 않음)              |
-| ZCode (GLM) provider            | ACP로 연결되는 Z.AI의 에이전트                                                         | Settings → Providers                            | Added in OoP                                            |
-| MiniMax Code provider           | ACP로 연결되는 MiniMax의 에이전트                                                      | Settings → Providers                            | Added in OoP                                            |
-| 원클릭 provider 설치 / 업데이트 | provider 카드에서 provider CLI를 설치하거나 업데이트                                   | Settings → Providers                            | Added in OoP (업스트림과의 정확한 차이는 확인하지 않음) |
-| Verify macOS build              | 서버 Mac에서 OoP `.dmg`의 무결성, 엄격한 코드 서명, 실행 여부를 검사                   | 채팅 헤더 → Verify macOS build                  | Added in OoP                                            |
-| 휴대폰 연결 대화상자            | 데스크톱 앱에서 원클릭으로 휴대폰 페어링 QR 제공, 선택적으로 자체 릴레이 사용          | 사이드바 → Connect mobile                       | Added in OoP (데스크톱 앱 전용)                         |
-| 자체 Cloudflare 릴레이          | 직접 배포하는 Worker로, 어느 네트워크의 휴대폰이든 데스크톱에 접속 가능                | `infra/oop-relay`                               | Added in OoP, 초기 단계                                 |
-| 로컬 폴더 업데이터              | 패키징된 OoP 빌드가 지정한 폴더의 새 패키지를 가져올 수 있음                           | 패키징된 macOS / Windows 빌드                   | Added in OoP, 초기 단계, 다른 사람이 테스트하지 않음    |
-| 멀티 provider 세션              | provider를 넘나드는 스레드, 턴, 체크포인트                                             | 전체                                            | From T3 Code                                            |
-| 권한 모드                       | Supervised, Auto-accept edits, Auto, Full access                                       | 작성창, Settings → General                      | From T3 Code                                            |
-| Diff 패널과 체크포인트          | 에이전트의 변경 사항 검토 및 복원                                                      | 오른쪽 패널 → Diff                              | From T3 Code                                            |
-| 소스 컨트롤                     | provider CLI를 통한 클론, 커밋, 게시, 풀 리퀘스트                                      | Settings → Source Control                       | From T3 Code                                            |
-| 내장 터미널                     | 서버 컴퓨터에서 스레드마다 제공되는 터미널                                             | 스레드 안                                       | From T3 Code                                            |
-| 채팅 속 리포트                  | 차트, 수치 카드, 진행 막대, mermaid 흐름도                                             | 답변 안                                         | From T3 Code                                            |
-| 워크플로 보기                   | 도구 호출과 서브에이전트의 실시간 다이어그램                                           | 오른쪽 패널, `mod+alt+w`                        | From T3 Code                                            |
-| Usage 페이지                    | 토큰 및 추정 비용 기록                                                                 | 사이드바, `mod+u`                               | From T3 Code (ZCode와 MiniMax 행은 OoP)                 |
-| SnapShots                       | 창을 캡처해 초안에 첨부(기본값은 꺼짐. macOS, Windows, Linux Wayland)                  | Settings → SnapShots                            | From T3 Code (출처 미확인)                              |
-| 원격 접속                       | LAN 페어링, Tailscale HTTPS, SSH 환경                                                  | Settings → Connections                          | From T3 Code                                            |
-| 디바이스 패널                   | 스레드 옆에서 iOS Simulator 또는 Android Emulator를 보고 탭                            | 오른쪽 패널 → Device                            | From T3 Code (여기서는 테스트하지 않음)                 |
-| 백그라운드 서비스               | macOS(launchd)와 Linux(systemd 사용자 유닛)에서 `t3 service install`. Windows는 미지원 | CLI                                             | From T3 Code (여기서는 테스트하지 않음)                 |
-| 키 바인딩, 프로젝트 설정, 테마  | 사용자 지정 단축키, 프로젝트별 재정의, 외형                                            | Settings                                        | From T3 Code                                            |
+| OOP Crew                        | brain 모델이 worker, expert, auditor 모델에게 위임. 프리셋과 역할별 지정               | 작성창 → Crew, 오른쪽 패널 → Workflows / Agents | Added in OOP                                            |
+| 스레드 목표                     | 점검을 통과하거나 목표가 막힐 때까지 스레드를 계속 진행                                | 작성창 → Goal                                   | Added in OOP                                            |
+| 프로젝트 메모리                 | 작성창에서 저장된 프로젝트 메모리를 제안                                               | 작성창, 메모리 버튼                             | Added in OOP                                            |
+| 로컬 역할 선호 설정             | 환경마다 구현용 또는 리뷰용 선호 모델을 저장하고 추천을 제공                           | 작성창 모델 선택기                              | Added in OOP                                            |
+| Z.AI / MiniMax 프리셋           | OpenCode 기반 provider 프리셋                                                          | Settings → Providers → Add                      | Added in OOP (유료 요청은 테스트하지 않음)              |
+| ZCode (GLM) provider            | ACP로 연결되는 Z.AI의 에이전트                                                         | Settings → Providers                            | Added in OOP                                            |
+| MiniMax Code provider           | ACP로 연결되는 MiniMax의 에이전트                                                      | Settings → Providers                            | Added in OOP                                            |
+| 원클릭 provider 설치 / 업데이트 | provider 카드에서 provider CLI를 설치하거나 업데이트                                   | Settings → Providers                            | Added in OOP (업스트림과의 정확한 차이는 확인하지 않음) |
+| Verify macOS build              | 서버 Mac에서 OOP `.dmg`의 무결성, 엄격한 코드 서명, 실행 여부를 검사                   | 채팅 헤더 → Verify macOS build                  | Added in OOP                                            |
+| 휴대폰 연결 대화상자            | 데스크톱 앱에서 원클릭으로 휴대폰 페어링 QR 제공, 선택적으로 자체 릴레이 사용          | 사이드바 → Connect mobile                       | Added in OOP (데스크톱 앱 전용)                         |
+| 자체 Cloudflare 릴레이          | 직접 배포하는 Worker로, 어느 네트워크의 휴대폰이든 데스크톱에 접속 가능                | `infra/oop-relay`                               | Added in OOP, 초기 단계                                 |
+| 로컬 폴더 업데이터              | 패키징된 OOP 빌드가 지정한 폴더의 새 패키지를 가져올 수 있음                           | 패키징된 macOS / Windows 빌드                   | Added in OOP, 초기 단계, 다른 사람이 테스트하지 않음    |
+| 멀티 provider 세션              | provider를 넘나드는 스레드, 턴, 체크포인트                                             | 전체                                            | Upstream                                            |
+| 권한 모드                       | Supervised, Auto-accept edits, Auto, Full access                                       | 작성창, Settings → General                      | Upstream                                            |
+| Diff 패널과 체크포인트          | 에이전트의 변경 사항 검토 및 복원                                                      | 오른쪽 패널 → Diff                              | Upstream                                            |
+| 소스 컨트롤                     | provider CLI를 통한 클론, 커밋, 게시, 풀 리퀘스트                                      | Settings → Source Control                       | Upstream                                            |
+| 내장 터미널                     | 서버 컴퓨터에서 스레드마다 제공되는 터미널                                             | 스레드 안                                       | Upstream                                            |
+| 채팅 속 리포트                  | 차트, 수치 카드, 진행 막대, mermaid 흐름도                                             | 답변 안                                         | Upstream                                            |
+| 워크플로 보기                   | 도구 호출과 서브에이전트의 실시간 다이어그램                                           | 오른쪽 패널, `mod+alt+w`                        | Upstream                                            |
+| Usage 페이지                    | 토큰 및 추정 비용 기록                                                                 | 사이드바, `mod+u`                               | Upstream (ZCode와 MiniMax 행은 OOP)                 |
+| SnapShots                       | 창을 캡처해 초안에 첨부(기본값은 꺼짐. macOS, Windows, Linux Wayland)                  | Settings → SnapShots                            | Upstream (출처 미확인)                              |
+| 원격 접속                       | LAN 페어링, Tailscale HTTPS, SSH 환경                                                  | Settings → Connections                          | Upstream                                            |
+| 디바이스 패널                   | 스레드 옆에서 iOS Simulator 또는 Android Emulator를 보고 탭                            | 오른쪽 패널 → Device                            | Upstream (여기서는 테스트하지 않음)                 |
+| 백그라운드 서비스               | macOS(launchd)와 Linux(systemd 사용자 유닛)에서 `t3 service install`. Windows는 미지원 | CLI                                             | Upstream (여기서는 테스트하지 않음)                 |
+| 키 바인딩, 프로젝트 설정, 테마  | 사용자 지정 단축키, 프로젝트별 재정의, 외형                                            | Settings                                        | Upstream                                            |
 
 ## 지원하는 provider
 
@@ -311,7 +311,7 @@ node scripts/macos.mjs start     # optional: run an isolated dev copy of the des
 node scripts/macos.mjs package   # builds an ad hoc signed DMG into release/macos/
 ```
 
-`release/macos/`에서 DMG를 열고 앱을 `/Applications/OoP.app`으로 끌어다 놓습니다.
+`release/macos/`에서 DMG를 열고 앱을 `/Applications/OOP.app`으로 끌어다 놓습니다.
 
 ### Windows (x64, 실험적)
 
@@ -322,7 +322,7 @@ set OOP_WINDOWS_UPDATE_DIRECTORY=%CD%\release\windows
 node scripts\windows.mjs package
 ```
 
-설치 프로그램(`OoP-<version>-x64.exe`)은 `release\windows`에 생성됩니다.
+설치 프로그램(`OOP-<version>-x64.exe`)은 `release\windows`에 생성됩니다.
 
 ### 일반 개발 경로 (모든 OS)
 
@@ -355,7 +355,7 @@ vp run dev    # server + web; open the pairing URL it prints
 ```mermaid
 graph LR
     P["휴대폰<br/>(브라우저 또는 네이티브 앱)"] -->|"일회용 페어링 링크 / QR"| N["네트워크 경로<br/>LAN, Tailscale, 또는 자체 릴레이"]
-    N --> S["내 컴퓨터의 OoP 서버<br/>(페어링을 확인하고 세션을 유지)"]
+    N --> S["내 컴퓨터의 OOP 서버<br/>(페어링을 확인하고 세션을 유지)"]
     S --> C["Provider CLI<br/>Codex, Claude Code, Cursor, ..."]
     C --> F["내 프로젝트 파일"]
 ```
@@ -373,10 +373,10 @@ graph LR
 
 ### a) 같은 Wi-Fi / LAN (가장 간단)
 
-**사전 준비:** 컴퓨터에서 실행 중인 OoP 데스크톱 앱, 그리고 같은 네트워크의 휴대폰.
+**사전 준비:** 컴퓨터에서 실행 중인 OOP 데스크톱 앱, 그리고 같은 네트워크의 휴대폰.
 
 1. 데스크톱 앱 사이드바의 휴대폰 아이콘(**Connect mobile**)을 클릭합니다.
-2. 모바일 연결이 꺼져 있다는 안내가 나오면 **Allow mobile connections**를 클릭합니다. OoP가 한 번 재시작되며, 설정은 유지됩니다.
+2. 모바일 연결이 꺼져 있다는 안내가 나오면 **Allow mobile connections**를 클릭합니다. OOP가 한 번 재시작되며, 설정은 유지됩니다.
 3. 일회용 QR 코드가 나타납니다. 주소가 여러 개 표시되면 휴대폰이 접근할 수 있는 것을 고르세요(같은 Wi-Fi라면 **LAN** 항목).
 4. 휴대폰 카메라로 QR 코드를 스캔하고 휴대폰 브라우저에서 링크를 엽니다. 이제 휴대폰이 페어링되었습니다. 페어링하면 그 기기가 이후 방문에도 승인되므로 처음의 코드를 다시 입력할 필요가 없습니다.
 
@@ -411,7 +411,7 @@ tailscale serve --https=443 off   # remove the mapping later
 
 ### c) 자체 Cloudflare 릴레이 (집 밖에서, Tailscale 없이)
 
-OoP에는 [`infra/oop-relay`](infra/oop-relay/README.md)에 작은 Cloudflare Worker가 포함되어 있으며, **사용자 본인의** Cloudflare 계정에 배포합니다. 데스크톱이 먼저 밖으로 연결을 걸기 때문에 공유기 설정이 필요 없고, 데스크톱이 온라인인 동안에는 어떤 네트워크의 휴대폰이든 연결할 수 있습니다.
+OOP에는 [`infra/oop-relay`](infra/oop-relay/README.md)에 작은 Cloudflare Worker가 포함되어 있으며, **사용자 본인의** Cloudflare 계정에 배포합니다. 데스크톱이 먼저 밖으로 연결을 걸기 때문에 공유기 설정이 필요 없고, 데스크톱이 온라인인 동안에는 어떤 네트워크의 휴대폰이든 연결할 수 있습니다.
 
 1. [`infra/oop-relay/README.md`](infra/oop-relay/README.md)의 설명대로 Worker를 배포합니다(`npx wrangler login`, `npx wrangler deploy`, 이어서 `npx wrangler secret put OOP_RELAY_SECRET`).
 2. 데스크톱 앱에서 Connect mobile → **Use away from home**을 선택합니다. 표시된 시크릿을 Worker 시크릿에 붙여 넣고, 릴레이 주소를 입력한 뒤 **Save**합니다.
@@ -420,25 +420,25 @@ OoP에는 [`infra/oop-relay`](infra/oop-relay/README.md)에 작은 Cloudflare Wo
 > [!NOTE]
 > 한 번의 배포는 데스크톱 한 대를 위한 것입니다. 릴레이의 TLS는 Cloudflare에서 종료되므로, 트래픽은 이를 운영하는 Cloudflare 계정에서 볼 수 있습니다. 휴대폰은 여전히 페어링 코드로 데스크톱에 로그인해야 합니다. 이 경로는 새로 추가되었고 세 가지 중 가장 덜 테스트되었습니다.
 
-**T3 Connect는요?** T3 Code는 "T3 Connect"라는 터널 서비스도 제공합니다. 클라우드 로그인과 업스트림 프로젝트가 운영하는 서버에 의존하는 서비스입니다. **OoP는 어떤 호스팅 서비스도 운영하지 않으며**, 이 포크는 T3 Connect를 테스트하지 않았으므로 이 가이드에서는 다루지 않습니다.
+**업스트림 터널 서비스는요?** 업스트림 프로젝트는 터널 서비스도 제공합니다. 클라우드 로그인과 업스트림 프로젝트가 운영하는 서버에 의존하는 서비스입니다. **OOP는 어떤 호스팅 서비스도 운영하지 않으며**, 이 포크는 이를 테스트하지 않았으므로 이 가이드에서는 다루지 않습니다.
 
 ### 네이티브 앱과 브라우저
 
 |                       | 휴대폰 브라우저                                                               | iOS / Android 네이티브 앱                                     |
 | --------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| 정체                  | 내 컴퓨터가 제공하는 OoP 웹 UI                                                | 업스트림 프로젝트가 배포한 T3 Code 모바일 앱(OoP 브랜드 아님) |
-| 설치                  | 필요 없음                                                                     | T3 Code의 App Store / Google Play 등록 페이지                 |
+| 정체                  | 내 컴퓨터가 제공하는 OOP 웹 UI                                                | 업스트림 프로젝트가 배포한 모바일 앱(OOP 브랜드 아님) |
+| 설치                  | 필요 없음                                                                     | 업스트림 프로젝트의 App Store / Google Play 등록 페이지                 |
 | 연결                  | 페어링 링크를 열거나 QR 코드를 스캔                                           | 환경 추가: QR 코드를 스캔하거나 페어링 URL을 붙여 넣기        |
 | 이 포크의 테스트 여부 | 휴대폰 크기에서 웹 UI를 확인함. 실제 휴대폰에서의 페어링은 따로 검증하지 않음 | **아니요**                                                    |
 
 ![페어링 링크로 연결된 휴대폰 크기의 웹 클라이언트](docs/screenshots/mobile.png)
-_OoP에 연결된 휴대폰 브라우저._
+_OOP에 연결된 휴대폰 브라우저._
 
-포크는 프로토콜과 인증 식별자를 그대로 유지하므로([`UPSTREAM.json`](UPSTREAM.json)의 `internal_protocol_and_auth_identifiers_preserved`), 업스트림 앱이 OoP 서버와 페어링될 수 있을 것으로 보입니다. **포크는 네이티브 모바일 앱을 테스트하지 않았으므로** 확인되지 않은 것으로 받아들여 주세요. 업스트림 문서는 앱의 연결 설정을 Settings → Environments 아래에 설명합니다. 문제가 생기면 브라우저를 사용하세요.
+포크는 프로토콜과 인증 식별자를 그대로 유지하므로([`UPSTREAM.json`](UPSTREAM.json)의 `internal_protocol_and_auth_identifiers_preserved`), 업스트림 앱이 OOP 서버와 페어링될 수 있을 것으로 보입니다. **포크는 네이티브 모바일 앱을 테스트하지 않았으므로** 확인되지 않은 것으로 받아들여 주세요. 업스트림 문서는 앱의 연결 설정을 Settings → Environments 아래에 설명합니다. 문제가 생기면 브라우저를 사용하세요.
 
 ### 푸시 알림
 
-업스트림 문서에 따르면 휴대폰 푸시 알림(에이전트 완료, 실패, 승인 필요)은 T3 Connect에 로그인해야 하며, 직접 연결이나 Tailscale 연결만으로는 켤 수 없습니다. OoP는 T3 Connect를 운영하지 않고 포크도 테스트하지 않았으므로, **위의 경로로는 푸시 알림을 기대하지 마세요.** 휴대폰 페이지를 열어 두거나 스레드를 다시 확인해 주세요.
+업스트림 문서에 따르면 휴대폰 푸시 알림(에이전트 완료, 실패, 승인 필요)은 업스트림 터널 서비스에 로그인해야 하며, 직접 연결이나 Tailscale 연결만으로는 켤 수 없습니다. OOP는 그 서비스를 운영하지 않고 포크도 테스트하지 않았으므로, **위의 경로로는 푸시 알림을 기대하지 마세요.** 휴대폰 페이지를 열어 두거나 스레드를 다시 확인해 주세요.
 
 ### 기기 해제하기
 
@@ -449,24 +449,24 @@ _OoP에 연결된 휴대폰 브라우저._
 
 ## 업데이트 방식
 
-소스 빌드는 GitHub에서 스스로 업데이트되지 않으며, 아래 절차대로 다시 빌드해야 합니다. 바이너리 설치본은 OoP를 종료한 뒤 해당 설치 명령을 다시 실행해 업데이트하세요. 사용자 데이터는 유지됩니다.
+소스 빌드는 GitHub에서 스스로 업데이트되지 않으며, 아래 절차대로 다시 빌드해야 합니다. 바이너리 설치본은 OOP를 종료한 뒤 해당 설치 명령을 다시 실행해 업데이트하세요. 사용자 데이터는 유지됩니다.
 
 1. `git pull`
 2. 다시 빌드 / 패키징([설치](#설치--소스에서-빌드) 참고)하고 재설치합니다.
 
-각 릴리스는 **커밋 하나**(제목 `OoP <version> source`), `v<version>` 태그, GitHub Release로 게시됩니다. `~/.oop-desktop/userdata`에 있는 데이터는 업데이트해도 유지됩니다. 새 버전 소식을 받으려면 GitHub 저장소에서 **Watch → Custom → Releases**를 켜세요. 이전 버전에는 태그만 있습니다.
+각 릴리스는 **커밋 하나**(제목 `OOP <version> source`), `v<version>` 태그, GitHub Release로 게시됩니다. `~/.oop-desktop/userdata`에 있는 데이터는 업데이트해도 유지됩니다. 새 버전 소식을 받으려면 GitHub 저장소에서 **Watch → Custom → Releases**를 켜세요. 이전 버전에는 태그만 있습니다.
 
 직접 빌드한 앱은 빌드할 때 정해진 폴더에서 다음 빌드를 찾아 앱 안에서 업데이트를 제안합니다. Windows는 위에서 지정한 `release\windows`, macOS는 `release/macos`입니다. macOS의 `package`는 DMG만 만들므로, 이어서 업데이트 패키지도 만드세요.
 
 ```bash
 V=<version>
-node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
-  --sha256 "$(awk '{print $1}' release/macos/OoP-$V-arm64.dmg.sha256)" \
-  --version $V --output release/macos/OoP-$V-arm64-update.pkg
+node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
+  --sha256 "$(awk '{print $1}' release/macos/OOP-$V-arm64.dmg.sha256)" \
+  --version $V --output release/macos/OOP-$V-arm64-update.pkg
 ```
 
 > [!NOTE]
-> 앱의 서버 업데이트 알림과 `t3 update`는 업스트림 T3 Code에서 오는 것입니다. OoP의 업데이트 채널이 아닙니다.
+> 앱의 서버 업데이트 알림과 `t3 update`는 업스트림 프로젝트에서 오는 것입니다. OOP의 업데이트 채널이 아닙니다.
 
 ## 보안 및 개인정보
 
@@ -477,12 +477,12 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OoP-$V-arm64.dmg \
 - **비용:** 모든 provider는 사용자 본인의 구독 또는 API 크레딧을 사용합니다. Crew는 채팅 하나에서 여러 모델을 실행하므로 사용량이 늘어납니다. Usage 페이지는 청구 금액이 아니라 추정치를 보여 줍니다.
 - **API 키**는 서버 측, 즉 사용자의 컴퓨터에 저장됩니다. Antigravity Gemini API 키는 설정에 **평문으로** 저장됩니다.
 - **`.env` 파일이나 키를 절대 커밋하지 마세요.** 이슈나 로그에 붙여 넣는 것도 안 됩니다.
-- **업스트림 설치 프로그램은 OoP가 아니라 T3 Code를 설치합니다.** `t3.codes` 설치 스크립트, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, App Store / Play 등록 페이지는 모두 업스트림 프로젝트의 것입니다. 위 OoP 데스크톱 설치 프로그램을 사용하거나 이 저장소에서 빌드하세요.
+- **업스트림 설치 프로그램은 OOP가 아니라 업스트림 앱을 설치합니다.** `t3.codes` 설치 스크립트, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, App Store / Play 등록 페이지는 모두 업스트림 프로젝트의 것입니다. 위 OOP 데스크톱 설치 프로그램을 사용하거나 이 저장소에서 빌드하세요.
 - **CLI 이름은 여전히 `t3`입니다.** 그래서 업스트림 설치본과 충돌할 수 있습니다.
 - **소스 빌드는 ad hoc 서명**이며 Developer ID도 공증도 없습니다. 바이너리 설치 프로그램은 SHA-256을 검증하며 Gatekeeper 격리 속성이나 SmartScreen을 우회하지 않습니다.
 - **로컬 폴더 업데이터**는 업데이트 폴더에 쓸 수 있는 모든 사람을 신뢰합니다. SHA-256 검사는 손상만 감지할 수 있습니다.
 
-**텔레메트리.** OoP에는 서버가 없으며 메인테이너는 사용자의 앱에서 아무것도 받지 않습니다. 업스트림에서 물려받은 서버 코드에는 익명의 PostHog 사용 현황 리포터가 들어 있습니다(업스트림 프로젝트의 키와 `us.i.posthog.com`을 사용). OoP는 이를 **기본적으로 꺼 두므로**, 직접 켜지 않는 한 아무것도 전송되지 않습니다. 켜려면 서버를 시작하기 전에 서버 환경에 `T3CODE_TELEMETRY_ENABLED=true`를 설정하세요([`docs/user/telemetry.md`](docs/user/telemetry.md) 참고). 켜면 이벤트에는 provider, 모델, 추론 강도, 권한 모드, 턴 결과, 소요 시간, 메인 에이전트의 토큰 합계가 포함되며 해시 처리된 계정 또는 설치 식별자와 연결됩니다. 문서에 따르면 프롬프트, 응답, 파일 내용, 인증 토큰, 대화 ID는 절대 포함되지 않습니다.
+**텔레메트리.** OOP에는 서버가 없으며 메인테이너는 사용자의 앱에서 아무것도 받지 않습니다. 업스트림에서 물려받은 서버 코드에는 익명의 PostHog 사용 현황 리포터가 들어 있습니다(업스트림 프로젝트의 키와 `us.i.posthog.com`을 사용). OOP는 이를 **기본적으로 꺼 두므로**, 직접 켜지 않는 한 아무것도 전송되지 않습니다. 켜려면 서버를 시작하기 전에 서버 환경에 `T3CODE_TELEMETRY_ENABLED=true`를 설정하세요([`docs/user/telemetry.md`](docs/user/telemetry.md) 참고). 켜면 이벤트에는 provider, 모델, 추론 강도, 권한 모드, 턴 결과, 소요 시간, 메인 에이전트의 토큰 합계가 포함되며 해시 처리된 계정 또는 설치 식별자와 연결됩니다. 문서에 따르면 프롬프트, 응답, 파일 내용, 인증 토큰, 대화 ID는 절대 포함되지 않습니다.
 
 취약점을 신고하려면 [SECURITY.md](SECURITY.md)를 참고하세요.
 
@@ -509,21 +509,21 @@ provider 자체의 명령으로 로그인한 뒤([지원하는 provider](#지원
 Node.js 24.x(24.13.1 이상)와 pnpm 11.10.0이 필요합니다. 다른 Node 메이저 버전은 거부됩니다.
 
 **내 데이터는 어디에 있나요?**
-OoP의 서버 상태(스레드, 설정, 로컬 데이터베이스)는 `~/.oop-desktop/userdata`에 있습니다. 데스크톱 바이너리는 이 데이터와 별도로 설치됩니다. provider 로그인은 여기가 아니라 각 provider CLI의 자체 폴더에 있습니다.
+OOP의 서버 상태(스레드, 설정, 로컬 데이터베이스)는 `~/.oop-desktop/userdata`에 있습니다. 데스크톱 바이너리는 이 데이터와 별도로 설치됩니다. provider 로그인은 여기가 아니라 각 provider CLI의 자체 폴더에 있습니다.
 
 **바이너리 설치본을 업데이트하려면 어떻게 하나요?**
-OoP를 종료한 뒤 해당 설치 명령을 다시 실행하세요. 사용자 데이터는 유지됩니다.
+OOP를 종료한 뒤 해당 설치 명령을 다시 실행하세요. 사용자 데이터는 유지됩니다.
 
-**OoP를 초기화하려면 어떻게 하나요?**
-앱을 종료한 뒤 `~/.oop-desktop/userdata`를 다른 곳으로 옮겨 두세요(확신이 서기 전에는 삭제하지 마세요). 다음 실행 때 OoP가 새로 시작됩니다. 프로젝트 폴더는 건드리지 않습니다.
+**OOP를 초기화하려면 어떻게 하나요?**
+앱을 종료한 뒤 `~/.oop-desktop/userdata`를 다른 곳으로 옮겨 두세요(확신이 서기 전에는 삭제하지 마세요). 다음 실행 때 OOP가 새로 시작됩니다. 프로젝트 폴더는 건드리지 않습니다.
 
 **어떻게 제거하나요?**
-앱을 종료하고 `~/Applications/OoP.app`을 삭제하세요(macOS, 또는 `OOP_INSTALL_DIR`로 지정한 경로). Windows에서는 Windows 설정에서 OoP를 제거하고, Linux에서는 `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop`, 메뉴 항목을 제거하세요. 원하면 `~/.oop-desktop`을 삭제해 데이터까지 지울 수 있습니다. provider CLI는 따로 설치된 것이므로 제거되지 않습니다.
+앱을 종료하고 `~/Applications/OOP.app`을 삭제하세요(macOS, 또는 `OOP_INSTALL_DIR`로 지정한 경로). Windows에서는 Windows 설정에서 OOP를 제거하고, Linux에서는 `~/.local/bin/oop-desktop`, `~/.local/share/oop-desktop`, 메뉴 항목을 제거하세요. 원하면 `~/.oop-desktop`을 삭제해 데이터까지 지울 수 있습니다. provider CLI는 따로 설치된 것이므로 제거되지 않습니다.
 
 **비용이 드나요?**
-OoP 자체는 무료입니다. OoP가 실행하는 provider는 사용자 본인의 구독 또는 API 크레딧을 사용합니다. Crew는 채팅 하나에서 여러 모델을 사용하며, Usage 페이지는 청구 금액이 아닌 추정 비용을 보여 줍니다.
+OOP 자체는 무료입니다. OOP가 실행하는 provider는 사용자 본인의 구독 또는 API 크레딧을 사용합니다. Crew는 채팅 하나에서 여러 모델을 사용하며, Usage 페이지는 청구 금액이 아닌 추정 비용을 보여 줍니다.
 
-**업스트림 T3 Code 모바일 앱을 쓸 수 있나요?**
+**업스트림 모바일 앱을 쓸 수 있나요?**
 페어링은 될 것으로 보이지만, 포크에서는 테스트하지 않았습니다. [네이티브 앱과 브라우저](#네이티브-앱과-브라우저)를 참고하세요.
 
 ## 저장소 구조
@@ -543,7 +543,7 @@ OoP 자체는 무료입니다. OoP가 실행하는 provider는 사용자 본인�
 
 ## 현황 및 로드맵에 대한 솔직한 안내
 
-OoP는 **초기 단계**입니다. 버그가 있을 수 있습니다. 포크가 실제로 테스트하는 플랫폼은 macOS Apple Silicon뿐이며, Windows는 실험적입니다. Intel Mac, Linux, 네이티브 모바일 앱, 푸시 알림, 유료 Z.AI / MiniMax 요청은 테스트하지 않았습니다. 약속된 로드맵은 없습니다. 메인테이너가 부딪힌 문제를 고치고, 준비가 되면 릴리스를 게시합니다.
+OOP는 **초기 단계**입니다. 버그가 있을 수 있습니다. 포크가 실제로 테스트하는 플랫폼은 macOS Apple Silicon뿐이며, Windows는 실험적입니다. Intel Mac, Linux, 네이티브 모바일 앱, 푸시 알림, 유료 Z.AI / MiniMax 요청은 테스트하지 않았습니다. 약속된 로드맵은 없습니다. 메인테이너가 부딪힌 문제를 고치고, 준비가 되면 릴리스를 게시합니다.
 
 ## 기여하기
 
@@ -553,4 +553,4 @@ OoP는 **초기 단계**입니다. 버그가 있을 수 있습니다. 포크가 
 
 [MIT](LICENSE). 원래의 고지문 "Copyright (c) 2026 T3 Tools Inc."는 그대로 유지되어야 하며, 이 포크의 수정 사항도 MIT 라이선스입니다.
 
-OoP는 T3 Tools Inc.와 pingdotgg 팀의 [T3 Code](https://github.com/pingdotgg/t3code)를 기반으로 만들어졌습니다. provider 이름(Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, ZCode, MiniMax, Z.AI)은 각 소유자의 것이며, OoP는 이들과 제휴 관계가 아닙니다.
+OOP는 T3 Tools Inc.와 pingdotgg 팀의 [T3 Code](https://github.com/pingdotgg/t3code)를 기반으로 만들어졌습니다. provider 이름(Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, ZCode, MiniMax, Z.AI)은 각 소유자의 것이며, OOP는 이들과 제휴 관계가 아닙니다.

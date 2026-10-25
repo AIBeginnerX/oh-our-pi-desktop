@@ -9,10 +9,16 @@ import {
 } from "@t3tools/contracts";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Effect from "effect/Effect";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import { CodexInstallation, type CodexInstallationError } from "./CodexInstallation.ts";
+import {
+  NPM_CLI_PACKAGES,
+  NpmCliInstallation,
+  type NpmCliInstallationError,
+} from "./NpmCliInstallation.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import {
   AntigravityInstallation,
@@ -34,6 +40,7 @@ export const makeProviderInstallation = Effect.fn("makeProviderInstallation")(fu
   const codexInstallation = yield* CodexInstallation;
   const instances = yield* ProviderInstanceRegistry;
   const providers = yield* ProviderRegistry;
+  const npmCli = yield* NpmCliInstallation;
   const settings = yield* ServerSettingsService;
 
   const readEntries = Effect.fn("ProviderInstallation.readEntries")(function* (
@@ -86,7 +93,7 @@ export const makeProviderInstallation = Effect.fn("makeProviderInstallation")(fu
       return yield* new ProviderSetupError({
         instanceId,
         operation,
-        detail: "Choose managed setup to install Codex in T3 Code.",
+        detail: "Choose managed setup to install Codex in OOP.",
       });
     }
     if (managedOnly && config.binaryPath && (!isCodex || config.binaryPath !== "codex")) {
@@ -94,7 +101,7 @@ export const makeProviderInstallation = Effect.fn("makeProviderInstallation")(fu
         instanceId,
         operation,
         detail:
-          "This instance uses a custom executable. Clear its binary path to manage installation in T3 Code.",
+          "This instance uses a custom executable. Clear its binary path to manage installation in OOP.",
       });
     }
     return { installation, driver: instance.driverKind };
@@ -102,10 +109,44 @@ export const makeProviderInstallation = Effect.fn("makeProviderInstallation")(fu
 
   const failure =
     (instanceId: ProviderInstanceId) =>
-    (error: AntigravityInstallationError | CodexInstallationError) =>
-      new ProviderSetupError({ instanceId, operation: error.operation, detail: error.detail });
+    (
+      error:
+        | AntigravityInstallationError
+        | CodexInstallationError
+        | NpmCliInstallationError
+        | PlatformError.PlatformError,
+    ) =>
+      new ProviderSetupError({
+        instanceId,
+        ...("operation" in error && "detail" in error
+          ? { operation: error.operation, detail: error.detail }
+          : {
+              operation: "npm-cli",
+              detail: `npm could not be started: ${JSON.stringify(error)}`,
+            }),
+      });
+
+  /** The npm-backed ACP CLIs (MiniMax Code, ZCode, OpenCode) have a fixed install command. */
+  const npmDriverOf = Effect.fn("ProviderInstallation.npmDriverOf")(function* (
+    instanceId: ProviderInstanceId,
+  ) {
+    const instance = yield* instances.getInstance(instanceId);
+    return instance !== undefined && NPM_CLI_PACKAGES[String(instance.driverKind)] !== undefined
+      ? instance.driverKind
+      : null;
+  });
 
   const start = Effect.fn("ProviderInstallation.start")(function* (input: ProviderSetupInput) {
+    const npmDriver = yield* npmDriverOf(input.instanceId);
+    if (npmDriver !== null) {
+      const state = yield* npmCli
+        .start({ driver: npmDriver })
+        .pipe(Effect.mapError(failure(input.instanceId)));
+      if (state.phase === "succeeded") {
+        yield* providers.refreshInstance(input.instanceId);
+      }
+      return state;
+    }
     const { installation } = yield* requireInstance(input.instanceId, "install", true);
     return yield* installation.start.pipe(Effect.mapError(failure(input.instanceId)));
   });
@@ -113,6 +154,14 @@ export const makeProviderInstallation = Effect.fn("makeProviderInstallation")(fu
   const cancel = Effect.fn("ProviderInstallation.cancel")(function* (
     input: ProviderInstallCancelInput,
   ) {
+    const npmDriver = yield* npmDriverOf(input.instanceId);
+    if (npmDriver !== null) {
+      return yield* new ProviderSetupError({
+        instanceId: input.instanceId,
+        operation: "cancel-install",
+        detail: "npm installs run to completion; there is nothing to cancel.",
+      });
+    }
     const { installation } = yield* requireInstance(input.instanceId, "cancel-install");
     return yield* installation
       .cancel(input.operationId)
@@ -121,12 +170,26 @@ export const makeProviderInstallation = Effect.fn("makeProviderInstallation")(fu
 
   const subscribe = (input: ProviderSetupInput) =>
     Stream.unwrap(
-      requireInstance(input.instanceId, "observe-install").pipe(
-        Effect.map(({ installation }) => installation.changes),
+      npmDriverOf(input.instanceId).pipe(
+        Effect.flatMap((npmDriver) =>
+          npmDriver !== null
+            ? Effect.succeed(npmCli.changes)
+            : requireInstance(input.instanceId, "observe-install").pipe(
+                Effect.map(({ installation }) => installation.changes),
+              ),
+        ),
       ),
     );
 
   const remove = Effect.fn("ProviderInstallation.remove")(function* (input: ProviderSetupInput) {
+    const npmDriver = yield* npmDriverOf(input.instanceId);
+    if (npmDriver !== null) {
+      const state = yield* npmCli
+        .remove({ driver: npmDriver })
+        .pipe(Effect.mapError(failure(input.instanceId)));
+      yield* providers.refreshInstance(input.instanceId);
+      return state;
+    }
     const { installation, driver } = yield* requireInstance(
       input.instanceId,
       "remove-install",

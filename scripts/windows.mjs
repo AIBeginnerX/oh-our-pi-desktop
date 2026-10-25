@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /* oxlint-disable t3code/no-global-process-runtime -- This dependency-free bootstrap runs before workspace dependencies are installed; tests inject host values. */
 
-// Windows counterpart of scripts/macos.mjs: builds the OoP NSIS installer on a Windows PC and
+// Windows counterpart of scripts/macos.mjs: builds the OOP NSIS installer on a Windows PC and
 // publishes it with the local update manifest. The source is the archive the Mac publishes to
-// Google Drive (<Drive>\OoP\source), or, before Drive is set up, the source kept on the NAS.
+// Google Drive (<Drive>\OOP\source), or, before Drive is set up, the source kept on the NAS.
 // The only robocopy /MIR target is a checkout folder this script owns under %LOCALAPPDATA%.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -11,6 +11,12 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
+
+import {
+  RELEASE_FILE_NAME,
+  windowsFeedInstallerName,
+  windowsInstallerName,
+} from "./oop-release-names.mjs";
 
 import {
   MIN_NODE_VERSION,
@@ -51,7 +57,7 @@ const ROBOCOPY_EXCLUDED_FILES = [".env", ".env.*", ".npmrc", "*.pem", "*.p12", "
 
 export const AUTO_BUILD_TASK_NAME = "OoP Windows Auto Build";
 /** Google Drive for desktop mounts as G: by default; the root is "My Drive" or "내 드라이브". */
-export const WINDOWS_DRIVE_ROOTS = ["G:\\My Drive\\OoP", "G:\\내 드라이브\\OoP"];
+export const WINDOWS_DRIVE_ROOTS = ["G:\\My Drive\\OOP", "G:\\내 드라이브\\OOP"];
 const SOURCE_INFO_NAME = "oop-source.json";
 const SOURCE_ARCHIVE_NAME = "oop-source.tar.gz";
 const RUNNER_FOLDER = "runner";
@@ -105,14 +111,15 @@ export function windowsUpdateManifest({ version, arch, fileName, size, sha256 })
 
 /** Installer files of versions other than the published one and the newest one before it. */
 export function releaseFilesToPrune(names, publishedVersion, arch) {
-  const pattern = new RegExp(`^OoP-(\\d+\\.\\d+\\.\\d+)-${arch}\\.exe(\\.sha256)?$`, "u");
-  const versions = [...new Set(names.flatMap((name) => pattern.exec(name)?.[1] ?? []))];
+  const suffix = new RegExp(`-${arch}\\.exe(\\.sha256)?$`, "u");
+  const versionOf = (name) => (suffix.test(name) ? RELEASE_FILE_NAME.exec(name)?.[1] : undefined);
+  const versions = [...new Set(names.flatMap((name) => versionOf(name) ?? []))];
   const older = versions
     .filter((version) => compareVersions(version, publishedVersion) < 0)
     .toSorted(compareVersions);
   const keep = new Set([publishedVersion, older.at(-1)]);
   return names.filter((name) => {
-    const version = pattern.exec(name)?.[1];
+    const version = versionOf(name);
     return version !== undefined && !keep.has(version);
   });
 }
@@ -163,7 +170,7 @@ export function scheduleTaskArgs(launcherPath) {
   ];
 }
 
-/** Where to look for the OoP folder in Google Drive: OOP_DRIVE_ROOT, else the G: defaults. */
+/** Where to look for the OOP folder in Google Drive: OOP_DRIVE_ROOT, else the G: defaults. */
 export function driveRootCandidates(env) {
   const configured = env.OOP_DRIVE_ROOT?.trim();
   return configured ? [configured] : WINDOWS_DRIVE_ROOTS;
@@ -452,8 +459,8 @@ async function packageInstaller(
     { cwd: checkout, env },
   );
 
-  const fileName = `OoP-${version}-${arch}.exe`;
-  const built = NodePath.join(out, fileName);
+  const fileName = windowsFeedInstallerName(version, arch);
+  const built = NodePath.join(out, windowsInstallerName(version, arch));
   const size = (await NodeFSP.stat(built)).size;
   const sha256 = await sha256File(built);
   for (const releaseDirectory of releaseDirectories) {
@@ -686,8 +693,8 @@ async function autoBuild(sourceRoot, arch) {
     console.log(
       `[${new Date().toISOString()}] nothing to build from: ${
         driveRoot === null
-          ? "the OoP folder in Google Drive was not found (install Google Drive for desktop, sign in, and make OoP available offline)"
-          : "Google Drive has no OoP\\source yet"
+          ? "the OOP folder in Google Drive was not found (install Google Drive for desktop, sign in, and make OOP available offline)"
+          : "Google Drive has no OOP\\source yet"
       }`,
     );
     return;

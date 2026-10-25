@@ -1,6 +1,7 @@
 import {
   DESKTOP_UPDATE_RESTART_MARKER_FILE,
   DesktopUpdateChannelSchema,
+  type DesktopBuildInfo,
   type DesktopRuntimeInfo,
   type DesktopUpdateActionResult,
   type DesktopUpdateChannel,
@@ -26,6 +27,7 @@ import * as Stream from "effect/Stream";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as DesktopAppIdentity from "../app/DesktopAppIdentity.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
@@ -240,16 +242,54 @@ type LocalMode =
 
 type LocalReadyMode = Extract<LocalMode, { readonly _tag: "ready" }>;
 
+/**
+ * Classifies the app bundle, AppImage, or install folder this process runs from. Update state is
+ * broadcast to the renderer and never carries filesystem paths, so only the kind is reported.
+ */
+export function resolveInstallScope(environment: {
+  readonly isPackaged: boolean;
+  readonly platform: NodeJS.Platform;
+  readonly appPath: string;
+  readonly appImagePath: Option.Option<string>;
+  readonly resourcesPath: string;
+  readonly homeDirectory: string;
+  readonly path: {
+    readonly dirname: (path: string) => string;
+    readonly relative: (from: string, to: string) => string;
+    readonly isAbsolute: (path: string) => boolean;
+  };
+}): DesktopBuildInfo["installScope"] {
+  if (!environment.isPackaged) return "development";
+  const bundleEnd = environment.appPath.indexOf(".app/");
+  const location =
+    environment.platform === "darwin" && bundleEnd !== -1
+      ? environment.appPath.slice(0, bundleEnd + ".app".length)
+      : environment.platform === "linux" && Option.isSome(environment.appImagePath)
+        ? environment.appImagePath.value
+        : environment.path.dirname(environment.resourcesPath);
+  const fromHome = environment.path.relative(environment.homeDirectory, location);
+  if (fromHome !== "" && !fromHome.startsWith("..") && !environment.path.isAbsolute(fromHome)) {
+    return "user";
+  }
+  if (environment.platform === "darwin" && location.startsWith("/Applications/")) return "system";
+  return "other";
+}
+
 function createBaseUpdateState(
   channel: DesktopUpdateChannel,
   enabled: boolean,
   environment: DesktopEnvironment.DesktopEnvironment["Service"],
   localMode: LocalMode,
+  build: Omit<DesktopBuildInfo, "updateSource">,
 ): DesktopUpdateState {
   return {
     ...createInitialDesktopUpdateState(environment.appVersion, environment.runtimeInfo, channel),
     enabled,
     status: enabled ? "idle" : "disabled",
+    build: {
+      ...build,
+      updateSource: localMode._tag === "ready" ? "local-folder" : enabled ? "release-feed" : "none",
+    },
     ...(localMode._tag === "off" ? {} : { installMode: "local-package" as const }),
     ...(localMode._tag === "invalid" ? { message: localMode.message } : {}),
     ...(localMode._tag === "ready" && localMode.connectUrl !== undefined
@@ -393,7 +433,7 @@ export const make = Effect.gen(function* () {
           )
       : false;
 
-  // OoP's packaged macOS and Windows builds can ship a config naming a local update folder.
+  // OOP's packaged macOS and Windows builds can ship a config naming a local update folder.
   // The mode is chosen once; an unreadable or invalid config disables updates
   // with an actionable message instead of falling back to the upstream feed.
   // The embedded trust policy is admitted first, so an OOP Mac build whose
@@ -442,6 +482,18 @@ export const make = Effect.gen(function* () {
       trustPolicy: loadedPolicy.success,
     } as const;
   });
+
+  const buildInfo: Omit<DesktopBuildInfo, "updateSource"> = {
+    commit: Option.getOrNull(
+      yield* DesktopAppIdentity.resolveBuildCommitHash(environment, fileSystem),
+    ),
+    distribution: !environment.isPackaged
+      ? "development"
+      : localMode._tag === "off"
+        ? "public"
+        : "private",
+    installScope: resolveInstallScope(environment),
+  };
 
   const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
     Effect.map(
@@ -1258,8 +1310,18 @@ export const make = Effect.gen(function* () {
       const settings = yield* desktopSettings.get;
       const enabled = yield* shouldEnableAutoUpdates;
       yield* setState(
-        createBaseUpdateState(settings.updateChannel, enabled, environment, localMode),
+        createBaseUpdateState(settings.updateChannel, enabled, environment, localMode, buildInfo),
       );
+      // Before anything is staged this run: packages for versions already installed are spent.
+      if (localMode._tag === "ready") {
+        const pruned = yield* LocalPkgUpdates.pruneInstalledStages({
+          stagingRoot: localMode.stagingRoot,
+          currentVersion: environment.appVersion,
+        });
+        if (pruned.length > 0) {
+          yield* logUpdaterInfo("removed installed update packages", { count: pruned.length });
+        }
+      }
       if (!enabled) {
         return;
       }
@@ -1341,7 +1403,9 @@ export const make = Effect.gen(function* () {
           );
 
         const enabled = yield* shouldEnableAutoUpdates;
-        yield* setState(createBaseUpdateState(nextChannel, enabled, environment, localMode));
+        yield* setState(
+          createBaseUpdateState(nextChannel, enabled, environment, localMode, buildInfo),
+        );
 
         if (!enabled || !(yield* Ref.get(updaterConfiguredRef))) {
           return yield* Ref.get(updateStateRef);

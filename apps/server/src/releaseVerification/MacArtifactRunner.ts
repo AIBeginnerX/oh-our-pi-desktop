@@ -64,7 +64,7 @@ const RM = "/bin/rm";
 const REQUIRED_TOOLS = [HDIUTIL, CODESIGN, PLUTIL, DITTO, ENV, OSASCRIPT, PS, KILL, RM] as const;
 const CODESIGN_ARGS = ["--verify", "--deep", "--strict", "--verbose=2"] as const;
 
-const APP_NAME = "OoP.app";
+const APP_NAME = "OOP.app";
 const LAUNCH_DIR = "launch";
 // One short folder holds everything: macOS caps Unix socket paths at 103 bytes and the launched
 // app binds sockets below the folder. `/private/tmp/t3v-<uuid>` is 53 bytes.
@@ -151,7 +151,7 @@ const lstatOrNotFound = (path: string, reason: string) =>
   Effect.tryPromise({ try: () => NodeFSP.lstat(path), catch: () => notFound(reason) });
 
 /**
- * Finds the one DMG the server will check: `release/macos/OoP-<version>-arm64.dmg`
+ * Finds the one DMG the server will check: `release/macos/OOP-<version>-arm64.dmg`
  * under the workspace, with the version taken from `OOP_RELEASE.json`. The
  * client supplies no path and no sidecar file (`.sha256`, `.json`) is read.
  * Symlinks are refused at every step, and the file must resolve inside the root.
@@ -173,7 +173,7 @@ export const locateArtifact = Effect.fn("MacArtifactRunner.locateArtifact")(func
     Effect.mapError(() => notFound("OOP_RELEASE.json must contain a version such as 0.0.45.")),
   );
 
-  const fileName = `OoP-${release.version}-arm64.dmg`;
+  const fileName = `OOP-${release.version}-arm64.dmg`;
   const relativePath = NodePath.join("release", "macos", fileName);
   for (const folder of ["release", NodePath.join("release", "macos")]) {
     const stat = yield* lstatOrNotFound(NodePath.join(root, folder), `${folder} was not found.`);

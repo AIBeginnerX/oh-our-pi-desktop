@@ -26,7 +26,7 @@ import {
   parseTrustPolicy,
   type DeveloperIdTrustPolicy,
 } from "./LocalPkgTrustPolicy.ts";
-import type { StagedPkg } from "./LocalPkgUpdates.ts";
+import { isReleasePackageName, type StagedPkg } from "./LocalPkgUpdates.ts";
 
 /**
  * Signs, notarizes and staples one internal Developer ID candidate package for
@@ -493,7 +493,7 @@ export const assessNotarizedPackageEffect = Effect.fn(
   if (
     !STABLE_TRIPLE.test(version) ||
     !isToolPath(signedPath) ||
-    signedPath.slice(split + 1) !== `OoP-${version}-arm64-update.pkg`
+    !isReleasePackageName(signedPath.slice(split + 1), `-${version}-arm64-update.pkg`)
   ) {
     return yield* signingError("assess", "path");
   }

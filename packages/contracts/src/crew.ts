@@ -5,7 +5,7 @@ import { ThreadId } from "./baseSchemas.ts";
 import { ModelSelection } from "./orchestration.ts";
 
 /**
- * OOP Crew: the thread's own model is the brain; it hands work to these roles through OoP's
+ * OOP Crew: the thread's own model is the brain; it hands work to these roles through OOP's
  * crew tools, and the auditor reviews turns that changed files.
  */
 export const CrewRole = Schema.Literals(["worker", "expert", "auditor"]);

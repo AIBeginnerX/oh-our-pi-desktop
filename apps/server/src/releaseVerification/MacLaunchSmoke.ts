@@ -20,7 +20,7 @@ import * as NodePath from "node:path";
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
- * Startup smoke for a private copy of OoP.app at `<runDir>/launch/OoP.app`, which the caller
+ * Startup smoke for a private copy of OOP.app at `<runDir>/launch/OOP.app`, which the caller
  * copies there first. The copy is started through LaunchServices with its app data redirected
  * into `runDir`.
  *
@@ -61,7 +61,7 @@ const OSASCRIPT = "/usr/bin/osascript";
 const PS = "/bin/ps";
 const KILL = "/bin/kill";
 
-const APP_PATH_SEGMENTS = ["launch", "OoP.app"] as const;
+const APP_PATH_SEGMENTS = ["launch", "OOP.app"] as const;
 const PROFILE_DIRS = ["tmp", "t3-home", "electron-user-data"] as const;
 const TRACE_SEGMENTS = ["t3-home", "userdata", "logs", "desktop.trace.ndjson"] as const;
 
@@ -447,7 +447,7 @@ const prepareProfile = (runDir: string) =>
       }
       await NodeFSP.writeFile(
         markerPath(runDir),
-        "OoP launch smoke may still be running. Keep this folder until it is confirmed gone.\n",
+        "OOP launch smoke may still be running. Keep this folder until it is confirmed gone.\n",
         { flag: "wx", mode: 0o600 },
       );
       return null;
@@ -577,7 +577,7 @@ const start = (runDir: string, run: Run, setLaunchMayRun: SetLaunchMayRun, t: La
     if (root === undefined || isDead(root)) {
       // Never identified, and anything it started was never seen: unknown, so the folder stays.
       run.notes.push(`launcher: pid ${pid} was not running when first listed`);
-      return failed("OoP was not running when first listed; anything it started was not observed.");
+      return failed("OOP was not running when first listed; anything it started was not observed.");
     }
     const startedMs = startedAtMs(root.startedAt);
     if (startedMs === null || startedMs < requestedAt - START_TIME_SKEW_MS) {
@@ -666,7 +666,7 @@ const observe = (run: Run, runDir: string, t: LaunchSmokeTiming) =>
       for (;;) {
         const seen = yield* refresh(run, t);
         if (seen !== null && !seen.alive) {
-          return failed("OoP exited before the startup proof was complete.");
+          return failed("OOP exited before the startup proof was complete.");
         }
         const trace = yield* readTrace(tracePath);
         if (trace === null) {

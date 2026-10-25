@@ -3350,7 +3350,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
                       'The above is the conversation history so far, provided as context. Respond as the assistant to the user message below only. Never emit "USER:" or "ASSISTANT:" labels or continue the transcript.<environment_context>',
                       `  <cwd>${workspace}</cwd>`,
                       "  <current_date>2026-08-24</current_date>",
-                      "</environment_context>You are running as an agent-task child. Task id: st_x",
+                      "</environment_context>You are running as an acme worker-task child. Task id: st_x",
                       "Parent session: 01a15ddf-583f-72b9-906c-8f4f02378968.",
                     ].join("\n"),
                   },
@@ -3598,9 +3598,9 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
                     text: [
                       "<conversation_history>",
                       "USER:",
-                      "<agent-task>",
+                      "<acme-worker-task>",
                       "Background task results are automatically delivered.",
-                      "</agent-task>",
+                      "</acme-worker-task>",
                       "",
                       "USER:",
                       "<environment_context>",
@@ -3719,7 +3719,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       const thread = AgentSessionScanner.parseAgentSessionTranscript({
         contents: makeClaudeUserTurns([
           "<environment_context>\n  <cwd>/tmp/project</cwd>\n</environment_context>",
-          "You are running as an agent-task child. Task id: st_x",
+          "You are running as an acme worker-task child. Task id: st_x",
           ...Array.from({ length: 210 }, (_, index) => `Follow up ${index + 1}`),
         ]),
         source: "claudeAgent",

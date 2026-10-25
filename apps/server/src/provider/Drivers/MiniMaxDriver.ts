@@ -98,7 +98,7 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
       // With a MiniMax API key (for example a Coding Plan key) in the instance's variables, MiniMax
-      // Code runs from an OoP-owned data dir set to that key instead of the user's own sign-in.
+      // Code runs from an OOP-owned data dir set to that key instead of the user's own sign-in.
       const apiKey = miniMaxApiKeyOf(processEnv);
       const apiKeyDataDir = apiKey
         ? path.join(
@@ -175,7 +175,12 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
           checkMiniMaxProviderStatus(effectiveConfig, processEnv, apiKeyDataDir).pipe(
             Effect.map((status) =>
               apiKeyFailure && status.installed
-                ? { ...status, status: "error" as const, message: apiKeyFailure }
+                ? {
+                    ...status,
+                    status: "error" as const,
+                    diagnosis: "api-key-invalid" as const,
+                    message: apiKeyFailure,
+                  }
                 : apiKeyDataDir
                   ? { ...status, models: withApiKeyModelNames(status.models) }
                   : status,

@@ -1,7 +1,11 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { getProviderSummary, getProviderVersionAdvisoryPresentation } from "./providerStatus";
+import {
+  getProviderInstallCommand,
+  getProviderSummary,
+  getProviderVersionAdvisoryPresentation,
+} from "./providerStatus";
 
 const provider: ServerProvider = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -137,5 +141,56 @@ it("shows compatibility in the version popover even when the installed version i
     updateCommand: null,
     emphasis: "normal",
     targetVersion: null,
+  });
+});
+
+describe("provider diagnosis", () => {
+  it("names the cause from the structured diagnosis instead of the probe outcome", () => {
+    expect(
+      getProviderSummary({
+        ...provider,
+        installed: false,
+        status: "error",
+        diagnosis: "runtime-missing",
+        message: "ZCode is not installed. npm i -g zcode-acp-server",
+      }).headline,
+    ).toBe("Runtime not installed");
+    expect(
+      getProviderSummary({
+        ...provider,
+        status: "error",
+        diagnosis: "api-key-invalid",
+        message: "The MiniMax key was rejected.",
+      }).headline,
+    ).toBe("API key rejected");
+    expect(
+      getProviderSummary({
+        ...provider,
+        status: "warning",
+        diagnosis: "runtime-error",
+        message: "ZCode is installed but did not answer.",
+      }).headline,
+    ).toBe("Runtime error");
+  });
+
+  it("extracts the install command only for a missing runtime", () => {
+    expect(
+      getProviderInstallCommand({
+        ...provider,
+        installed: false,
+        diagnosis: "runtime-missing",
+        message: "Install MiniMax Code (npm i -g @minimax-ai/code), then sign in.",
+      }),
+    ).toBe("npm i -g @minimax-ai/code");
+    expect(
+      getProviderInstallCommand({
+        ...provider,
+        status: "warning",
+        diagnosis: "runtime-error",
+        message: "npm i -g whatever",
+      }),
+    ).toBeNull();
+    expect(getProviderInstallCommand({ ...provider, diagnosis: "runtime-missing" })).toBeNull();
+    expect(getProviderInstallCommand(undefined)).toBeNull();
   });
 });

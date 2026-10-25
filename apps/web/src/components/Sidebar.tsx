@@ -1959,7 +1959,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                           <span role="status">
                             {topStatus.label}
                             {topStatus.icon === "done" ? (
-                              <span className="sr-only">. Outcome not verified by OoP.</span>
+                              <span className="sr-only">. Outcome not verified by OOP.</span>
                             ) : null}
                           </span>
                           {status === "working" ? (

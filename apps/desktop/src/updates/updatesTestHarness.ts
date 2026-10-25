@@ -111,7 +111,7 @@ export const makeLocalPackageFixture = Effect.acquireRelease(
           NodePath.join(resourcesDirectory, "oop-local-update.json"),
           content ?? JSON.stringify({ directory: sourceDirectory }),
         ),
-      publish: async ({ version, content = `OoP package ${version}` }) => {
+      publish: async ({ version, content = `OOP package ${version}` }) => {
         const pkg = `OoP-${version}-arm64-update.pkg`;
         const bytes = Buffer.from(content);
         const sha256 = NodeCrypto.createHash("sha256").update(bytes).digest("hex");
@@ -148,7 +148,7 @@ export const makeLocalPackageFixture = Effect.acquireRelease(
 );
 
 export interface UpdatesHarnessOptions {
-  /** Runs as packaged OoP on arm64 macOS, configured from this fixture. */
+  /** Runs as packaged OOP on arm64 macOS, configured from this fixture. */
   readonly local?: LocalPackageFixture;
   /** Overrides the embedded local trust runtime only inside integration tests. */
   readonly trustRuntime?: Omit<
@@ -161,7 +161,7 @@ export interface UpdatesHarnessOptions {
         "verifyBinding"
       >
     >;
-  /** Overrides the build profile; "" is a build without one (not OoP). */
+  /** Overrides the build profile; "" is a build without one (not OOP). */
   readonly buildProfileName?: string;
   /** Exit status of `/usr/bin/open` for the staged package; defaults to 0. */
   readonly openExitCode?: number;

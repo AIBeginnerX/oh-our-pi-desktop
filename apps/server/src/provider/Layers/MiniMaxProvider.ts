@@ -70,7 +70,7 @@ export function miniMaxApiKeyDirName(key: string): string {
 /**
  * `mcode acp` runs MiniMax Code as an ACP agent; it signs in on its own via `mcode login`. With no
  * region on the command line, in `MAVIS_REGION`, or from an earlier login, MiniMax Code picks the
- * China region (`cn`), so OoP pins the global one (`en`) and a first sign-in opens the global site.
+ * China region (`cn`), so OOP pins the global one (`en`) and a first sign-in opens the global site.
  * With `apiKeyDataDir`, MiniMax Code keeps its state there instead of `~/.minimax`; that is how an
  * instance with an API key runs on the key rather than the user's own MiniMax Code sign-in.
  */

@@ -3,7 +3,7 @@ When the t3-code MCP server exposes link_pull_request, you must use it to regist
 </pull_request_linking>`;
 
 const VISUAL_REPORT_INSTRUCTIONS = `<visual_report>
-T3 Code renders two kinds of fenced blocks in your replies as animated visuals. When a final answer reports results, analysis, research, comparisons, numbers, plans, or processes, shape it as a polished report the user can read at a glance instead of plain prose: open with a one-line conclusion, then short sections with headings, key figures, tables, and visuals, and close with the takeaway or next steps. Skip visuals for short conversational replies and for plain code changes.
+OOP renders two kinds of fenced blocks in your replies as animated visuals. When a final answer reports results, analysis, research, comparisons, numbers, plans, or processes, shape it as a polished report the user can read at a glance instead of plain prose: open with a one-line conclusion, then short sections with headings, key figures, tables, and visuals, and close with the takeaway or next steps. Skip visuals for short conversational replies and for plain code changes.
 - \`\`\`chart with exactly one JSON object. Types: bar, hbar (rankings), line, area (trends), pie, donut (shares): {"type":"bar","title":"...","unit":"...","labels":["..."],"series":[{"name":"...","data":[1,2]}]}; add "stacked":true for stacked bars. Key figures: {"type":"stats","items":[{"label":"...","value":"12.3B","delta":4.2,"hint":"..."}]}. Progress toward targets: {"type":"progress","items":[{"label":"...","value":72,"max":100}]}. Use only numbers you actually know or computed; never invent data.
 - \`\`\`mermaid with a flowchart (graph TD or graph LR) for processes, architectures, step sequences, and decision flows.
 Use a few visuals where they make the point clearer, each introduced by a sentence that says what it shows.
@@ -27,7 +27,7 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${VISUAL_REPORT_INSTRUCTIONS}`;
+  return `<runtime_info>In case you're asked: you are running in OOP through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${VISUAL_REPORT_INSTRUCTIONS}`;
 }
 
 function toSingleLine(value: string): string {

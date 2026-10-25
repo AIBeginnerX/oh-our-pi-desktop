@@ -55,14 +55,15 @@ import { readCodexSetupMode } from "./CodexSetupSection.logic";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
+  getProviderInstallCommand,
   getProviderSummary,
   getProviderVersionLabel,
   type ProviderStatusKey,
 } from "./providerStatus";
 
-/** Shown when an update exists but OoP has no way to run it on this machine. */
+/** Shown when an update exists but OOP has no way to run it on this machine. */
 const MANUAL_UPDATE_HINT =
-  "OoP cannot update this install. Update it with the tool you installed it with, then refresh.";
+  "OOP cannot update this install. Update it with the tool you installed it with, then refresh.";
 
 const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -465,6 +466,7 @@ export function ProviderInstanceCard({
   const summary = enabled
     ? getProviderSummary(liveProvider)
     : { headline: "Disabled", detail: null };
+  const installCommand = getProviderInstallCommand(liveProvider);
   const authEmail = liveProvider?.auth.email?.trim();
   const isAuthenticated = enabled && liveProvider?.auth.status === "authenticated";
   const authLabel =
@@ -779,6 +781,27 @@ export function ProviderInstanceCard({
                   {needsAttention && inlineStatusDetail ? ` · ${inlineStatusDetail}` : null}
                 </span>
               </ProviderStatusDiagnostic>
+              {installCommand ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        size="icon-micro"
+                        variant="ghost-muted"
+                        className="pointer-events-auto shrink-0"
+                        aria-label={`Copy ${displayName} install command`}
+                        onClick={() =>
+                          copyToClipboard(installCommand, { providerName: displayName })
+                        }
+                      >
+                        <DownloadIcon className="size-3" />
+                      </Button>
+                    }
+                  />
+                  <TooltipPopup side="top">Copy install command</TooltipPopup>
+                </Tooltip>
+              ) : null}
             </span>
           </span>
         </div>

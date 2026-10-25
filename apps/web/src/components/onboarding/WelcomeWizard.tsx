@@ -345,7 +345,7 @@ function PrepareStep({ onContinue }: { readonly onContinue: () => void }) {
   return (
     <StepShell
       title="Get this computer ready"
-      description="OOP installs its updates from an update folder: OoP/release in your Google Drive, or a shared folder on your network. Make it available on this computer so new versions keep arriving."
+      description="OOP installs its updates from an update folder: OOP/release in your Google Drive, or a shared folder on your network. Make it available on this computer so new versions keep arriving."
     >
       <div className="mt-5 rounded-lg border border-border px-4 py-3">
         <p className="text-xs text-muted-foreground">Update folder</p>
@@ -370,7 +370,7 @@ function PrepareStep({ onContinue }: { readonly onContinue: () => void }) {
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             {updateState?.canOpenUpdateSource
               ? "Connect to the shared folder and sign in with your NAS account if asked, then check again. If it is already connected under another name, disconnect it and connect again."
-              : "Install Google Drive for desktop, sign in with the account that holds the OoP folder, and make OoP/release available offline. Then check again."}
+              : "Install Google Drive for desktop, sign in with the account that holds the OOP folder, and make OOP/release available offline. Then check again."}
           </p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
@@ -585,7 +585,7 @@ function ConnectAccountOption({
           }
         >
           <CloudIcon className="size-4 text-muted-foreground" />
-          <span className="flex-1 text-left">T3 Connect</span>
+          <span className="flex-1 text-left">OOP Connect</span>
           <span className="text-xs text-muted-foreground">
             {!isLoaded
               ? "Loading sign-in…"

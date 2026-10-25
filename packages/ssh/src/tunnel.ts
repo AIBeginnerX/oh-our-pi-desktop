@@ -95,7 +95,7 @@ export interface RemoteT3RunnerOptions {
   readonly remoteHomeDirName?: string | null;
   /**
    * False: the runner never downloads. A missing runtime then fails the launch
-   * and the caller installs it, as OoP does by sending its own archive over SSH.
+   * and the caller installs it, as OOP does by sending its own archive over SSH.
    */
   readonly archiveDownloads?: boolean;
 }

@@ -193,8 +193,8 @@ describe("LocalPkgUpdates.loadConfig", () => {
             NodePath.join(resources, "oop-local-update.json"),
             encodeJson({
               directories: [
-                "~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos",
-                "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos",
+                "~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos",
+                "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos",
               ],
               directory: "/Volumes/oop/release/macos",
               folderKind: "google-drive",
@@ -204,8 +204,8 @@ describe("LocalPkgUpdates.loadConfig", () => {
         assert.deepEqual(yield* LocalPkgUpdates.loadConfig(resources), {
           _tag: "Ready",
           directories: [
-            "~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos",
-            "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos",
+            "~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos",
+            "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos",
             "/Volumes/oop/release/macos",
           ],
           folderKind: "google-drive",
@@ -347,6 +347,12 @@ describe("LocalPkgUpdates.checkLocalPackage", () => {
           validManifest({ platform: "win32", arch: "x64", pkg: "OoP-0.0.50-x64.exe" }),
         );
         assert.equal(Option.getOrThrow(yield* checkWindows).pkg, "OoP-0.0.50-x64.exe");
+        // Builds after the rename publish OOP-named setups; both casings are the release file.
+        yield* writeManifest(
+          folder,
+          validManifest({ platform: "win32", arch: "x64", pkg: "OOP-0.0.50-x64.exe" }),
+        );
+        assert.equal(Option.getOrThrow(yield* checkWindows).pkg, "OOP-0.0.50-x64.exe");
         const onMac = yield* check(folder, "0.0.49", "x64").pipe(Effect.flip);
         assert.equal(onMac.reason, "manifest-unsupported");
 
@@ -383,8 +389,9 @@ describe("LocalPkgUpdates.checkLocalPackage", () => {
               pkg: "OoP-99999999999999999999.0.0-arm64-update.pkg",
             }),
           ],
-          ["pkg without arch", validManifest({ pkg: "OoP-0.0.50-update.pkg" })],
+          ["pkg without arch", validManifest({ pkg: "OOP-0.0.50-update.pkg" })],
           ["pkg for another version", validManifest({ pkg: "OoP-0.0.51-arm64-update.pkg" })],
+          ["pkg with another casing", validManifest({ pkg: "oop-0.0.50-arm64-update.pkg" })],
           ["pkg with parent path", validManifest({ pkg: `../${PKG_NAME}` })],
           ["pkg with subdirectory", validManifest({ pkg: `sub/${PKG_NAME}` })],
           ["absolute pkg path", validManifest({ pkg: `/tmp/${PKG_NAME}` })],
@@ -458,7 +465,7 @@ describe("LocalPkgUpdates.checkLocalPackage", () => {
 // Staging
 // ---------------------------------------------------------------------------
 
-const sourceFixture = (content: string | Buffer = "OoP update package") =>
+const sourceFixture = (content: string | Buffer = "OOP update package") =>
   Effect.gen(function* () {
     const root = yield* tempDirectory;
     const sourceDirectory = NodePath.join(root, "source");
@@ -1035,7 +1042,7 @@ describe("LocalPkgUpdates.verifyStaged", () => {
 describe("LocalPkgUpdates.openInstaller", () => {
   it.effect("opens exactly the macOS Installer on the staged package", () => {
     const commands: FakeCommand[] = [];
-    return LocalPkgUpdates.openInstaller("/staging/stage-abc/OoP.pkg").pipe(
+    return LocalPkgUpdates.openInstaller("/staging/stage-abc/OOP.pkg").pipe(
       Effect.provide(
         makeFakeSpawner((command) => {
           commands.push(command);
@@ -1047,7 +1054,7 @@ describe("LocalPkgUpdates.openInstaller", () => {
           assert.deepEqual(commands, [
             {
               command: "/usr/bin/open",
-              args: ["-b", "com.apple.installer", "/staging/stage-abc/OoP.pkg"],
+              args: ["-b", "com.apple.installer", "/staging/stage-abc/OOP.pkg"],
             },
           ]);
         }),
@@ -1057,7 +1064,7 @@ describe("LocalPkgUpdates.openInstaller", () => {
 
   it.effect("fails with the exit status, not the path, when open refuses", () =>
     Effect.gen(function* () {
-      const error = yield* LocalPkgUpdates.openInstaller("/staging/stage-abc/OoP.pkg").pipe(
+      const error = yield* LocalPkgUpdates.openInstaller("/staging/stage-abc/OOP.pkg").pipe(
         Effect.provide(makeFakeSpawner(() => ({ exitCode: 1 }))),
         Effect.flip,
       );
@@ -1069,7 +1076,7 @@ describe("LocalPkgUpdates.openInstaller", () => {
 
   it.effect("fails when open does not return in time", () =>
     Effect.gen(function* () {
-      const fiber = yield* LocalPkgUpdates.openInstaller("/staging/stage-abc/OoP.pkg").pipe(
+      const fiber = yield* LocalPkgUpdates.openInstaller("/staging/stage-abc/OOP.pkg").pipe(
         Effect.provide(makeFakeSpawner(() => ({ exitCode: new Promise<number>(() => {}) }))),
         Effect.flip,
         Effect.forkChild,
@@ -1096,7 +1103,7 @@ describe("LocalPkgUpdates update folder candidates", () => {
           cloud,
           "GoogleDrive-me@example.com",
           "내 드라이브",
-          "OoP",
+          "OOP",
           "release",
           "macos",
         );
@@ -1106,21 +1113,21 @@ describe("LocalPkgUpdates update folder candidates", () => {
         });
         const expanded = yield* LocalPkgUpdates.expandUpdateDirectories(
           [
-            "~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos",
-            "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OoP/release/macos",
+            "~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos",
+            "~/Library/CloudStorage/GoogleDrive-*/내 드라이브/OOP/release/macos",
             "/Volumes/oop/release/macos",
           ],
           { home },
         );
         assert.deepEqual(expanded, [
-          NodePath.join(cloud, "GoogleDrive-me@example.com", "My Drive", "OoP", "release", "macos"),
+          NodePath.join(cloud, "GoogleDrive-me@example.com", "My Drive", "OOP", "release", "macos"),
           drive,
           "/Volumes/oop/release/macos",
         ]);
         // No Drive installed: the Drive patterns expand to nothing, the share stays.
         assert.deepEqual(
           yield* LocalPkgUpdates.expandUpdateDirectories(
-            ["~/Library/CloudStorage/GoogleDrive-*/My Drive/OoP/release/macos", "/Volumes/oop"],
+            ["~/Library/CloudStorage/GoogleDrive-*/My Drive/OOP/release/macos", "/Volumes/oop"],
             { home: NodePath.join(home, "nobody") },
           ),
           ["/Volumes/oop"],
@@ -1214,12 +1221,12 @@ describe("LocalPkgUpdates update folder candidates", () => {
         yield* Effect.promise(() =>
           NodeFSP.writeFile(
             overridePath,
-            encodeJson({ directory: "/Volumes/Drive/OoP/release/macos" }),
+            encodeJson({ directory: "/Volumes/Drive/OOP/release/macos" }),
           ),
         );
         assert.equal(
           yield* LocalPkgUpdates.readFolderOverride(userData),
-          "/Volumes/Drive/OoP/release/macos",
+          "/Volumes/Drive/OOP/release/macos",
         );
         for (const content of [
           "{not json",
@@ -1230,6 +1237,85 @@ describe("LocalPkgUpdates update folder candidates", () => {
           yield* Effect.promise(() => NodeFSP.writeFile(overridePath, content));
           assert.equal(yield* LocalPkgUpdates.readFolderOverride(userData), undefined, content);
         }
+      }),
+    ),
+  );
+});
+
+describe("LocalPkgUpdates.pruneInstalledStages", () => {
+  it.effect("removes only stages for versions the running app already is or has passed", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* tempDirectory;
+        const stagingRoot = NodePath.join(root, "oop-local-update");
+        const outside = NodePath.join(root, "outside");
+        const stages = {
+          older: "OoP-0.0.49-arm64-update.pkg",
+          current: "OoP-0.0.50-arm64-update.pkg",
+          newer: "OoP-0.0.51-arm64-update.pkg",
+          unknown: "notes.txt",
+        } as const;
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(outside, { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(outside, stages.older), "outside");
+          for (const [label, file] of Object.entries(stages)) {
+            await NodeFSP.mkdir(NodePath.join(stagingRoot, `stage-${label}`), { recursive: true });
+            await NodeFSP.writeFile(NodePath.join(stagingRoot, `stage-${label}`, file), label);
+          }
+          await NodeFSP.mkdir(NodePath.join(stagingRoot, "keep-me"));
+          await NodeFSP.writeFile(NodePath.join(stagingRoot, "keep-me", stages.older), "x");
+          await NodeFSP.mkdir(NodePath.join(stagingRoot, "stage-empty"));
+          // A symlink named like a stage must not lead the cleanup out of the staging root.
+          await NodeFSP.symlink(outside, NodePath.join(stagingRoot, "stage-link"));
+        });
+
+        const removed = yield* LocalPkgUpdates.pruneInstalledStages({
+          stagingRoot,
+          currentVersion: "0.0.50",
+        });
+
+        assert.deepEqual([...removed].map((directory) => NodePath.basename(directory)).sort(), [
+          "stage-current",
+          "stage-older",
+        ]);
+        assert.deepEqual([...(yield* listStaging(stagingRoot))].sort(), [
+          "keep-me",
+          "stage-empty",
+          "stage-link",
+          "stage-newer",
+          "stage-unknown",
+        ]);
+        assert.isTrue(
+          (yield* Effect.promise(() => NodeFSP.readdir(outside))).includes(stages.older),
+        );
+      }),
+    ),
+  );
+
+  it.effect("keeps everything when the running version is not a stable release", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* tempDirectory;
+        const stagingRoot = NodePath.join(root, "oop-local-update");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.join(stagingRoot, "stage-a"), { recursive: true });
+          await NodeFSP.writeFile(NodePath.join(stagingRoot, "stage-a", PKG_NAME), "x");
+        });
+        assert.deepEqual(
+          yield* LocalPkgUpdates.pruneInstalledStages({
+            stagingRoot,
+            currentVersion: "0.0.51-dev",
+          }),
+          [],
+        );
+        assert.deepEqual(
+          yield* LocalPkgUpdates.pruneInstalledStages({
+            stagingRoot: NodePath.join(root, "missing"),
+            currentVersion: "0.0.51",
+          }),
+          [],
+        );
+        assert.deepEqual(yield* listStaging(stagingRoot), ["stage-a"]);
       }),
     ),
   );

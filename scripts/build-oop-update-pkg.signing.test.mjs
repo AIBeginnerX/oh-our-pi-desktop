@@ -10,13 +10,13 @@ import { buildOopUpdatePkg, parseArgs } from "./build-oop-update-pkg.mjs";
 const VERSION = "0.0.59";
 const DMG_BYTES = "trusted candidate DMG fixture";
 const DMG_SHA256 = NodeCrypto.createHash("sha256").update(DMG_BYTES).digest("hex");
-const CANDIDATE_NAME = `OoP-${VERSION}-arm64-signed-candidate.pkg`;
+const CANDIDATE_NAME = `OOP-${VERSION}-arm64-signed-candidate.pkg`;
 const CANDIDATE_LOCK = ".oop-signed-candidate.lock";
 const POLICY = { mode: "developer-id", teamId: "ABCDE12345", leafPins: ["a".repeat(64)] };
 const APP_METADATA = {
   identifier: "com.t3tools.t3code",
-  name: "OoP",
-  executable: "OoP",
+  name: "OOP",
+  executable: "OOP",
   version: VERSION,
   architectures: ["arm64"],
   oopProfileEmbedded: true,
@@ -115,7 +115,7 @@ function fakePackageRunner(events, { bindingRead } = {}) {
       events.push("codesign requirement");
     if (name === "hdiutil" && args[0] === "attach") {
       mount = args[args.indexOf("-mountpoint") + 1];
-      const resources = NodePath.join(mount, "OoP.app", "Contents", "Resources");
+      const resources = NodePath.join(mount, "OOP.app", "Contents", "Resources");
       await NodeFSP.mkdir(resources, { recursive: true });
       await NodeFSP.writeFile(
         NodePath.join(resources, "app.asar"),
@@ -286,7 +286,7 @@ NodeTest.test("signed candidate rejects unsafe output locations before any mutat
     output: NodePath.join(outputRoot, `OoP-${VERSION}-arm64-update.pkg`),
   }));
   await assertPreflightReject("wrong candidate name", async ({ outputRoot }) => ({
-    output: NodePath.join(outputRoot, `OoP-${VERSION}-arm64-rollback.pkg`),
+    output: NodePath.join(outputRoot, `OOP-${VERSION}-arm64-rollback.pkg`),
   }));
   await assertPreflightReject("inside repository", async ({ repoRoot }) => ({
     output: NodePath.join(repoRoot, "release", CANDIDATE_NAME),

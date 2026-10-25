@@ -161,6 +161,11 @@ overrides:
   "expo-sharing>@expo/config-types": 57.0.2
   node-abi: 4.33.0
   # Security floors for transitive desktop/server dependencies.
+  "@modelcontextprotocol/sdk": 1.32.1
+  body-parser@2: 2.4.0
+  undici@7: 7.30.1
+  undici@8: 8.12.3
+  zod@>=4.0.0 <4.6.6: 4.6.7
   proxy-addr: 2.0.8
   seroval: 1.6.3
   seroval-plugins: 1.6.3

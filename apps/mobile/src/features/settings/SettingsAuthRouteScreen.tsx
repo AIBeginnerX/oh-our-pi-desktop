@@ -11,7 +11,7 @@ import { T3ConnectProfilePage } from "../cloud/T3ConnectProfilePage";
 const USER_PROFILE_CUSTOM_PAGES = [
   {
     path: "t3-connect",
-    label: "T3 Connect",
+    label: "OOP Connect",
     icon: "globe",
     content: <T3ConnectProfilePage />,
   },

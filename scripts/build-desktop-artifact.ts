@@ -1492,7 +1492,7 @@ const resolveFutureRealPath = Effect.fn("resolveFutureRealPath")(function* (targ
 });
 
 /**
- * Validates the inputs of the explicit, internal-only OoP Developer ID
+ * Validates the inputs of the explicit, internal-only OOP Developer ID
  * candidate. This is text validation of what was requested: it does not prove
  * which certificate signs the bundle, so the signed artifact is also checked
  * with codesign after packaging. `T3CODE_CLERK_PUBLISHABLE_KEY` is deliberately
@@ -1974,7 +1974,7 @@ export const verifyMacDeveloperIdRequirement = Effect.fn("verifyMacDeveloperIdRe
   },
 );
 
-const MAC_DEVELOPER_ID_RECEIPT_NAME = "OoP-developer-id-candidate.json";
+const MAC_DEVELOPER_ID_RECEIPT_NAME = "OOP-developer-id-candidate.json";
 
 /** Written beside direct candidate artifacts. States limits only; claims no notarization or runtime result. */
 export function renderMacDeveloperIdCandidateReceipt(appVersion: string, teamId: string): string {
@@ -2910,7 +2910,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   const buildConfig: Record<string, unknown> = {
     appId: DESKTOP_APP_ID,
     productName: resolveDesktopProductName(version, oopBrand),
-    artifactName: oopBrand ? "OoP-${version}-${arch}.${ext}" : "T3-Code-${version}-${arch}.${ext}",
+    artifactName: oopBrand ? "OOP-${version}-${arch}.${ext}" : "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
       ...DESKTOP_FILE_EXCLUSIONS,
@@ -2967,12 +2967,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       category: "public.app-category.developer-tools",
       extendInfo: {
         NSScreenCaptureUsageDescription: oopBrand
-          ? "OoP captures the active window when you use the window capture shortcut."
+          ? "OOP captures the active window when you use the window capture shortcut."
           : "T3 Code captures the active window when you use the window capture shortcut.",
       },
       protocols: [
         {
-          name: oopBrand ? "OoP" : "T3 Code",
+          name: oopBrand ? "OOP" : "T3 Code",
           schemes: ["t3code", "t3code-dev"],
         },
       ],
@@ -3074,7 +3074,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     buildConfig.nsis = oopBrand
       ? {
           differentialPackage: true,
-          // OoP walks people through the install: Korean pages, a choice of folder, and a
+          // OOP walks people through the install: Korean pages, a choice of folder, and a
           // welcome page (OOP_NSIS_INCLUDE) that says what the first run sets up.
           oneClick: false,
           perMachine: false,
@@ -3082,7 +3082,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           installerLanguages: ["ko_KR"],
           language: "1042",
           include: OOP_NSIS_INCLUDE,
-          shortcutName: "OoP",
+          shortcutName: "OOP",
           runAfterFinish: true,
         }
       : { differentialPackage: true };
@@ -4023,7 +4023,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     t3codeCommitHash: commitHash,
     private: true,
     packageManager: rootPackageJson.packageManager,
-    description: oopBrand ? "OoP desktop build" : "T3 Code desktop build",
+    description: oopBrand ? "OOP desktop build" : "T3 Code desktop build",
     // Required by the .deb control file.
     homepage: "https://t3.codes",
     author: "T3 Tools",
@@ -4324,7 +4324,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   ),
   signingMode: Flag.Literals("signing-mode", ExplicitBuildSigningMode.literals).pipe(
     Flag.withDescription(
-      "Explicit internal-candidate mode: sign the OoP macOS build with the Developer ID Application identity in CSC_NAME and the Team ID in T3CODE_APPLE_TEAM_ID, without passkey provisioning, notarization or an update feed. Requires --output-dir outside the repo and the local update directory. Cannot be combined with --signed.",
+      "Explicit internal-candidate mode: sign the OOP macOS build with the Developer ID Application identity in CSC_NAME and the Team ID in T3CODE_APPLE_TEAM_ID, without passkey provisioning, notarization or an update feed. Requires --output-dir outside the repo and the local update directory. Cannot be combined with --signed.",
     ),
     Flag.optional,
   ),
