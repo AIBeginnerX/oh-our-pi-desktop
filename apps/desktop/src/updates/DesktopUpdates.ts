@@ -39,6 +39,8 @@ import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as EmbeddedLocalPkgTrustPolicy from "./EmbeddedLocalPkgTrustPolicy.ts";
 import type * as LocalPkgTrust from "./LocalPkgTrust.ts";
+import * as GitHubReleaseSource from "./GitHubReleaseSource.ts";
+import type { LocalPkgSource } from "./LocalPkgSource.ts";
 import * as LocalPkgUpdates from "./LocalPkgUpdates.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
@@ -234,6 +236,9 @@ type LocalMode =
       readonly directories: ReadonlyArray<string>;
       readonly folderKind?: "google-drive";
       readonly connectUrl?: string;
+      /** Public builds read the feed from these GitHub releases through `source`. */
+      readonly github?: string;
+      readonly source?: LocalPkgSource;
       readonly userDataDirectory: string;
       readonly stagingRoot: string;
       readonly trustPolicy: LocalPkgTrust.TrustPolicy;
@@ -288,7 +293,12 @@ function createBaseUpdateState(
     status: enabled ? "idle" : "disabled",
     build: {
       ...build,
-      updateSource: localMode._tag === "ready" ? "local-folder" : enabled ? "release-feed" : "none",
+      updateSource:
+        localMode._tag === "ready" && localMode.github === undefined
+          ? "local-folder"
+          : enabled
+            ? "release-feed"
+            : "none",
     },
     ...(localMode._tag === "off" ? {} : { installMode: "local-package" as const }),
     ...(localMode._tag === "invalid" ? { message: localMode.message } : {}),
@@ -477,6 +487,15 @@ export const make = Effect.gen(function* () {
       directories: localConfig.directories,
       ...(localConfig.folderKind === undefined ? {} : { folderKind: localConfig.folderKind }),
       ...(localConfig.connectUrl === undefined ? {} : { connectUrl: localConfig.connectUrl }),
+      ...(localConfig.github === undefined
+        ? {}
+        : {
+            github: localConfig.github,
+            source: GitHubReleaseSource.makeGitHubReleaseSource({
+              repository: localConfig.github,
+              platformKey: environment.platform === "win32" ? "windows" : "macos",
+            }),
+          }),
       userDataDirectory: environment.desktopUserDataDir.value,
       stagingRoot: LocalPkgUpdates.stagingRootFor(environment.desktopUserDataDir.value),
       trustPolicy: loadedPolicy.success,
@@ -489,7 +508,7 @@ export const make = Effect.gen(function* () {
     ),
     distribution: !environment.isPackaged
       ? "development"
-      : localMode._tag === "off"
+      : localMode._tag === "off" || (localMode._tag === "ready" && localMode.github !== undefined)
         ? "public"
         : "private",
     installScope: resolveInstallScope(environment),
@@ -572,7 +591,11 @@ export const make = Effect.gen(function* () {
   // offered, so there is no downgrade path.
   const checkLocalPackage = (mode: LocalReadyMode) =>
     Effect.gen(function* () {
-      const override = yield* LocalPkgUpdates.readFolderOverride(mode.userDataDirectory);
+      // A device's own update folder applies to folder builds; a release feed has none.
+      const override =
+        mode.github === undefined
+          ? yield* LocalPkgUpdates.readFolderOverride(mode.userDataDirectory)
+          : undefined;
       const candidates = yield* LocalPkgUpdates.expandUpdateDirectories(mode.directories, {
         home: environment.homeDirectory,
       });
@@ -582,6 +605,11 @@ export const make = Effect.gen(function* () {
         currentVersion: environment.appVersion,
         appArch: environment.runtimeInfo.appArch,
         platform: environment.platform === "win32" ? "win32" : "darwin",
+        // A public Mac build updates from the release disk image, in place.
+        ...(mode.github !== undefined && environment.platform === "darwin"
+          ? { macPackage: "dmg" as const }
+          : {}),
+        ...(mode.source === undefined ? {} : { source: mode.source }),
       });
       yield* Ref.set(localSourceDirectoryRef, Option.some(checked.sourceDirectory));
       return checked.offered;
@@ -709,7 +737,9 @@ export const make = Effect.gen(function* () {
               sourceDirectory: sourceDirectory.value,
               stagingRoot: mode.stagingRoot,
               manifest: offered.value,
-              preserveQuarantine: environment.platform === "darwin",
+              // A download has no quarantine flag of its own to carry; its hash is checked.
+              preserveQuarantine: environment.platform === "darwin" && mode.source === undefined,
+              ...(mode.source === undefined ? {} : { source: mode.source }),
               onProgress: (percent) =>
                 Ref.get(updateStateRef).pipe(
                   Effect.flatMap((current) =>
@@ -1013,11 +1043,22 @@ export const make = Effect.gen(function* () {
             { concurrency: "unbounded" },
           );
           if (Option.isSome(stagedForInstall)) {
+            const appBundle = LocalPkgUpdates.appBundleOf(environment.appPath);
             yield* environment.platform === "win32"
               ? LocalPkgUpdates.launchSetup(stagedForInstall.value.path)
-              : LocalPkgUpdates.openInstaller(stagedForInstall.value.path).pipe(
-                  Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-                );
+              : localMode._tag === "ready" && localMode.github !== undefined
+                ? appBundle === undefined
+                  ? Effect.fail(
+                      new LocalPkgUpdates.LocalPkgUpdateError({ reason: "installer-failed" }),
+                    )
+                  : LocalPkgUpdates.installFromDmg({
+                      stagedPath: stagedForInstall.value.path,
+                      appBundle,
+                      pid: process.pid,
+                    })
+                : LocalPkgUpdates.openInstaller(stagedForInstall.value.path).pipe(
+                    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+                  );
             yield* electronApp.quit;
           } else {
             yield* electronUpdater.quitAndInstall({
@@ -1087,9 +1128,26 @@ export const make = Effect.gen(function* () {
     };
   });
 
+  // Public builds fetch a newer GitHub release on their own; installing it still waits for the user.
+  const checkAndPrepare = (reason: "startup" | "poll") =>
+    checkForUpdates(reason).pipe(
+      Effect.andThen(
+        Effect.gen(function* () {
+          const state = yield* Ref.get(updateStateRef);
+          if (
+            localMode._tag === "ready" &&
+            localMode.github !== undefined &&
+            state.status === "available"
+          ) {
+            yield* downloadAvailableUpdate;
+          }
+        }),
+      ),
+    );
+
   const startUpdatePollers: Effect.Effect<void, never, Scope.Scope> = Effect.gen(function* () {
     yield* Effect.sleep(AUTO_UPDATE_STARTUP_DELAY).pipe(
-      Effect.andThen(checkForUpdates("startup")),
+      Effect.andThen(checkAndPrepare("startup")),
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {
           return Effect.void;
@@ -1103,7 +1161,7 @@ export const make = Effect.gen(function* () {
       Effect.forkScoped,
     );
     yield* Effect.sleep(AUTO_UPDATE_POLL_INTERVAL).pipe(
-      Effect.andThen(checkForUpdates("poll")),
+      Effect.andThen(checkAndPrepare("poll")),
       Effect.forever,
       Effect.catchCause((cause) => {
         if (Cause.hasInterruptsOnly(cause)) {

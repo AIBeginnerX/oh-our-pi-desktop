@@ -74,6 +74,7 @@ import {
   resolveMockUpdateServerUrl,
   resolveOopLocalUpdateDirectory,
   resolveOopLocalUpdateCandidates,
+  resolveOopLocalUpdateGitHub,
   resolvePackageManagerUserAgent,
   renderOopLocalUpdateConfig,
   stageLinuxIconSize,
@@ -751,6 +752,29 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.deepStrictEqual((config.mac as { protocols: unknown }).protocols, [
         { name: "OOP", schemes: ["t3code", "t3code-dev"] },
       ]);
+    }),
+  );
+
+  it.effect("bundles a GitHub release feed alone, for owner/repo only", () =>
+    Effect.gen(function* () {
+      assert.equal(yield* resolveOopLocalUpdateGitHub(undefined, false), undefined);
+      assert.equal(yield* resolveOopLocalUpdateGitHub(" ", false), undefined);
+      assert.equal(
+        yield* resolveOopLocalUpdateGitHub("owner/oop-desktop", false),
+        "owner/oop-desktop",
+      );
+      for (const [value, hasFolders] of [
+        ["owner", false],
+        ["owner/repo/extra", false],
+        ["https://github.com/owner/repo", false],
+        ["owner/repo", true],
+      ] as const) {
+        yield* Effect.flip(resolveOopLocalUpdateGitHub(value, hasFolders));
+      }
+      assert.equal(
+        renderOopLocalUpdateConfig(undefined, undefined, { github: "owner/oop-desktop" }),
+        '{"github":"owner/oop-desktop"}\n',
+      );
     }),
   );
 

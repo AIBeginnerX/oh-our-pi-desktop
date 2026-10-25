@@ -122,7 +122,11 @@ jobs:
       - name: Install desktop dependencies
         run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
 
+      # The profile is compiled into the bundle: it names the app OOP, keeps its data in
+      # ~/.oop-desktop, and turns on the release-feed updater. Packaging alone is too late.
       - name: Build desktop bundle
+        env:
+          T3CODE_DESKTOP_BUILD_PROFILE_NAME: oop-desktop
         run: vp run build:desktop
 
       - name: Package OOP installer
@@ -133,6 +137,8 @@ jobs:
           TARGET: ${{ matrix.target }}
           ARCH: ${{ matrix.arch }}
           T3CODE_DESKTOP_BUILD_PROFILE_NAME: oop-desktop
+          # macOS and Windows builds update themselves from this repository's releases.
+          OOP_DESKTOP_UPDATE_GITHUB: ${{ github.repository }}
         run: |
           set -euo pipefail
           node scripts/build-desktop-artifact.ts \
@@ -153,11 +159,45 @@ jobs:
           test -s "public-installer/$ASSET"
           find public-installer -maxdepth 1 -type f -print
 
+      # The in-app updater reads oop-update-<platform>.json from the newest release and fetches
+      # the installer it names (the same file the one-line installer uses) from that version.
+      - name: Build the in-app update feed
+        if: matrix.platform != 'linux'
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          mkdir -p update-feed
+          node --input-type=module -e '
+            import { createHash } from "node:crypto";
+            import { readFileSync, statSync, writeFileSync } from "node:fs";
+            const [version, platform, arch, asset] = process.argv.slice(1);
+            const file = `public-installer/${asset}`;
+            const feed = {
+              schemaVersion: 1,
+              platform: platform === "mac" ? "darwin" : "win32",
+              arch,
+              version,
+              pkg: asset,
+              size: statSync(file).size,
+              sha256: createHash("sha256").update(readFileSync(file)).digest("hex"),
+            };
+            const name = platform === "mac" ? "macos" : "windows";
+            writeFileSync(`update-feed/oop-update-${name}.json`, `${JSON.stringify(feed, null, 2)}\n`);
+          ' "$VERSION" "$PLATFORM" "$ARCH" "$ASSET"
+          cat update-feed/*.json
+
       - name: Upload installer between jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: installer-${{ matrix.platform }}-${{ matrix.arch }}
-          path: public-installer/${{ matrix.asset }}
+          path: |
+            public-installer/${{ matrix.asset }}
+            update-feed/*
           if-no-files-found: error
           # Long enough to re-run a failed publish with these exact bytes.
           retention-days: 7
@@ -260,6 +300,8 @@ jobs:
             --mac "release-input/OOP-$VERSION-arm64.dmg" \
             --windows "release-input/OOP-$VERSION-x64.exe" \
             --linux "release-input/OOP-$VERSION-x86_64.AppImage" \
+            --update-feed release-input/oop-update-macos.json \
+            --update-feed release-input/oop-update-windows.json \
             --out release-ready
 
       # A retry only fills in what is missing: an asset already attached must match these bytes

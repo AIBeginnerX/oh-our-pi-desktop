@@ -22,6 +22,7 @@ import {
   defaultLocalPkgSource,
   type LocalPkgSource,
 } from "./LocalPkgSource.ts";
+import { githubReleaseDirectory, isGitHubRepository } from "./GitHubReleaseSource.ts";
 
 export { LocalPkgUpdateError };
 
@@ -186,6 +187,8 @@ const ConfigFile = Schema.Struct({
   directories: Schema.optionalKey(Schema.Array(Schema.String)),
   folderKind: Schema.optionalKey(Schema.Literal("google-drive")),
   connectUrl: Schema.optionalKey(Schema.String),
+  /** Public builds: `owner/repo` whose GitHub releases carry the update feed and packages. */
+  github: Schema.optionalKey(Schema.String),
 });
 const FolderOverrideFile = Schema.Struct({ directory: Schema.String });
 const decodeFolderOverrideJson = Schema.decodeUnknownEffect(
@@ -204,6 +207,8 @@ export type LocalPkgConfig =
       readonly directories: ReadonlyArray<string>;
       readonly folderKind?: "google-drive";
       readonly connectUrl?: string;
+      /** Set when updates come from this repository's GitHub releases instead of a folder. */
+      readonly github?: string;
     }
   | { readonly _tag: "Invalid"; readonly error: LocalPkgUpdateError };
 
@@ -261,8 +266,21 @@ export const loadConfig = (
         Effect.mapError(() => new LocalPkgUpdateError({ reason: "config-invalid" })),
       ),
     ),
-    Effect.flatMap(({ directory, directories, folderKind, connectUrl }) => {
+    Effect.flatMap(({ directory, directories, folderKind, connectUrl, github }) => {
       const patterns = [...(directories ?? []), ...(directory === undefined ? [] : [directory])];
+      if (github !== undefined) {
+        // A release feed stands alone: no folders, no Drive setup page.
+        return isGitHubRepository(github) &&
+          patterns.length === 0 &&
+          folderKind === undefined &&
+          connectUrl === undefined
+          ? Effect.succeed<LocalPkgConfig>({
+              _tag: "Ready",
+              directories: [githubReleaseDirectory(github)],
+              github,
+            })
+          : Effect.fail(new LocalPkgUpdateError({ reason: "config-invalid" }));
+      }
       return patterns.length > 0 &&
         patterns.every(isSafeDirectoryPattern) &&
         (connectUrl === undefined || isSafeConnectUrl(connectUrl))
@@ -418,6 +436,8 @@ export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(fun
   readonly appArch: DesktopRuntimeArch;
   /** The running app's platform; a manifest for the other platform is never offered. */
   readonly platform?: "darwin" | "win32";
+  /** What a macOS feed names: an Installer package (folders) or the release disk image (GitHub). */
+  readonly macPackage?: "pkg" | "dmg";
   readonly source?: LocalPkgSource;
 }) {
   const source = input.source ?? defaultLocalPkgSource;
@@ -425,7 +445,7 @@ export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(fun
   // The whole manifest read is bounded, not only each request: a folder that dribbles one
   // byte every few seconds must not stretch a check. Interruption closes the helper within
   // its own bound. (Staging a package has no total bound, only the per-request one.)
-  const text = yield* readSourceSmallFile(source, manifestPath, MAX_MANIFEST_BYTES, {
+  const read = yield* readSourceSmallFile(source, manifestPath, MAX_MANIFEST_BYTES, {
     invalid: "manifest-invalid",
     unreadable: "folder-unavailable",
   }).pipe(
@@ -436,7 +456,14 @@ export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(fun
         onSome: Effect.succeed,
       }),
     ),
+    Effect.result,
   );
+  // A GitHub release without this platform's feed has nothing to offer yet; it is not an error.
+  if (Result.isFailure(read) && read.failure.reason === "release-feed-missing") {
+    return Option.none();
+  }
+  if (Result.isFailure(read)) return yield* read.failure;
+  const text = read.success;
   const manifest = yield* decodeManifestJson(text).pipe(
     Effect.mapError(() => new LocalPkgUpdateError({ reason: "manifest-invalid" })),
   );
@@ -447,7 +474,9 @@ export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(fun
       manifest.pkg,
       manifest.platform === "win32"
         ? `-${manifest.version}-${manifest.arch}.exe`
-        : `-${manifest.version}-${manifest.arch}-update.pkg`,
+        : input.macPackage === "dmg"
+          ? `-${manifest.version}-${manifest.arch}.dmg`
+          : `-${manifest.version}-${manifest.arch}-update.pkg`,
     )
   ) {
     return yield* new LocalPkgUpdateError({ reason: "manifest-invalid" });
@@ -463,7 +492,11 @@ export const checkLocalPackage = Effect.fn("desktop.updates.localPkg.check")(fun
 });
 
 /** Reasons that mean "this folder is not here right now", so the next candidate is tried. */
-const UNREACHABLE_REASONS: ReadonlySet<Reason> = new Set(["folder-unavailable", "source-timeout"]);
+const UNREACHABLE_REASONS: ReadonlySet<Reason> = new Set([
+  "folder-unavailable",
+  "source-timeout",
+  "github-unavailable",
+]);
 
 /**
  * Checks the first candidate folder that answers. A folder that is missing or does not answer
@@ -477,6 +510,7 @@ export const checkLocalPackageIn = Effect.fn("desktop.updates.localPkg.checkIn")
   readonly currentVersion: string;
   readonly appArch: DesktopRuntimeArch;
   readonly platform?: "darwin" | "win32";
+  readonly macPackage?: "pkg" | "dmg";
   readonly source?: LocalPkgSource;
 }) {
   let last: LocalPkgUpdateError | undefined;
@@ -487,6 +521,7 @@ export const checkLocalPackageIn = Effect.fn("desktop.updates.localPkg.checkIn")
         currentVersion: input.currentVersion,
         appArch: input.appArch,
         ...(input.platform === undefined ? {} : { platform: input.platform }),
+        ...(input.macPackage === undefined ? {} : { macPackage: input.macPackage }),
         ...(input.source === undefined ? {} : { source: input.source }),
       }),
     );
@@ -834,3 +869,96 @@ export const launchSetup = (stagedPath: string) =>
     ),
     Effect.withSpan("desktop.updates.localPkg.launchSetup"),
   );
+
+// ---------------------------------------------------------------------------
+// Public macOS builds: replace the app bundle from the release disk image
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs after OOP quits: mounts the verified disk image, copies its app next to the running one,
+ * swaps the two (restoring the old app if the swap fails), and reopens OOP. The app stays where
+ * the user installed it, so a copy in ~/Applications is updated in place.
+ */
+export const DMG_SWAP_SCRIPT = `#!/bin/sh
+set -u
+pid=$1; dmg=$2; app=$3
+exec >>"$(dirname "$dmg")/install.log" 2>&1
+waited=0
+while kill -0 "$pid" 2>/dev/null; do
+  waited=$((waited + 1))
+  if [ "$waited" -gt 600 ]; then echo "OOP did not quit; update skipped."; exit 1; fi
+  sleep 0.2
+done
+dir=$(dirname "$app")
+id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist") || exit 1
+mnt=$(mktemp -d "\${TMPDIR:-/tmp}/oop-update-mount.XXXXXX") || { open "$app"; exit 1; }
+staged="$dir/.OOP.app.update-$$"
+previous="$dir/.OOP.app.previous-$$"
+finish() {
+  /usr/bin/hdiutil detach "$mnt" -quiet >/dev/null 2>&1 || true
+  rmdir "$mnt" 2>/dev/null || true
+  rm -rf "$staged"
+}
+trap finish EXIT
+fail() { echo "$1"; open "$app"; exit 1; }
+/usr/bin/hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$dmg" >/dev/null || fail "Could not open the update disk image."
+[ -d "$mnt/OOP.app" ] || fail "The update disk image has no OOP.app."
+new_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mnt/OOP.app/Contents/Info.plist") || fail "The update has no bundle identifier."
+[ "$new_id" = "$id" ] || fail "The update is a different app; it was not installed."
+/usr/bin/ditto "$mnt/OOP.app" "$staged" || fail "Could not copy the update next to OOP."
+mv "$app" "$previous" || fail "Could not move the current OOP aside."
+if ! mv "$staged" "$dir/OOP.app"; then
+  mv "$previous" "$app"
+  fail "Could not put the update in place; the previous OOP was restored."
+fi
+rm -rf "$previous"
+/usr/bin/xattr -dr com.apple.quarantine "$dir/OOP.app" 2>/dev/null || true
+open "$dir/OOP.app"
+`;
+
+/** The `.app` bundle a path inside it belongs to (an executable or app.asar), if any. */
+export const appBundleOf = (path: string): string | undefined => {
+  const index = path.lastIndexOf(".app/Contents/");
+  return index < 0 ? undefined : path.slice(0, index + ".app".length);
+};
+
+/**
+ * Checks that OOP can replace its own bundle, then starts the swap as its own process so it
+ * outlives the app. A bundle in a folder this user cannot change is refused before OOP quits.
+ */
+export const installFromDmg = (input: {
+  readonly stagedPath: string;
+  readonly appBundle: string;
+  readonly pid: number;
+}) =>
+  Effect.gen(function* () {
+    const writable = yield* Effect.promise(() =>
+      Promise.all(
+        [NodePath.dirname(input.appBundle), input.appBundle].map((path) =>
+          NodeFSP.access(path, NodeFS.constants.W_OK).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ),
+    );
+    if (writable.includes(false)) {
+      return yield* new LocalPkgUpdateError({ reason: "app-folder-not-writable" });
+    }
+    const script = NodePath.join(NodePath.dirname(input.stagedPath), "install.sh");
+    yield* fsStep("installer-failed", () =>
+      NodeFSP.writeFile(script, DMG_SWAP_SCRIPT, { mode: 0o700, flag: "w" }),
+    );
+    yield* Effect.callback<void, LocalPkgUpdateError>((resume) => {
+      const child = NodeChildProcess.spawn(
+        "/bin/sh",
+        [script, String(input.pid), input.stagedPath, input.appBundle],
+        { detached: true, stdio: "ignore" },
+      );
+      child.once("spawn", () => {
+        child.unref();
+        resume(Effect.void);
+      });
+      child.once("error", (cause) => resume(Effect.fail(failure("installer-failed", cause))));
+    });
+  }).pipe(Effect.withSpan("desktop.updates.localPkg.installFromDmg"));

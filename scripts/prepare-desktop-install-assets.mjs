@@ -11,6 +11,8 @@ const { values } = parseArgs({
     mac: { type: "string" },
     windows: { type: "string" },
     linux: { type: "string" },
+    // In-app update feeds (oop-update-macos.json, oop-update-windows.json), copied as they are.
+    "update-feed": { type: "string", multiple: true, default: [] },
     out: { type: "string" },
   },
 });
@@ -31,6 +33,21 @@ const assets = [
   [values.windows, `OOP-${values.version}-x64.exe`],
   [values.linux, `OOP-${values.version}-x86_64.AppImage`],
 ];
+const UPDATE_FILE = /^oop-update-(?:macos|windows)\.json$/;
+const updateFiles = values["update-feed"];
+for (const source of updateFiles) {
+  const name = path.basename(source);
+  const stat = await fs.stat(source);
+  if (!UPDATE_FILE.test(name) || !stat.isFile() || stat.size === 0) {
+    throw new Error(`Unexpected update file ${name}`);
+  }
+  // The feed must name this release's own installer, which the same command copies.
+  const feed = JSON.parse(await fs.readFile(source, "utf8"));
+  const installer = name.includes("macos") ? `OOP-${values.version}-arm64.dmg` : `OOP-${values.version}-x64.exe`;
+  if (feed.version !== values.version || feed.pkg !== installer) {
+    throw new Error(`${name} does not describe ${installer}`);
+  }
+}
 // Reject a missing, misnamed, or empty platform file before creating any output.
 for (const [source, name] of assets) {
   const stat = await fs.stat(source);
@@ -54,6 +71,9 @@ for (const [source, name] of assets) {
     flag: "wx",
   });
 }
+for (const source of updateFiles) {
+  await fs.copyFile(source, path.join(values.out, path.basename(source)), fs.constants.COPYFILE_EXCL);
+}
 console.log(
-  `Prepared ${assets.length} installers and their SHA-256 files in ${path.resolve(values.out)}. Nothing was published.`,
+  `Prepared ${assets.length} installers and their SHA-256 files and ${updateFiles.length} update files in ${path.resolve(values.out)}. Nothing was published.`,
 );

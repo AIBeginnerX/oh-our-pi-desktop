@@ -448,7 +448,7 @@ The upstream docs say phone push notifications (agent finished, failed, needs ap
 
 ## How updates work
 
-Source builds do not update themselves from GitHub; rebuild them as described below. For an installed binary, quit OOP and rerun the matching installer command to update. Your user data is preserved.
+Source builds do not update themselves from GitHub; rebuild them as described below. Installed binaries from 0.0.111 on update themselves on macOS and Windows: OOP checks this repository's GitHub releases every few minutes, downloads a newer version in the background, verifies its SHA-256, and installs it when you choose to restart (macOS replaces the app where you installed it; Windows runs the setup). On Linux, or from an older version, quit OOP and rerun the matching installer command. Your user data is preserved.
 
 1. `git pull`
 2. Rebuild / package again (see [Install](#install--build-from-source)) and reinstall.

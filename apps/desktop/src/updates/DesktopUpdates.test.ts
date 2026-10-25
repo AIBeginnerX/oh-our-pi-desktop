@@ -1,5 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- Local-package tests tamper with real staged files.
 import { assert, describe, it } from "@effect/vitest";
+import { afterEach, vi } from "vite-plus/test";
+import * as NodeCrypto from "node:crypto";
 import { DESKTOP_UPDATE_RESTART_MARKER_FILE } from "@t3tools/contracts";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -951,6 +953,8 @@ const runLocalPackage = <E>(
     }),
   );
 
+const encodeFeed = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 const installerCommands = (harness: ReturnType<typeof makeHarness>) =>
   harness.commands.filter((command) => command.command === "/usr/bin/open");
 const trustCommands = (harness: ReturnType<typeof makeHarness>) =>
@@ -1863,6 +1867,63 @@ describe("DesktopUpdates.resolveInstallScope", () => {
     assert.equal(
       DesktopUpdates.resolveInstallScope({ ...mac("/Applications/OOP.app"), isPackaged: false }),
       "development",
+    );
+  });
+});
+
+describe("public builds updating from GitHub releases", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.effect("download a newer release on their own and wait for the user to install it", () => {
+    const dmg = Buffer.from("public OOP 99.0.0 disk image");
+    const feed = {
+      schemaVersion: 1,
+      platform: "darwin",
+      arch: "arm64",
+      version: "99.0.0",
+      pkg: "OOP-99.0.0-arm64.dmg",
+      size: dmg.length,
+      sha256: NodeCrypto.createHash("sha256").update(dmg).digest("hex"),
+    };
+    const releases = "https://github.com/example/oop-desktop/releases";
+    const assets: Record<string, Buffer> = {
+      [`${releases}/latest/download/oop-update-macos.json`]: Buffer.from(encodeFeed(feed)),
+      [`${releases}/download/v99.0.0/OOP-99.0.0-arm64.dmg`]: dmg,
+    };
+    const asked: Array<string> = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      asked.push(url);
+      const body = assets[url];
+      return body === undefined
+        ? new Response("Not Found", { status: 404 })
+        : new Response(new Uint8Array(body), {
+            headers: { "content-length": String(body.length) },
+          });
+    });
+    return runLocalPackage(
+      ({ fixture, harness, updates }) =>
+        Effect.gen(function* () {
+          const { changes } = yield* updates.subscribe;
+          const downloaded = yield* changes.pipe(
+            Stream.filter((state) => state.status === "downloaded"),
+            Stream.runHead,
+            Effect.forkChild,
+          );
+          yield* TestClock.adjust(Duration.seconds(15));
+          const state = Option.getOrThrow(yield* Fiber.join(downloaded));
+          assert.equal(state.downloadedVersion, "99.0.0");
+          assert.equal(state.build?.distribution, "public");
+          assert.equal(state.build?.updateSource, "release-feed");
+          assert.deepEqual(asked, Object.keys(assets));
+          const staged = yield* Effect.promise(() => fixture.stagedPackagePaths());
+          assert.equal(staged.length, 1);
+          assert.deepEqual(yield* Effect.promise(() => NodeFSP.readFile(staged[0]!)), dmg);
+          // Nothing is installed until the user chooses to.
+          assert.deepEqual(installerCommands(harness), []);
+        }),
+      { config: '{"github":"example/oop-desktop"}' },
     );
   });
 });

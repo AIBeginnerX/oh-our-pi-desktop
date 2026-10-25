@@ -249,6 +249,41 @@ test("release preparation emits verified hashes for all three installers", async
   }
 });
 
+test("release preparation copies the in-app update feeds for its own version only", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "oop-install-assets-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const names = ["OOP-1.2.3-arm64.dmg", "OOP-1.2.3-x64.exe", "OOP-1.2.3-x86_64.AppImage"];
+  for (const name of names) await fs.writeFile(path.join(root, name), `fixture-${name}`);
+  const feeds = ["oop-update-macos.json", "oop-update-windows.json"];
+  await fs.writeFile(path.join(root, feeds[0]), JSON.stringify({ version: "1.2.3", pkg: names[0] }));
+  await fs.writeFile(path.join(root, feeds[1]), JSON.stringify({ version: "1.2.3", pkg: names[1] }));
+  const prepare = (out, extra) =>
+    run(process.execPath, [
+      path.join(scripts, "prepare-desktop-install-assets.mjs"),
+      "--version", "1.2.3",
+      "--mac", path.join(root, names[0]),
+      "--windows", path.join(root, names[1]),
+      "--linux", path.join(root, names[2]),
+      ...extra.flatMap((file) => ["--update-feed", path.join(root, file)]),
+      "--out", path.join(root, out),
+    ]);
+  const ok = await prepare("out", feeds);
+  assert.equal(ok.code, 0, ok.output);
+  for (const name of feeds) {
+    assert.equal(
+      await fs.readFile(path.join(root, "out", name), "utf8"),
+      await fs.readFile(path.join(root, name), "utf8"),
+    );
+  }
+  await fs.writeFile(
+    path.join(root, "oop-update-windows.json"),
+    JSON.stringify({ version: "1.2.2", pkg: "OOP-1.2.2-x64.exe" }),
+  );
+  const stale = await prepare("stale", ["oop-update-windows.json"]);
+  assert.notEqual(stale.code, 0);
+  await assert.rejects(fs.stat(path.join(root, "stale")));
+});
+
 test("release preparation refuses a missing platform before producing output", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "oop-install-assets-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

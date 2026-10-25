@@ -24,6 +24,9 @@ const REASONS = [
   "notarization-unconfirmed",
   "trust-check-failed",
   "binding-failed",
+  "github-unavailable",
+  "release-feed-missing",
+  "app-folder-not-writable",
 ] as const;
 
 const MESSAGES: Record<(typeof REASONS)[number], string> = {
@@ -53,6 +56,11 @@ const MESSAGES: Record<(typeof REASONS)[number], string> = {
     "OOP could not finish checking the update package signature, so the package was rejected. Check for updates again.",
   "binding-failed":
     "The update package does not carry the expected OOP release identity and was rejected.",
+  "github-unavailable":
+    "OOP could not reach GitHub to check for updates. Check the network; OOP checks again every few minutes.",
+  "release-feed-missing": "The newest OOP release has no update for this computer yet.",
+  "app-folder-not-writable":
+    "OOP cannot replace itself in the folder it was installed to. Reinstall it with the OOP installer, which puts it in Applications in your home folder.",
 };
 
 export class LocalPkgUpdateError extends Schema.TaggedError<LocalPkgUpdateError>()(

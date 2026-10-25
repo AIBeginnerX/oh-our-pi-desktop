@@ -450,7 +450,7 @@ La documentación upstream dice que las notificaciones push del teléfono (el ag
 
 ## Cómo funcionan las actualizaciones
 
-Las compilaciones desde el código fuente no se actualizan solas desde GitHub; vuelve a compilarlas con los pasos de abajo. Para actualizar una instalación binaria, cierra OOP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
+Las compilaciones desde el código fuente no se actualizan solas desde GitHub; vuelve a compilarlas con los pasos de abajo. Desde la 0.0.111, las instalaciones de macOS y Windows se actualizan solas: OOP revisa cada pocos minutos los GitHub Releases de este repositorio, descarga en segundo plano la versión nueva, verifica su SHA-256 y la instala cuando eliges reiniciar (en macOS reemplaza la app donde la instalaste; en Windows ejecuta el instalador). En Linux, o desde una versión anterior, cierra OOP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
 
 1. `git pull`
 2. Vuelve a compilar / empaquetar (consulta [Instalación](#instalación--compilación-desde-el-código-fuente)) y reinstala.

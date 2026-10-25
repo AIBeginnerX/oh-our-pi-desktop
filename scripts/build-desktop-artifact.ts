@@ -425,8 +425,11 @@ export function renderOopLocalUpdateConfig(
   extra: {
     readonly directories?: ReadonlyArray<string>;
     readonly folderKind?: "google-drive";
+    readonly github?: string;
   } = {},
 ): string {
+  // A GitHub release feed stands alone: the runtime rejects it next to folders.
+  if (extra.github !== undefined) return `${JSON.stringify({ github: extra.github })}\n`;
   const config = {
     ...(extra.directories === undefined || extra.directories.length === 0
       ? {}
@@ -479,6 +482,28 @@ export const resolveOopLocalUpdateCandidates = Effect.fn("resolveOopLocalUpdateC
     return parsed;
   },
 );
+
+export class InvalidOopLocalUpdateGitHubError extends Schema.TaggedError<InvalidOopLocalUpdateGitHubError>()(
+  "InvalidOopLocalUpdateGitHubError",
+  { inputLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) },
+) {
+  override get message(): string {
+    return "OOP_DESKTOP_UPDATE_GITHUB must be owner/repo, and cannot be combined with update folders.";
+  }
+}
+
+/** The GitHub repository whose releases a public build updates from; empty or unset means none. */
+export const resolveOopLocalUpdateGitHub = Effect.fn("resolveOopLocalUpdateGitHub")(function* (
+  configured: string | undefined,
+  hasFolders: boolean,
+) {
+  const value = configured?.trim() ?? "";
+  if (value === "") return undefined;
+  if (hasFolders || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/u.test(value)) {
+    return yield* new InvalidOopLocalUpdateGitHubError({ inputLength: value.length });
+  }
+  return value;
+});
 
 export class InvalidOopLocalUpdateConnectUrlError extends Schema.TaggedError<InvalidOopLocalUpdateConnectUrlError>()(
   "InvalidOopLocalUpdateConnectUrlError",
@@ -3677,6 +3702,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       "google-drive"
       ? ("google-drive" as const)
       : undefined;
+  // Public builds: update from this repository's GitHub releases (owner/repo), never a folder.
+  const localUpdateGitHub =
+    oopBrand && (options.platform === "mac" || options.platform === "win")
+      ? yield* resolveOopLocalUpdateGitHub(
+          Option.getOrUndefined(
+            yield* Config.String("OOP_DESKTOP_UPDATE_GITHUB").pipe(Config.option),
+          ),
+          localUpdateDirectory !== undefined || localUpdateCandidates !== undefined,
+        )
+      : undefined;
   const localUpdateConnectUrl =
     localUpdateDirectory === undefined
       ? undefined
@@ -3955,13 +3990,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   // Written into the stage and copied to resources/ under the same condition: a Drive-only
   // build (candidates, no share folder) shipped without it and could never update itself.
   const localUpdateConfigBundled =
-    localUpdateDirectory !== undefined || localUpdateCandidates !== undefined;
+    localUpdateDirectory !== undefined ||
+    localUpdateCandidates !== undefined ||
+    localUpdateGitHub !== undefined;
   if (localUpdateConfigBundled) {
     yield* fs.writeFileString(
       path.join(stageProdResourcesDir, OOP_LOCAL_UPDATE_CONFIG_NAME),
       renderOopLocalUpdateConfig(localUpdateDirectory, localUpdateConnectUrl, {
         ...(localUpdateCandidates === undefined ? {} : { directories: localUpdateCandidates }),
         ...(localUpdateFolderKind === undefined ? {} : { folderKind: localUpdateFolderKind }),
+        ...(localUpdateGitHub === undefined ? {} : { github: localUpdateGitHub }),
       }),
     );
   }
