@@ -2,9 +2,9 @@
   color-scheme: light;
   --ink: #1d2840;
   --muted: #5f6b82;
-  --accent: #2f55c8;
-  --accent-dark: #1f3f9e;
-  --tint: #e9eefb;
+  --accent: #7253b9;
+  --accent-dark: #553d93;
+  --tint: #efeaf8;
   --line: #e1e3ea;
   --paper: #fbfaf7;
   --card: #ffffff;
@@ -12,15 +12,11 @@
   --ok-bg: #e4f3ea;
   --warn: #9a5b00;
   --warn-bg: #fbefd9;
-  --serif: Georgia, "Times New Roman", serif;
+  /* Malgun Gothic is never shipped as a webfont (license): it is used where the OS has it. */
   --sans:
-    Inter, "Aptos", -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
-    "Malgun Gothic", sans-serif;
+    "Malgun Gothic", "맑은 고딕", "Apple SD Gothic Neo", "Noto Sans KR", -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --mono: "SFMono-Regular", ui-monospace, Consolas, monospace;
-}
-
-html[data-lang="ko"] {
-  --serif: "Noto Serif KR", "AppleMyungjo", "Nanum Myeongjo", Batang, Georgia, serif;
 }
 
 * {
@@ -87,13 +83,8 @@ li code,
 }
 
 em {
-  font-style: italic;
-  font-weight: 400;
-  color: var(--muted);
-}
-
-html[data-lang="ko"] em {
   font-style: normal;
+  color: var(--accent);
 }
 
 .sr {
@@ -223,37 +214,37 @@ html[data-lang="ko"] em {
 h1,
 h2,
 h3 {
-  font-family: var(--serif);
-  font-weight: 500;
+  font-family: var(--sans);
+  font-weight: 700;
   margin: 0;
 }
 
 h1 {
-  font-size: clamp(38px, 6vw, 72px);
-  line-height: 1.08;
-  letter-spacing: -2px;
+  font-size: clamp(34px, 5.6vw, 66px);
+  line-height: 1.12;
+  letter-spacing: -0.03em;
 }
 
 h2 {
-  font-size: clamp(30px, 4vw, 48px);
-  line-height: 1.14;
-  letter-spacing: -1.4px;
+  font-size: clamp(28px, 3.8vw, 44px);
+  line-height: 1.18;
+  letter-spacing: -0.025em;
 }
 
 h3 {
-  font-size: 21px;
-  line-height: 1.25;
-  letter-spacing: -0.3px;
+  font-size: 20px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
 }
 
 html[data-lang="ko"] h1 {
-  font-size: clamp(34px, 5vw, 60px);
+  font-size: clamp(32px, 4.6vw, 54px);
 }
 
 html[data-lang="ko"] h1,
 html[data-lang="ko"] h2 {
-  letter-spacing: -0.04em;
-  line-height: 1.25;
+  letter-spacing: -0.035em;
+  line-height: 1.28;
   word-break: keep-all;
 }
 
@@ -361,8 +352,8 @@ html[data-lang="ko"] h2 {
 }
 
 .fact b {
-  font: 600 52px/1 var(--serif);
-  letter-spacing: -2px;
+  font: 700 52px/1 var(--sans);
+  letter-spacing: -0.04em;
   color: var(--accent);
 }
 
@@ -418,7 +409,7 @@ html[data-lang="ko"] h2 {
 }
 
 .eq-term b {
-  font: 500 19px/1.3 var(--serif);
+  font: 700 18px/1.3 var(--sans);
 }
 
 .eq-term.accent {
@@ -438,7 +429,7 @@ html[data-lang="ko"] h2 {
 
 .eq-op {
   align-self: center;
-  font: 400 28px/1 var(--serif);
+  font: 400 28px/1 var(--sans);
   color: var(--muted);
 }
 
@@ -539,7 +530,7 @@ html[data-lang="ko"] h2 {
 }
 
 .role b {
-  font: 500 22px/1.2 var(--serif);
+  font: 700 20px/1.25 var(--sans);
   color: var(--ink);
 }
 
@@ -556,6 +547,101 @@ html[data-lang="ko"] h2 {
 
 .notes b {
   color: var(--ink);
+}
+
+/* Showcase sections: charts, workflows, phone */
+.cards.points {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 28px;
+}
+
+.showcase {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 28px;
+  align-items: start;
+}
+
+.showcase .shot-aside {
+  margin-block: 0;
+}
+
+.mobile-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 64px;
+  align-items: center;
+}
+
+/* Simple phone frame around the 390x844 screenshot. */
+.phone-frame {
+  margin: 0;
+  width: min(270px, 100%);
+}
+
+.phone-frame img {
+  width: 100%;
+  border: 9px solid var(--ink);
+  border-radius: 34px;
+  background: var(--card);
+}
+
+.phone-frame figcaption {
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+  max-width: 560px;
+}
+
+.steps li {
+  counter-increment: step;
+  position: relative;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px 20px 16px 62px;
+  font-size: 14.5px;
+  color: var(--muted);
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 18px;
+  top: 14px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--tint);
+  color: var(--accent-dark);
+  font: 600 14px/1 var(--mono);
+}
+
+.steps li > b {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.steps li span b {
+  color: var(--ink);
+}
+
+.mobile-grid .hint {
+  max-width: 560px;
 }
 
 /* Tabs */
@@ -740,7 +826,7 @@ html[data-lang="ko"] h2 {
 }
 
 .gh-band em {
-  color: #b9c3dc;
+  color: #cdbcf2;
 }
 
 .gh-band p {
@@ -827,7 +913,7 @@ td {
 
 .faq summary {
   cursor: pointer;
-  font: 500 19px/1.3 var(--serif);
+  font: 700 18px/1.35 var(--sans);
 }
 
 .faq p {
@@ -889,9 +975,28 @@ td {
   }
 }
 
+@media (max-width: 1100px) {
+  .nav {
+    gap: 14px;
+    font-size: 13.5px;
+  }
+}
+
 @media (max-width: 900px) {
   .nav {
     display: none;
+  }
+  .showcase,
+  .mobile-grid {
+    grid-template-columns: 1fr;
+  }
+  .mobile-grid {
+    justify-items: center;
+    gap: 32px;
+  }
+  .steps {
+    justify-self: stretch;
+    max-width: none;
   }
   .bar-tools {
     margin-left: auto;

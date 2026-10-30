@@ -157,3 +157,32 @@ NodeTest.test("rejects asynchronous spawn errors and removes the isolated profil
   NodeAssert.deepEqual(child.killCalls, []);
   NodeAssert.ok(events.includes("remove-temp"));
 });
+
+NodeTest.test(
+  "on Windows ends the whole process tree of the spawned PID, then releases the output pipes",
+  async () => {
+    const child = new FakeChild();
+    const killedTrees = [];
+    const { events, options } = smokeOptions(child, {
+      platform: "win32",
+      killTree: (pid) => {
+        killedTrees.push(pid);
+        setImmediate(() => child.exit(null, "SIGTERM"));
+      },
+    });
+    const resultPromise = runDesktopSmoke("electron-test-double", [], options);
+    await new Promise((resolve) => setImmediate(resolve));
+    child.stdout.write(`INFO ${DESKTOP_SMOKE_READY_MARKER}\n`);
+    await resultPromise;
+
+    NodeAssert.deepEqual(killedTrees, [42]);
+    NodeAssert.deepEqual(child.killCalls, [], "TerminateProcess alone would leave the backend");
+    NodeAssert.equal(
+      child.stdout.destroyed,
+      true,
+      "an orphan holding the pipe cannot hang the caller",
+    );
+    NodeAssert.equal(child.stderr.destroyed, true);
+    NodeAssert.ok(events.includes("remove-temp"));
+  },
+);

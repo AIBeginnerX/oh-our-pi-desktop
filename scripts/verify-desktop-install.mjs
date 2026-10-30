@@ -87,14 +87,18 @@ const install = (label) =>
       )
     : must(label, run("sh", [path.join(scripts, "install-desktop.sh")], env));
 
-async function windowsUninstallEntry() {
+// electron-builder's NSIS template writes InstallLocation under HKCU\Software\<app guid>, not into the
+// Uninstall key, which only holds DisplayName, DisplayIcon ("<install dir>\OOP.exe,0") and the
+// uninstall commands. So the install directory comes from DisplayIcon.
+async function windowsInstall() {
   const query =
     "Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*' | " +
-    "Where-Object { $_.DisplayName -like 'OOP*' } | Select-Object -First 1 DisplayIcon, InstallLocation | ConvertTo-Json";
+    "Where-Object { $_.DisplayName -like 'OOP*' } | Select-Object -First 1 DisplayIcon | ConvertTo-Json";
   const { output } = await must("read the per-user uninstall entry", run("powershell", ["-NoProfile", "-Command", query], env));
   const entry = JSON.parse(output.trim() || "null");
-  if (!entry?.InstallLocation) throw new Error("No per-user OOP uninstall entry was registered.");
-  return entry;
+  if (!entry?.DisplayIcon) throw new Error("No per-user OOP uninstall entry with a DisplayIcon was registered.");
+  const executable = String(entry.DisplayIcon).replace(/^"|"?,\d+$|"$/g, "");
+  return { executable, installLocation: path.dirname(executable) };
 }
 
 async function installedExecutable() {
@@ -107,8 +111,7 @@ async function installedExecutable() {
     );
     return path.join(installDir, "OOP.app", "Contents", "MacOS", output.trim());
   }
-  const entry = await windowsUninstallEntry();
-  return String(entry.DisplayIcon).replace(/^"|"?,\d+$|"$/g, "");
+  return (await windowsInstall()).executable;
 }
 
 async function launch(label) {
@@ -129,14 +132,16 @@ try {
   await launch("launch after reinstall");
 
   if (process.platform === "win32") {
-    const entry = await windowsUninstallEntry();
-    const uninstaller = (await fs.readdir(entry.InstallLocation)).find((name) => /^Uninstall .*\.exe$/i.test(name));
+    const { installLocation } = await windowsInstall();
+    const uninstaller = (await fs.readdir(installLocation)).find((name) => /^Uninstall .*\.exe$/i.test(name));
     if (!uninstaller) throw new Error("The installation has no uninstaller.");
     // `_?=` keeps NSIS from copying itself away, so the call returns only once removal is done.
-    await must(
-      "uninstall",
-      run(path.join(entry.InstallLocation, uninstaller), ["/S", "/currentuser", `_?=${entry.InstallLocation}`], env),
-    );
+    // It runs from a copy outside the install folder, as the installer runs an old uninstaller:
+    // its "is the app still running" check stops every process under the install folder, and an
+    // uninstaller started in place would be one of them.
+    const copy = path.join(root, "uninstaller.exe");
+    await fs.copyFile(path.join(installLocation, uninstaller), copy);
+    await must("uninstall", run(copy, ["/S", "/currentuser", `_?=${installLocation}`], env));
   } else if (process.platform === "darwin") {
     await fs.rm(path.join(installDir, "OOP.app"), { recursive: true });
     console.log("ok: uninstall");
@@ -163,3 +168,6 @@ if (failure) {
   console.error(failure instanceof Error ? failure.message : failure);
   process.exitCode = 1;
 }
+// Everything is verified and cleaned up. Exit explicitly so that nothing an app run left behind
+// can keep this step alive until the job times out.
+process.exit();

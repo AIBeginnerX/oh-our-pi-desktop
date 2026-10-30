@@ -16,8 +16,8 @@ or `python3 -m http.server 4173 --directory apps/oop-site`, then open <http://lo
 
 ## Content sources
 
-Copy and numbers come from the public README, `INSTALL.md` and `docs/screenshots` in `tools/public-export/overlay/`. Screenshots in `assets/shots/` are those PNGs re-encoded as WebP; the logo and favicons are copied from `assets/oop/`. When the install docs or supported platforms change, update `index.html` to match.
+Copy and numbers come from the public README, `INSTALL.md` and `docs/screenshots` in `tools/public-export/overlay/`. Most screenshots in `assets/shots/` are those PNGs re-encoded as WebP. `report-charts`, `report-flow` and `mobile-chat` were taken from a fake demo project in the purple `iris` theme. The logo and favicons are copied from `assets/oop/`. When the install docs or supported platforms change, update `index.html` to match.
 
 ## Deploy to GitHub Pages
 
-The site is served at <https://oop-desktop.github.io/> from the `oop-desktop/oop-desktop.github.io` repository, which holds this folder's files at its root. Each release copies this folder there, and Pages serves the `main` branch as plain files (`.nojekyll`). All asset paths are relative; only the `canonical` and `og:` tags in `index.html` hold the absolute URL.
+The site is served at <https://oop-desktop.github.io/> from the `oop-desktop/oop-desktop.github.io` repository, which holds this folder's files at its root. Each release copies this folder there, and between releases the owner publishes site-only changes with `oop-publish-site` (see `tools/public-export/README.md`). Pages serves the `main` branch as plain files (`.nojekyll`). All asset paths are relative; only the `canonical` and `og:` tags in `index.html` hold the absolute URL.

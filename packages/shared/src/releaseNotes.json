@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.0.126",
+      "date": "2026-10-30",
+      "highlights": [
+        {
+          "en": "Public Windows builds can now find and download updates from GitHub releases. Every public release also carries its installers again, so the one-line install works.",
+          "ko": "공개 Windows 빌드가 GitHub 릴리스에서 업데이트를 찾아 내려받을 수 있습니다. 공개 릴리스에 설치 파일도 다시 첨부되어 한 줄 설치가 동작합니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.125",
       "date": "2026-10-30",
       "highlights": [

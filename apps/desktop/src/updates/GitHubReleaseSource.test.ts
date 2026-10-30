@@ -165,6 +165,88 @@ describe("GitHubReleaseSource", () => {
   );
 });
 
+describe("public Windows builds", () => {
+  // `expandUpdateDirectories` normalizes the configured folder with `node:path`, so on Windows the
+  // source is handed backslash paths: `\github-releases\owner\repo\oop-update.json`.
+  const windowsDirectory = NodePath.win32.normalize(directory);
+  const EXE = "OOP-0.0.111-x64.exe";
+  const EXE_BYTES = Buffer.from("w".repeat(300_000));
+  const windowsManifest = {
+    schemaVersion: 1,
+    platform: "win32",
+    arch: "x64",
+    version: "0.0.111",
+    pkg: EXE,
+    size: EXE_BYTES.length,
+    sha256: NodeCrypto.createHash("sha256").update(EXE_BYTES).digest("hex"),
+  };
+
+  it("maps the backslash paths Windows builds to the same release assets", () => {
+    assert.equal(
+      githubAssetUrl(REPO, "windows", NodePath.win32.join(windowsDirectory, "oop-update.json")),
+      `${base}/latest/download/oop-update-windows.json`,
+    );
+    assert.equal(
+      githubAssetUrl(REPO, "windows", NodePath.win32.join(windowsDirectory, EXE)),
+      `${base}/download/v0.0.111/${EXE}`,
+    );
+    assert.equal(
+      githubAssetUrl(REPO, "windows", NodePath.win32.join("\\elsewhere", "oop-update.json")),
+      undefined,
+    );
+  });
+
+  it.effect("offers a newer release and stages its installer from a Windows-shaped folder", () =>
+    Effect.gen(function* () {
+      const source = makeGitHubReleaseSource({
+        repository: REPO,
+        platformKey: "windows",
+        fetch: releases({
+          [`${base}/latest/download/oop-update-windows.json`]: encodeJson(windowsManifest),
+          [`${base}/download/v0.0.111/${EXE}`]: EXE_BYTES,
+        }),
+      });
+      const offered = yield* LocalPkgUpdates.checkLocalPackage({
+        sourceDirectory: windowsDirectory,
+        currentVersion: "0.0.110",
+        appArch: "x64",
+        platform: "win32",
+        source,
+      });
+      assert.equal(Option.getOrThrow(offered).pkg, EXE);
+      const stagingRoot = yield* Effect.acquireRelease(
+        Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-gh-stage-"))),
+        (dir) => Effect.promise(() => NodeFSP.rm(dir, { recursive: true, force: true })),
+      );
+      const staged = yield* LocalPkgUpdates.stage({
+        sourceDirectory: windowsDirectory,
+        stagingRoot,
+        manifest: Option.getOrThrow(offered),
+        preserveQuarantine: false,
+        source,
+      });
+      assert.deepEqual(yield* Effect.promise(() => NodeFSP.readFile(staged.path)), EXE_BYTES);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("still treats a newest release without the Windows feed as no update", () =>
+    Effect.gen(function* () {
+      const offered = yield* LocalPkgUpdates.checkLocalPackage({
+        sourceDirectory: windowsDirectory,
+        currentVersion: "0.0.110",
+        appArch: "x64",
+        platform: "win32",
+        source: makeGitHubReleaseSource({
+          repository: REPO,
+          platformKey: "windows",
+          fetch: releases({}),
+        }),
+      });
+      assert.isTrue(Option.isNone(offered));
+    }),
+  );
+});
+
 describe("public Mac builds", () => {
   it.effect("take the release disk image as their package, never an Installer package", () =>
     Effect.gen(function* () {

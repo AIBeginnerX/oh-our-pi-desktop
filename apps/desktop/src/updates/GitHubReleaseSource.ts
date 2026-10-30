@@ -33,14 +33,21 @@ export type GitHubFetch = (
 
 const timeoutMillis = Duration.toMillis(SOURCE_IO_TIMEOUT);
 
+/**
+ * The virtual folder is POSIX-shaped, but the updater builds the paths it hands the source with
+ * `node:path`, which on Windows turns `/github-releases/o/r` into `\github-releases\o\r`.
+ */
+const toVirtualPath = (path: string) => path.replaceAll("\\", "/");
+
 /** The asset URL a path in the virtual folder stands for, or undefined when it names nothing. */
 export const githubAssetUrl = (
   repository: string,
   platformKey: "macos" | "windows",
   path: string,
 ): string | undefined => {
-  if (NodePath.posix.dirname(path) !== githubReleaseDirectory(repository)) return undefined;
-  const name = NodePath.posix.basename(path);
+  const virtualPath = toVirtualPath(path);
+  if (NodePath.posix.dirname(virtualPath) !== githubReleaseDirectory(repository)) return undefined;
+  const name = NodePath.posix.basename(virtualPath);
   const base = `https://github.com/${repository}/releases`;
   if (name === MANIFEST_FILE_NAME) {
     return `${base}/latest/download/oop-update-${platformKey}.json`;
@@ -76,7 +83,10 @@ export const makeGitHubReleaseSource = (input: {
           ),
         );
         // No release, or a newest release without this platform's feed: nothing to offer yet.
-        if (response.status === 404 && NodePath.posix.basename(path) === MANIFEST_FILE_NAME) {
+        if (
+          response.status === 404 &&
+          NodePath.posix.basename(toVirtualPath(path)) === MANIFEST_FILE_NAME
+        ) {
           return yield* new LocalPkgUpdateError({ reason: "release-feed-missing" });
         }
         if (!response.ok || response.body === null) {

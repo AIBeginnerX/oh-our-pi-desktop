@@ -11,7 +11,10 @@
     <meta name="theme-color" content="#fbfaf7" />
     <link rel="canonical" href="https://oop-desktop.github.io/" />
     <meta property="og:url" content="https://oop-desktop.github.io/" />
-    <meta property="og:image" content="https://oop-desktop.github.io/assets/shots/chat.webp" />
+    <meta
+      property="og:image"
+      content="https://oop-desktop.github.io/assets/shots/report-charts.webp"
+    />
     <meta property="og:image:type" content="image/webp" />
     <meta property="og:image:width" content="1440" />
     <meta property="og:image:height" content="900" />
@@ -49,6 +52,9 @@
           <a href="#what"><span lang="en">What it is</span><span lang="ko">소개</span></a>
           <a href="#features"><span lang="en">Features</span><span lang="ko">기능</span></a>
           <a href="#crew">Crew</a>
+          <a href="#charts"><span lang="en">Charts</span><span lang="ko">차트</span></a>
+          <a href="#flows"><span lang="en">Workflows</span><span lang="ko">워크플로</span></a>
+          <a href="#mobile"><span lang="en">Phone</span><span lang="ko">휴대폰</span></a>
           <a href="#screens"><span lang="en">Screens</span><span lang="ko">화면</span></a>
           <a href="#install"><span lang="en">Install</span><span lang="ko">설치</span></a>
           <a href="#faq">FAQ</a>
@@ -122,11 +128,11 @@
         </div>
         <figure class="wrap shot hero-shot reveal">
           <img
-            src="assets/shots/chat.webp"
+            src="assets/shots/report-charts.webp"
             width="1440"
             height="900"
-            alt="OOP main chat view with composer, model picker and permission mode"
-            data-alt-ko="작성창, 모델 선택기, 권한 모드가 있는 OOP 메인 채팅 화면"
+            alt="OOP chat reply with key-figure tiles, a bar chart and a donut chart"
+            data-alt-ko="핵심 수치 타일, 막대 차트, 도넛 차트가 들어 있는 OOP 채팅 답변"
             fetchpriority="high"
           />
         </figure>
@@ -511,10 +517,319 @@
       </section>
 
       <!-- 04 -->
+      <section class="section wrap" id="charts">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>04</span> · <span lang="en">Charts in chat</span
+            ><span lang="ko">대화창 안의 차트</span>
+          </p>
+          <h2>
+            <span lang="en">Charts right in the chat.<br /><em>No extra tools.</em></span>
+            <span lang="ko">대화창 안의 차트.<br /><em>별도 도구 없이.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >When an answer carries numbers, the agent can draw them as key-figure tiles and bar,
+              line or donut charts instead of a wall of text. They are rendered from the agent's
+              reply, so there is nothing extra to install or connect.</span
+            >
+            <span lang="ko"
+              >답변에 숫자가 담겨 있으면, 에이전트가 긴 글 대신 핵심 수치 타일과 막대·선·도넛 차트로
+              그려 줍니다. 에이전트의 답변에서 바로 렌더링되므로 따로 설치하거나 연결할 것이
+              없습니다.</span
+            >
+          </p>
+        </header>
+        <figure class="shot reveal">
+          <img
+            src="assets/shots/report-charts.webp"
+            width="1440"
+            height="900"
+            loading="lazy"
+            alt="Chat reply with key-figure tiles, a bar chart and a donut chart"
+            data-alt-ko="핵심 수치 타일, 막대 차트, 도넛 차트가 들어 있는 채팅 답변"
+          />
+          <figcaption>
+            <span lang="en">A chat reply drawn as tiles, a bar chart and a donut chart.</span
+            ><span lang="ko">타일, 막대 차트, 도넛 차트로 그려진 채팅 답변.</span>
+          </figcaption>
+        </figure>
+        <div class="cards points">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">C1</span
+              ><span class="tag"
+                ><span lang="en">Key figures</span><span lang="ko">핵심 수치</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">The headline numbers first</span
+              ><span lang="ko">핵심 수치를 먼저</span>
+            </h3>
+            <p>
+              <span lang="en">Tiles put the totals and changes on top, with the detail below.</span>
+              <span lang="ko"
+                >타일이 합계와 변화량을 맨 위에 놓고, 세부 내용은 그 아래에 보여 줍니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">C2</span
+              ><span class="tag"><span lang="en">Charts</span><span lang="ko">차트</span></span>
+            </p>
+            <h3><span lang="en">Bar, line and donut</span><span lang="ko">막대, 선, 도넛</span></h3>
+            <p>
+              <span lang="en"
+                >Compare values, follow a trend or split a total. Just ask the agent for a
+                chart.</span
+              >
+              <span lang="ko"
+                >값을 비교하고, 추세를 따라가고, 전체를 나눠 보세요. 에이전트에게 차트를 요청하기만
+                하면 됩니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">C3</span
+              ><span class="tag"><span lang="en">Trust</span><span lang="ko">신뢰</span></span>
+            </p>
+            <h3>
+              <span lang="en">See the data behind it</span><span lang="ko">근거 데이터 확인</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Each figure has a Source button that shows the data it was drawn from.</span
+              >
+              <span lang="ko"
+                >그림마다 Source 버튼이 있어, 그림의 바탕이 된 데이터를 보여 줍니다.</span
+              >
+            </p>
+            <code>Source</code>
+          </article>
+        </div>
+      </section>
+
+      <!-- 05 -->
+      <section class="section wrap" id="flows">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>05</span> · <span lang="en">Workflows</span><span lang="ko">워크플로</span>
+          </p>
+          <h2>
+            <span lang="en">Workflows you can see.<br /><em>Not just read about.</em></span>
+            <span lang="ko">눈으로 보는 워크플로.<br /><em>읽기만 하지 않고.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >Ask for a process or an architecture and the agent draws the flowchart in its reply.
+              While it works, the Workflows panel shows every tool call and subagent as it
+              happens.</span
+            >
+            <span lang="ko"
+              >프로세스나 아키텍처를 물어보면 에이전트가 답변 안에 흐름도를 그려 줍니다. 작업하는
+              동안에는 워크플로 패널이 모든 도구 호출과 서브에이전트를 실시간으로 보여 줍니다.</span
+            >
+          </p>
+        </header>
+        <div class="showcase">
+          <figure class="shot reveal">
+            <img
+              src="assets/shots/report-flow.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Chat reply with a release-pipeline flowchart"
+              data-alt-ko="릴리스 파이프라인 흐름도가 들어 있는 채팅 답변"
+            />
+            <figcaption>
+              <span lang="en">A release pipeline drawn as a flowchart inside the reply.</span
+              ><span lang="ko">답변 안에 흐름도로 그려진 릴리스 파이프라인.</span>
+            </figcaption>
+          </figure>
+          <figure class="shot shot-aside reveal">
+            <img
+              src="assets/shots/workflows.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Workflows panel with a live diagram of tool calls and subagents"
+              data-alt-ko="도구 호출과 서브에이전트의 실시간 다이어그램이 있는 워크플로 패널"
+            />
+            <figcaption>
+              <span lang="en">The Workflows panel: tool calls and subagents, live.</span
+              ><span lang="ko">워크플로 패널: 도구 호출과 서브에이전트를 실시간으로.</span>
+            </figcaption>
+          </figure>
+        </div>
+        <div class="cards points">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">W1</span
+              ><span class="tag"
+                ><span lang="en">In the reply</span><span lang="ko">답변 안</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">Flowcharts on request</span><span lang="ko">요청하면 흐름도로</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Ask for a pipeline, a decision flow or how the parts fit together, and get a
+                diagram instead of paragraphs.</span
+              >
+              <span lang="ko"
+                >파이프라인, 의사결정 흐름, 구성 요소의 연결 방식을 물어보면 긴 글 대신 다이어그램을
+                받습니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">W2</span
+              ><span class="tag"><span lang="en">Live</span><span lang="ko">실시간</span></span>
+            </p>
+            <h3>
+              <span lang="en">One card per step</span><span lang="ko">단계마다 카드 하나</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Each tool call, subagent or provider workflow is a card, and parallel work shares a
+                column. Select a card to see its model, timing and tokens.</span
+              >
+              <span lang="ko"
+                >도구 호출, 서브에이전트, provider 워크플로가 각각 카드 하나이고, 병렬 작업은 같은
+                열에 놓입니다. 카드를 선택하면 모델, 소요 시간, 토큰을 볼 수 있습니다.</span
+              >
+            </p>
+            <code>Right panel · mod+alt+w</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top"><span class="num">W3</span><span class="tag">Crew</span></p>
+            <h3>
+              <span lang="en">Crew work shows up too</span><span lang="ko">Crew의 작업도 함께</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >When Crew splits a task between models, the panel shows who is doing what.</span
+              >
+              <span lang="ko"
+                >Crew가 모델들에게 작업을 나눠 맡기면, 패널에서 누가 무엇을 하는지 볼 수
+                있습니다.</span
+              >
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- 06 -->
+      <section class="section wrap" id="mobile">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>06</span> · <span lang="en">Phone</span><span lang="ko">휴대폰</span>
+          </p>
+          <h2>
+            <span lang="en">Your desktop,<br /><em>from your phone.</em></span>
+            <span lang="ko">휴대폰에서<br /><em>내 데스크톱으로.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >Pair a phone or tablet browser with the computer that runs OOP and keep driving your
+              agents from anywhere in the house or beyond. The agents, files and logins stay on the
+              computer; the phone is a remote control that shows threads, sends messages and answers
+              approval prompts.</span
+            >
+            <span lang="ko"
+              >휴대폰이나 태블릿 브라우저를 OOP가 실행되는 컴퓨터에 페어링하고, 어디서든 에이전트를
+              계속 조종하세요. 에이전트, 파일, 로그인은 컴퓨터에 남고, 휴대폰은 스레드를 보여 주고
+              메시지를 보내며 승인 프롬프트에 답하는 리모컨입니다.</span
+            >
+          </p>
+        </header>
+        <div class="mobile-grid">
+          <figure class="phone-frame reveal">
+            <img
+              src="assets/shots/mobile-chat.webp"
+              width="390"
+              height="844"
+              loading="lazy"
+              alt="OOP chat in a phone browser, paired to a desktop host"
+              data-alt-ko="데스크톱 호스트에 페어링한 휴대폰 브라우저의 OOP 채팅"
+            />
+            <figcaption>
+              <span lang="en">The same web UI in a phone browser.</span
+              ><span lang="ko">휴대폰 브라우저에서 보는 같은 웹 UI.</span>
+            </figcaption>
+          </figure>
+          <div>
+            <ol class="steps reveal">
+              <li>
+                <b
+                  ><span lang="en">Open Connect mobile</span
+                  ><span lang="ko">Connect mobile 열기</span></b
+                >
+                <span lang="en"
+                  >Click the phone icon in the desktop sidebar. If mobile connections are off, click
+                  <b>Allow mobile connections</b>; OOP restarts once.</span
+                >
+                <span lang="ko"
+                  >데스크톱 사이드바의 휴대폰 아이콘을 클릭합니다. 모바일 연결이 꺼져 있다면
+                  <b>Allow mobile connections</b>를 누르세요. OOP가 한 번 재시작됩니다.</span
+                >
+              </li>
+              <li>
+                <b
+                  ><span lang="en">Scan the one-time QR code</span
+                  ><span lang="ko">일회용 QR 코드 스캔</span></b
+                >
+                <span lang="en"
+                  >Scan it with the phone camera and open the link in the phone browser. On the same
+                  Wi-Fi, pick the <b>LAN</b> address.</span
+                >
+                <span lang="ko"
+                  >휴대폰 카메라로 스캔한 뒤 휴대폰 브라우저에서 링크를 엽니다. 같은 Wi-Fi라면
+                  <b>LAN</b> 주소를 고르세요.</span
+                >
+              </li>
+              <li>
+                <b
+                  ><span lang="en">Keep driving your agents</span
+                  ><span lang="ko">에이전트 계속 조종하기</span></b
+                >
+                <span lang="en"
+                  >The paired phone is authorized for later visits. Away from home, use Tailscale
+                  (Settings → Connections), or a Cloudflare relay you deploy yourself.</span
+                >
+                <span lang="ko"
+                  >페어링한 휴대폰은 이후 방문에도 승인됩니다. 집 밖에서는 Tailscale(설정 →
+                  Connections)이나 직접 배포한 Cloudflare relay를 쓰세요.</span
+                >
+              </li>
+            </ol>
+            <p class="hint reveal">
+              <span lang="en"
+                >The computer has to stay awake and running. Treat pairing links as passwords, and
+                use Supervised mode when controlling agents remotely. The web UI is checked at phone
+                size; the native iOS and Android apps and push notifications are untested by this
+                fork.</span
+              >
+              <span lang="ko"
+                >컴퓨터는 켜져 있고 OOP가 실행 중이어야 합니다. 페어링 링크는 비밀번호처럼 다루고,
+                원격으로 에이전트를 조종할 때는 Supervised 모드를 쓰세요. 웹 UI는 휴대폰 크기에서
+                확인했으며, iOS·Android 네이티브 앱과 푸시 알림은 이 포크에서 검증하지
+                않았습니다.</span
+              >
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 07 -->
       <section class="section wrap" id="screens">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>04</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
+            <span>07</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
           </p>
           <h2>
             <span lang="en">See it before<br /><em>you install it.</em></span>
@@ -813,7 +1128,7 @@
             hidden
           >
             <img
-              src="assets/shots/mobile.webp"
+              src="assets/shots/mobile-chat.webp"
               width="390"
               height="844"
               loading="lazy"
@@ -828,11 +1143,11 @@
         </div>
       </section>
 
-      <!-- 05 -->
+      <!-- 08 -->
       <section class="section wrap" id="install">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>05</span> · <span lang="en">Install</span><span lang="ko">설치</span>
+            <span>08</span> · <span lang="en">Install</span><span lang="ko">설치</span>
           </p>
           <h2>
             <span lang="en">One command.<br /><em>Checked before it installs.</em></span>
@@ -1108,11 +1423,11 @@ node scripts/macos.mjs package</code></pre>
         </div>
       </section>
 
-      <!-- 06 -->
+      <!-- 09 -->
       <section class="section wrap" id="faq">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>06</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
+            <span>09</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
           </p>
           <h2>
             <span lang="en">Early, local,<br /><em>and clear about it.</em></span>

@@ -32,10 +32,20 @@ function waitForExit(child, timeoutMs) {
   });
 }
 
-async function stopChild(child, terminationGraceMs) {
+// On Windows "SIGTERM" is TerminateProcess on the main process alone, which leaves the backend it
+// started running with the profile's files open. taskkill /T ends the tree below the PID this
+// runner spawned; it never looks processes up by name or path.
+const killWindowsProcessTree = (pid) =>
+  NodeChildProcess.spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+
+async function stopChild(child, terminationGraceMs, { platform, killTree }) {
   if (!processIsRunning(child)) return;
 
-  child.kill("SIGTERM");
+  if (platform === "win32" && child.pid !== undefined) killTree(child.pid);
+  else child.kill("SIGTERM");
   try {
     await waitForExit(child, terminationGraceMs);
   } catch {
@@ -121,10 +131,16 @@ export async function runDesktopSmoke(command, args, options = {}) {
     env: parentEnv = process.env,
     spawn = NodeChildProcess.spawn,
     createTempDir = () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-desktop-smoke-")),
-    removeTempDir = (directory) => NodeFSP.rm(directory, { recursive: true, force: true }),
+    // Windows releases a killed process's files a moment after it exits.
+    removeTempDir = (directory) =>
+      NodeFSP.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
     startupTimeoutMs = 60_000,
     terminationGraceMs = 2_000,
+    // oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone CI runner with no Effect runtime.
+    platform = process.platform,
+    killTree = killWindowsProcessTree,
   } = options;
+  const stopOptions = { platform, killTree };
 
   const tempRoot = await createTempDir();
   const isolatedHome = NodePath.join(tempRoot, "t3-home");
@@ -170,7 +186,7 @@ export async function runDesktopSmoke(command, args, options = {}) {
       );
     }
 
-    await stopChild(child, terminationGraceMs);
+    await stopChild(child, terminationGraceMs, stopOptions);
     result = { pid: childPid, output };
   } catch (error) {
     failure = error;
@@ -178,7 +194,7 @@ export async function runDesktopSmoke(command, args, options = {}) {
 
   if (child && child.pid !== undefined && processIsRunning(child)) {
     try {
-      await stopChild(child, terminationGraceMs);
+      await stopChild(child, terminationGraceMs, stopOptions);
     } catch (cleanupError) {
       failure = failure
         ? new AggregateError(
@@ -200,6 +216,9 @@ export async function runDesktopSmoke(command, args, options = {}) {
         )
       : preserveProfileError;
   } else {
+    // A backend the app started can outlive it holding the other end of these pipes, which would
+    // keep this process (and any CI step running it) from exiting.
+    for (const stream of [child?.stdin, child?.stdout, child?.stderr]) stream?.destroy();
     try {
       await removeTempDir(tempRoot);
     } catch (cleanupError) {
