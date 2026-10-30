@@ -2237,37 +2237,13 @@ code {
 }
 
 /*
- * Workflow board motion. Only work that is moving animates: edges feeding a running step flow as
- * dashes, running cards glow, and the progress bar shimmers while the flow runs; settling plays
- * once. The dash flow repaints its edge, so the board caps how many edges carry it.
+ * Workflow board motion. Nothing here repeats: running work is marked by a still ring and dot,
+ * and a card or edge plays its settle animation once.
  */
-@utility wf-edge-flow {
-  animation: wf-dash 0.7s linear infinite;
-}
-
-@utility wf-edge-glow {
-  animation: wf-breathe 1.6s ease-in-out infinite;
-}
-
 @utility wf-edge-draw {
   stroke-dasharray: var(--wf-length);
   stroke-dashoffset: var(--wf-length);
   animation: wf-draw 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-@utility wf-card-neon {
-  border-color: var(--primary);
-  box-shadow:
-    0 0 0 1px var(--primary),
-    0 0 10px color-mix(in oklab, var(--primary) 70%, transparent),
-    inset 0 0 10px color-mix(in oklab, var(--primary) 25%, transparent);
-}
-
-@utility wf-card-halo {
-  box-shadow:
-    0 0 14px 2px color-mix(in oklab, var(--primary) 70%, transparent),
-    0 0 34px 8px color-mix(in oklab, var(--primary) 35%, transparent);
-  animation: wf-neon 1.4s ease-in-out infinite;
 }
 
 @utility wf-card-settled-completed {
@@ -2281,51 +2257,6 @@ code {
 /* A flow box arriving in the Agents panel: one short pop, never repeated. */
 @utility wf-box-enter {
   animation: wf-pop 240ms ease-out;
-}
-
-@utility wf-progress-live {
-  position: relative;
-  overflow: hidden;
-
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      color-mix(in srgb, var(--color-white) 60%, transparent),
-      transparent
-    );
-    transform: translateX(-100%);
-    animation: wf-shimmer 1.6s ease-in-out infinite;
-  }
-}
-
-@keyframes wf-dash {
-  to {
-    stroke-dashoffset: -16;
-  }
-}
-
-@keyframes wf-breathe {
-  0%,
-  100% {
-    opacity: 0.2;
-  }
-  50% {
-    opacity: 0.6;
-  }
-}
-
-@keyframes wf-neon {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 @keyframes wf-draw {
@@ -2357,12 +2288,6 @@ code {
   }
 }
 
-@keyframes wf-shimmer {
-  to {
-    transform: translateX(100%);
-  }
-}
-
 /*
  * Startup neon sign: white tubes on black that flicker on letter by letter, then the sign fades.
  * It plays once per launch and never loops.
@@ -2370,12 +2295,20 @@ code {
 @utility oop-neon-splash {
   background: var(--color-black);
   color: var(--color-white);
-  animation: oop-splash-out 0.6s ease-in 3s forwards;
+  animation: oop-splash-out 0.4s ease-in 0.8s forwards;
+
+  /* A "What's new" card holds the sign up; closing it fades the sign at once. */
+  &[data-notice="open"] {
+    animation: none;
+  }
+  &[data-notice="closed"] {
+    animation-delay: 0s;
+  }
 }
 
 @utility oop-neon-letter {
   opacity: 0.06;
-  animation: oop-neon-on 0.9s linear forwards;
+  animation: oop-neon-on 0.3s linear forwards;
 
   @media (prefers-reduced-motion: reduce) {
     opacity: 1;
@@ -2536,6 +2469,10 @@ code {
   animation: rpt-draw 0.9s ease-out forwards;
 }
 
+@utility rpt-reveal-x {
+  animation: rpt-reveal-x 0.9s ease-out both;
+}
+
 @utility rpt-pop {
   transform-box: fill-box;
   transform-origin: center;
@@ -2578,6 +2515,15 @@ code {
 @keyframes rpt-draw {
   to {
     stroke-dashoffset: 0;
+  }
+}
+
+@keyframes rpt-reveal-x {
+  from {
+    clip-path: inset(-6px 100% -6px -6px);
+  }
+  to {
+    clip-path: inset(-6px);
   }
 }
 

@@ -18,6 +18,8 @@ vi.mock("../hooks/useSettings", async (importOriginal) => {
     ...actual,
     useClientSettings: (select?: (value: typeof settings) => unknown) =>
       select ? select(settings) : settings,
+    // Favicons wait for persisted settings to load; model the loaded state with the default (on).
+    useLinkIconsEnabled: () => settings.loadLinkIcons,
   };
 });
 vi.mock("./ui/tooltip", async () => {

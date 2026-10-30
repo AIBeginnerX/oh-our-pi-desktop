@@ -35,7 +35,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
@@ -96,7 +96,7 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
       const serverSettings = yield* ServerSettingsService;
       const serverConfig = yield* ServerConfig;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = makeProviderProcessEnvironment(environment);
       // With a MiniMax API key (for example a Coding Plan key) in the instance's variables, MiniMax
       // Code runs from an OOP-owned data dir set to that key instead of the user's own sign-in.
       const apiKey = miniMaxApiKeyOf(processEnv);
@@ -136,10 +136,12 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
       });
       const effectiveConfig = { ...config, enabled } satisfies MiniMaxCodeSettings;
       // The Grok ACP path only reads these fields; MiniMax Code needs no xAI-specific settings.
+      // MiniMax Code has no telemetry switch, so its environment keeps the generic defaults.
       const acpSettings = {
         enabled,
         binaryPath: effectiveConfig.binaryPath,
         customModels: effectiveConfig.customModels,
+        telemetry: false,
       } satisfies GrokSettings;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(MINIMAX_MAINTENANCE, {

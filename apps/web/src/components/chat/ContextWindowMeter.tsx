@@ -1,8 +1,12 @@
 import { Button } from "../ui/button";
 import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { formatContextWindowCompactionMessage } from "./ContextWindowMeter.logic";
+import {
+  formatContextWindowCompactionMessage,
+  resolveContextWindowSeverity,
+} from "./ContextWindowMeter.logic";
 import { Minimize2Icon } from "lucide-react";
+import { cn } from "~/lib/utils";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 function formatPercentage(value: number | null): string | null {
@@ -30,10 +34,14 @@ export function ContextWindowMeter(props: {
   const dashOffset = circumference * (1 - normalizedPercentage / 100);
   const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
-  const isOverloaded = normalizedPercentage > 90;
-  const usageColor = isOverloaded
-    ? "var(--color-error)"
-    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+  const severity = resolveContextWindowSeverity(normalizedPercentage);
+  const showPercentageLabel = usage.maxTokens !== null && severity !== "normal";
+  const usageColor =
+    severity === "critical"
+      ? "var(--color-error)"
+      : severity === "warning"
+        ? "var(--color-warning)"
+        : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
 
   return (
     <Popover>
@@ -43,9 +51,9 @@ export function ContextWindowMeter(props: {
         closeDelay={onCompact ? 150 : 0}
         render={
           <Button
-            size="icon-sm"
+            size={showPercentageLabel ? "sm" : "icon-sm"}
             variant="ghost-muted"
-            className="size-7"
+            className={showPercentageLabel ? undefined : "size-7"}
             aria-label={
               usage.maxTokens !== null && usedPercentage
                 ? `Context window ${usedPercentage} used`
@@ -80,6 +88,16 @@ export function ContextWindowMeter(props: {
                 />
               </svg>
             </span>
+            {showPercentageLabel && usedPercentage ? (
+              <span
+                className={cn(
+                  "text-2xs font-medium tabular-nums",
+                  severity === "critical" ? "text-error-foreground" : "text-warning-foreground",
+                )}
+              >
+                {usedPercentage}
+              </span>
+            ) : null}
           </Button>
         }
       />

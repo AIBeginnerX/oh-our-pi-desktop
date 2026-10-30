@@ -11,11 +11,15 @@ export function isTerminalCloseConfirmPending(): boolean {
  * Confirmation for individual terminal close actions: drawer buttons, panel
  * buttons, the `terminal.close` keybinding, and closing a terminal surface from
  * the tab strip. Auto-exit cleanup and bulk tab closes skip this path and close
- * directly.
+ * directly. Pass `running: false` for a terminal with no live process to skip the prompt.
  */
 export async function confirmTerminalClose(
   labels: readonly [string, ...string[]],
+  options: { readonly running?: boolean } = {},
 ): Promise<boolean> {
+  // An idle shell has nothing to lose but scrollback, so it closes without a prompt. Callers that
+  // do not know whether a process is running leave `running` unset and are asked as before.
+  if (options.running === false) return true;
   const localApi = readLocalApi();
   if (!localApi) return true;
   pendingConfirmations += 1;

@@ -12,8 +12,10 @@ import {
   CommandId,
   EventId,
   MessageId,
+  OWNED_USAGE_ACTIVITY_KIND,
   ThreadId,
   type CrewRole,
+  type OrchestrationThread,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
   ThreadTurnDiffCompletedPayload,
@@ -43,6 +45,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
 import * as CheckpointDiffQuery from "../checkpointing/CheckpointDiffQuery.ts";
+import { checkpointRefForThreadTurn } from "../checkpointing/Utils.ts";
 import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
@@ -55,6 +58,8 @@ import { OrchestrationCommandReceiptRepository } from "../persistence/Services/O
 import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import { CrewFollowUpRecoveryJson, CrewTaskRecoveryJson } from "./crewRecoveryState.ts";
+import { makeCrewWorktrees, mergeConflictNote, type CrewWorktree } from "./crewWorktree.ts";
+import { crewThreadUsage } from "./crewUsage.ts";
 import {
   CREW_MAX_FIX_ROUNDS,
   CREW_MAX_FOLLOW_UPS,
@@ -63,6 +68,8 @@ import {
   auditDiff,
   auditPrompt,
   auditVerdict,
+  clipCrewReport,
+  crewMemberOutcome,
   followUpRound,
   isCrewFollowUp,
   planFollowUp,
@@ -72,18 +79,23 @@ import {
   delegatePrompt,
   isCrewThreadTitle,
   isSettledCrewStatus,
+  overlappingWriteScopes,
   reportExcerpt,
   latestAuditAsksChanges,
   planTurnAudit,
   turnChangedLines,
   turnRanPassingTests,
+  writeScopeWarning,
+  type CrewMemberReport,
   type CrewTaskOutcome,
   crewFailureKind,
-  crewReportStatus,
+  ISOLATED_CHECKOUT_PROMPT,
 } from "./crewLogic.ts";
 
 const MAX_WAIT_SECONDS = 50;
 const RESULT_TEXT_LIMIT = 6_000;
+const ISOLATION_FALLBACK_WARNING =
+  "The task started in the shared workspace: an isolated worktree could not be created (the workspace is not a git repository with a commit, or git failed).";
 // A provider that just failed (sign-in, balance, outage) is skipped by new chains for a while,
 // so parallel tasks do not each spend a minute rediscovering the same failure.
 const FAILED_PROVIDER_COOLDOWN_MS = 10 * 60_000;
@@ -107,6 +119,8 @@ export interface CrewTaskReport {
   readonly role: CrewRole | null;
   readonly status: CrewTaskOutcome;
   readonly result: string | null;
+  /** The crew member's JSON report, when its reply ended with one that decodes. */
+  readonly report?: CrewMemberReport | undefined;
 }
 
 export class CrewService extends Context.Service<
@@ -120,6 +134,19 @@ export class CrewService extends Context.Service<
       readonly role: "worker" | "expert";
       readonly task: string;
       readonly title?: string | undefined;
+      readonly writeScope?: ReadonlyArray<string> | undefined;
+      readonly verify?: string | undefined;
+      readonly doneWhen?: string | undefined;
+      /** "worktree" runs the task in its own git worktree and applies its changes back. */
+      readonly isolation?: "shared" | "worktree" | undefined;
+    }) => Effect.Effect<
+      { readonly taskId: string; readonly model: string; readonly warning?: string | undefined },
+      CrewError
+    >;
+    /** Runs a worker or expert task that ended without finishing again, as a new task. */
+    readonly retryTask: (input: {
+      readonly threadId: ThreadId;
+      readonly taskId: string;
     }) => Effect.Effect<{ readonly taskId: string; readonly model: string }, CrewError>;
     readonly wait: (input: {
       readonly threadId: ThreadId;
@@ -142,6 +169,10 @@ interface CrewTaskRecord {
   readonly leadTurnId: TurnId | null;
   readonly role: CrewRole;
   readonly subject: string;
+  /** The repo-relative paths the task may change, when the lead named them. */
+  readonly writeScope?: ReadonlyArray<string> | undefined;
+  /** The task's own worktree, when it runs isolated from the lead's workspace. */
+  readonly worktree?: CrewWorktree | undefined;
   readonly attempts: CrewAttempt[];
   report: CrewTaskReport | null;
   /** The lead has this report: crew_wait returned it, or a follow-up turn carried it. */
@@ -152,6 +183,10 @@ interface CrewTaskRecord {
   readonly done: Deferred.Deferred<void>;
   readonly lock: Semaphore.Semaphore;
 }
+
+/** The thread of the last attempt that got as far as launching a crew thread. */
+const lastRunThreadId = (record: Pick<CrewTaskRecord, "attempts">) =>
+  record.attempts.findLast((attempt) => attempt.error !== "could not start")?.threadId;
 
 const encodeTaskRecovery = Schema.encodeEffect(CrewTaskRecoveryJson);
 const decodeTaskRecovery = Schema.decodeEffect(CrewTaskRecoveryJson);
@@ -168,6 +203,7 @@ export const make = Effect.gen(function* () {
   const recovery = yield* CrewRuntimeState;
   const receipts = yield* OrchestrationCommandReceiptRepository;
   const turns = yield* ProjectionTurnRepository;
+  const worktrees = yield* makeCrewWorktrees;
 
   // Watchers outlive the tool call that started them, so they run in the service's own scope.
   const watcherScope = yield* Scope.make("sequential");
@@ -221,6 +257,8 @@ export const make = Effect.gen(function* () {
         leadTurnId: record.leadTurnId,
         role: record.role,
         subject: record.subject,
+        writeScope: record.writeScope,
+        worktree: record.worktree,
         attempts: record.attempts,
         report: record.report,
         collected: record.collected,
@@ -325,7 +363,7 @@ export const make = Effect.gen(function* () {
       Effect.map((thread) => {
         if (Option.isNone(thread)) return null;
         const reply = thread.value.messages.findLast((message) => message.role === "assistant");
-        return reply === undefined ? null : reply.text.slice(0, RESULT_TEXT_LIMIT);
+        return reply === undefined ? null : reply.text;
       }),
       Effect.orElseSucceed(() => null),
     );
@@ -354,6 +392,8 @@ export const make = Effect.gen(function* () {
     readonly option: CrewModelOption;
     readonly subject: string;
     readonly prompt: string;
+    /** An isolated task works here, on no branch, instead of in the lead's workspace. */
+    readonly worktree?: CrewWorktree | undefined;
   }) {
     const threadId = input.threadId;
     const createdAt = yield* nowIso;
@@ -367,8 +407,8 @@ export const make = Effect.gen(function* () {
       modelSelection: input.option.selection,
       runtimeMode: input.lead.runtimeMode,
       interactionMode,
-      branch: input.lead.branch,
-      worktreePath: input.lead.worktreePath,
+      branch: input.worktree === undefined ? input.lead.branch : null,
+      worktreePath: input.worktree?.cwd ?? input.lead.worktreePath,
       parentThreadId: input.lead.id,
       createdAt,
     });
@@ -423,6 +463,61 @@ export const make = Effect.gen(function* () {
         ),
         Effect.orElseSucceed(() => ({ testsPassed: false, changesRequested: true })),
       );
+
+  /**
+   * What the board shows for a finished crew attempt: its thread's token and cost totals, and
+   * whether its last turn ended on a passing test run. Only this attempt counts; earlier models
+   * in the fallback chain are not added in. A turn's usage is appended just after its terminal
+   * status, so a thread without any yet gets a short wait for it.
+   */
+  const crewThreadFacts = (threadId: ThreadId) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* engine.subscribeDomainEvents;
+        const read = snapshots
+          .getThreadDetailById(threadId, {
+            activityKinds: [OWNED_USAGE_ACTIVITY_KIND, "tool.completed"],
+          })
+          .pipe(
+            Effect.map((thread) => ({
+              usage: Option.isNone(thread) ? null : crewThreadUsage(thread.value.activities),
+              testsPassed:
+                Option.isSome(thread) && thread.value.latestTurn !== null
+                  ? turnRanPassingTests(thread.value.latestTurn.turnId, thread.value.activities)
+                  : false,
+            })),
+          );
+        const first = yield* read;
+        if (first.usage !== null) return first;
+        yield* events.pipe(
+          Stream.filter(
+            (event) =>
+              event.aggregateId === threadId &&
+              event.type === "thread.activity-appended" &&
+              event.payload.activity.kind === OWNED_USAGE_ACTIVITY_KIND,
+          ),
+          Stream.runHead,
+          Effect.timeoutOption(Duration.seconds(1)),
+        );
+        return yield* read;
+      }),
+    ).pipe(Effect.catchCause(() => Effect.succeed({ usage: null, testsPassed: false })));
+
+  /** The `tested` and `usage` fields of a finished task's board activity. */
+  const completionEvidence = (
+    threadId: ThreadId,
+    role: CrewRole,
+    report: CrewMemberReport | undefined,
+  ) =>
+    crewThreadFacts(threadId).pipe(
+      Effect.map(({ usage, testsPassed }) => ({
+        // Observed (a passing test run in the thread) or self-reported by the member's JSON report.
+        ...(role === "auditor"
+          ? {}
+          : { tested: testsPassed || report?.verification?.passed === true }),
+        ...(usage === null ? {} : { usage }),
+      })),
+    );
 
   /** The last message the user wrote in a lead thread, skipping OOP's crew follow-ups. */
   const latestRequestText = (threadId: ThreadId) =>
@@ -685,6 +780,43 @@ export const make = Effect.gen(function* () {
       )
       .pipe(Effect.catchCause((cause) => Effect.logWarning("crew follow-up skipped", { cause })));
 
+  /** A worktree for an isolated task, or none when the lead's workspace cannot give it one. */
+  const isolate = (lead: OrchestrationThreadShell, taskId: string) =>
+    Effect.gen(function* () {
+      const project =
+        lead.worktreePath === null
+          ? yield* snapshots.getProjectShellById(lead.projectId)
+          : Option.none();
+      const cwd =
+        lead.worktreePath ?? Option.getOrNull(Option.map(project, (shell) => shell.workspaceRoot));
+      return cwd === null ? undefined : yield* worktrees.create({ taskId, cwd });
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("crew worktree could not be created", { error }).pipe(
+          Effect.as(undefined),
+        ),
+      ),
+    );
+
+  /**
+   * Applies an isolated member's changes to the lead's workspace once its turn ended. A note for
+   * the report comes back when they could not be applied and the worktree was kept.
+   */
+  const mergeIsolated = (record: CrewTaskRecord) =>
+    Effect.gen(function* () {
+      if (record.worktree === undefined) return null;
+      const result = yield* worktrees.mergeBack(record.worktree);
+      return result.merged ? null : mergeConflictNote(record.worktree, result);
+    });
+
+  /** A task that produced no usable result leaves the lead's workspace alone. */
+  const dropIsolated = (record: CrewTaskRecord) =>
+    record.worktree === undefined ? Effect.void : worktrees.discard(record.worktree);
+
+  /** A report's text with the merge note after it, which the clip must not cut. */
+  const withNote = (text: string | null, note: string | null) =>
+    note === null ? text : `${text ?? ""}${note}`;
+
   /**
    * Runs one crew task down its fallback chain. A model that fails hands the same task to the
    * next model in the chain; the lead's board shows each switch, and the brain only takes the
@@ -734,6 +866,8 @@ export const make = Effect.gen(function* () {
           turnId: input.leadTurnId,
           payload: {
             ...base,
+            // The board opens or stops this attempt's own thread.
+            threadId: attempt.threadId,
             model: option.label,
             // Clients color the task by the provider instance running this attempt.
             providerInstanceId: option.selection.instanceId,
@@ -756,6 +890,7 @@ export const make = Effect.gen(function* () {
             option,
             subject: input.subject,
             prompt: input.prompt,
+            worktree: record.worktree,
           }),
         );
         if (Exit.isFailure(launched)) {
@@ -767,12 +902,23 @@ export const make = Effect.gen(function* () {
         const threadId = launched.value;
         attempt.threadId = threadId;
         const status = yield* settled(threadId);
+        // Status and verdict are judged on the full report; only the stored result is clipped.
         const reply = yield* lastAssistantText(threadId);
         if (status === "completed" || status === "interrupted") {
-          const reportStatus =
-            status === "completed" && record.role !== "auditor" ? crewReportStatus(reply) : "done";
-          const outcome: CrewTaskOutcome = reportStatus === "done" ? status : reportStatus;
-          yield* finish({ status: outcome, result: reply });
+          const { status: memberStatus, report } = crewMemberOutcome(record.role, status, reply);
+          const kept = yield* mergeIsolated(record);
+          // Changes that did not reach the workspace leave the task unfinished.
+          const outcome: CrewTaskOutcome =
+            kept !== null && memberStatus === "completed" ? "partial" : memberStatus;
+          yield* finish({
+            status: outcome,
+            result: withNote(
+              reply === null ? null : clipCrewReport(reply, RESULT_TEXT_LIMIT),
+              kept,
+            ),
+            ...(report === null ? {} : { report }),
+          });
+          const evidence = yield* completionEvidence(threadId, record.role, report ?? undefined);
           if (record.role === "auditor" && status === "completed")
             yield* queueAuditFix(record, reply);
           yield* appendActivity({
@@ -782,6 +928,8 @@ export const make = Effect.gen(function* () {
             turnId: input.leadTurnId,
             payload: {
               ...base,
+              threadId,
+              ...evidence,
               model: option.label,
               status: outcome === "interrupted" ? "stopped" : outcome,
               ...(reply === null ? {} : { summary: reportExcerpt(reply) }),
@@ -801,13 +949,20 @@ export const make = Effect.gen(function* () {
       }
 
       const report = crewExhaustedReport(record.role, record.attempts);
+      yield* dropIsolated(record);
       yield* finish({ status: "failed", result: report });
       yield* appendActivity({
         threadId: input.lead.id,
         kind: "task.completed",
         summary: `${label} failed on every crew model; the lead takes it: ${input.subject}`,
         turnId: input.leadTurnId,
-        payload: { ...base, status: "failed", summary: reportExcerpt(report) },
+        payload: {
+          ...base,
+          // The last model that actually ran, so the board can open its thread.
+          ...(lastRunThreadId(record) === undefined ? {} : { threadId: lastRunThreadId(record) }),
+          status: "failed",
+          summary: reportExcerpt(report),
+        },
       });
       yield* updateTask(record, { ended: true });
       yield* flushFollowUps(record.leadThreadId);
@@ -821,6 +976,8 @@ export const make = Effect.gen(function* () {
     readonly subject: string;
     readonly prompt: string;
     readonly leadTurnId: TurnId | null;
+    readonly writeScope?: ReadonlyArray<string> | undefined;
+    readonly isolation?: "shared" | "worktree" | undefined;
     /** Run the task on the cheapest model available instead of the role's own. */
     readonly preferFast?: boolean;
   }) {
@@ -850,12 +1007,16 @@ export const make = Effect.gen(function* () {
       );
     }
     const taskId = yield* uuid;
+    const worktree =
+      input.isolation === "worktree" ? yield* isolate(input.lead, taskId) : undefined;
     const record: CrewTaskRecord = {
       taskId,
       leadThreadId: input.lead.id,
       leadTurnId: input.leadTurnId,
       role: input.role,
       subject: input.subject,
+      writeScope: input.writeScope,
+      worktree,
       attempts: [],
       report: null,
       collected: false,
@@ -866,11 +1027,19 @@ export const make = Effect.gen(function* () {
     };
     yield* persistTask(record);
     tasks.set(taskId, record);
-    yield* runTask({ ...input, taskId, record, chain }).pipe(
+    yield* runTask({
+      ...input,
+      prompt:
+        worktree === undefined ? input.prompt : `${input.prompt}\n\n${ISOLATED_CHECKOUT_PROMPT}`,
+      taskId,
+      record,
+      chain,
+    }).pipe(
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           yield* Effect.logWarning("crew task stopped", { cause });
           if (record.ended) return;
+          if (record.report === null) yield* dropIsolated(record);
           yield* endBrokenTask({
             lead: input.lead,
             leadTurnId: input.leadTurnId,
@@ -883,7 +1052,11 @@ export const make = Effect.gen(function* () {
       ),
       Effect.forkIn(watcherScope),
     );
-    return { taskId, model: `${first.label} (${first.providerLabel})` };
+    return {
+      taskId,
+      model: `${first.label} (${first.providerLabel})`,
+      isolated: worktree !== undefined,
+    };
   });
 
   const requireLead = Effect.fn("CrewService.requireLead")(function* (threadId: ThreadId) {
@@ -919,14 +1092,106 @@ export const make = Effect.gen(function* () {
       }
       const task = input.task.trim();
       if (task.length === 0) return yield* fail("Describe the task to hand over.");
-      return yield* startTask({
+      const writeScope = input.writeScope?.map((path) => path.trim()).filter((path) => path !== "");
+      const { isolated, ...started } = yield* startTask({
         lead,
         role: input.role,
         resolved,
         options,
         subject: input.title?.trim() || task,
-        prompt: delegatePrompt({ role: input.role, leadTitle: lead.title, task }),
+        prompt: delegatePrompt({
+          role: input.role,
+          leadTitle: lead.title,
+          task,
+          writeScope,
+          verify: input.verify,
+          doneWhen: input.doneWhen,
+        }),
         leadTurnId: lead.latestTurn?.turnId ?? null,
+        writeScope,
+        isolation: input.isolation,
+      });
+      // Tasks without a scope are unknown, so they stay out of the comparison, as do isolated
+      // ones: a task in its own worktree neither clobbers nor is clobbered.
+      const overlap = isolated
+        ? null
+        : writeScopeWarning(
+            overlappingWriteScopes(
+              writeScope ?? [],
+              [...tasks.values()]
+                .filter(
+                  (record) =>
+                    record.leadThreadId === lead.id &&
+                    record.report === null &&
+                    record.taskId !== started.taskId,
+                )
+                .map((record) => ({
+                  taskId: record.taskId,
+                  subject: record.subject,
+                  writeScope: record.writeScope,
+                  isolated: record.worktree !== undefined,
+                })),
+            ),
+          );
+      const warning = [
+        input.isolation === "worktree" && !isolated ? ISOLATION_FALLBACK_WARNING : null,
+        overlap,
+      ]
+        .filter((line) => line !== null)
+        .join("\n");
+      return warning === "" ? started : { ...started, warning };
+    },
+  );
+
+  /** The prompt a task's first crew thread was started with, or null once its threads are gone. */
+  const originalPrompt = (record: CrewTaskRecord) =>
+    Effect.gen(function* () {
+      for (const attempt of record.attempts) {
+        if (attempt.threadId === undefined || attempt.messageId === undefined) continue;
+        const detail = yield* snapshots
+          .getThreadDetailById(attempt.threadId)
+          .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationThread>()));
+        const text = Option.isSome(detail)
+          ? detail.value.messages.find((message) => message.id === attempt.messageId)?.text
+          : undefined;
+        if (text !== undefined) return text;
+      }
+      return null;
+    });
+
+  /**
+   * Runs a task that ended without finishing again as a new task on the same lead turn, so the board
+   * keeps both cards. The lead never waits on it; like any late crew result, its report reaches the
+   * lead through flushFollowUps once the task ends and the lead is idle.
+   */
+  const retryTask: CrewService["Service"]["retryTask"] = Effect.fn("CrewService.retryTask")(
+    function* (input) {
+      const lead = yield* requireLead(input.threadId);
+      const { resolved, options } = yield* crewFor(lead);
+      if (!resolved.enabled) return yield* fail("OOP Crew is off for this thread.");
+      const record = tasks.get(input.taskId);
+      if (record === undefined || record.leadThreadId !== lead.id) {
+        return yield* fail("This crew task is not available to retry.");
+      }
+      if (record.role === "auditor") {
+        return yield* fail("An audit runs again when the lead changes files.");
+      }
+      if (record.report === null || record.report.status === "completed") {
+        return yield* fail("Only a task that ended without finishing can be retried.");
+      }
+      const prompt = yield* originalPrompt(record);
+      if (prompt === null) return yield* fail("The task's original brief is no longer available.");
+      return yield* startTask({
+        lead,
+        role: record.role,
+        resolved,
+        options,
+        subject: record.subject,
+        prompt,
+        leadTurnId: record.leadTurnId,
+        writeScope: record.writeScope,
+        // A task that had its own worktree gets a fresh one; the old one is the earlier attempt's.
+        isolation: record.worktree === undefined ? undefined : "worktree",
       });
     },
   );
@@ -1032,6 +1297,16 @@ export const make = Effect.gen(function* () {
           files: payload.files.map((file) => file.path),
           request: yield* latestRequestText(payload.threadId),
           diff: yield* threadDiffForAudit(payload),
+          turnRefs:
+            payload.checkpointTurnCount > 0
+              ? {
+                  from: checkpointRefForThreadTurn(
+                    payload.threadId,
+                    payload.checkpointTurnCount - 1,
+                  ),
+                  to: payload.checkpointRef,
+                }
+              : null,
         }),
         leadTurnId: payload.turnId,
         preferFast: plan === "fast",
@@ -1057,7 +1332,7 @@ export const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const attempt = record.attempts.at(-1);
       if (attempt?.threadId === undefined || attempt.messageId === undefined) {
-        return Option.some<Pick<CrewTaskReport, "status" | "result">>({
+        return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
           status: "interrupted",
           result: "The server stopped before the worker start was recorded.",
         });
@@ -1067,21 +1342,19 @@ export const make = Effect.gen(function* () {
         (candidate) => candidate.pendingMessageId === attempt.messageId,
       );
       if (turn === undefined) {
-        return Option.some<Pick<CrewTaskReport, "status" | "result">>({
+        return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
           status: "interrupted",
           result: "The original worker turn is no longer available.",
         });
       }
       if (turn.state === "pending" || turn.state === "running") {
-        return Option.none<Pick<CrewTaskReport, "status" | "result">>();
+        return Option.none<Pick<CrewTaskReport, "status" | "result" | "report">>();
       }
       const detail = yield* snapshots.getThreadDetailById(attempt.threadId);
       const reply = Option.isSome(detail)
-        ? (detail.value.messages
-            .find(
-              (message) => message.id === turn.assistantMessageId && message.turnId === turn.turnId,
-            )
-            ?.text.slice(0, RESULT_TEXT_LIMIT) ?? null)
+        ? (detail.value.messages.find(
+            (message) => message.id === turn.assistantMessageId && message.turnId === turn.turnId,
+          )?.text ?? null)
         : null;
       const status =
         turn.state === "completed"
@@ -1089,11 +1362,11 @@ export const make = Effect.gen(function* () {
           : turn.state === "error"
             ? "failed"
             : "interrupted";
-      const reportStatus =
-        status === "completed" && record.role !== "auditor" ? crewReportStatus(reply) : "done";
-      return Option.some<Pick<CrewTaskReport, "status" | "result">>({
-        status: reportStatus === "done" ? status : reportStatus,
-        result: reply,
+      const { status: outcome, report } = crewMemberOutcome(record.role, status, reply);
+      return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
+        status: outcome,
+        result: reply === null ? null : clipCrewReport(reply, RESULT_TEXT_LIMIT),
+        ...(report === null ? {} : { report }),
       });
     });
 
@@ -1118,10 +1391,15 @@ export const make = Effect.gen(function* () {
             status: "interrupted" as const,
             result: null,
           }));
+          // An isolated member that got as far as a result is merged back; a failed one is dropped.
+          if (outcome.status === "failed") yield* dropIsolated(record);
+          const kept = outcome.status === "failed" ? null : yield* mergeIsolated(record);
           report = {
             taskId: record.taskId,
             role: record.role,
             ...outcome,
+            status: kept !== null && outcome.status === "completed" ? "partial" : outcome.status,
+            result: withNote(outcome.result, kept),
           };
           yield* updateTask(record, { report });
         }
@@ -1130,6 +1408,11 @@ export const make = Effect.gen(function* () {
           yield* queueAuditFix(record, report.result);
         }
         if (!record.ended) {
+          const threadId = lastRunThreadId(record);
+          const evidence =
+            threadId === undefined || report.status === "failed"
+              ? {}
+              : yield* completionEvidence(threadId, record.role, report.report);
           yield* appendActivity({
             threadId: record.leadThreadId,
             kind: "task.completed",
@@ -1140,6 +1423,8 @@ export const make = Effect.gen(function* () {
               title: record.subject,
               agentKind: "agent",
               crewRole: record.role,
+              ...(threadId === undefined ? {} : { threadId }),
+              ...evidence,
               status: report.status === "interrupted" ? "stopped" : report.status,
               ...(report.result === null ? {} : { summary: reportExcerpt(report.result) }),
               ...(record.role === "auditor" ? { verdict: auditVerdict(report.result) } : {}),
@@ -1223,7 +1508,7 @@ export const make = Effect.gen(function* () {
   yield* restoreTasks.pipe(
     Effect.catchCause((cause) => Effect.logWarning("crew restore failed", { cause })),
   );
-  if (Option.isNone(events)) return CrewService.of({ roster, delegate, wait });
+  if (Option.isNone(events)) return CrewService.of({ roster, delegate, retryTask, wait });
   yield* Stream.runForEach(events.value, (event) =>
     event.type === "thread.turn-diff-completed"
       ? maybeAudit(event.payload).pipe(
@@ -1237,7 +1522,7 @@ export const make = Effect.gen(function* () {
         : Effect.void,
   ).pipe(Effect.forkIn(watcherScope));
 
-  return CrewService.of({ roster, delegate, wait });
+  return CrewService.of({ roster, delegate, retryTask, wait });
 });
 
 export const layer = Layer.effect(CrewService, make).pipe(

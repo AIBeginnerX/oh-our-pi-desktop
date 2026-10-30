@@ -17,6 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   MessageId,
+  PROJECT_MEMORY_PENDING_PROPOSALS_MAX,
   PROJECT_MEMORY_THREAD_CHANGES_MAX,
   ProjectId,
   ProjectMemoryId,
@@ -1638,5 +1639,191 @@ describe("ProjectMemoryService", () => {
       assert.isTrue(ledger.mutationFenceHolds(beforeConflict));
 
       assert.isTrue(ledger.mutationFenceHolds(ledger.captureMutationFence()));
+    }));
+});
+
+describe("ProjectMemoryService agent proposals", () => {
+  const PROJECT = ProjectId.make("project-1");
+  const THREAD = ThreadId.make("thread-1");
+  const proposal = (overrides: { text?: string; reason?: string } = {}) => ({
+    projectId: PROJECT,
+    threadId: THREAD,
+    text: "Use pnpm, not npm, in this repo.\nThe lockfile is pnpm-lock.yaml.",
+    reason: "The user corrected me twice.",
+    ...overrides,
+  });
+
+  test("a pending proposal is invisible to list, search, get, and the memory table", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+
+      const pending = yield* service.propose(proposal());
+      assert.equal(pending.title, "Use pnpm, not npm, in this repo.");
+
+      assert.deepEqual((yield* service.list({ projectId: PROJECT })).items, []);
+      assert.deepEqual(
+        (yield* service.search({ projectId: PROJECT, query: "lockfile" })).items,
+        [],
+      );
+      assert.equal(yield* memoryRowCount, 0);
+      const listed = (yield* service.listProposals({ projectId: PROJECT })).items;
+      assert.deepEqual(
+        listed.map((item) => [item.proposalId, item.reason]),
+        [[pending.proposalId, "The user corrected me twice."]],
+      );
+      // Another project never sees it.
+      assert.deepEqual(
+        (yield* service.listProposals({ projectId: ProjectId.make("project-2") })).items,
+        [],
+      );
+    }));
+
+  test("approving moves the proposal into searchable memory exactly once", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const pending = yield* service.propose(proposal());
+
+      const approved = yield* service.approveProposal({
+        projectId: PROJECT,
+        proposalId: pending.proposalId,
+      });
+      assert.equal(approved.memory.kind, "fact");
+      assert.equal(approved.memory.title, pending.title);
+      assert.equal(approved.memory.body, pending.body);
+      assert.deepEqual(approved.memory.origin, { type: "manual" });
+
+      assert.deepEqual((yield* service.listProposals({ projectId: PROJECT })).items, []);
+      assert.deepEqual(
+        (yield* service.search({ projectId: PROJECT, query: "lockfile" })).items.map(
+          (item) => item.memoryId,
+        ),
+        [approved.memory.memoryId],
+      );
+
+      const again = yield* Effect.flip(
+        service.approveProposal({ projectId: PROJECT, proposalId: pending.proposalId }),
+      );
+      assert.equal(again._tag, "ProjectMemoryRejectedError");
+      assert.equal(yield* memoryRowCount, 1);
+    }));
+
+  test("rejecting deletes the proposal and creates no memory", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const pending = yield* service.propose(proposal());
+
+      yield* service.rejectProposal({ projectId: PROJECT, proposalId: pending.proposalId });
+      assert.deepEqual((yield* service.listProposals({ projectId: PROJECT })).items, []);
+      assert.equal(yield* memoryRowCount, 0);
+
+      const missing = yield* Effect.flip(
+        service.rejectProposal({ projectId: PROJECT, proposalId: pending.proposalId }),
+      );
+      assert.equal(missing._tag, "ProjectMemoryRejectedError");
+      const approveMissing = yield* Effect.flip(
+        service.approveProposal({ projectId: PROJECT, proposalId: pending.proposalId }),
+      );
+      assert.equal(approveMissing._tag, "ProjectMemoryRejectedError");
+    }));
+
+  test("a proposal can only be decided inside its own project", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      yield* seedProject("project-2");
+      const service = yield* ProjectMemoryService;
+      const pending = yield* service.propose(proposal());
+      const other = { projectId: ProjectId.make("project-2"), proposalId: pending.proposalId };
+
+      yield* Effect.flip(service.approveProposal(other));
+      yield* Effect.flip(service.rejectProposal(other));
+      assert.equal((yield* service.listProposals({ projectId: PROJECT })).items.length, 1);
+      assert.equal(yield* memoryRowCount, 0);
+    }));
+
+  test("rejects sensitive text and reasons without storing or echoing them", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const secret = ["sk", "live", "4eC39HqLyjWDarjtT1zdp7dc"].join("_");
+      const assignment = ["api_key", `"${secret}"`].join(" = ");
+
+      for (const attempt of [
+        proposal({ text: `Deploy with ${assignment}` }),
+        proposal({ reason: `I saw ${assignment}` }),
+      ]) {
+        const error = yield* Effect.flip(service.propose(attempt));
+        if (error._tag !== "ProjectMemoryRejectedError") {
+          throw new Error(`expected rejection, got ${error._tag}`);
+        }
+        assert.equal(error.reason, "sensitive");
+        assert.isFalse(error.message.includes("sk_"));
+      }
+      assert.deepEqual((yield* service.listProposals({ projectId: PROJECT })).items, []);
+    }));
+
+  test("rejects empty, oversized, and orphaned proposals", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const reasonOf = (input: Parameters<typeof service.propose>[0]) =>
+        Effect.map(Effect.flip(service.propose(input)), (error) =>
+          error._tag === "ProjectMemoryRejectedError" ? error.reason : error._tag,
+        );
+
+      assert.equal(yield* reasonOf(proposal({ text: "  " })), "empty");
+      assert.equal(yield* reasonOf(proposal({ reason: "" })), "empty");
+      assert.equal(yield* reasonOf(proposal({ text: "x".repeat(8001) })), "too-long");
+      assert.equal(yield* reasonOf(proposal({ reason: "x".repeat(501) })), "too-long");
+      assert.equal(
+        yield* reasonOf({ ...proposal(), projectId: ProjectId.make("missing") }),
+        "project-missing",
+      );
+    }));
+
+  test("caps pending proposals per project so a looping agent cannot flood review", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      yield* seedProject("project-2");
+      const service = yield* ProjectMemoryService;
+
+      for (let index = 0; index < PROJECT_MEMORY_PENDING_PROPOSALS_MAX; index += 1) {
+        yield* service.propose(proposal({ text: `Fact number ${index}` }));
+      }
+      const overflow = yield* Effect.flip(service.propose(proposal({ text: "One too many" })));
+      if (overflow._tag !== "ProjectMemoryRejectedError") {
+        throw new Error(`expected rejection, got ${overflow._tag}`);
+      }
+      assert.equal(overflow.reason, "proposal-limit");
+
+      // Another project has its own budget, and deciding one frees a slot.
+      yield* service.propose({ ...proposal(), projectId: ProjectId.make("project-2") });
+      const [first] = (yield* service.listProposals({ projectId: PROJECT })).items;
+      yield* service.rejectProposal({ projectId: PROJECT, proposalId: first!.proposalId });
+      yield* service.propose(proposal({ text: "Now there is room" }));
+    }));
+
+  test("a tombstoned project takes its pending proposals with it", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      yield* service.propose(proposal());
+
+      yield* tombstoneProject("project-1");
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly c: number }>`
+        SELECT COUNT(*) AS c FROM project_memory_proposals
+      `;
+      assert.equal(rows[0]?.c, 0);
     }));
 });

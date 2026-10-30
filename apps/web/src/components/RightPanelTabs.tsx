@@ -41,6 +41,7 @@ import {
 } from "react";
 
 import { isElectron } from "~/env";
+import { useT } from "~/i18n";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
@@ -63,6 +64,7 @@ import { useBrowserDefaults } from "~/browser/browserDefaults";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { faviconUrlForOrigin } from "~/lib/favicon";
+import { useLinkIconsEnabled } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
 import { useDeviceState } from "~/state/device";
 import {
@@ -343,12 +345,14 @@ function RightPanelEmptyState(props: {
   deviceAvailable: boolean;
   liveAgentCount: number;
 }) {
+  const t = useT();
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
 
   const actions = [
     {
       label: "Browser",
+      description: "Preview your app in a built-in browser.",
       icon: Globe2,
       shortcut: "B",
       available: props.browserAvailable,
@@ -358,6 +362,7 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Terminal",
+      description: "Run commands in this project.",
       icon: TerminalSquare,
       shortcut: "T",
       available: props.terminalAvailable,
@@ -367,6 +372,7 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Files",
+      description: "Browse and open project files.",
       icon: Files,
       shortcut: "F",
       available: props.filesAvailable,
@@ -376,6 +382,7 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Diff",
+      description: "Review this thread's changes.",
       icon: FileDiff,
       shortcut: "D",
       available: props.diffAvailable,
@@ -385,6 +392,7 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Pull request",
+      description: "Open this branch's pull request.",
       icon: PullRequestGlyph.pullRequest,
       shortcut: "P",
       available: props.pullRequestAvailable,
@@ -394,6 +402,7 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Linked pull requests",
+      description: "Pull requests linked to this thread.",
       icon: PullRequestGlyph.link,
       shortcut: "L",
       available: props.pullRequestsAvailable,
@@ -403,6 +412,7 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Agents",
+      description: "Who is working and on what.",
       icon: Bot,
       shortcut: "A",
       available: props.agentsAvailable,
@@ -551,7 +561,7 @@ function RightPanelEmptyState(props: {
                   type="button"
                   onClick={action.onClick}
                   className={cn(
-                    "flex h-20 w-full cursor-pointer flex-col justify-between rounded-xl border border-border/70 bg-card/40 p-3 text-left text-sm transition-colors group-hover:border-border group-hover:bg-accent/60",
+                    "flex h-24 w-full cursor-pointer flex-col justify-between rounded-xl border border-border/70 bg-card/40 p-3 text-left text-sm transition-colors group-hover:border-border group-hover:bg-accent/60",
                     isHighlighted(action) && "border-border bg-accent/60",
                   )}
                 >
@@ -561,11 +571,14 @@ function RightPanelEmptyState(props: {
                   </span>
                   <span
                     className={cn(
-                      "min-w-0 truncate font-medium",
+                      "flex min-w-0 flex-col",
                       action.label === "Browser" && props.browserProfiles.length > 1 && "pr-7",
                     )}
                   >
-                    {action.label}
+                    <span className="truncate font-medium">{action.label}</span>
+                    <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+                      {t(action.description)}
+                    </span>
                   </span>
                 </button>
                 {/*
@@ -601,23 +614,23 @@ function RightPanelEmptyState(props: {
                 ) : null}
               </div>
             ) : (
-              <DisabledReasonTooltip
+              <div
                 key={action.label}
-                reason={action.disabledReason}
-                trigger={
-                  <div
-                    tabIndex={0}
-                    aria-disabled="true"
-                    className="flex h-20 w-full cursor-default flex-col justify-between rounded-xl border border-dashed border-border/70 p-3 text-left text-sm opacity-50"
-                  >
-                    <span className="flex items-start justify-between gap-2">
-                      {actionIcon(action, "size-5")}
-                      <Kbd>{action.shortcut}</Kbd>
-                    </span>
-                    <span className="min-w-0 truncate font-medium">{action.label}</span>
-                  </div>
-                }
-              />
+                tabIndex={0}
+                aria-disabled="true"
+                className="flex h-24 w-full cursor-default flex-col justify-between rounded-xl border border-dashed border-border/70 p-3 text-left text-sm opacity-50"
+              >
+                <span className="flex items-start justify-between gap-2">
+                  {actionIcon(action, "size-5")}
+                  <Kbd>{action.shortcut}</Kbd>
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate font-medium">{action.label}</span>
+                  <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+                    {t(action.disabledReason)}
+                  </span>
+                </span>
+              </div>
             ),
           )}
         </div>
@@ -669,7 +682,8 @@ function surfaceTitle(
 }
 
 function PreviewFavicon({ capturedUrl, url }: { capturedUrl: string | null; url: string | null }) {
-  const publicProviderUrl = faviconUrlForOrigin(url, 32);
+  const loadLinkIcons = useLinkIconsEnabled();
+  const publicProviderUrl = faviconUrlForOrigin(url, 32, loadLinkIcons);
   return (
     <FaviconImage
       sources={[capturedUrl, publicProviderUrl]}
@@ -780,15 +794,12 @@ export function resolvePullRequestTabLink(
   return newest;
 }
 
-function PullRequestSurfaceIcon({
-  surface,
-  environmentId,
-  seed,
-}: {
-  surface: Extract<RightPanelSurface, { kind: "pull-request" }>;
-  environmentId: EnvironmentId | null;
-  seed: PullRequestTabStatusSeed | undefined;
-}) {
+/** The best state known for a pull request tab: linked snapshot, then live detail, then the seed. */
+function usePullRequestTabStatus(
+  surface: Extract<RightPanelSurface, { kind: "pull-request" }>,
+  environmentId: EnvironmentId | null,
+  seed: PullRequestTabStatusSeed | undefined,
+) {
   const resolvedEnvironmentId =
     (surface.environmentId as EnvironmentId | undefined) ?? environmentId;
   const projects = useProjects();
@@ -839,17 +850,49 @@ function PullRequestSurfaceIcon({
   // their own presentation on surfaces that have mergeability, while this tab stays stable as
   // detail data arrives.
   const status = linkedSnapshot ?? newestPullRequestSummary(detail, sharedSummary) ?? seed ?? null;
+  if (status === null) return null;
+  return {
+    state: status.state,
+    isDraft: status.isDraft ?? detail?.isDraft ?? seed?.isDraft ?? false,
+    title: "title" in status ? status.title : null,
+  };
+}
+
+function PullRequestSurfaceIcon(props: {
+  surface: Extract<RightPanelSurface, { kind: "pull-request" }>;
+  environmentId: EnvironmentId | null;
+  seed: PullRequestTabStatusSeed | undefined;
+}) {
+  const status = usePullRequestTabStatus(props.surface, props.environmentId, props.seed);
   if (status === null) {
     return <PullRequestGlyph.pullRequest className="size-3 shrink-0 text-muted-foreground" />;
   }
-  const presentation = resolvePullRequestState({
-    state: status.state,
-    isDraft: status.isDraft ?? detail?.isDraft ?? seed?.isDraft ?? false,
-  });
+  const presentation = resolvePullRequestState(status);
   return <presentation.Icon className={cn("size-3 shrink-0", presentation.toneClassName)} />;
 }
 
+/** `owner/repo#123 · title · state`, as far as the tab's pull request data is known. */
+export function pullRequestTabTooltipText(
+  reference: { repository: string; number: number },
+  status: { state: PullRequestState; isDraft: boolean; title: string | null } | null,
+): string {
+  const parts = [`${reference.repository}#${reference.number}`];
+  if (status?.title) parts.push(status.title);
+  if (status) parts.push(resolvePullRequestState(status).label);
+  return parts.join(" · ");
+}
+
+function PullRequestTabTooltip(props: {
+  surface: Extract<RightPanelSurface, { kind: "pull-request" }>;
+  environmentId: EnvironmentId | null;
+  seed: PullRequestTabStatusSeed | undefined;
+}) {
+  const status = usePullRequestTabStatus(props.surface, props.environmentId, props.seed);
+  return <>{pullRequestTabTooltipText(props.surface, status)}</>;
+}
+
 export function RightPanelTabs(props: RightPanelTabsProps) {
+  const t = useT();
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const browserProfiles = useBrowserDefaults().profiles;
   const { resolvedTheme } = useTheme();
@@ -1165,6 +1208,10 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
               const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const workingCount =
+                surface.kind === "agents" || surface.kind === "workflows"
+                  ? props.liveAgentCount
+                  : 0;
               const previewTabId = previewTabIdOf(surface, props.previewSessions);
               // Desktop state is keyed by the session id, but desktop actions
               // must be addressed with the runtime id.
@@ -1201,9 +1248,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                       environmentId={props.environmentId}
                       pullRequestStatusSeeds={props.pullRequestStatusSeeds}
                     />
-                    {pending ? (
+                    {pending || workingCount > 0 ? (
                       <span
-                        className="absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full bg-current"
+                        className={cn(
+                          "absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full",
+                          pending ? "bg-current" : "bg-info",
+                        )}
                         aria-hidden
                       />
                     ) : null}
@@ -1282,6 +1332,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                             environmentId={props.environmentId}
                             title={title}
                           />
+                        ) : surface.kind === "pull-request" ? (
+                          <PullRequestTabTooltip
+                            surface={surface}
+                            environmentId={props.environmentId}
+                            seed={props.pullRequestStatusSeeds?.[surface.id]}
+                          />
+                        ) : workingCount > 0 ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span>{title}</span>
+                            <span className="text-muted-foreground">
+                              {t("{count} working", { count: workingCount })}
+                            </span>
+                          </div>
                         ) : (
                           title
                         )}

@@ -82,14 +82,17 @@ export function verifyFeed({ releaseDir, dir, platform, expectedVersion, scratch
   return { dir, version: feed.version, pkg: feed.pkg, sha256, problems };
 }
 
-/** Checks every platform against the version in `repoRoot`/OOP_RELEASE.json. */
-export function verifyReleaseFeeds({ repoRoot, releaseDir }) {
+/**
+ * Checks each platform folder (`dirs`, default all) against the version in
+ * `repoRoot`/OOP_RELEASE.json.
+ */
+export function verifyReleaseFeeds({ repoRoot, releaseDir, dirs = PLATFORMS.map((p) => p.dir) }) {
   const expectedVersion = JSON.parse(
     NodeFS.readFileSync(NodePath.join(repoRoot, "OOP_RELEASE.json"), "utf8"),
   ).version;
   const scratchDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oop-feed-verify-"));
   try {
-    const results = PLATFORMS.map((entry) =>
+    const results = PLATFORMS.filter((entry) => dirs.includes(entry.dir)).map((entry) =>
       verifyFeed({ releaseDir, ...entry, expectedVersion, scratchDir }),
     );
     return {

@@ -482,7 +482,7 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
 - **소스 빌드는 ad hoc 서명**이며 Developer ID도 공증도 없습니다. 바이너리 설치 프로그램은 SHA-256을 검증하며 Gatekeeper 격리 속성이나 SmartScreen을 우회하지 않습니다.
 - **로컬 폴더 업데이터**는 업데이트 폴더에 쓸 수 있는 모든 사람을 신뢰합니다. SHA-256 검사는 손상만 감지할 수 있습니다.
 
-**텔레메트리.** OOP에는 서버가 없으며 메인테이너는 사용자의 앱에서 아무것도 받지 않습니다. 업스트림에서 물려받은 서버 코드에는 익명의 PostHog 사용 현황 리포터가 들어 있습니다(업스트림 프로젝트의 키와 `us.i.posthog.com`을 사용). OOP는 이를 **기본적으로 꺼 두므로**, 직접 켜지 않는 한 아무것도 전송되지 않습니다. 켜려면 서버를 시작하기 전에 서버 환경에 `T3CODE_TELEMETRY_ENABLED=true`를 설정하세요([`docs/user/telemetry.md`](docs/user/telemetry.md) 참고). 켜면 이벤트에는 provider, 모델, 추론 강도, 권한 모드, 턴 결과, 소요 시간, 메인 에이전트의 토큰 합계가 포함되며 해시 처리된 계정 또는 설치 식별자와 연결됩니다. 문서에 따르면 프롬프트, 응답, 파일 내용, 인증 토큰, 대화 ID는 절대 포함되지 않습니다.
+**텔레메트리.** OOP에는 서버가 없으며 메인테이너는 사용자의 앱에서 아무것도 받지 않습니다. 업스트림에서 물려받은 서버 코드에는 익명의 PostHog 사용 현황 리포터가 들어 있습니다(OOP에는 프로젝트 키가 들어 있지 않음). OOP는 이를 **기본적으로 꺼 두므로**, 직접 켜지 않는 한 아무것도 전송되지 않습니다. 켜려면 서버를 시작하기 전에 서버 환경에 `T3CODE_TELEMETRY_ENABLED=true`와 본인의 PostHog 프로젝트 키(`T3CODE_POSTHOG_KEY`)를 설정하세요([`docs/user/telemetry.md`](docs/user/telemetry.md) 참고). 켜면 이벤트에는 provider, 모델, 추론 강도, 권한 모드, 턴 결과, 소요 시간, 메인 에이전트의 토큰 합계가 포함되며 해시 처리된 계정 또는 설치 식별자와 연결됩니다. 문서에 따르면 프롬프트, 응답, 파일 내용, 인증 토큰, 대화 ID는 절대 포함되지 않습니다.
 
 취약점을 신고하려면 [SECURITY.md](SECURITY.md)를 참고하세요.
 

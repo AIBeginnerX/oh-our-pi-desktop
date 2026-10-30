@@ -31,6 +31,7 @@ import {
   ClientSurface,
   ClientWebDeployment,
   CommandId,
+  CrewRetryTaskError,
   type DiscoveredLocalServerList,
   EventId,
   type EditorId,
@@ -151,6 +152,7 @@ import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
+import * as CrewService from "./crew/CrewService.ts";
 import * as ProjectMemoryService from "./memory/ProjectMemoryService.ts";
 import * as ProjectSkillService from "./skills/ProjectSkillService.ts";
 import * as SelectedChecks from "./selectedChecks/SelectedChecks.ts";
@@ -770,6 +772,7 @@ const makeWsRpcLayer = (
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const releaseVerification = yield* ReleaseVerification.ReleaseVerification;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
+      const crew = yield* CrewService.CrewService;
       const projectMemory = yield* ProjectMemoryService.ProjectMemoryService;
       const projectSkills = yield* ProjectSkillService.ProjectSkillService;
       const selectedChecks = yield* SelectedChecks.SelectedChecks;
@@ -2871,6 +2874,15 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "usage" },
           ),
+        [WS_METHODS.crewRetryTask]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.crewRetryTask,
+            crew.retryTask({ threadId: input.leadThreadId, taskId: input.taskId }).pipe(
+              Effect.map(({ taskId }) => ({ taskId })),
+              Effect.mapError((error) => new CrewRetryTaskError({ reason: error.reason })),
+            ),
+            { "rpc.aggregate": "crew" },
+          ),
         [WS_METHODS.serverRefreshUsageRates]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRefreshUsageRates, usage.refreshRates, {
             "rpc.aggregate": "server",
@@ -3359,6 +3371,24 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             WS_METHODS.projectMemoryAcknowledgeThread,
             projectMemory.acknowledgeThread(input),
+            { "rpc.aggregate": "memory" },
+          ),
+        [WS_METHODS.projectMemoryListProposals]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectMemoryListProposals,
+            projectMemory.listProposals(input),
+            { "rpc.aggregate": "memory" },
+          ),
+        [WS_METHODS.projectMemoryApproveProposal]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectMemoryApproveProposal,
+            projectMemory.approveProposal(input),
+            { "rpc.aggregate": "memory" },
+          ),
+        [WS_METHODS.projectMemoryRejectProposal]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectMemoryRejectProposal,
+            projectMemory.rejectProposal(input),
             { "rpc.aggregate": "memory" },
           ),
         [WS_METHODS.projectSkillList]: (input) =>
@@ -4179,6 +4209,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         ),
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
+    const crew = yield* CrewService.CrewService;
     const sql = yield* SqlClient.SqlClient;
     const orchestrationEventStore = yield* OrchestrationEventStore;
     return HttpRouter.add(
@@ -4230,6 +4261,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               // One server-lifetime service means clients share the same PR caches, and a WS
               // mutation invalidates the HTTP diff cache that every client reads from.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
+              // The crew service owns the running tasks, so every connection uses the one the MCP tools use.
+              Layer.provide(Layer.succeed(CrewService.CrewService, crew)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

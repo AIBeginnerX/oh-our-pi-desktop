@@ -224,6 +224,9 @@ import {
   ProjectMemoryListInput,
   ProjectMemoryListResult,
   ProjectMemoryNotFoundError,
+  ProjectMemoryProposalDecisionInput,
+  ProjectMemoryProposalListInput,
+  ProjectMemoryProposalListResult,
   ProjectMemoryRejectedError,
   ProjectMemorySearchInput,
   ProjectMemorySearchResult,
@@ -348,6 +351,7 @@ import {
   OwnedResultUsageOutcome,
   OwnedResultUsageReadError,
 } from "./ownedUsage.ts";
+import { CrewRetryTaskError, CrewRetryTaskInput, CrewRetryTaskResult } from "./crew.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -489,6 +493,9 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
   usageGetThreadResults: "usage.getThreadResults",
 
+  // Crew methods
+  crewRetryTask: "crew.retryTask",
+
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
@@ -541,6 +548,9 @@ export const WS_METHODS = {
   projectMemoryDelete: "projectMemory.delete",
   projectMemoryThreadState: "projectMemory.threadState",
   projectMemoryAcknowledgeThread: "projectMemory.acknowledgeThread",
+  projectMemoryListProposals: "projectMemory.listProposals",
+  projectMemoryApproveProposal: "projectMemory.approveProposal",
+  projectMemoryRejectProposal: "projectMemory.rejectProposal",
 
   // Project skill methods
   projectSkillList: "projectSkill.list",
@@ -820,6 +830,12 @@ export const WsUsageGetThreadResultsRpc = Rpc.make(WS_METHODS.usageGetThreadResu
   payload: OwnedResultUsageInput,
   success: OwnedResultUsageOutcome,
   error: Schema.Union([EnvironmentAuthorizationError, OwnedResultUsageReadError]),
+});
+
+const WsCrewRetryTaskRpc = Rpc.make(WS_METHODS.crewRetryTask, {
+  payload: CrewRetryTaskInput,
+  success: CrewRetryTaskResult,
+  error: Schema.Union([CrewRetryTaskError, EnvironmentAuthorizationError]),
 });
 
 /**
@@ -1182,6 +1198,32 @@ const WsProjectMemoryDeleteRpc = Rpc.make(WS_METHODS.projectMemoryDelete, {
   error: Schema.Union([
     ProjectMemoryNotFoundError,
     ProjectMemoryConflictError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsProjectMemoryListProposalsRpc = Rpc.make(WS_METHODS.projectMemoryListProposals, {
+  payload: ProjectMemoryProposalListInput,
+  success: ProjectMemoryProposalListResult,
+  error: Schema.Union([ProjectMemoryStoreError, EnvironmentAuthorizationError]),
+});
+
+const WsProjectMemoryApproveProposalRpc = Rpc.make(WS_METHODS.projectMemoryApproveProposal, {
+  payload: ProjectMemoryProposalDecisionInput,
+  success: ProjectMemoryWriteResult,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsProjectMemoryRejectProposalRpc = Rpc.make(WS_METHODS.projectMemoryRejectProposal, {
+  payload: ProjectMemoryProposalDecisionInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
     ProjectMemoryStoreError,
     EnvironmentAuthorizationError,
   ]),
@@ -1864,6 +1906,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsUsageGetThreadResultsRpc,
+  WsCrewRetryTaskRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
@@ -1919,6 +1962,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectMemoryDeleteRpc,
   WsProjectMemoryThreadStateRpc,
   WsProjectMemoryAcknowledgeThreadRpc,
+  WsProjectMemoryListProposalsRpc,
+  WsProjectMemoryApproveProposalRpc,
+  WsProjectMemoryRejectProposalRpc,
   WsProjectSkillListRpc,
   WsProjectSkillGetRpc,
   WsProjectSkillCreateCandidateRpc,

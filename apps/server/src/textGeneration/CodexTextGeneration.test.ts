@@ -133,6 +133,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
 function withFakeCodexEnv<A, E, R>(
   input: FakeCodexInput & {
     launchArgs?: string;
+    analyticsConfig?: string;
     environment?: NodeJS.ProcessEnv;
     models?: ReadonlyArray<string>;
     managedRuntime?: boolean;
@@ -143,7 +144,14 @@ function withFakeCodexEnv<A, E, R>(
     const fs = yield* FileSystem.FileSystem;
     const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-codex-text-" });
     const codexPath = yield* makeFakeCodexBinary(tempDir, input);
-    const config = decodeCodexSettings({ binaryPath: codexPath, launchArgs: input.launchArgs });
+    if (input.analyticsConfig !== undefined) {
+      yield* fs.writeFileString(`${tempDir}/config.toml`, input.analyticsConfig);
+    }
+    const config = decodeCodexSettings({
+      binaryPath: codexPath,
+      homePath: tempDir,
+      launchArgs: input.launchArgs,
+    });
     const textGeneration = yield* makeCodexTextGeneration(
       config,
       input.environment,
@@ -263,6 +271,48 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
         }),
     ),
   );
+
+  for (const managedRuntime of [false, true]) {
+    it.effect(
+      `disables analytics for ${managedRuntime ? "managed" : "native"} text generation`,
+      () =>
+        withFakeCodexEnv(
+          {
+            output: JSON.stringify({ subject: "Update project", body: "" }),
+            managedRuntime,
+            requireArg: "analytics.enabled=false",
+          },
+          (textGeneration) =>
+            textGeneration.generateCommitMessage({
+              cwd: process.cwd(),
+              branch: "feature/analytics",
+              stagedSummary: "M README.md",
+              stagedPatch: "diff --git a/README.md b/README.md",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            }),
+        ),
+    );
+  }
+
+  for (const enabled of [false, true]) {
+    it.effect(`preserves analytics.enabled=${enabled} for text generation`, () =>
+      withFakeCodexEnv(
+        {
+          output: JSON.stringify({ subject: "Update project", body: "" }),
+          analyticsConfig: `[analytics]\nenabled = ${enabled}\n`,
+          forbidArg: "analytics.enabled=false",
+        },
+        (textGeneration) =>
+          textGeneration.generateCommitMessage({
+            cwd: process.cwd(),
+            branch: "feature/analytics",
+            stagedSummary: "M README.md",
+            stagedPatch: "diff --git a/README.md b/README.md",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          }),
+      ),
+    );
+  }
 
   it.effect("passes exec-safe launch args into codex exec", () =>
     withFakeCodexEnv(

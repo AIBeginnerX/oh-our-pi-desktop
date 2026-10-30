@@ -11,6 +11,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopAppSettings from "./DesktopAppSettings.ts";
 
 const DesktopSettingsPatch = Schema.Struct({
+  menuLanguage: Schema.optionalKey(Schema.Literals(["system", "en", "ko", "ja", "zh-CN", "es"])),
   linuxPasswordStore: Schema.optionalKey(
     Schema.Literals(["auto", "gnome-libsecret", "kwallet", "kwallet5", "kwallet6"]),
   ),
@@ -123,6 +124,7 @@ describe("DesktopSettings", () => {
     assert.deepEqual(
       DesktopAppSettings.resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1"),
       {
+        menuLanguage: "system",
         linuxPasswordStore: "auto",
         localEnvironmentEnabled: true,
         mainWindowBounds: null,
@@ -153,6 +155,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          menuLanguage: "system",
           linuxPasswordStore: "gnome-libsecret",
           localEnvironmentEnabled: true,
           mainWindowBounds: null,
@@ -182,6 +185,10 @@ describe("DesktopSettings", () => {
         assert.isTrue(updateChannel.changed);
         assert.equal(updateChannel.settings.updateChannel, "nightly");
         assert.equal(updateChannel.settings.updateChannelConfiguredByUser, true);
+
+        const menuLanguage = yield* settings.setMenuLanguage("ko");
+        assert.isTrue(menuLanguage.changed);
+        assert.equal(menuLanguage.settings.menuLanguage, "ko");
       }),
     ),
   );
@@ -261,6 +268,7 @@ describe("DesktopSettings", () => {
         );
 
         assert.deepEqual(yield* settings.load, {
+          menuLanguage: "system",
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
           mainWindowBounds: { x: 120, y: 80, width: 1280, height: 900 },
@@ -318,6 +326,7 @@ describe("DesktopSettings", () => {
           );
 
           assert.deepEqual(yield* settings.load, {
+            menuLanguage: "system",
             linuxPasswordStore: "auto",
             localEnvironmentEnabled: true,
             mainWindowBounds: null,
@@ -344,6 +353,7 @@ describe("DesktopSettings", () => {
 
         yield* settings.setMainWindowBounds({ x: -1200, y: 40, width: 1440, height: 960 }, true);
         yield* settings.setServerExposureMode("network-accessible");
+        yield* settings.setMenuLanguage("ko");
 
         const persisted = yield* decodeDesktopSettingsPatch(
           yield* fileSystem.readFileString(environment.desktopSettingsPath),
@@ -352,6 +362,7 @@ describe("DesktopSettings", () => {
           mainWindowBounds: { x: -1200, y: 40, width: 1440, height: 960 },
           mainWindowMaximized: true,
           serverExposureMode: "network-accessible",
+          menuLanguage: "ko",
         } satisfies typeof DesktopSettingsPatch.Type);
       }),
     ),
@@ -367,6 +378,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          menuLanguage: "system",
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
           mainWindowBounds: null,
@@ -396,6 +408,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          menuLanguage: "system",
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
           mainWindowBounds: null,
@@ -424,6 +437,7 @@ describe("DesktopSettings", () => {
         });
 
         assert.deepEqual(yield* settings.load, {
+          menuLanguage: "system",
           linuxPasswordStore: "auto",
           localEnvironmentEnabled: true,
           mainWindowBounds: null,

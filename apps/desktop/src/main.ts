@@ -233,6 +233,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   desktopSshLayer,
 ).pipe(
   Layer.provideMerge(desktopSnapShotLayer),
+  Layer.provideMerge(desktopFoundationLayer),
   Layer.provideMerge(DesktopUpdates.layer),
   Layer.provideMerge(desktopWslBackendLayer),
   Layer.provideMerge(desktopLocalEnvironmentAuthLayer),

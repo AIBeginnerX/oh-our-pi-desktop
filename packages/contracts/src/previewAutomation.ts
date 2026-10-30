@@ -671,7 +671,9 @@ export class McpCapabilityUnavailableError extends Schema.TaggedError<McpCapabil
   },
 ) {
   override get message(): string {
-    return `MCP credential does not grant the ${this.capability} capability.`;
+    return this.capability === "memory"
+      ? "Project memory is off for this thread: it is not shared with this thread's provider. Do not retry memory_recall or memory_propose; continue without them."
+      : `MCP credential does not grant the ${this.capability} capability.`;
   }
 }
 

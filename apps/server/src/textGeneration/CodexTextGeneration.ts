@@ -20,7 +20,11 @@ import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
-import { codexExecLaunchArgs, resolveCodexLaunchArgs } from "../provider/Layers/codexLaunchArgs.ts";
+import {
+  codexExecLaunchArgs,
+  resolveCodexLaunchArgs,
+  withCodexAnalyticsDefault,
+} from "../provider/Layers/codexLaunchArgs.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
@@ -207,8 +211,13 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
       const serviceTier = resolved ? undefined : getCodexServiceTierOptionValue(modelSelection);
-      const spawnCommand = yield* resolveSpawnCommand(
-        effectiveConfig.binaryPath || "codex",
+      const processEnvironment = {
+        ...effectiveEnvironment,
+        ...(effectiveConfig.homePath
+          ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
+          : {}),
+      };
+      const args = yield* withCodexAnalyticsDefault(
         [
           "exec",
           ...codexExecLaunchArgs(launchArgs),
@@ -228,15 +237,13 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...imagePaths.flatMap((imagePath) => ["--image", imagePath]),
           "-",
         ],
-        { env: effectiveEnvironment },
+        { ...process.env, ...processEnvironment },
       );
+      const spawnCommand = yield* resolveSpawnCommand(effectiveConfig.binaryPath || "codex", args, {
+        env: processEnvironment,
+      });
       const command = ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-        env: {
-          ...effectiveEnvironment,
-          ...(effectiveConfig.homePath
-            ? { CODEX_HOME: expandHomePath(effectiveConfig.homePath) }
-            : {}),
-        },
+        env: processEnvironment,
         cwd,
         shell: spawnCommand.shell,
         stdin: {

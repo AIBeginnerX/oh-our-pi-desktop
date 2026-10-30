@@ -6,8 +6,8 @@
 import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
 import type { AgentPanelModel, RuntimeSubagent } from "./state/subagentRuntime.ts";
-import { THINKING_NODE_PREFIX, leadFlowSummary, threadFlows } from "./threadFlow.ts";
-import type { WorkflowGraph, WorkflowNode } from "./workflowGraph.ts";
+import { THINKING_NODE_PREFIX, leadFlowSummary, threadFlows, toolCounts } from "./threadFlow.ts";
+import type { ToolCount, WorkflowDoing, WorkflowGraph, WorkflowNode } from "./workflowGraph.ts";
 
 export type AgentFlowState = "working" | "thinking" | "waiting" | "done" | "failed" | "stopped";
 
@@ -27,6 +27,9 @@ export interface AgentFlowEntry {
   readonly startedAt: string | null;
   /** When it settled; null while it runs. Clients tick elapsed time from these. */
   readonly completedAt: string | null;
+  /** On the lead: its tool calls this turn by category, and what it does right now. */
+  readonly tools?: ReadonlyArray<ToolCount>;
+  readonly doing?: WorkflowDoing;
 }
 
 export interface AgentFlowBox {
@@ -36,6 +39,9 @@ export interface AgentFlowBox {
   readonly detail: string | null;
   readonly state: AgentFlowState;
   readonly startedAt: string;
+  /** On a run of the lead's own work: what it did by category, and what it does right now. */
+  readonly tools?: ReadonlyArray<ToolCount>;
+  readonly doing?: WorkflowDoing;
 }
 
 export interface AgentFlow {
@@ -103,17 +109,6 @@ function crewTasks(activities: ReadonlyArray<OrchestrationThreadActivity>) {
   return tasks;
 }
 
-/** "Run 5 · Read 3 · Edit 1": what the lead did most, from its step labels. */
-function verbCounts(nodes: ReadonlyArray<WorkflowNode>): string | undefined {
-  const counts = new Map<string, number>();
-  for (const node of nodes) {
-    const verb = node.label.split(" · ")[0]?.trim();
-    if (verb) counts.set(verb, (counts.get(verb) ?? 0) + 1);
-  }
-  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
-  return top.length === 0 ? undefined : top.map(([verb, n]) => `${verb} ${n}`).join(" · ");
-}
-
 function newestTurn(flows: ReadonlyArray<WorkflowGraph>): WorkflowGraph | undefined {
   return flows
     .filter((flow) => flow.kind === "turn")
@@ -142,15 +137,20 @@ export function agentFlow(input: {
   const crew = crewTasks(input.activities);
 
   const leadState: AgentFlowState = lead === null ? "done" : lead.state;
-  const verbs = verbCounts(steps);
   const leadSummary =
     lead === null
       ? "Ready for the next request"
       : lead.state === "thinking"
         ? `Working out the next step · ${lead.steps} steps so far`
         : lead.state === "working"
-          ? `${lead.current?.label ?? "Working"} · step ${lead.steps}`
-          : `Finished the turn · ${lead.steps} step${lead.steps === 1 ? "" : "s"}${verbs ? ` · ${verbs}` : ""}`;
+          ? `Working · step ${lead.steps}`
+          : `Finished the turn · ${lead.steps} step${lead.steps === 1 ? "" : "s"}`;
+  const leadDoing: WorkflowDoing | undefined =
+    lead?.state === "working"
+      ? (lead.current?.category ?? "waiting")
+      : lead?.state === "thinking"
+        ? "thinking"
+        : undefined;
 
   const subagents: RuntimeSubagent[] = [
     ...input.agents.workflows.map((group) => group.workflow),
@@ -207,6 +207,8 @@ export function agentFlow(input: {
       summary: leadSummary,
       startedAt: turn?.startedAt ?? null,
       completedAt: null,
+      tools: lead?.tools ?? [],
+      ...(leadDoing === undefined ? {} : { doing: leadDoing }),
     },
     ...others,
   ];
@@ -220,22 +222,23 @@ export function agentFlow(input: {
   let run: WorkflowNode[] = [];
   const flushRun = () => {
     const first = run[0];
-    const last = run.at(-1);
-    if (first === undefined || last === undefined) return;
-    const running = run.some((node) => node.state === "running");
+    if (first === undefined) return;
+    const running = run.find((node) => node.state === "running");
     boxes.push({
       id: `lead:${first.id}`,
       agentId: LEAD_AGENT_ID,
-      title: last.label,
-      detail: run.length === 1 ? null : `${run.length} steps`,
+      title: "Main agent",
+      detail: null,
       state: running ? "working" : run.some((node) => node.state === "failed") ? "failed" : "done",
       startedAt: first.info.startedAt ?? turnStart,
+      tools: toolCounts(run.map((node) => node.info.toolCategory)),
+      ...(running === undefined ? {} : { doing: running.info.toolCategory ?? "waiting" }),
     });
     run = [];
   };
-  const sortedSteps = [...steps].sort((a, b) =>
-    (a.info.startedAt ?? "").localeCompare(b.info.startedAt ?? ""),
-  );
+  const sortedSteps = steps
+    .filter((node) => node.info.toolCategory !== undefined)
+    .sort((a, b) => (a.info.startedAt ?? "").localeCompare(b.info.startedAt ?? ""));
   let next = 0;
   for (const step of sortedSteps) {
     const at = step.info.startedAt ?? "";
@@ -258,6 +261,7 @@ export function agentFlow(input: {
       agentId: LEAD_AGENT_ID,
       title: "Working out the next step",
       detail: null,
+      doing: "thinking",
       state: "thinking",
       startedAt: turn?.updatedAt ?? turnStart,
     });

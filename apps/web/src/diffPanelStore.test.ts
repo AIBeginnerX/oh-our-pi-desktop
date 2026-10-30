@@ -2,7 +2,11 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId, TurnId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "./diffPanelStore";
+import {
+  selectThreadDiffPanelSelection,
+  selectThreadViewedDiffMarks,
+  useDiffPanelStore,
+} from "./diffPanelStore";
 
 const THREAD_REF = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-1"));
 
@@ -11,6 +15,7 @@ describe("diffPanelStore", () => {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      viewedMarksByThreadKey: {},
     }),
   );
 
@@ -108,5 +113,21 @@ describe("diffPanelStore", () => {
       filePath: "src/app.ts",
       revealRequestId: 1,
     });
+  });
+
+  it("remembers viewed marks per thread and forgets them with the thread", () => {
+    const other = scopeThreadRef(EnvironmentId.make("environment-1"), ThreadId.make("thread-2"));
+    const store = useDiffPanelStore.getState();
+    store.setDiffFileViewed(THREAD_REF, "a:src/app.ts", true);
+    store.setDiffFileViewed(THREAD_REF, "b:src/index.ts", true);
+    store.setDiffFileViewed(THREAD_REF, "a:src/app.ts", false);
+
+    const marks = (ref: typeof THREAD_REF) =>
+      selectThreadViewedDiffMarks(useDiffPanelStore.getState().viewedMarksByThreadKey, ref);
+    expect(marks(THREAD_REF)).toEqual(["b:src/index.ts"]);
+    expect(marks(other)).toEqual([]);
+
+    useDiffPanelStore.getState().removeThread(THREAD_REF);
+    expect(marks(THREAD_REF)).toEqual([]);
   });
 });

@@ -1,6 +1,8 @@
 import {
+  DesktopMenuLanguageSchema,
   DesktopServerExposureModeSchema,
   DesktopUpdateChannelSchema,
+  type DesktopMenuLanguage,
   type DesktopServerExposureMode,
   type DesktopUpdateChannel,
 } from "@t3tools/contracts";
@@ -26,6 +28,8 @@ import { isValidDistroName } from "../wsl/wslPathParsing.ts";
 
 export interface DesktopSettings {
   readonly localEnvironmentEnabled: boolean;
+  /** The native application menu's language; `system` follows the OS locale. */
+  readonly menuLanguage: DesktopMenuLanguage;
   readonly linuxPasswordStore: LinuxPasswordStorePreference;
   readonly mainWindowBounds: DesktopWindowBounds | null;
   readonly mainWindowMaximized: boolean;
@@ -75,6 +79,7 @@ export const DEFAULT_MAIN_WINDOW_SIZE = {
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   localEnvironmentEnabled: true,
+  menuLanguage: "system",
   linuxPasswordStore: DEFAULT_LINUX_PASSWORD_STORE,
   mainWindowBounds: null,
   mainWindowMaximized: false,
@@ -97,6 +102,7 @@ const DesktopWindowBoundsDocument = Schema.Struct({
 
 const DesktopSettingsDocument = Schema.Struct({
   localEnvironmentEnabled: Schema.optionalKey(Schema.Boolean),
+  menuLanguage: Schema.optionalKey(DesktopMenuLanguageSchema),
   linuxPasswordStore: Schema.optionalKey(Schema.Unknown),
   mainWindowBounds: Schema.optionalKey(Schema.NullOr(DesktopWindowBoundsDocument)),
   mainWindowMaximized: Schema.optionalKey(Schema.Boolean),
@@ -155,6 +161,9 @@ export class DesktopAppSettings extends Context.Service<
   {
     readonly load: Effect.Effect<DesktopSettings>;
     readonly get: Effect.Effect<DesktopSettings>;
+    readonly setMenuLanguage: (
+      language: DesktopMenuLanguage,
+    ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
     readonly setLocalEnvironmentEnabled: (
       enabled: boolean,
     ) => Effect.Effect<DesktopSettingsChange, DesktopSettingsWriteError>;
@@ -231,6 +240,7 @@ function normalizeDesktopSettingsDocument(
 
   return {
     localEnvironmentEnabled: parsed.localEnvironmentEnabled !== false,
+    menuLanguage: parsed.menuLanguage ?? "system",
     linuxPasswordStore: normalizeLinuxPasswordStorePreference(parsed.linuxPasswordStore),
     mainWindowBounds,
     mainWindowMaximized: mainWindowBounds !== null && parsed.mainWindowMaximized === true,
@@ -253,6 +263,10 @@ function toDesktopSettingsDocument(
   defaults: DesktopSettings,
 ): DesktopSettingsDocument {
   const document: Mutable<DesktopSettingsDocument> = {};
+
+  if (settings.menuLanguage !== defaults.menuLanguage) {
+    document.menuLanguage = settings.menuLanguage;
+  }
 
   if (settings.localEnvironmentEnabled !== defaults.localEnvironmentEnabled) {
     document.localEnvironmentEnabled = settings.localEnvironmentEnabled;
@@ -293,6 +307,18 @@ function toDesktopSettingsDocument(
   }
 
   return document;
+}
+
+function setMenuLanguage(
+  settings: DesktopSettings,
+  language: DesktopMenuLanguage,
+): DesktopSettings {
+  return settings.menuLanguage === language
+    ? settings
+    : {
+        ...settings,
+        menuLanguage: language,
+      };
 }
 
 function setServerExposureMode(
@@ -566,6 +592,10 @@ export const make = Effect.gen(function* () {
       persist((settings) => setLocalEnvironmentEnabled(settings, enabled)).pipe(
         Effect.withSpan("desktop.settings.setLocalEnvironmentEnabled", { attributes: { enabled } }),
       ),
+    setMenuLanguage: (language) =>
+      persist((settings) => setMenuLanguage(settings, language)).pipe(
+        Effect.withSpan("desktop.settings.setMenuLanguage", { attributes: { language } }),
+      ),
     applyWslWindowsFallback: persist(applyWslWindowsFallback).pipe(
       Effect.withSpan("desktop.settings.applyWslWindowsFallback"),
     ),
@@ -609,6 +639,7 @@ export const layerTest = (initialSettings: DesktopSettings = DEFAULT_DESKTOP_SET
         setWslOnly: (enabled) => update((settings) => setWslOnly(settings, enabled)),
         setLocalEnvironmentEnabled: (enabled) =>
           update((settings) => setLocalEnvironmentEnabled(settings, enabled)),
+        setMenuLanguage: (language) => update((settings) => setMenuLanguage(settings, language)),
         applyWslWindowsFallback: update(applyWslWindowsFallback),
         applyWslWindowsFallbackInMemory: update(applyWslWindowsFallback),
       });

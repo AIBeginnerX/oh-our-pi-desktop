@@ -109,6 +109,16 @@ export function workEntryIsVisibleInGroup(
   );
 }
 
+/** Tool calls that failed anywhere in the group, so a collapsed row can say so. Declined calls are the user's choice, not failures. */
+export function countFailedToolEntries(entries: ReadonlyArray<WorkLogEntry>): number {
+  return entries.filter(
+    (entry) =>
+      entry.toolLifecycleStatus !== "declined" &&
+      workLogEntryIsToolLike(entry) &&
+      workEntryDisplayIndicatesToolFailure(entry),
+  ).length;
+}
+
 export interface WorkGroupScrollAnchor {
   readonly entryId: string;
   readonly offset: number;
@@ -389,7 +399,7 @@ export type MessagesTimelineRow =
       toolSurface?: WorkLogEntry["toolSurface"];
       toolIcon?: WorkLogEntry["toolIcon"];
       summaryToolIcon?: "browser" | "device" | "t3-code" | "pull-request";
-      hasFailure: boolean;
+      failedCount: number;
     }
   | {
       kind: "turn-fold";
@@ -1322,7 +1332,6 @@ export function deriveMessagesTimelineRows(input: {
           const groupToolIcon =
             primarySourceIcon ??
             visibleGroupedEntries.findLast((entry) => entry.toolIcon !== undefined)?.toolIcon;
-          const latestToolEntry = visibleGroupedEntries.findLast(workLogEntryIsToolLike);
           const singleEntry =
             visibleGroupedEntries.length === 1 ? (visibleGroupedEntries[0] ?? null) : null;
           const usesSingleToolCallLabel =
@@ -1349,9 +1358,7 @@ export function deriveMessagesTimelineRows(input: {
             ...(groupToolSurface ? { toolSurface: groupToolSurface } : {}),
             ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
             ...(summaryToolIcon ? { summaryToolIcon } : {}),
-            hasFailure:
-              latestToolEntry !== undefined &&
-              workEntryDisplayIndicatesToolFailure(latestToolEntry),
+            failedCount: countFailedToolEntries(visibleGroupedEntries),
           });
           if (expanded) {
             nextRows.push(
@@ -1676,7 +1683,7 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.summaryKind === bw.summaryKind &&
         a.toolSurface === bw.toolSurface &&
         Equal.equals(a.toolIcon, bw.toolIcon) &&
-        a.hasFailure === bw.hasFailure
+        a.failedCount === bw.failedCount
       );
     }
 

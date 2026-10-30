@@ -13,6 +13,12 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import {
+  MENU_LANGUAGES,
+  resolveMenuLanguage,
+  type MenuLabels,
+} from "./DesktopApplicationMenuLabels.ts";
 
 export class DesktopApplicationMenuActionError extends Schema.TaggedError<DesktopApplicationMenuActionError>()(
   "DesktopApplicationMenuActionError",
@@ -105,6 +111,167 @@ const handleCheckForUpdatesMenuClick = Effect.gen(function* () {
   yield* checkForUpdatesFromMenu;
 }).pipe(Effect.withSpan("desktop.menu.handleCheckForUpdatesClick"));
 
+export interface ApplicationMenuTemplateHandlers {
+  readonly checkForUpdatesClick: () => void;
+  readonly settingsClick: () => void;
+  readonly pasteAsTextClick: (
+    item: Electron.MenuItem,
+    window: Electron.BaseWindow | undefined,
+    event: Electron.KeyboardEvent,
+  ) => void;
+  readonly zoomClick: (direction: DesktopWindow.MainWindowZoomDirection) => () => void;
+}
+
+/**
+ * Builds the application menu template with localized labels. Roles keep their behavior; only
+ * their labels are overridden, so localization can never change what an item does.
+ */
+export function buildApplicationMenuTemplate(input: {
+  readonly platform: NodeJS.Platform;
+  readonly appName: string;
+  readonly labels: MenuLabels;
+  readonly handlers: ApplicationMenuTemplateHandlers;
+}): Electron.MenuItemConstructorOptions[] {
+  const { platform, appName, labels, handlers } = input;
+  const appLabel = (key: "about" | "hide" | "quit") => labels[key].replace("{app}", appName);
+  const template: Electron.MenuItemConstructorOptions[] = [];
+
+  if (platform === "darwin") {
+    template.push({
+      label: appName,
+      submenu: [
+        { role: "about", label: appLabel("about") },
+        {
+          label: labels.checkForUpdates,
+          click: handlers.checkForUpdatesClick,
+        },
+        { type: "separator" },
+        {
+          label: labels.settings,
+          accelerator: "CmdOrCtrl+,",
+          click: handlers.settingsClick,
+        },
+        { type: "separator" },
+        { role: "services", label: labels.services },
+        { type: "separator" },
+        { role: "hide", label: appLabel("hide") },
+        { role: "hideOthers", label: labels.hideOthers },
+        { role: "unhide", label: labels.showAll },
+        { type: "separator" },
+        { role: "quit", label: appLabel("quit") },
+      ],
+    });
+  }
+
+  template.push(
+    {
+      label: labels.file,
+      submenu: [
+        ...(platform === "darwin"
+          ? []
+          : [
+              {
+                label: labels.settings,
+                accelerator: "CmdOrCtrl+,",
+                click: handlers.settingsClick,
+              },
+              { type: "separator" as const },
+            ]),
+        {
+          role: platform === "darwin" ? "close" : "quit",
+          label: platform === "darwin" ? labels.close : appLabel("quit"),
+        },
+      ],
+    },
+    {
+      label: labels.edit,
+      submenu: [
+        { role: "undo", label: labels.undo },
+        { role: "redo", label: labels.redo },
+        { type: "separator" },
+        { role: "cut", label: labels.cut },
+        { role: "copy", label: labels.copy },
+        { role: "paste", label: labels.paste },
+        {
+          label: labels.pasteAsText,
+          accelerator: "CmdOrCtrl+Shift+V",
+          click: handlers.pasteAsTextClick,
+        },
+        { role: "delete", label: labels.remove },
+        { type: "separator" },
+        { role: "selectAll", label: labels.selectAll },
+        ...(platform === "darwin"
+          ? [
+              { type: "separator" as const },
+              {
+                label: labels.speech,
+                submenu: [
+                  { role: "startSpeaking" as const, label: labels.startSpeaking },
+                  { role: "stopSpeaking" as const, label: labels.stopSpeaking },
+                ],
+              },
+            ]
+          : []),
+      ],
+    },
+    {
+      label: labels.view,
+      submenu: [
+        { role: "reload", label: labels.reload },
+        { role: "forceReload", label: labels.forceReload },
+        { role: "toggleDevTools", label: labels.toggleDevTools },
+        { type: "separator" },
+        /*
+          Not the zoom roles: those act on the focused webContents, so with
+          an embedded preview WebContentsView focused they zoom the guest
+          page and the app UI appears stuck. These always zoom the main
+          window (see DesktopWindow.zoomMain).
+        */
+        {
+          label: labels.actualSize,
+          accelerator: "CmdOrCtrl+0",
+          click: handlers.zoomClick("reset"),
+        },
+        { label: labels.zoomIn, accelerator: "CmdOrCtrl+=", click: handlers.zoomClick("in") },
+        {
+          label: labels.zoomIn,
+          accelerator: "CmdOrCtrl+Plus",
+          visible: false,
+          click: handlers.zoomClick("in"),
+        },
+        { label: labels.zoomOut, accelerator: "CmdOrCtrl+-", click: handlers.zoomClick("out") },
+        { type: "separator" },
+        { role: "togglefullscreen", label: labels.toggleFullScreen },
+      ],
+    },
+    {
+      label: labels.window,
+      submenu: [
+        { role: "minimize", label: labels.minimize },
+        { role: "zoom", label: labels.zoom },
+        ...(platform === "darwin"
+          ? [
+              { type: "separator" as const },
+              { role: "front" as const, label: labels.bringAllToFront },
+            ]
+          : []),
+      ],
+    },
+    {
+      role: "help",
+      label: labels.help,
+      submenu: [
+        {
+          label: labels.checkForUpdates,
+          click: handlers.checkForUpdatesClick,
+        },
+      ],
+    },
+  );
+
+  return template;
+}
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const electronApp = yield* ElectronApp.ElectronApp;
@@ -130,7 +297,13 @@ export const make = Effect.gen(function* () {
     );
   };
 
+  const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const configure = Effect.gen(function* () {
+    const settings = yield* appSettings.get;
+    const systemLocale = yield* electronApp.systemLocale;
+    const language = resolveMenuLanguage(settings.menuLanguage, systemLocale);
+    const labels = MENU_LANGUAGES[language];
+
     const checkForUpdatesClick = () => {
       runMenuEffect("check-for-updates", handleCheckForUpdatesMenuClick);
     };
@@ -153,119 +326,15 @@ export const make = Effect.gen(function* () {
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
       runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
     };
-    const template: Electron.MenuItemConstructorOptions[] = [];
 
-    if (environment.platform === "darwin") {
-      template.push({
-        label: appName,
-        submenu: [
-          { role: "about" },
-          {
-            label: "Check for Updates...",
-            click: checkForUpdatesClick,
-          },
-          { type: "separator" },
-          {
-            label: "Settings...",
-            accelerator: "CmdOrCtrl+,",
-            click: settingsClick,
-          },
-          { type: "separator" },
-          { role: "services" },
-          { type: "separator" },
-          { role: "hide" },
-          { role: "hideOthers" },
-          { role: "unhide" },
-          { type: "separator" },
-          { role: "quit" },
-        ],
-      });
-    }
-
-    template.push(
-      {
-        label: "File",
-        submenu: [
-          ...(environment.platform === "darwin"
-            ? []
-            : [
-                {
-                  label: "Settings...",
-                  accelerator: "CmdOrCtrl+,",
-                  click: settingsClick,
-                },
-                { type: "separator" as const },
-              ]),
-          { role: environment.platform === "darwin" ? "close" : "quit" },
-        ],
-      },
-      {
-        label: "Edit",
-        submenu: [
-          { role: "undo" },
-          { role: "redo" },
-          { type: "separator" },
-          { role: "cut" },
-          { role: "copy" },
-          { role: "paste" },
-          {
-            label: "Paste as Text",
-            accelerator: "CmdOrCtrl+Shift+V",
-            click: pasteAsTextClick,
-          },
-          { role: "delete" },
-          { type: "separator" },
-          { role: "selectAll" },
-          ...(environment.platform === "darwin"
-            ? [
-                { type: "separator" as const },
-                {
-                  label: "Speech",
-                  submenu: [{ role: "startSpeaking" as const }, { role: "stopSpeaking" as const }],
-                },
-              ]
-            : []),
-        ],
-      },
-      {
-        label: "View",
-        submenu: [
-          { role: "reload" },
-          { role: "forceReload" },
-          { role: "toggleDevTools" },
-          { type: "separator" },
-          /*
-            Not the zoom roles: those act on the focused webContents, so with
-            an embedded preview WebContentsView focused they zoom the guest
-            page and the app UI appears stuck. These always zoom the main
-            window (see DesktopWindow.zoomMain).
-          */
-          { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: zoomClick("reset") },
-          { label: "Zoom In", accelerator: "CmdOrCtrl+=", click: zoomClick("in") },
-          {
-            label: "Zoom In",
-            accelerator: "CmdOrCtrl+Plus",
-            visible: false,
-            click: zoomClick("in"),
-          },
-          { label: "Zoom Out", accelerator: "CmdOrCtrl+-", click: zoomClick("out") },
-          { type: "separator" },
-          { role: "togglefullscreen" },
-        ],
-      },
-      { role: "windowMenu" },
-      {
-        role: "help",
-        submenu: [
-          {
-            label: "Check for Updates...",
-            click: checkForUpdatesClick,
-          },
-        ],
-      },
+    yield* electronMenu.setApplicationMenu(
+      buildApplicationMenuTemplate({
+        platform: environment.platform,
+        appName,
+        labels,
+        handlers: { checkForUpdatesClick, settingsClick, pasteAsTextClick, zoomClick },
+      }),
     );
-
-    yield* electronMenu.setApplicationMenu(template);
   }).pipe(Effect.withSpan("desktop.menu.configure"));
 
   return DesktopApplicationMenu.of({

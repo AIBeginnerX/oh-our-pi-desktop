@@ -33,6 +33,8 @@ import {
 import * as CrewService from "../crew/CrewService.ts";
 import { CrewToolkitHandlersLive } from "./toolkits/crew/handlers.ts";
 import { CrewToolkit } from "./toolkits/crew/tools.ts";
+import { MemoryToolkitHandlersLive } from "./toolkits/memory/handlers.ts";
+import { MemoryToolkit } from "./toolkits/memory/tools.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import {
@@ -656,6 +658,10 @@ export const CrewToolkitRegistrationLive = McpServer.toolkit(CrewToolkit).pipe(
   Layer.provide(CrewService.layer),
 );
 
+export const MemoryToolkitRegistrationLive = McpServer.toolkit(MemoryToolkit).pipe(
+  Layer.provide(MemoryToolkitHandlersLive),
+);
+
 const DeviceStandardToolkitRegistrationLive = McpServer.toolkit(DeviceStandardToolkit).pipe(
   Layer.provide(DeviceStandardToolkitHandlersLive),
 );
@@ -680,5 +686,6 @@ export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   PullRequestsToolkitRegistrationLive,
   CrewToolkitRegistrationLive,
+  MemoryToolkitRegistrationLive,
   DeviceToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive));

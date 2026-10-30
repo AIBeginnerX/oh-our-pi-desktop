@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   RightPanelTabs,
+  pullRequestTabTooltipText,
   resolvePullRequestTabLink,
   shouldOpenDefaultBrowserProfileFromMenuClick,
   surfaceShortcutActionForKey,
@@ -328,5 +329,22 @@ describe("pull request tab snapshots", () => {
         link,
       ),
     ).toBe(newer);
+  });
+});
+
+describe("pullRequestTabTooltipText", () => {
+  const reference = { repository: "pingdotgg/t3code", number: 123 };
+
+  it("names the repository, title, and state once they are known", () => {
+    expect(
+      pullRequestTabTooltipText(reference, { state: "merged", isDraft: false, title: "Fix it" }),
+    ).toBe("pingdotgg/t3code#123 · Fix it · Merged");
+  });
+
+  it("falls back to the reference alone, or without a title, when data has not arrived", () => {
+    expect(pullRequestTabTooltipText(reference, null)).toBe("pingdotgg/t3code#123");
+    expect(
+      pullRequestTabTooltipText(reference, { state: "open", isDraft: true, title: null }),
+    ).toBe("pingdotgg/t3code#123 · Draft");
   });
 });

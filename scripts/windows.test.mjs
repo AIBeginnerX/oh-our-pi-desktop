@@ -3,6 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
+import * as NodeURL from "node:url";
 
 import {
   AUTO_BUILD_TASK_NAME,
@@ -15,6 +16,7 @@ import {
   prependPath,
   releaseFilesToPrune,
   removeBrokenNsisCache,
+  RUNNER_SCRIPTS,
   runnerLauncherScript,
   scheduleTaskArgs,
   smbUrlForUncPath,
@@ -235,6 +237,20 @@ NodeTest.test("writes an ASCII launcher for the task on this PC", () => {
       .slice(0, -1)
       .every((line) => line.endsWith("\r")),
   );
+});
+
+NodeTest.test("the runner's script copies load on their own", async () => {
+  // The task runs windows.mjs from a folder holding only these copies; a missed import breaks every run.
+  const runner = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oop-runner-scripts-"));
+  try {
+    for (const name of RUNNER_SCRIPTS) {
+      NodeFS.copyFileSync(new URL(name, import.meta.url), NodePath.join(runner, name));
+    }
+    const loaded = await import(NodeURL.pathToFileURL(NodePath.join(runner, "windows.mjs")).href);
+    NodeAssert.equal(typeof loaded.main, "function");
+  } finally {
+    NodeFS.rmSync(runner, { recursive: true, force: true });
+  }
 });
 
 NodeTest.test("trims a long log to its last lines", () => {

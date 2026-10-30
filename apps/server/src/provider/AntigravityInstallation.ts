@@ -49,6 +49,7 @@ const RECORD_MAX_BYTES = 8 * 1024;
 const RELEASE_RECORD = ".install-complete.json";
 
 const ReleaseId = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/u));
+const isReleaseId = Schema.is(ReleaseId);
 const ActiveRelease = Schema.Struct({ releaseId: ReleaseId });
 const InstalledRelease = Schema.Struct({
   releaseId: ReleaseId,
@@ -465,6 +466,37 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
         ),
     );
 
+  /**
+   * Best-effort cleanup of releases the active pointer no longer names. Only
+   * 64-hex names are releases: `.install-*` staging belongs to an install in
+   * flight and is never touched. Releases a live session leases are skipped,
+   * and a directory that cannot be deleted (a running binary on Windows) is
+   * logged and retried by the next prune, so this never fails an install.
+   */
+  const pruneSuperseded = Effect.fn("AntigravityInstallation.pruneSuperseded")(
+    function* (activeReleaseId: string) {
+      yield* gate.withPermit(
+        Effect.gen(function* () {
+          for (const entry of yield* fs.readDirectory(versionsDirectory)) {
+            const directory = path.join(versionsDirectory, entry);
+            if (entry === activeReleaseId || !isReleaseId(entry) || leases.has(directory)) continue;
+            yield* fs.remove(directory, { recursive: true, force: true }).pipe(
+              Effect.catch((cause) =>
+                Effect.logWarning("Could not remove a superseded Antigravity release", {
+                  directory,
+                  cause,
+                }),
+              ),
+            );
+          }
+        }),
+      );
+    },
+    Effect.catch((cause) =>
+      Effect.logWarning("Could not clean up superseded Antigravity releases", { cause }),
+    ),
+  );
+
   const validate =
     options.validate ??
     Effect.fn("AntigravityInstallation.validate")(
@@ -583,6 +615,7 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
           Effect.timeout(VALIDATION_TIMEOUT),
         );
         yield* activate();
+        yield* pruneSuperseded(asset.sha256);
         return;
       }
 
@@ -783,6 +816,7 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
         ),
       );
       yield* activate();
+      yield* pruneSuperseded(asset.sha256);
     },
     Effect.scoped,
     Effect.mapError(
@@ -935,6 +969,9 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
       ...current,
       installedVersion: installed.version,
     }));
+    // Reclaims releases left by upgrades from before pruning existed. Only a
+    // verified active release gets here, so the last good copy is never deleted.
+    yield* pruneSuperseded(active.releaseId);
   }).pipe(
     Effect.catch(() =>
       SubscriptionRef.update(

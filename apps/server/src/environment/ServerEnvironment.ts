@@ -263,6 +263,7 @@ export const make = Effect.gen(function* () {
         manage: true,
         send: memorySendDriverKinds.length > 0,
         threadRecovery: true,
+        proposals: true,
         ...(memorySendDriverKinds.length > 0 ? { sendDriverKinds: memorySendDriverKinds } : {}),
       },
       // Judgment and retire are always advertised when lifecycle ships; `use`

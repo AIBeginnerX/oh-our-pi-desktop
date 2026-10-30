@@ -3,6 +3,10 @@ import { describe, expect, it } from "@effect/vitest";
 import { faviconUrlForOrigin, toolActivityFaviconUrl } from "./favicon.ts";
 
 describe("faviconUrlForOrigin", () => {
+  it("does not return a Google URL when link icons are disabled", () => {
+    expect(faviconUrlForOrigin("https://example.com/private", 32, false)).toBeNull();
+  });
+
   it.each([
     "http://192.168.1.10:8080",
     "http://localhost:3000",
@@ -42,6 +46,24 @@ describe("faviconUrlForOrigin", () => {
 });
 
 describe("toolActivityFaviconUrl", () => {
+  it.each(["light", "dark"] as const)(
+    "disables site, themed and provider-supplied favicons in %s mode",
+    (appearance) => {
+      for (const icon of [
+        { pageUrl: "https://example.com/docs" },
+        { pageUrl: "https://github.com/openai/codex" },
+        {
+          pageUrl: "https://example.com/docs",
+          faviconUrl: "https://www.google.com/s2/favicons?domain=example.com",
+          faviconUrlDark: "https://cdn.example.com/icon-dark.svg",
+        },
+        { pageUrl: "https://example.com", faviconUrl: "data:image/png;base64,aGVsbG8=" },
+      ]) {
+        expect(toolActivityFaviconUrl(icon, appearance, 32, false)).toBeNull();
+      }
+    },
+  );
+
   it("uses the page origin instead of a third-party favicon service", () => {
     expect(toolActivityFaviconUrl({ pageUrl: "https://example.com/docs/page?q=1" }, "light")).toBe(
       "https://example.com/favicon.ico",

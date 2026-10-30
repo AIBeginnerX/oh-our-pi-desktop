@@ -21,6 +21,7 @@ import {
   applyProviderCompatibility,
   ProviderCompatibilityPolicy,
   resolveProviderCompatibility,
+  withoutOopOwnedPolicies,
 } from "./providerCompatibility.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -63,6 +64,39 @@ describe("provider compatibility", () => {
         `Missing bundled compatibility policy for ${builtIn.driverKind}`,
       );
     }
+  });
+
+  it("keeps the bundled OpenCode policy when the upstream manifest marks 2.x broken", () => {
+    const bundled = ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility;
+    const bundledOpenCode = bundled?.find((entry) => entry.driver === "opencode");
+    assert.isDefined(bundledOpenCode);
+    const upstream: ReadonlyArray<ProviderCompatibilityPolicy> = [
+      {
+        ...bundledOpenCode!,
+        ranges: [
+          { range: ">=2.0.0", status: "broken" },
+          { range: ">=1.14.19 <2.0.0", status: "supported" },
+        ],
+      },
+      policy,
+    ];
+    const openCode: ServerProvider = {
+      ...provider,
+      driver: ProviderDriverKind.make("opencode"),
+      instanceId: ProviderInstanceId.make("opencode"),
+      version: "2.1.4",
+    };
+
+    assert.strictEqual(
+      applyProviderCompatibility(openCode, upstream, bundled).compatibilityAdvisory?.status,
+      "broken",
+    );
+    assert.strictEqual(
+      applyProviderCompatibility(openCode, withoutOopOwnedPolicies(upstream), bundled)
+        .compatibilityAdvisory?.status,
+      "supported",
+    );
+    assert.deepStrictEqual(withoutOopOwnedPolicies(upstream), [policy]);
   });
 
   it("compares Cursor build dates without treating semver prereleases as stable", () => {

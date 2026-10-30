@@ -3571,10 +3571,11 @@ describe("deriveMessagesTimelineRows", () => {
   );
 
   it.each([
-    ["recovered", ["failed", "completed"], false],
-    ["ending in failure", ["completed", "failed"], true],
-    ["failed", ["failed", "failed"], true],
-  ] as const)("uses the final call for %s tool groups", (_, statuses, hasFailure) => {
+    ["recovered", ["failed", "completed"], 1],
+    ["ending in failure", ["completed", "failed"], 1],
+    ["failed", ["failed", "failed"], 2],
+    ["declined", ["declined", "completed"], 0],
+  ] as const)("counts every failed call in %s tool groups", (_, statuses, failedCount) => {
     const timelineEntries = statuses.map((status, index) => ({
       id: `work-entry-${index}`,
       kind: "work" as const,
@@ -3599,20 +3600,20 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(rows.find((row) => row.kind === "work-toggle")).toMatchObject({
       hiddenCount: 2,
-      hasFailure,
+      failedCount,
     });
   });
 
   it.each([
-    ["the later success is hidden", ["failed", "completed", "info"], false],
-    ["the later success is visible", ["failed", "info", "completed"], false],
-    ["an error-toned entry recovers", ["error", "info", "completed"], false],
-    ["the final failure is hidden", ["completed", "failed", "info"], true],
-    ["the final failure is visible", ["failed", "info", "failed"], true],
-    ["the only failure is visible", ["completed", "info", "failed"], true],
+    ["the later success is hidden", ["failed", "completed", "info"], 1],
+    ["the later success is visible", ["failed", "info", "completed"], 1],
+    ["an error-toned entry is split out", ["error", "info", "completed"], 0],
+    ["the final failure is hidden", ["completed", "failed", "info"], 1],
+    ["two failures are visible", ["failed", "info", "failed"], 2],
+    ["the only failure is visible", ["completed", "info", "failed"], 1],
   ] as const)(
-    "uses the final tool call for mixed work groups when %s",
-    (_, statuses, hasFailure) => {
+    "counts failed tool calls in mixed work groups when %s",
+    (_, statuses, failedCount) => {
       const timelineEntries = statuses.map((status, index) => {
         const id = `work-${index}`;
         const createdAt = `2026-01-01T00:00:0${index}Z`;
@@ -3649,7 +3650,7 @@ describe("deriveMessagesTimelineRows", () => {
         summary: statuses.some((status) => status === "error")
           ? "Received 1 update and used 1 tool"
           : "Used 2 tools and received 1 update",
-        hasFailure,
+        failedCount,
       });
       if (statuses.some((status) => status === "error")) {
         expect(rows[0]).toMatchObject({
@@ -3673,7 +3674,7 @@ describe("computeStableMessagesTimelineRows", () => {
       summary: "Used Browser",
       summaryKind: "other",
       toolSurface: "browser",
-      hasFailure: false,
+      failedCount: 0,
     };
     const initial = computeStableMessagesTimelineRows([initialRow], {
       byId: new Map(),

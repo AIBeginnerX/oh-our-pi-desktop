@@ -3,12 +3,14 @@ import { useCallback } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
 import { isElectron } from "../env";
+import { useT } from "../i18n";
 import { Button } from "./ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarInset } from "./ui/sidebar";
 import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
 export function NoProjectsHero() {
+  const t = useT();
   const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
 
   return (
@@ -19,12 +21,12 @@ export function NoProjectsHero() {
         <Empty size="hero" className="flex-1">
           <div className="w-full max-w-lg px-8 py-12">
             <EmptyHeader className="max-w-none">
-              <EmptyTitle>What should we work on?</EmptyTitle>
-              <EmptyDescription>Add a project to start your first thread.</EmptyDescription>
+              <EmptyTitle>{t("What should we work on?")}</EmptyTitle>
+              <EmptyDescription>{t("Add a project to start your first thread.")}</EmptyDescription>
               <div className="mt-6 flex justify-center">
                 <Button size="sm" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
-                  Add project
+                  {t("Add project")}
                 </Button>
               </div>
             </EmptyHeader>

@@ -77,19 +77,35 @@ describe("agentFlow", () => {
 
   it("lays the turn out in order and keeps flowing while the lead thinks", () => {
     const { boxes } = flowOf("turn-1");
-    expect(boxes.map((box) => [box.agentId, box.title, box.state])).toEqual([
-      [LEAD_AGENT_ID, "Read · cat docs/spec.md", "done"],
-      ["crew-1", "Implement invoice totals", "working"],
-      ["sub-1", "Write spec tests", "done"],
-      [LEAD_AGENT_ID, "Run · npm test", "done"],
-      [LEAD_AGENT_ID, "Working out the next step", "thinking"],
+    expect(
+      boxes.map((box) => [box.agentId, box.tools?.map((tool) => tool.category) ?? box.title]),
+    ).toEqual([
+      [LEAD_AGENT_ID, ["read"]],
+      ["crew-1", "Implement invoice totals"],
+      ["sub-1", "Write spec tests"],
+      [LEAD_AGENT_ID, ["run"]],
+      [LEAD_AGENT_ID, "Working out the next step"],
     ]);
+    expect(boxes.at(-1)).toMatchObject({ state: "thinking", doing: "thinking" });
+    // No command or file path reaches the boxes.
+    expect(JSON.stringify(boxes)).not.toContain("npm test");
   });
 
-  it("sums up a finished turn in English", () => {
+  it("sums up a finished turn by category, never by command", () => {
     const { agents, boxes } = flowOf(null);
-    expect(agents[0]?.summary).toBe("Finished the turn · 2 steps · Read 1 · Run 1");
-    expect(agents[0]?.state).toBe("done");
+    expect(agents[0]).toMatchObject({
+      summary: "Finished the turn · 2 steps",
+      state: "done",
+      tools: [
+        { category: "read", count: 1 },
+        { category: "run", count: 1 },
+      ],
+    });
+    expect(agents[0]?.doing).toBeUndefined();
     expect(boxes.at(-1)?.state).toBe("done");
+  });
+
+  it("tells what the lead does right now while its turn runs", () => {
+    expect(flowOf("turn-1").agents[0]).toMatchObject({ state: "thinking", doing: "thinking" });
   });
 });

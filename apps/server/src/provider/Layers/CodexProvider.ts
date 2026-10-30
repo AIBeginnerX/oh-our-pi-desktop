@@ -32,7 +32,11 @@ import {
   readCustomModelEntries,
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import {
+  codexAppServerArgs,
+  resolveCodexLaunchArgs,
+  withCodexAnalyticsDefault,
+} from "./codexLaunchArgs.ts";
 import {
   AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
@@ -387,11 +391,14 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
     ...input.environment,
     ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
   };
-  const spawnCommand = yield* resolveSpawnCommand(
-    input.binaryPath,
-    codexAppServerArgs(input.launchArgs),
-    { env: environment, extendEnv: true },
-  );
+  const args = yield* withCodexAnalyticsDefault(codexAppServerArgs(input.launchArgs), {
+    ...process.env,
+    ...environment,
+  });
+  const spawnCommand = yield* resolveSpawnCommand(input.binaryPath, args, {
+    env: environment,
+    extendEnv: true,
+  });
   const child = yield* spawner
     .spawn(
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {

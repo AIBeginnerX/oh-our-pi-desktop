@@ -1,17 +1,21 @@
 import {
   COMPACT_WORKFLOW_METRICS,
   layoutWorkflow,
-  nodeElapsedMs,
-  shortDuration,
   type WorkflowCard,
   type WorkflowEdgeLayout,
   type WorkflowGraph,
+  type WorkflowNodeInfo,
   type WorkflowNodeState,
 } from "@t3tools/client-runtime/workflow-graph";
+import { formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
 import { memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { useMediaQuery } from "~/hooks/useMediaQuery";
+import { useT } from "~/i18n";
 import { cn } from "~/lib/utils";
+
+import { Badge } from "../ui/badge";
+import { hasElapsed, LiveElapsed } from "./LiveElapsed";
+import { nodeText, waveTitleText, type Translate } from "./workflowText";
 
 export const WORKFLOW_STATE_TONE: Record<WorkflowNodeState, string> = {
   running: "text-primary",
@@ -24,17 +28,24 @@ export const WORKFLOW_STATE_TONE: Record<WorkflowNodeState, string> = {
   skipped: "text-muted-foreground/60",
 };
 
+const EVIDENCE_VARIANT = { reported: "outline", tested: "info", audited: "success" } as const;
+
+/** A reported cost, with "+ unpriced" when part of the usage beside it came with none. */
+export function workflowCostLabel(
+  info: Pick<WorkflowNodeInfo, "costUsd" | "unpriced">,
+  t: Translate,
+) {
+  if (info.costUsd === undefined) return undefined;
+  const cost = info.costUsd > 0 && info.costUsd < 0.01 ? "<$0.01" : formatUsd(info.costUsd);
+  return info.unpriced === true ? t("{cost} + unpriced", { cost }) : cost;
+}
+
 const EDGE_STROKE = {
   done: "var(--success)",
   failed: "var(--destructive)",
   idle: "var(--border)",
   active: "var(--primary)",
 } as const;
-
-// The dash flow repaints its edge every frame; past this many running edges the rest keep a
-// still dashed line, so a wide fan-out never turns into a GPU load.
-const MAX_ANIMATED_EDGES = 12;
-const FLOW_DASH = "9 7";
 
 function useElementWidth() {
   const ref = useRef<HTMLDivElement>(null);
@@ -53,13 +64,12 @@ function useElementWidth() {
 
 export const WorkflowBoard = memo(function WorkflowBoard(props: {
   readonly graph: WorkflowGraph;
-  readonly now: number;
   readonly selectedNodeId: string | null;
   readonly onSelectNode: (nodeId: string) => void;
   readonly compact?: boolean;
 }) {
+  const t = useT();
   const [containerRef, viewportWidth] = useElementWidth();
-  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const layout = useMemo(
     () =>
       layoutWorkflow(
@@ -68,16 +78,6 @@ export const WorkflowBoard = memo(function WorkflowBoard(props: {
         viewportWidth,
       ),
     [props.graph, props.compact, viewportWidth],
-  );
-  const animatedEdges = useMemo(
-    () =>
-      new Set(
-        layout.edges
-          .filter((edge) => edge.tone === "active")
-          .slice(0, MAX_ANIMATED_EDGES)
-          .map((edge) => `${edge.from}>${edge.to}`),
-      ),
-    [layout.edges],
   );
 
   return (
@@ -93,38 +93,46 @@ export const WorkflowBoard = memo(function WorkflowBoard(props: {
           aria-hidden
         >
           {layout.edges.map((edge) => (
-            <WorkflowEdge
-              key={`${edge.from}>${edge.to}:${edge.tone}`}
-              edge={edge}
-              animate={!reducedMotion && animatedEdges.has(`${edge.from}>${edge.to}`)}
-            />
+            <WorkflowEdge key={`${edge.from}>${edge.to}:${edge.tone}`} edge={edge} />
           ))}
         </svg>
-        {layout.waves.map((wave) => (
-          <div
-            key={wave.index}
-            className="absolute flex flex-col gap-1 text-2xs text-muted-foreground"
-            style={{ left: wave.x, top: 12, width: wave.width }}
-          >
-            <span
-              className={cn("truncate", wave.index === layout.currentWave && "text-foreground")}
-            >
-              {wave.title} · {wave.settled}/{wave.total}
-              {wave.running > 0 ? ` · ${wave.running} running` : ""}
-            </span>
-            <span className="h-0.5 overflow-hidden rounded-full bg-border/60">
-              <span
-                className="block h-full rounded-full bg-success transition-[width] duration-500"
-                style={{ width: `${(wave.settled / Math.max(1, wave.total)) * 100}%` }}
-              />
-            </span>
-          </div>
-        ))}
+        {layout.waves.length > 1
+          ? layout.waves.map((wave) => (
+              <div
+                key={wave.index}
+                className="absolute flex flex-col gap-1 text-2xs text-muted-foreground"
+                style={{ left: wave.x, top: 12, width: wave.width }}
+              >
+                <span
+                  className={cn("truncate", wave.index === layout.currentWave && "text-foreground")}
+                >
+                  {waveTitleText(wave.title, t)}
+                  {wave.total > 1 ? ` · ${wave.completed}/${wave.total}` : ""}
+                  {wave.failed > 0 ? (
+                    <span className="text-destructive-foreground">
+                      {" · "}
+                      {t("{count} failed", { count: wave.failed })}
+                    </span>
+                  ) : null}
+                  {wave.running > 0 ? ` · ${t("{count} running", { count: wave.running })}` : ""}
+                </span>
+                <span className="flex h-0.5 overflow-hidden rounded-full bg-border/60">
+                  <span
+                    className="h-full bg-success transition-[width] duration-500"
+                    style={{ width: `${(wave.completed / Math.max(1, wave.total)) * 100}%` }}
+                  />
+                  <span
+                    className="h-full bg-destructive transition-[width] duration-500"
+                    style={{ width: `${(wave.failed / Math.max(1, wave.total)) * 100}%` }}
+                  />
+                </span>
+              </div>
+            ))
+          : null}
         {layout.cards.map((card) => (
           <WorkflowNodeCard
             key={card.node.id}
             card={card}
-            now={props.now}
             selected={card.node.id === props.selectedNodeId}
             onSelect={props.onSelectNode}
           />
@@ -134,41 +142,19 @@ export const WorkflowBoard = memo(function WorkflowBoard(props: {
   );
 });
 
-function WorkflowEdge({ edge, animate }: { edge: WorkflowEdgeLayout; animate: boolean }) {
-  const stroke = EDGE_STROKE[edge.tone];
-  if (edge.tone !== "active") {
-    return (
-      <path
-        d={edge.d}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={edge.tone === "idle" ? 1.5 : 2}
-        strokeDasharray={edge.tone === "idle" || edge.tone === "failed" ? "4 6" : undefined}
-        className={edge.tone === "done" ? "motion-safe:wf-edge-draw" : undefined}
-        style={{ ["--wf-length" as string]: edge.flow.length }}
-      />
-    );
-  }
+/** Running edges are a solid primary line; only a finished edge draws itself in, once. */
+function WorkflowEdge({ edge }: { edge: WorkflowEdgeLayout }) {
   return (
-    <g>
-      <path
-        d={edge.d}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={8}
-        strokeLinecap="round"
-        className="opacity-30 motion-safe:wf-edge-glow"
-      />
-      <path
-        d={edge.d}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={2.5}
-        strokeLinecap="round"
-        strokeDasharray={FLOW_DASH}
-        className={animate ? "motion-safe:wf-edge-flow" : undefined}
-      />
-    </g>
+    <path
+      d={edge.d}
+      fill="none"
+      stroke={EDGE_STROKE[edge.tone]}
+      strokeWidth={edge.tone === "idle" ? 1.5 : 2}
+      strokeLinecap="round"
+      strokeDasharray={edge.tone === "idle" || edge.tone === "failed" ? "4 6" : undefined}
+      className={edge.tone === "done" ? "motion-safe:wf-edge-draw" : undefined}
+      style={{ ["--wf-length" as string]: edge.flow.length }}
+    />
   );
 }
 
@@ -185,38 +171,41 @@ function isStarted(node: WorkflowCard["node"]): boolean {
 
 const WorkflowNodeCard = memo(function WorkflowNodeCard(props: {
   readonly card: WorkflowCard;
-  readonly now: number;
   readonly selected: boolean;
   readonly onSelect: (nodeId: string) => void;
 }) {
+  const t = useT();
   const { node } = props.card;
   const running = node.state === "running";
   const started = isStarted(node);
+  const text = nodeText(node, t);
+  const frame = {
+    left: props.card.x,
+    top: props.card.y,
+    width: props.card.width,
+    height: props.card.height,
+  };
   if (props.card.mini) {
     return (
       <button
         type="button"
         key={node.state}
-        aria-label={`${node.label}, ${node.state}`}
+        aria-label={`${text.title}, ${text.status}`}
         onClick={() => props.onSelect(node.id)}
         className={cn(
           "absolute flex items-center gap-1.5 rounded-lg border bg-card px-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-          running ? "wf-card-neon" : "border-border/60 hover:border-border",
+          running
+            ? "border-primary ring-1 ring-primary/60"
+            : "border-border/60 hover:border-border",
           node.state === "completed" && "motion-safe:wf-card-settled-completed",
           props.selected && "ring-2 ring-primary/70",
         )}
-        style={{
-          left: props.card.x,
-          top: props.card.y,
-          width: props.card.width,
-          height: props.card.height,
-        }}
+        style={frame}
       >
         <span
           className={cn(
             "size-1.5 shrink-0 rounded-full bg-current",
             WORKFLOW_STATE_TONE[node.state],
-            running && "animate-pulse",
           )}
         />
         <span
@@ -225,68 +214,82 @@ const WorkflowNodeCard = memo(function WorkflowNodeCard(props: {
             started ? "text-foreground" : "text-muted-foreground",
           )}
         >
-          {node.label}
+          {node.info.actor === undefined
+            ? text.title
+            : [text.title, text.body].filter(Boolean).join(" · ")}
         </span>
       </button>
     );
   }
-  const elapsed = nodeElapsedMs(node.info, props.now);
-  const meta = [
-    elapsed === undefined ? undefined : shortDuration(elapsed),
-    node.info.tokens === undefined ? undefined : `${Math.round(node.info.tokens / 1000)}k tok`,
-  ].filter(Boolean);
+  const crewTokens =
+    node.info.tokens !== undefined && node.info.actor?.role === "main"
+      ? t("{amount} tok by crew", { amount: formatTokens(node.info.tokens) })
+      : node.info.tokens === undefined
+        ? undefined
+        : t("{amount} tok", { amount: formatTokens(node.info.tokens) });
+  const meta = [crewTokens, workflowCostLabel(node.info, t)].filter(Boolean);
+  const agentCard = node.info.actor !== undefined;
   return (
-    <div
-      className="absolute"
-      style={{
-        left: props.card.x,
-        top: props.card.y,
-        width: props.card.width,
-        height: props.card.height,
-      }}
+    <button
+      type="button"
+      key={node.state}
+      aria-label={`${text.title}, ${text.status}`}
+      onClick={() => props.onSelect(node.id)}
+      className={cn(
+        "absolute flex flex-col gap-0.5 overflow-hidden rounded-xl border bg-card px-3 py-2 text-left shadow-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        running ? "border-primary" : "border-border/70 hover:border-border",
+        node.state === "completed" && "motion-safe:wf-card-settled-completed",
+        node.state === "failed" && "border-destructive/50 motion-safe:wf-card-settled-failed",
+        props.selected ? "ring-2 ring-primary/70" : running && "ring-1 ring-primary/60",
+      )}
+      style={frame}
     >
-      {running ? (
-        <span className="pointer-events-none absolute -inset-1.5 rounded-2xl motion-safe:wf-card-halo" />
-      ) : null}
-      <button
-        type="button"
-        key={node.state}
-        aria-label={`${node.label}, ${node.state}`}
-        onClick={() => props.onSelect(node.id)}
-        className={cn(
-          "relative flex h-full w-full flex-col gap-0.5 rounded-xl border bg-card px-3 py-2 text-left shadow-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
-          running ? "wf-card-neon" : "border-border/70 hover:border-border",
-          node.state === "completed" && "motion-safe:wf-card-settled-completed",
-          node.state === "failed" && "border-destructive/50 motion-safe:wf-card-settled-failed",
-          props.selected && "ring-2 ring-primary/70",
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span
+          className={cn("size-2 shrink-0 rounded-full bg-current", WORKFLOW_STATE_TONE[node.state])}
+        />
+        <span
+          className={cn(
+            "min-w-0 truncate text-xs font-medium",
+            started ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {text.title}
+        </span>
+        {node.info.evidence === undefined ? null : (
+          <Badge size="sm" variant={EVIDENCE_VARIANT[node.info.evidence]} className="ml-auto">
+            {t(node.info.evidence)}
+          </Badge>
         )}
+      </span>
+      {text.model === undefined ? null : (
+        <span className="truncate text-2xs text-muted-foreground">{text.model}</span>
+      )}
+      {text.body === undefined ? null : (
+        <span
+          className={cn(
+            "text-2xs text-foreground/90",
+            agentCard ? "line-clamp-2" : "truncate text-muted-foreground",
+          )}
+        >
+          {text.body}
+        </span>
+      )}
+      <span
+        className={cn("flex min-w-0 items-center gap-1 text-2xs", WORKFLOW_STATE_TONE[node.state])}
       >
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            className={cn(
-              "size-2 shrink-0 rounded-full bg-current",
-              WORKFLOW_STATE_TONE[node.state],
-            )}
-          />
-          <span
-            className={cn(
-              "min-w-0 truncate text-xs font-medium",
-              started ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {node.label}
-          </span>
-        </span>
-        <span className="truncate text-2xs text-muted-foreground">
-          {node.info.subtitle ?? node.info.description ?? node.state}
-        </span>
-        <span className={cn("truncate text-2xs", WORKFLOW_STATE_TONE[node.state])}>
-          {[node.state, ...meta].join(" · ")}
-        </span>
-        {running && node.info.progress ? (
-          <span className="truncate text-2xs text-muted-foreground/80">{node.info.progress}</span>
+        <span className="truncate">{text.status}</span>
+        {hasElapsed(node.info) ? (
+          <>
+            <span aria-hidden>·</span>
+            <LiveElapsed info={node.info} live={running} />
+          </>
         ) : null}
-      </button>
-    </div>
+        {meta.length > 0 ? <span className="truncate">· {meta.join(" · ")}</span> : null}
+      </span>
+      {!agentCard && running && node.info.progress ? (
+        <span className="truncate text-2xs text-muted-foreground/80">{node.info.progress}</span>
+      ) : null}
+    </button>
   );
 });

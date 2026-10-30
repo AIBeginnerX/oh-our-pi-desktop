@@ -5,6 +5,14 @@ When a server is behind your web or desktop app, an update notice appears in the
 conversation and **Settings → Connections**. Update the machine named in that
 notice.
 
+## See what's new
+
+After an update, OOP shows a "What's new" card over the startup screen once.
+Close it and it stays away until the next update. Choose **See all updates** to
+open **Settings → What's new**, which lists the highlights of every release and
+marks the version you are running. A dot next to **What's new** shows until you
+open that page after an update.
+
 ## Before you update
 
 Server updates restart the connection and can interrupt active agents and

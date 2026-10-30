@@ -10,7 +10,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 
-import { macDmgName } from "./oop-release-names.mjs";
+import { assertReleaseNotes, macDmgName } from "./oop-release-names.mjs";
 
 export const SOURCE_ROOT = NodePath.resolve(
   NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
@@ -770,6 +770,9 @@ export async function packageDmg(
     await NodeFSP.rm(checksumTemp, { force: true });
     await NodeFSP.rm(manifestTemp, { force: true });
   }
+  // The verified copy now lives in release/macos; the build output (DMG plus zip, about 280 MB)
+  // would otherwise stay in the cache after every build. A candidate keeps its private output.
+  if (!candidate) await NodeFSP.rm(out, { recursive: true, force: true });
   console.log(
     `${candidate ? "Candidate DMG (internal, not shippable)" : "DMG"}: ${NodePath.join(destination, fileName)}`,
   );
@@ -784,6 +787,14 @@ export async function main(
   // Reject incomplete or conflicting signing inputs before any sync, install, or build.
   const signing = resolvePackageSigning(signingMode, process.env);
   const paths = await resolvePaths(sourceRoot, cacheDir);
+  // The app bundles the release notes, so a version without user-facing highlights must stop
+  // before the rsync, install, and desktop build. `package` builds too unless signing.
+  if (command === "build" || command === "package") {
+    await assertReleaseNotes({
+      repoRoot: paths.source,
+      version: await releaseVersion(paths.source),
+    });
+  }
   await doctor(paths);
   if (command === "doctor") return;
   await withLock(paths, async () => {

@@ -13,6 +13,7 @@
  * @module provider/Drivers/OpenCodeDriver
  */
 import { OpenCodeSettings, ProviderDriverKind } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -36,7 +37,16 @@ import {
 } from "../Layers/OpenCodeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { OpenCodeRuntime, loadOpenCodeCommands } from "../opencodeRuntime.ts";
+import {
+  OpenCodeRuntime,
+  loadOpenCodeCommands,
+  verifyOpenCode2ServerVersion,
+} from "../opencodeRuntime.ts";
+import { makeOpenCode2Adapter } from "../opencode2/OpenCode2Adapter.ts";
+import { isOpenCode2Version, makeOpenCode2Client } from "../opencode2/OpenCode2Client.ts";
+import { loadOpenCode2Workspace } from "../opencode2/OpenCode2Inventory.ts";
+import { selectOpenCodeAdapter } from "../opencode2/OpenCodeAdapterSelector.ts";
+import { parseGenericCliVersion } from "../providerSnapshot.ts";
 import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import {
   defaultProviderContinuationIdentity,
@@ -44,7 +54,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { resolveOpenCodeProviderScope } from "../openCodeProviderScope.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
@@ -109,7 +119,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = makeProviderProcessEnvironment(environment);
       const providerScope = resolveOpenCodeProviderScope(environment);
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
@@ -134,11 +144,56 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         ),
       );
 
-      const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
-        instanceId,
+      // OpenCode 2 changed the whole protocol. Detect the generation from the
+      // installed CLI (or the external server) and keep it briefly so text
+      // generation and inventory reads do not re-spawn the CLI each time.
+      const serverUrl = effectiveConfig.serverUrl.trim();
+      const probeIsV2 =
+        serverUrl.length > 0
+          ? verifyOpenCode2ServerVersion(serverUrl, effectiveConfig.serverPassword).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            )
+          : openCodeRuntime
+              .runOpenCodeCommand({
+                binaryPath: effectiveConfig.binaryPath,
+                args: ["--version"],
+                environment: processEnv,
+              })
+              .pipe(
+                Effect.map((result) => isOpenCode2Version(parseGenericCliVersion(result.stdout))),
+                Effect.timeout("10 seconds"),
+                Effect.orElseSucceed(() => false),
+              );
+      let cachedGeneration: { readonly isV2: boolean; readonly at: number } | undefined;
+      const isV2 = Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        if (cachedGeneration !== undefined && now - cachedGeneration.at < 60_000) {
+          return cachedGeneration.isV2;
+        }
+        const detected = yield* probeIsV2;
+        cachedGeneration = { isV2: detected, at: now };
+        return detected;
+      });
+      const freshIsV2 = Effect.sync(() => {
+        cachedGeneration = undefined;
+      }).pipe(Effect.andThen(isV2));
+
+      const adapter = selectOpenCodeAdapter({
+        v1: yield* makeOpenCodeAdapter(effectiveConfig, {
+          instanceId,
+          environment: processEnv,
+          ...(providerScope ? { providerScope } : {}),
+          ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        }),
+        v2: yield* makeOpenCode2Adapter(effectiveConfig, { instanceId, environment: processEnv }),
+        isV2: freshIsV2,
+      });
+      const openCode2ServerOwner = yield* OpenCodeServerOwner.make({
+        binaryPath: effectiveConfig.binaryPath,
+        directory: serverConfig.cwd,
         environment: processEnv,
-        ...(providerScope ? { providerScope } : {}),
-        ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+        protocol: "v2",
       });
       const serverOwner = yield* OpenCodeServerOwner.make({
         binaryPath: effectiveConfig.binaryPath,
@@ -148,9 +203,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           : {}),
         environment: processEnv,
       });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, providerScope).pipe(
-        Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner),
-      );
+      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, providerScope, {
+        isV2,
+        serverOwner: openCode2ServerOwner,
+      }).pipe(Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner));
 
       const checkProvider = Effect.all(
         {
@@ -159,6 +215,10 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
             serverConfig.cwd,
             processEnv,
             providerScope,
+            openCode2ServerOwner,
+          ).pipe(
+            // A disabled provider must not spawn the CLI just to refresh the cached generation.
+            Effect.tap(() => (effectiveConfig.enabled ? freshIsV2 : Effect.void)),
           ),
           usageLimits: readOpenCodeGoUsageLimits({
             enabled: effectiveConfig.enabled && providerScope === undefined,
@@ -195,7 +255,25 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           },
           { concurrency: "unbounded" },
         );
+      const loadOpenCode2WorkspaceForCwd = (cwd: string) =>
+        serverUrl.length > 0
+          ? loadOpenCode2Workspace(
+              makeOpenCode2Client({ baseUrl: serverUrl, password: effectiveConfig.serverPassword }),
+              cwd,
+            )
+          : openCode2ServerOwner.withServer((server) =>
+              loadOpenCode2Workspace(
+                makeOpenCode2Client({ baseUrl: server.url, password: server.serverPassword ?? "" }),
+                cwd,
+              ),
+            );
       const loadWorkspaceForCwd = (cwd: string) =>
+        isV2.pipe(
+          Effect.flatMap((v2) =>
+            v2 ? loadOpenCode2WorkspaceForCwd(cwd) : loadOpenCode1WorkspaceForCwd(cwd),
+          ),
+        );
+      const loadOpenCode1WorkspaceForCwd = (cwd: string) =>
         effectiveConfig.serverUrl.trim().length > 0
           ? Effect.scoped(
               Effect.gen(function* () {

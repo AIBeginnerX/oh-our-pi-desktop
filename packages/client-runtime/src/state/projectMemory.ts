@@ -127,6 +127,17 @@ export function createProjectMemoryAtoms<R, E>(
     refreshTrigger: refreshOnWrite,
   });
 
+  // Memories agents proposed, waiting for review. The server adds them from a
+  // tool call, not an RPC, so they appear on the next mount or refresh; the
+  // staleTime is short because a proposal is worth showing soon.
+  const proposalsFamily = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:project-memory:proposals",
+    tag: WS_METHODS.projectMemoryListProposals,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: refreshOnWrite,
+  });
+
   // One cached wrapper per underlying query atom, keyed exactly like the
   // family keys its queries (a JSON [environmentId, input] tuple). Without the
   // cache, every call allocated a new wrapper atom, so React re-renders would
@@ -151,6 +162,7 @@ export function createProjectMemoryAtoms<R, E>(
     search: cachedRead("environment-data:project-memory:search", searchFamily),
     get: cachedRead("environment-data:project-memory:get", getFamily),
     threadState: cachedRead("environment-data:project-memory:thread-state", threadStateFamily),
+    proposals: cachedRead("environment-data:project-memory:proposals", proposalsFamily),
     create: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:project-memory:create",
       tag: WS_METHODS.projectMemoryCreate,
@@ -170,6 +182,24 @@ export function createProjectMemoryAtoms<R, E>(
     delete: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:project-memory:delete",
       tag: WS_METHODS.projectMemoryDelete,
+      scheduler: writeScheduler,
+      concurrency: writeConcurrency,
+      onSuccess: ({ environmentId, input: { projectId } }, registry) =>
+        Effect.sync(() => bumpChangeSignal({ environmentId, input: { projectId } }, registry)),
+    }),
+    // Approving adds a memory and rejecting drops a proposal; both bump the
+    // signal so the proposal list and the memory list refetch.
+    approveProposal: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:project-memory:approve-proposal",
+      tag: WS_METHODS.projectMemoryApproveProposal,
+      scheduler: writeScheduler,
+      concurrency: writeConcurrency,
+      onSuccess: ({ environmentId, input: { projectId } }, registry) =>
+        Effect.sync(() => bumpChangeSignal({ environmentId, input: { projectId } }, registry)),
+    }),
+    rejectProposal: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:project-memory:reject-proposal",
+      tag: WS_METHODS.projectMemoryRejectProposal,
       scheduler: writeScheduler,
       concurrency: writeConcurrency,
       onSuccess: ({ environmentId, input: { projectId } }, registry) =>

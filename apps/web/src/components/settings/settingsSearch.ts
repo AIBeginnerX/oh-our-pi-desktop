@@ -22,7 +22,8 @@ export type SettingsPath =
   | "/settings/source-control"
   | "/settings/storage"
   | "/settings/connections"
-  | "/settings/archived";
+  | "/settings/archived"
+  | "/settings/whats-new";
 
 /**
  * Where a setting can be edited. Device-local rows have no scope: they render
@@ -94,6 +95,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/storage": "Storage",
   "/settings/connections": "Connections",
   "/settings/archived": "Archive",
+  "/settings/whats-new": "What's new",
 };
 
 /** Anchor id of the first row bound to `command` on the Keybindings page. */
@@ -192,6 +194,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "appearance",
   },
   {
+    id: "setting-menu-language",
+    title: "Language",
+    to: "/settings/appearance",
+    searchTerms: ["language menu locale app bar 한국어 日本語 简体中文 Español"],
+    targetId: "appearance-interface",
+  },
+  {
     // Prefixed because the slider control already owns the `appearance-contrast` id.
     id: "setting-appearance-contrast",
     title: "Contrast",
@@ -260,6 +269,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
     searchTerms: ["typography text grayscale anti aliasing macos thin"],
     macOnly: true,
+  },
+  {
+    id: "load-link-icons",
+    title: "Load link icons from Google",
+    to: "/settings/appearance",
+    searchTerms: ["privacy favicon website external google icons"],
   },
   {
     id: "word-wrap",
@@ -858,6 +873,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/archived",
     searchTerms: ["restore reopen deleted history projects"],
   },
+  {
+    id: "whats-new",
+    title: "What's new",
+    to: "/settings/whats-new",
+    searchTerms: ["release notes changelog updates version highlights"],
+  },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
@@ -878,6 +899,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/storage": "project-defaults",
   "/settings/connections": "connections",
   "/settings/archived": "project-defaults",
+  "/settings/whats-new": null,
 };
 
 /** Search keeps the selected target. A missing row can explain its owning scope instead. */

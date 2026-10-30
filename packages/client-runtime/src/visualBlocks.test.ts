@@ -2,10 +2,12 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   formatCompact,
+  layoutCalendar,
   layoutFlowchart,
   niceScale,
   parseChartSpec,
   parseFlowchart,
+  stackSeries,
 } from "./visualBlocks.ts";
 
 describe("parseChartSpec", () => {
@@ -56,6 +58,199 @@ describe("parseChartSpec", () => {
     expect(parseChartSpec('{"type":"bar","labels":["a"')).toBeNull();
     expect(parseChartSpec('{"type":"sankey","labels":["a"],"data":[1]}')).toBeNull();
     expect(parseChartSpec('{"type":"bar","labels":["a"],"data":["n/a"]}')).toBeNull();
+  });
+});
+
+describe("chart kinds", () => {
+  const manySeries = (type: string, count: number, labels = ["a", "b"]) =>
+    parseChartSpec(
+      JSON.stringify({
+        type,
+        labels,
+        series: Array.from({ length: count }, (_, index) => ({
+          name: `s${index}`,
+          data: labels.map((_, at) => index + at),
+        })),
+      }),
+    );
+
+  it("maps aliases to the new kinds", () => {
+    const kindOf = (type: string) => manySeries(type, 1)?.kind;
+    expect(
+      ["steps", "stepline", "spark", "slopegraph", "bump-chart", "ranks", "streamgraph"].map(
+        kindOf,
+      ),
+    ).toEqual(["step", "step", "sparkline", "slope", "bump", "bump", "stream"]);
+    expect(
+      ["heatmap", "contributions"].map(
+        (type) => parseChartSpec(`{"type":"${type}","days":{"2026-10-01":1}}`)?.kind,
+      ),
+    ).toEqual(["calendar", "calendar"]);
+  });
+
+  it("treats stacked-area aliases as a stacked area chart", () => {
+    for (const type of ["stacked-area", "stackedarea", "area-stacked"]) {
+      const spec = manySeries(type, 2);
+      expect([spec?.kind, spec?.stacked]).toEqual(["area", true]);
+    }
+    expect(manySeries("area", 2)?.stacked).toBe(false);
+  });
+
+  it("caps series at 12 for sparkline, slope and bump but 6 for line", () => {
+    expect(
+      ["sparkline", "slope", "bump", "line", "stream"].map(
+        (type) => manySeries(type, 20)?.series.length,
+      ),
+    ).toEqual([12, 12, 12, 6, 6]);
+  });
+
+  it("needs at least two labels for a slope chart", () => {
+    expect(manySeries("slope", 2, ["2025"])).toBeNull();
+    expect(manySeries("slope", 2, ["2025", "2026"])?.labels).toHaveLength(2);
+  });
+});
+
+describe("calendar charts", () => {
+  const parse = (days: unknown) => parseChartSpec(JSON.stringify({ type: "calendar", days }));
+
+  it("reads an array of objects, an object map, and pairs", () => {
+    const expected = [
+      { date: "2026-10-01", value: 3 },
+      { date: "2026-10-02", value: 5 },
+    ];
+    expect(
+      parse([
+        { day: "2026-10-02", count: "5" },
+        { date: "2026-10-01", value: 3 },
+      ])?.days,
+    ).toEqual(expected);
+    expect(parse({ "2026-10-02": 5, "2026-10-01": 3 })?.days).toEqual(expected);
+    expect(
+      parse([
+        ["2026-10-01", 3],
+        ["2026-10-02", "5"],
+      ])?.days,
+    ).toEqual(expected);
+    const spec = parseChartSpec('{"type":"calendar","data":{"2026-10-01":3}}');
+    expect([spec?.labels, spec?.series, spec?.items]).toEqual([[], [], []]);
+    expect(spec?.days).toHaveLength(1);
+  });
+
+  it("drops invalid dates and values, and the last duplicate wins", () => {
+    const spec = parse({ "2026-02-30": 1, "10/01/2026": 2, "2026-10-03": "n/a" });
+    expect(spec).toBeNull();
+    expect(
+      parse([
+        ["2026-10-01", 1],
+        ["2026-10-01", 9],
+        ["2026-2-1", 4],
+      ])?.days,
+    ).toEqual([{ date: "2026-10-01", value: 9 }]);
+    expect(parse([])).toBeNull();
+  });
+
+  it("keeps only the most recent 371 days", () => {
+    // 400 consecutive days from 2025-01-01 (neither year is a leap year).
+    const monthLengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 31, 28];
+    const days: Record<string, number> = {};
+    let index = 0;
+    monthLengths.forEach((length, month) => {
+      for (let day = 1; day <= length && index < 400; day += 1, index += 1) {
+        days[
+          `${2025 + Math.floor(month / 12)}-${String((month % 12) + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`
+        ] = index;
+      }
+    });
+    const kept = parse(days)?.days;
+    expect(kept).toHaveLength(371);
+    expect(kept?.at(-1)?.value).toBe(399);
+    expect(kept?.[0]?.value).toBe(29);
+  });
+});
+
+describe("stackSeries", () => {
+  const series = [
+    { name: "a", data: [1, 2, Number.NaN] },
+    { name: "b", data: [3, -4] },
+    { name: "c", data: [2, 2, 2] },
+  ];
+
+  it("stacks up from zero in input order, treating missing, NaN and negative as 0", () => {
+    const bands = stackSeries(series, 3, "zero");
+    expect(bands.map((band) => band.name)).toEqual(["a", "b", "c"]);
+    expect(bands[0]?.lower).toEqual([0, 0, 0]);
+    expect(bands[0]?.upper).toEqual([1, 2, 0]);
+    expect(bands[1]?.upper).toEqual([4, 2, 0]);
+    expect(bands[2]?.lower).toEqual([4, 2, 0]);
+    expect(bands[2]?.upper).toEqual([6, 4, 2]);
+  });
+
+  it("centers each column on zero for a silhouette", () => {
+    const bands = stackSeries(series, 3, "silhouette");
+    for (let index = 0; index < 3; index += 1) {
+      expect(bands[0]!.lower[index]).toBeCloseTo(-bands.at(-1)!.upper[index]!);
+    }
+    expect(bands[0]?.lower).toEqual([-3, -2, -1]);
+    expect(bands.at(-1)?.upper).toEqual([3, 2, 1]);
+  });
+});
+
+describe("layoutCalendar", () => {
+  it("returns an empty layout for no days", () => {
+    expect(layoutCalendar([])).toEqual({ weeks: 0, cells: [], months: [], max: 0, total: 0 });
+  });
+
+  it("places a range that starts mid-week into Sunday-first columns", () => {
+    // 2026-10-29 is a Thursday; the range crosses into November.
+    const layout = layoutCalendar([
+      { date: "2026-11-03", value: 4 },
+      { date: "2026-10-29", value: 1 },
+      { date: "2026-10-31", value: 0 },
+    ]);
+    expect(layout.cells.map((cell) => [cell.date, cell.week, cell.weekday])).toEqual([
+      ["2026-10-29", 0, 4],
+      ["2026-10-30", 0, 5],
+      ["2026-10-31", 0, 6],
+      ["2026-11-01", 1, 0],
+      ["2026-11-02", 1, 1],
+      ["2026-11-03", 1, 2],
+    ]);
+    expect(layout.weeks).toBe(2);
+    expect(layout.months).toEqual([
+      { week: 0, month: 9, year: 2026 },
+      { week: 1, month: 10, year: 2026 },
+    ]);
+    expect([layout.max, layout.total]).toEqual([4, 5]);
+  });
+
+  it("levels by share of the largest value and leaves gaps null", () => {
+    const layout = layoutCalendar([
+      { date: "2026-10-04", value: 0 },
+      { date: "2026-10-06", value: 1 },
+      { date: "2026-10-07", value: 5 },
+      { date: "2026-10-08", value: 10 },
+    ]);
+    expect(layout.cells.map((cell) => [cell.value, cell.level])).toEqual([
+      [0, 0],
+      [null, 0],
+      [1, 1],
+      [5, 2],
+      [10, 4],
+    ]);
+    expect(layout.months).toEqual([{ week: 0, month: 9, year: 2026 }]);
+  });
+
+  it("does not shift days across a DST change", () => {
+    const layout = layoutCalendar([
+      { date: "2026-10-30", value: 1 },
+      { date: "2026-11-02", value: 1 },
+    ]);
+    expect(layout.cells.map((cell) => cell.date)).toEqual([
+      "2026-10-30",
+      "2026-10-31",
+      "2026-11-01",
+      "2026-11-02",
+    ]);
   });
 });
 

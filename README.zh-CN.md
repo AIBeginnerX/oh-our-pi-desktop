@@ -481,7 +481,7 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
 - **源码构建产物是临时签名的**，没有 Developer ID，也未经公证。二进制安装程序会验证 SHA-256，不会绕过 Gatekeeper 隔离属性或 SmartScreen。
 - **本地文件夹更新器**信任任何能写入更新文件夹的人；它的 SHA-256 校验只能检测数据损坏。
 
-**遥测。** OOP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（使用上游项目的密钥和 `us.i.posthog.com`）；OOP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。
+**遥测。** OOP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（OOP 未内置任何项目密钥）；OOP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true` 以及你自己的 PostHog 项目密钥 `T3CODE_POSTHOG_KEY`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。
 
 如需报告安全漏洞，请参见 [SECURITY.md](SECURITY.md)。
 

@@ -190,15 +190,26 @@ jobs:
           ' "$VERSION" "$PLATFORM" "$ARCH" "$ASSET"
           cat public-installer/oop-update-*.json
 
+      # The later jobs read the files at the artifact root. Uploading file paths kept them under
+      # public-installer/, so 0.0.111 could not find them; a directory upload roots at that directory.
+      - name: Collect the files to hand over
+        shell: bash
+        env:
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          mkdir handoff
+          cp "public-installer/$ASSET" handoff/
+          if compgen -G "public-installer/oop-update-*.json" >/dev/null; then
+            cp public-installer/oop-update-*.json handoff/
+          fi
+          ls -l handoff
+
       - name: Upload installer between jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: installer-${{ matrix.platform }}-${{ matrix.arch }}
-          # One folder, so the artifact keeps the files at its root (upload-artifact roots
-          # several paths at their common parent).
-          path: |
-            public-installer/${{ matrix.asset }}
-            public-installer/oop-update-*.json
+          path: handoff/
           if-no-files-found: error
           # Long enough to re-run a failed publish with these exact bytes.
           retention-days: 7

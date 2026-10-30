@@ -79,6 +79,21 @@ NodeTest.test("flags a feed that is behind OOP_RELEASE.json", () => {
   );
 });
 
+NodeTest.test("checks only the macOS feed while Windows is still building", () => {
+  const release = makeRelease();
+  release.rewriteFeed("windows", { version: "1.2.2" });
+  const report = verifyReleaseFeeds({
+    repoRoot: release.root,
+    releaseDir: release.releaseDir,
+    dirs: ["macos"],
+  });
+  NodeAssert.deepEqual(
+    report.results.map((result) => result.dir),
+    ["macos"],
+  );
+  NodeAssert.equal(report.ok, true);
+});
+
 NodeTest.test("flags a missing installer, a wrong size, and a stale sidecar", () => {
   const release = makeRelease();
   NodeFS.rmSync(NodePath.join(release.releaseDir, "windows", release.feeds.windows.pkg));

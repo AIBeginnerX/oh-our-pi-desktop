@@ -1,0 +1,230 @@
+{
+  "versions": [
+    {
+      "version": "0.0.125",
+      "date": "2026-10-30",
+      "highlights": [
+        {
+          "en": "Changing a crew member's model now applies to the next task right away, even while a reply is still running. Tasks already running keep the model they started with.",
+          "ko": "Crew 멤버의 모델을 바꾸면 답변이 진행 중이어도 다음 작업부터 바로 적용됩니다. 이미 실행 중인 작업은 시작할 때의 모델을 유지합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.124",
+      "date": "2026-10-29",
+      "highlights": [
+        {
+          "en": "Charts in chat answers gain stacked area, step line, sparkline, slope, bump and streamgraph views, each drawn with a short entry animation.",
+          "ko": "대화 답변의 차트에 누적 영역, 계단형 라인, 스파크라인, 슬로프, 범프, 스트림그래프가 추가되었고, 각 차트가 짧은 등장 애니메이션과 함께 그려집니다."
+        },
+        {
+          "en": "Daily activity can be shown as a calendar heatmap with month and weekday labels and a Less–More legend.",
+          "ko": "날짜별 활동을 월·요일 표시와 적음–많음 범례가 있는 캘린더 히트맵으로 보여 줄 수 있습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.123",
+      "date": "2026-10-29",
+      "highlights": [
+        {
+          "en": "The Workflows panel shows each agent as a card with its role, model and what it did, instead of a list of tool steps.",
+          "ko": "워크플로 패널이 도구 단계 목록 대신 에이전트마다 역할, 사용 모델, 한 일을 카드로 보여 줍니다."
+        },
+        {
+          "en": "Long runs stay readable: older turns move into an Earlier menu and long activity lists fold behind Show all.",
+          "ko": "작업이 길어져도 지난 턴은 '이전' 메뉴로, 긴 활동 목록은 '모두 보기'로 접혀 화면이 늘어나지 않습니다."
+        },
+        {
+          "en": "Chat marks failed tool calls, caps very long code blocks with an Expand button, and warns when the context is 75% full.",
+          "ko": "대화에서 실패한 도구 호출을 표시하고, 아주 긴 코드 블록은 펼치기 버튼으로 줄이며, 컨텍스트가 75% 차면 알려 줍니다."
+        },
+        {
+          "en": "In the diff panel, ] and [ move between files and v marks a file as viewed. Preview Stop now works in the desktop app.",
+          "ko": "diff 패널에서 ]와 [로 파일을 넘기고 v로 확인 표시를 합니다. 데스크톱 앱에서 미리보기 중지가 동작합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.122",
+      "date": "2026-10-29",
+      "highlights": [
+        {
+          "en": "After each update, OOP shows the highlights of the new version once on the startup screen.",
+          "ko": "업데이트할 때마다 새 버전의 주요 변경 사항을 시작 화면에서 한 번 보여 줍니다."
+        },
+        {
+          "en": "Settings > What's new lists the highlights of every release, with a dot until you open it after an update.",
+          "ko": "설정 > 새로운 기능에서 모든 버전의 주요 변경 사항을 볼 수 있고, 업데이트 후 열어 보기 전까지 점으로 표시됩니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.121",
+      "date": "2026-10-29",
+      "highlights": [
+        {
+          "en": "Crew tasks can declare the files they may change; OOP warns when parallel tasks overlap, and a task can run in its own isolated worktree.",
+          "ko": "crew 작업이 수정할 파일 범위를 밝힐 수 있고, 병렬 작업의 범위가 겹치면 경고합니다. 작업을 별도 작업 폴더에서 격리해 실행할 수도 있습니다."
+        },
+        {
+          "en": "The Agents board shows whether each crew task is reported, tested, or audited, its tokens and cost, and lets you stop, open, or retry it.",
+          "ko": "Agents 보드에서 crew 작업마다 보고됨·테스트 통과·감사 통과 단계, 토큰과 비용을 보여 주고, 중지·열기·재실행할 수 있습니다."
+        },
+        {
+          "en": "Audits no longer ask for fixes to failures that existed before the turn.",
+          "ko": "감사가 턴 이전부터 있던 실패에 대해서는 수정을 요구하지 않습니다."
+        },
+        {
+          "en": "Agents can propose project memories; they become memory only after you approve them in Settings.",
+          "ko": "에이전트가 프로젝트 메모리를 제안할 수 있고, 설정에서 승인해야 메모리로 저장됩니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.120",
+      "date": "2026-10-29",
+      "highlights": [
+        {
+          "en": "The startup splash now clears in about a second and lets you click and type right away.",
+          "ko": "시작 스플래시가 약 1초 만에 사라지고, 그동안에도 클릭과 입력을 막지 않습니다."
+        },
+        {
+          "en": "Antigravity upgrades no longer leave old runtime versions taking up hundreds of megabytes on disk.",
+          "ko": "Antigravity를 업그레이드해도 예전 런타임 버전이 수백 MB씩 디스크에 남지 않습니다."
+        },
+        {
+          "en": "Project memory screening catches more kinds of secrets, including keys in URLs, npm and Telegram tokens, and Korean phrasing, before anything is saved.",
+          "ko": "프로젝트 메모리에 저장되기 전에 URL 속 자격 증명, npm·텔레그램 토큰, 한국어 표현 등 더 다양한 형태의 비밀 정보를 걸러 냅니다."
+        },
+        {
+          "en": "Long crew reports keep their closing status and verdict, so a blocked or needs-changes task is no longer shown as done.",
+          "ko": "길게 잘린 crew 보고서도 마지막 상태와 판정 줄을 유지하므로, 중단됐거나 수정이 필요한 작업이 완료로 표시되지 않습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.119",
+      "date": "2026-10-28",
+      "highlights": [
+        {
+          "en": "Codex, Grok and ZCode each have their own telemetry switch under Settings > Providers.",
+          "ko": "Codex, Grok, ZCode가 설정 > 공급자에서 각각 텔레메트리 스위치를 갖습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.118",
+      "date": "2026-10-28",
+      "highlights": [
+        {
+          "en": "Link icons in chat can now come from built-in generic icons instead of Google, so links make no external favicon request.",
+          "ko": "채팅의 링크 아이콘을 Google 대신 기본 아이콘으로 표시할 수 있어, 링크를 열 때 외부로 파비콘 요청을 보내지 않습니다."
+        },
+        {
+          "en": "Agent CLIs now start with their own telemetry and error reporting turned off.",
+          "ko": "에이전트 CLI가 자체 텔레메트리와 오류 보고를 끈 상태로 실행됩니다."
+        },
+        {
+          "en": "Claude Code keeps its own telemetry by default, because disabling it also broke features like Remote Control; a new switch in Settings turns it off.",
+          "ko": "Claude Code는 자체 텔레메트리를 기본으로 유지합니다. 끄면 Remote Control 같은 기능도 함께 꺼졌기 때문이며, 설정의 새 스위치로 끌 수 있습니다."
+        },
+        {
+          "en": "Optional usage reporting needs your own reporting key, so nothing is sent anywhere out of the box.",
+          "ko": "선택적 사용 정보 전송에는 직접 발급받은 키가 필요하므로, 기본 상태에서는 어디로도 전송되지 않습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.117",
+      "date": "2026-10-26",
+      "highlights": [
+        {
+          "en": "OpenCode 2.x works again: a dedicated connection handles its turns, streaming, tools, approvals and stop.",
+          "ko": "OpenCode 2.x를 다시 사용할 수 있습니다. 전용 연결이 턴, 스트리밍, 도구 실행, 승인, 중지를 처리합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.116",
+      "date": "2026-10-26",
+      "highlights": [
+        {
+          "en": "Long Claude sessions now compact at 300,000 tokens by default, which cuts the tokens a long turn re-reads and lowers cost.",
+          "ko": "긴 Claude 세션이 기본 300,000 토큰에서 압축되어, 긴 턴에서 다시 읽는 토큰과 비용이 줄어듭니다."
+        },
+        {
+          "en": "Claude's claude.ai connectors such as Gmail, Drive and Calendar are no longer loaded into sessions unless you turn them on.",
+          "ko": "Gmail, Drive, 캘린더 같은 Claude의 claude.ai 커넥터는 직접 켜지 않는 한 세션에 로드되지 않습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.115",
+      "date": "2026-10-26",
+      "highlights": [
+        {
+          "en": "Idle agent sessions are released after ten minutes instead of lingering, freeing several hundred megabytes of memory.",
+          "ko": "유휴 에이전트 세션이 계속 남아 있지 않고 10분 후 정리되어, 수백 MB의 메모리가 확보됩니다."
+        },
+        {
+          "en": "Sidebar headers, settings defaults and review findings now stay in the language you picked.",
+          "ko": "사이드바 제목, 설정 기본값, 리뷰 결과가 선택한 언어로 표시됩니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.114",
+      "date": "2026-10-26",
+      "highlights": [
+        {
+          "en": "The language picker now also translates the interface: the sidebar, start screen, settings and first-run wizard speak Korean, Japanese, Simplified Chinese and Spanish.",
+          "ko": "언어 선택이 인터페이스에도 적용됩니다. 사이드바, 시작 화면, 설정, 첫 실행 마법사가 한국어·일본어·중국어(간체)·스페인어로 표시됩니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.113",
+      "date": "2026-10-26",
+      "highlights": [
+        {
+          "en": "The desktop menu bar is available in English, Korean, Japanese, Simplified Chinese and Spanish, with a Menu language setting that can follow your system.",
+          "ko": "데스크톱 메뉴 막대를 영어, 한국어, 일본어, 중국어(간체), 스페인어로 쓸 수 있고, 시스템을 따르는 메뉴 언어 설정도 있습니다."
+        },
+        {
+          "en": "A globe button next to Settings switches the menu language in one click.",
+          "ko": "설정 옆 지구본 버튼으로 메뉴 언어를 한 번에 바꿀 수 있습니다."
+        },
+        {
+          "en": "Packaged desktop builds now follow your actual system language instead of always opening in English.",
+          "ko": "설치된 데스크톱 앱이 항상 영어로 뜨지 않고 실제 시스템 언어를 따릅니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.111",
+      "date": "2026-10-26",
+      "highlights": [
+        {
+          "en": "Public macOS and Windows builds now update themselves: OOP downloads the new installer in the background, checks it, and installs it when you choose.",
+          "ko": "공개된 macOS·Windows 빌드가 스스로 업데이트됩니다. OOP가 새 설치 파일을 백그라운드에서 내려받아 검증하고, 선택하면 설치합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.110",
+      "date": "2026-10-25",
+      "highlights": [
+        {
+          "en": "The app is now OOP: the window, menus, installers and user-facing text use the new name instead of T3 Code.",
+          "ko": "앱 이름이 OOP가 되었습니다. 창, 메뉴, 설치 프로그램, 화면 문구가 T3 Code 대신 새 이름을 씁니다."
+        },
+        {
+          "en": "Existing installs upgrade in place: the old app is replaced and its folder renamed, so nothing has to be reinstalled by hand.",
+          "ko": "기존 설치본은 그대로 업그레이드됩니다. 예전 앱이 교체되고 폴더 이름도 바뀌므로 직접 다시 설치할 필요가 없습니다."
+        }
+      ]
+    }
+  ]
+}

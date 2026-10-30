@@ -2182,6 +2182,62 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.effect("compacts a 1M-context model at 300k tokens when no window is configured", () => {
+    const startWith = (contextWindow: string) => {
+      const harness = makeHarness();
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          modelSelection: createModelSelection(
+            ProviderInstanceId.make("claudeAgent"),
+            SYNTHETIC_CLAUDE_STANDARD_MODEL,
+            [{ id: "contextWindow", value: contextWindow }],
+          ),
+          runtimeMode: "full-access",
+        });
+        return harness.getLastCreateQueryInput()?.options.settings;
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    };
+    return Effect.gen(function* () {
+      assert.deepEqual(yield* startWith("expanded"), {
+        showThinkingSummaries: true,
+        autoCompactWindow: 300000,
+      });
+      // A window at or below the default is left to Claude.
+      assert.deepEqual(yield* startWith("standard"), { showThinkingSummaries: true });
+    });
+  });
+
+  it.effect("keeps claude.ai connectors out of sessions unless enabled", () => {
+    const connectorsEnv = (claudeConfig?: Partial<ClaudeSettings>) => {
+      const harness = makeHarness({
+        environment: { PATH: process.env.PATH },
+        ...(claudeConfig ? { claudeConfig } : {}),
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        return harness.getLastCreateQueryInput()?.options.env?.ENABLE_CLAUDEAI_MCP_SERVERS;
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    };
+    return Effect.gen(function* () {
+      assert.equal(yield* connectorsEnv(), "false");
+      assert.equal(yield* connectorsEnv({ claudeAiConnectors: true }), undefined);
+    });
+  });
+
   it.effect("forwards claude effort levels into query options", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {
@@ -2328,6 +2384,7 @@ describe("ClaudeAdapterLive", () => {
       const createInput = harness.getLastCreateQueryInput();
       assert.deepEqual(createInput?.options.settings, {
         showThinkingSummaries: true,
+        autoCompactWindow: 300000,
       });
       assert.deepEqual(createInput?.options.thinking, {
         type: "adaptive",
@@ -2358,6 +2415,7 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settings, {
         showThinkingSummaries: true,
         fastMode: true,
+        autoCompactWindow: 300000,
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -2383,6 +2441,7 @@ describe("ClaudeAdapterLive", () => {
       const createInput = harness.getLastCreateQueryInput();
       assert.deepEqual(createInput?.options.settings, {
         showThinkingSummaries: true,
+        autoCompactWindow: 300000,
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -2479,6 +2538,7 @@ describe("ClaudeAdapterLive", () => {
         assert.deepEqual(builtInOptions.settings, {
           showThinkingSummaries: true,
           fastMode: true,
+          autoCompactWindow: 300000,
         });
       });
     },

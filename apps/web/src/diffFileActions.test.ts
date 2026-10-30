@@ -34,6 +34,20 @@ describe("openDiffFilePrimaryAction", () => {
     expect(openInEditor).not.toHaveBeenCalled();
   });
 
+  it("asks the file viewer to reveal the changed line", () => {
+    openDiffFilePrimaryAction({
+      threadRef: THREAD_REF,
+      filePath: "apps/web/src/components/DiffPanel.tsx",
+      activeCwd: "/repo/project",
+      line: 42,
+      openInEditor: vi.fn(),
+    });
+
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, THREAD_REF).surfaces,
+    ).toContainEqual(expect.objectContaining({ revealLine: 42 }));
+  });
+
   it("falls back to the editor without thread context", () => {
     const openInEditor = vi.fn();
 

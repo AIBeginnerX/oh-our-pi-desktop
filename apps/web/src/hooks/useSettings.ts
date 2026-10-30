@@ -330,6 +330,13 @@ export function useClientSettings<T = ClientSettings>(
   return useMemo(() => (selector ? selector(settings) : (settings as T)), [selector, settings]);
 }
 
+/** Wait for the persisted privacy preference before allowing external icon requests. */
+export function useLinkIconsEnabled(): boolean {
+  const enabled = useClientSettings((settings) => settings.loadLinkIcons);
+  const hydrated = useClientSettingsHydrated();
+  return hydrated && enabled;
+}
+
 export function resolveEnvironmentIdentificationMode(input: {
   mode: EnvironmentIdentificationMode;
   settingsHydrated: boolean;

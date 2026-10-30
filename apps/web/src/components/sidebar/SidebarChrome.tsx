@@ -1,4 +1,11 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon, SmartphoneIcon } from "lucide-react";
+import type { DesktopMenuLanguage } from "@t3tools/contracts";
+import {
+  ArrowLeftIcon,
+  ChartNoAxesColumnIcon,
+  GlobeIcon,
+  SettingsIcon,
+  SmartphoneIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { memo, useCallback, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -16,6 +23,7 @@ import {
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { Badge } from "../ui/badge";
+import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -26,6 +34,8 @@ import {
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
+import { useT } from "../../i18n";
+import { MENU_LANGUAGE_OPTIONS, useMenuLanguage } from "../../state/menuLanguage";
 import { isSidebarUtilityPage, useNavigateToMainApp } from "./mainAppLocation";
 import { MobileConnectDialog } from "./MobileConnectDialog";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
@@ -124,7 +134,47 @@ function SidebarUtilityItem({
   );
 }
 
+/** Globe button that picks the interface language, and in the desktop app the menu bar too. */
+function SidebarMenuLanguageItem() {
+  const t = useT();
+  const { supported, language, isChanging, change } = useMenuLanguage();
+  if (!supported) return null;
+  return (
+    <SidebarMenuItem className="shrink-0">
+      <Menu>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={
+                  <SidebarMenuButton aria-label={t("Language")} disabled={isChanging} size="icon" />
+                }
+              />
+            }
+          >
+            <GlobeIcon />
+          </TooltipTrigger>
+          <TooltipPopup side="top">{t("Language")}</TooltipPopup>
+        </Tooltip>
+        <MenuPopup align="start" side="top">
+          <MenuRadioGroup
+            value={language ?? "system"}
+            onValueChange={(value) => change(value as DesktopMenuLanguage)}
+          >
+            {MENU_LANGUAGE_OPTIONS.map((option) => (
+              <MenuRadioItem closeOnClick key={option.value} value={option.value}>
+                {option.value === "system" ? t(option.label) : option.label}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuPopup>
+      </Menu>
+    </SidebarMenuItem>
+  );
+}
+
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
+  const t = useT();
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -177,33 +227,34 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
         <SidebarMenuItem className="min-w-0 flex-1">
           <SidebarMenuButton onClick={handleBackClick}>
             <ArrowLeftIcon />
-            <span>Back</span>
+            <span>{t("Back")}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       ) : (
         <>
           <SidebarUtilityItem
             icon={<SettingsIcon />}
-            label="Settings"
+            label={t("Settings")}
             onClick={handleSettingsClick}
           />
+          <SidebarMenuLanguageItem />
           {canConnectMobile ? (
             <SidebarUtilityItem
               icon={<SmartphoneIcon />}
-              label="Connect mobile"
+              label={t("Connect mobile")}
               onClick={handleMobileConnectClick}
             />
           ) : null}
           {pullRequestsSupported ? (
             <SidebarUtilityItem
               icon={<PullRequestGlyph.pullRequest />}
-              label="Pull Requests"
+              label={t("Pull Requests")}
               onClick={handlePullRequestsClick}
             />
           ) : null}
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
+            label={t("Usage")}
             onClick={handleUsageClick}
           />
         </>

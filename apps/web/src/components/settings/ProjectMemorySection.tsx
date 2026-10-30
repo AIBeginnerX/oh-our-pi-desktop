@@ -48,6 +48,7 @@ import {
   resolvePrimaryOperateAccess,
   resolveRemoteOperateAccess,
 } from "./ProviderSettingsPanel.logic";
+import { ProjectMemoryProposals } from "./ProjectMemoryProposals";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const KIND_OPTIONS = [
@@ -665,16 +666,26 @@ export function ProjectMemorySection({
   readonly projectId: ProjectId;
 }) {
   const config = useAtomValue(serverEnvironment.configValueAtom(environmentId));
-  if (config?.environment.capabilities.projectMemory?.manage !== true) return null;
-  return <ProjectMemorySectionInner environmentId={environmentId} projectId={projectId} />;
+  const memoryCapability = config?.environment.capabilities.projectMemory;
+  if (memoryCapability?.manage !== true) return null;
+  return (
+    <ProjectMemorySectionInner
+      environmentId={environmentId}
+      projectId={projectId}
+      showProposals={memoryCapability.proposals === true}
+    />
+  );
 }
 
 function ProjectMemorySectionInner({
   environmentId,
   projectId,
+  showProposals,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
+  /** Older servers do not serve the proposal RPCs. */
+  readonly showProposals: boolean;
 }) {
   const operateAccess = useProjectMemoryOperateAccess(environmentId);
   const writeLock = resolveMemoryWriteLock(operateAccess);
@@ -728,6 +739,13 @@ function ProjectMemorySectionInner({
       />
       <div className="flex flex-col gap-2 px-6">
         {writeLock !== null ? <p className="text-xs text-muted-foreground">{writeLock}</p> : null}
+        {showProposals ? (
+          <ProjectMemoryProposals
+            environmentId={environmentId}
+            projectId={projectId}
+            writeLock={writeLock}
+          />
+        ) : null}
         <Input
           size="sm"
           aria-label="Search project memories"

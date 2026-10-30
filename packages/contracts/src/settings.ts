@@ -303,6 +303,7 @@ export const ChatWidth = Schema.Literals(["comfortable", "wide", "full"]);
 export type ChatWidth = typeof ChatWidth.Type;
 
 export const ClientSettingsSchema = Schema.Struct({
+  loadLinkIcons: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   notificationMode: NotificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
@@ -642,9 +643,18 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    telemetry: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Codex analytics",
+        description:
+          "Let Codex send usage analytics to OpenAI. While this is off, OOP starts Codex with analytics.enabled=false unless your config.toml or launch arguments set it.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs", "telemetry"],
   },
 );
 export type CodexSettings = typeof CodexSettings.Type;
@@ -698,16 +708,41 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({
         title: "Auto-compact after",
         description:
-          "Compact after 100,000 to 1,000,000 tokens. Leave empty to use Claude's default.",
+          "Compact after 100,000 to 1,000,000 tokens. Leave empty to compact larger-context models at 300,000.",
         providerSettingsForm: {
           placeholder: "e.g. 300000",
           clearWhenEmpty: "omit",
         },
       }),
     ),
+    claudeAiConnectors: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "claude.ai connectors",
+        description:
+          "Load your claude.ai connectors (Gmail, Drive, Calendar and others) in OOP sessions. Their tools are sent with every request.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
+    telemetry: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(true)),
+      Schema.annotateKey({
+        title: "Claude Code telemetry",
+        description:
+          "Let Claude Code send usage and error reports to Anthropic. Turning this off also turns off Claude Code feature flags, which features such as Remote Control use.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "homePath", "autoCompactWindow", "launchArgs"],
+    order: [
+      "binaryPath",
+      "homePath",
+      "autoCompactWindow",
+      "claudeAiConnectors",
+      "telemetry",
+      "launchArgs",
+    ],
   },
 );
 export type ClaudeSettings = typeof ClaudeSettings.Type;
@@ -767,9 +802,18 @@ export const GrokSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    telemetry: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "Grok telemetry",
+        description:
+          "Let Grok send usage and error reports to xAI. While this is off, OOP starts Grok with GROK_TELEMETRY_ENABLED=false, DISABLE_TELEMETRY=1 and DISABLE_ERROR_REPORTING=1.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath"],
+    order: ["binaryPath", "telemetry"],
   },
 );
 export type GrokSettings = typeof GrokSettings.Type;
@@ -829,9 +873,18 @@ export const ZCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed([])),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
+    telemetry: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({
+        title: "ZCode telemetry",
+        description:
+          "Let ZCode send model telemetry to Z.ai. While this is off, OOP starts ZCode with ZCODE_MODEL_TELEMETRY_ENABLED=false.",
+        providerSettingsForm: { control: "switch" },
+      }),
+    ),
   },
   {
-    order: ["binaryPath", "bridgePath"],
+    order: ["binaryPath", "bridgePath", "telemetry"],
   },
 );
 export type ZCodeSettings = typeof ZCodeSettings.Type;
@@ -1504,6 +1557,7 @@ const CodexSettingsPatch = Schema.Struct({
   shadowHomePath: Schema.optionalKey(TrimmedString),
   launchArgs: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
+  telemetry: Schema.optionalKey(Schema.Boolean),
 });
 
 const ClaudeSettingsPatch = Schema.Struct({
@@ -1517,6 +1571,8 @@ const ClaudeSettingsPatch = Schema.Struct({
   autoCompactWindow: Schema.optionalKey(
     TrimmedString.check(Schema.isPattern(CLAUDE_AUTO_COMPACT_WINDOW_PATTERN)),
   ),
+  claudeAiConnectors: Schema.optionalKey(Schema.Boolean),
+  telemetry: Schema.optionalKey(Schema.Boolean),
 });
 
 const CursorSettingsPatch = Schema.Struct({
@@ -1530,6 +1586,14 @@ const GrokSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
+  telemetry: Schema.optionalKey(Schema.Boolean),
+});
+
+const ZCodeSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(TrimmedString),
+  customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
+  telemetry: Schema.optionalKey(Schema.Boolean),
 });
 
 const HarnessSettingsPatch = Schema.Struct({
@@ -1668,7 +1732,7 @@ export const ServerSettingsPatch = Schema.Struct({
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
       antigravity: Schema.optionalKey(AntigravitySettingsPatch),
       minimax: Schema.optionalKey(HarnessSettingsPatch),
-      zcode: Schema.optionalKey(HarnessSettingsPatch),
+      zcode: Schema.optionalKey(ZCodeSettingsPatch),
     }),
   ),
   // Whole-map replacement for the new instance config. Patching individual
@@ -1694,6 +1758,7 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
+  loadLinkIcons: Schema.optionalKey(Schema.Boolean),
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   setupNotificationsEnabled: Schema.optionalKey(Schema.Boolean),

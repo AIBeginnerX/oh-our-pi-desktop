@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  boundFlows,
   connectColumns,
   focusWorkflowGraphId,
   layoutWorkflow,
   workflowActivity,
+  workflowCounts,
   workflowWaves,
   type WorkflowGraph,
   type WorkflowNode,
@@ -182,6 +184,64 @@ describe("focus and activity", () => {
       "plan:end",
       "plan:start",
     ]);
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "progress",
+      "started",
+      "settled",
+      "started",
+    ]);
+    expect(entries[0]?.detail).toBe("Read a.ts");
+  });
+});
+
+describe("failure counts", () => {
+  const mixed = [
+    node("a", "completed"),
+    node("b", "completed"),
+    node("c", "failed"),
+    node("d", "cancelled"),
+    node("e", "running"),
+    node("f", "pending"),
+  ];
+
+  it("counts failures apart from completions", () => {
+    expect(workflowCounts(mixed)).toEqual({
+      total: 6,
+      completed: 2,
+      failed: 1,
+      stopped: 1,
+      running: 1,
+    });
+  });
+
+  it("carries the split into every column", () => {
+    const [wave] = layoutWorkflow({
+      waveTitles: [],
+      nodes: mixed.map((entry) => ({ ...entry, wave: 0 })),
+      edges: [],
+    }).waves;
+    expect([wave?.settled, wave?.completed, wave?.failed, wave?.running]).toEqual([4, 2, 1, 1]);
+  });
+});
+
+describe("bounded flow chips", () => {
+  const flows = Array.from({ length: 7 }, (_, index) => ({ id: `flow-${6 - index}` }));
+  const ids = (list: ReadonlyArray<{ id: string }>) => list.map((flow) => flow.id);
+
+  it("shows the newest four and tucks the rest behind Earlier", () => {
+    const { visible, earlier } = boundFlows(flows, null);
+    expect(ids(visible)).toEqual(["flow-6", "flow-5", "flow-4", "flow-3"]);
+    expect(ids(earlier)).toEqual(["flow-2", "flow-1", "flow-0"]);
+  });
+
+  it("keeps an older selected flow visible without duplicating it", () => {
+    const { visible, earlier } = boundFlows(flows, "flow-1");
+    expect(ids(visible)).toEqual(["flow-6", "flow-5", "flow-4", "flow-3", "flow-1"]);
+    expect(ids(earlier)).toEqual(["flow-2", "flow-0"]);
+  });
+
+  it("has nothing earlier while the flows fit", () => {
+    expect(boundFlows(flows.slice(0, 3), "flow-5").earlier).toEqual([]);
   });
 });
 

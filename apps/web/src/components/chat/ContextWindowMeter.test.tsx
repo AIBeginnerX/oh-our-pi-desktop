@@ -14,17 +14,21 @@ vi.mock("../ui/popover", () => ({
   ),
 }));
 
-const usage = deriveLatestContextWindowSnapshot([
-  {
-    id: EventId.make("activity-1"),
-    tone: "info",
-    kind: "context-window.updated",
-    summary: "Context updated",
-    payload: { usedTokens: 100_000, maxTokens: 1_000_000 },
-    turnId: TurnId.make("turn-1"),
-    createdAt: "2026-08-24T12:00:00.000Z",
-  },
-]);
+function usageWith(usedTokens: number) {
+  return deriveLatestContextWindowSnapshot([
+    {
+      id: EventId.make("activity-1"),
+      tone: "info",
+      kind: "context-window.updated",
+      summary: "Context updated",
+      payload: { usedTokens, maxTokens: 1_000_000 },
+      turnId: TurnId.make("turn-1"),
+      createdAt: "2026-08-24T12:00:00.000Z",
+    },
+  ]);
+}
+
+const usage = usageWith(100_000);
 
 if (!usage) {
   throw new Error("The context window test fixture did not produce a snapshot.");
@@ -58,5 +62,17 @@ describe("ContextWindowMeter", () => {
     expect(markup).toContain('disabled=""');
     expect(markup).toContain(">Send or clear your draft before compacting<");
     expect(markup).not.toContain('aria-label="Send or clear your draft before compacting"');
+  });
+
+  it("shows a percentage label beside the ring only once usage reaches 75%", () => {
+    const high = usageWith(800_000);
+    if (!high) throw new Error("The high-usage fixture did not produce a snapshot.");
+
+    const quiet = renderToStaticMarkup(<ContextWindowMeter usage={usage} />);
+    const warned = renderToStaticMarkup(<ContextWindowMeter usage={high} />);
+
+    expect(quiet).not.toContain("text-warning-foreground");
+    expect(warned).toContain("text-warning-foreground");
+    expect(warned).toContain(">80%<");
   });
 });

@@ -18,7 +18,7 @@ in a new, unsent chat the changes set the default directly.
 
 If a crew model fails, for example because its account is out of credit, OOP hands the same task to another signed-in model of the same level and shows the switch on the board. A provider that just failed sits out new tasks for ten minutes; one that is out of credit or signed out sits out until OOP checks its status again. Only when every model in that chain fails does the chat's own model do the task itself.
 
-When the auditor asks for changes, or a crew task finishes after the brain has already answered, OOP sends the brain a follow-up turn with that report so it can fix the work or update its answer. Audit fixes stop after two rounds per message you send. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
+When the auditor asks for changes, or a crew task finishes after the brain has already answered, OOP sends the brain a follow-up turn with that report so it can fix the work or update its answer. The auditor checks whether a failing test or build already failed before the turn, and does not ask for fixes to failures that predate it. Audit fixes stop after two rounds per message you send. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
 
 Each piece of crew work runs as its own chat named `Crew Worker · …`, `Crew Expert · …`, or
 `Crew Auditor · …` in the same workspace, and is settled when it finishes. In the sidebar these
@@ -26,6 +26,10 @@ chats fold into a **Crew · N** line under the chat that delegated them; open it
 each task. Crew chats from before this grouping, or whose lead chat is archived, collect in one
 **Earlier crew tasks** line. A crew chat waiting on your approval or answer stays in the main list.
 The brain and its crew show up live in the right panel under **Workflows** and **Agents**.
+
+On the **Workflows** board a finished task is labeled **reported**, **tested** (its run passed tests), or **audited** (an approving audit came after it), and never called done. Cards show tokens and, when the provider reports one, a cost; the brain's card totals the turn and says "+ unpriced" when part of it had no reported cost. Select a card to **Stop** a running task, **Open** its chat, or **Retry** one that failed, stopped, was blocked, or finished only part of its work.
+
+When the brain splits code edits across crew tasks that run at the same time, it can start each in its own git worktree. The member starts from your tracked files, uncommitted changes included, and its changes are applied back to the chat's workspace when it finishes. Untracked and ignored files such as installed dependencies are not copied. If the changes conflict with yours, nothing is applied, the worktree is kept, and the task is reported as unfinished with the worktree's path.
 
 When the brain is a Claude chat, crew roles that use a Claude model from the same account run as
 the brain's own subagents instead of separate chats. They start faster and share the brain's

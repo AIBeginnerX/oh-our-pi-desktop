@@ -109,6 +109,7 @@ const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
   shadowHomePath: "",
   launchArgs: "",
   customModels: [],
+  telemetry: false,
   ...overrides,
 });
 
@@ -119,6 +120,8 @@ const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings =>
   customModels: [],
   launchArgs: "",
   autoCompactWindow: "",
+  claudeAiConnectors: false,
+  telemetry: true,
   ...overrides,
 });
 
@@ -134,6 +137,7 @@ const makeGrokConfig = (overrides: Partial<GrokSettings>): GrokSettings => ({
   enabled: false,
   binaryPath: "grok",
   customModels: [],
+  telemetry: false,
   ...overrides,
 });
 

@@ -84,7 +84,8 @@ Join modifiers and a key with `+`, such as `mod+shift+d` or `ctrl+l`.
 ## When conditions
 
 Available context keys are `terminalFocus`, `terminalOpen`, `previewFocus`,
-`previewOpen`, `modelPickerOpen`, `usagePageOpen`, `editableFocus`, `isWeb`, and `isDesktop`.
+`previewOpen`, `modelPickerOpen`, `usagePageOpen`, `diffFocus`, `editableFocus`, `isWeb`, and
+`isDesktop`.
 `editableFocus` is true while a text field, the composer, or another editor has
 the keyboard. `isWeb` is true in a browser tab. `isDesktop` is true in the
 desktop app. Unknown keys evaluate to `false`.
@@ -119,6 +120,11 @@ terminals so native undo keeps working there.
 
 `navigation.back` (`mod+[` by default) and `navigation.forward` (`mod+]`) move
 through the pages you have visited, like a browser's back and forward buttons.
+
+`diff.nextFile` (`]`), `diff.previousFile` (`[`), and `diff.toggleViewed` (`v`) work while the
+Diff panel has focus and you are not typing in a field. Click inside the panel to focus it.
+`diff.toggleViewed` ticks the current file as viewed and collapses it; a file whose diff
+changes later reads as unviewed again.
 
 `chat.new` may ask you to choose a project when there is more than one.
 `chat.newLocal` skips that chooser. Both use your

@@ -236,6 +236,42 @@ NodeTest.test("invalid Installer pins stop the wrapper before any operation", as
   }
 });
 
+NodeTest.test("a build stops on missing release notes before it syncs or builds", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-notes-gate-"));
+  const calls = [];
+  try {
+    await NodeFSP.writeFile(NodePath.join(root, "OOP_RELEASE.json"), '{ "version": "0.0.121" }\n');
+    await NodeAssert.rejects(
+      main(["build"], root, async (...args) => {
+        calls.push(args);
+      }),
+      (error) =>
+        /Add the OOP 0\.0\.121 user-facing highlights/u.test(error.message) &&
+        /packages\/shared\/src\/releaseNotes\.json/u.test(error.message),
+    );
+    NodeAssert.deepEqual(calls, []);
+
+    // The same version with highlights passes the gate and reaches the host checks.
+    await NodeFSP.mkdir(NodePath.join(root, "packages", "shared", "src"), { recursive: true });
+    await NodeFSP.writeFile(
+      NodePath.join(root, "packages", "shared", "src", "releaseNotes.json"),
+      JSON.stringify({
+        versions: [
+          { version: "0.0.121", date: "2026-10-29", highlights: [{ en: "A.", ko: "가." }] },
+        ],
+      }),
+    );
+    await NodeAssert.rejects(
+      main(["build"], root, async (...args) => {
+        calls.push(args);
+      }),
+      (error) => !/releaseNotes\.json/u.test(error.message),
+    );
+  } finally {
+    await NodeFSP.rm(root, { recursive: true, force: true });
+  }
+});
+
 NodeTest.test(
   "cache path is deterministic and cannot enclose the source in either direction",
   async () => {
@@ -631,6 +667,8 @@ NodeTest.test(
       NodeAssert.equal(manifest.sha256, digest);
       NodeAssert.match(manifest.verification, /signature passed/u);
       NodeAssert.match(manifest.verification, /UI, integrations, and notarization not exercised/u);
+      // The build output is not kept in the cache once release/macos holds the verified copy.
+      NodeAssert.deepEqual(await NodeFSP.readdir(artifactRoot), []);
       NodeAssert.deepEqual(
         Object.keys(manifest).filter((key) =>
           ["distribution", "shippable", "passkeyConfigured", "notarized", "signing"].includes(key),

@@ -14,6 +14,7 @@ import * as NodeURL from "node:url";
 
 import {
   RELEASE_FILE_NAME,
+  assertReleaseNotes,
   windowsFeedInstallerName,
   windowsInstallerName,
 } from "./oop-release-names.mjs";
@@ -61,6 +62,11 @@ export const WINDOWS_DRIVE_ROOTS = ["G:\\My Drive\\OOP", "G:\\내 드라이브\\
 const SOURCE_INFO_NAME = "oop-source.json";
 const SOURCE_ARCHIVE_NAME = "oop-source.tar.gz";
 const RUNNER_FOLDER = "runner";
+/**
+ * Every script the runner executes. The task runs `windows.mjs` from the runner folder, so a
+ * module it imports but this list misses fails at load, before any log reaches Drive.
+ */
+export const RUNNER_SCRIPTS = ["windows.mjs", "macos.mjs", "oop-release-names.mjs"];
 const RUNNER_LOG_NAME = "auto-build.log";
 const RUNNER_OLD_LOG_NAME = "auto-build.old.log";
 const LOG_LIMIT_BYTES = 5 * 1024 * 1024;
@@ -330,6 +336,12 @@ async function packageInstaller(
   const localAppData =
     process.env.LOCALAPPDATA ?? NodePath.join(NodeOS.homedir(), "AppData", "Local");
   const checkout = NodePath.join(localAppData, CACHE_FOLDER, sourceKey(sourceRoot), "checkout");
+  // The archive from Drive is gated at publish time, but the NAS fallback builds straight from a
+  // working tree, so both paths check the notes the app will bundle before copying or building.
+  await assertReleaseNotes({
+    repoRoot: sourceRoot,
+    version: await releaseVersion(sourceRoot),
+  });
   const updateDirectory =
     process.env.OOP_WINDOWS_UPDATE_DIRECTORY ??
     (nasReleaseDirectory === null
@@ -621,11 +633,11 @@ async function extractDriveSource(driveRoot, info, cacheRoot) {
   return source;
 }
 
-/** Copies this script and macos.mjs to the runner folder and writes its launcher. */
+/** Copies the runner scripts to the runner folder and writes its launcher. */
 async function installRunner(scriptsDirectory, cacheRoot) {
   const runner = NodePath.join(cacheRoot, RUNNER_FOLDER);
   await NodeFSP.mkdir(NodePath.join(runner, "scripts"), { recursive: true });
-  for (const name of ["windows.mjs", "macos.mjs"]) {
+  for (const name of RUNNER_SCRIPTS) {
     await NodeFSP.copyFile(
       NodePath.join(scriptsDirectory, name),
       NodePath.join(runner, "scripts", name),

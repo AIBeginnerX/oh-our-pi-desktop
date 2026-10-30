@@ -105,6 +105,11 @@ When the selected provider can receive project memories, the memory button next 
 files** lists the project's saved memories. As you type, OOP suggests the memory whose title best
 matches your message next to the button; select it to add it to the message.
 
+In those chats the agent can also search the project's memories and propose new ones while it
+works. A proposal is not saved: it appears under **Proposed by agents** in the project's memory settings
+with the agent's reason, and becomes a normal memory only when you select **Approve**. **Reject**
+deletes it.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

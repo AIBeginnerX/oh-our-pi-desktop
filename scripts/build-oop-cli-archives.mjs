@@ -172,7 +172,7 @@ mkdir -p /opt/t3 && tar -xzf "/out/$1" -C /opt/t3 --strip-components=1
 /opt/t3/t3 --version
 T3CODE_NO_BROWSER=1 /opt/t3/t3 serve --host 127.0.0.1 --port 3999 --base-dir /root/.oop-desktop >/tmp/serve.log 2>&1 &
 i=0
-until curl -fs -o /dev/null http://127.0.0.1:3999/; do
+until curl -fs -m 5 -o /dev/null http://127.0.0.1:3999/; do
   i=$((i + 1))
   if [ "$i" -ge 120 ]; then tail -20 /tmp/serve.log >&2; exit 1; fi
   sleep 1

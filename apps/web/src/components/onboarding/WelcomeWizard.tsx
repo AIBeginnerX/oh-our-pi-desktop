@@ -87,6 +87,7 @@ import { Dialog } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { formatRelativeTime } from "../../timestampFormat";
+import { useT } from "../../i18n";
 
 /**
  * First-run welcome wizard. Rendered over the workspace at `/welcome` on a
@@ -115,6 +116,7 @@ export function WelcomeWizard({
   readonly resumeEnvironmentId?: EnvironmentId | undefined;
   readonly onDone: (projectRef?: ScopedProjectRef) => void | Promise<void>;
 }) {
+  const t = useT();
   const completeOnboarding = useCompleteOnboarding();
   // Desktop builds that update from a shared folder first check this computer can reach it.
   const [hasPrepareStep] = useState(
@@ -124,6 +126,7 @@ export function WelcomeWizard({
     resumeEnvironmentId ? "agents" : hasPrepareStep ? "prepare" : "connection",
   );
   const stages = hasPrepareStep ? PREPARED_ONBOARDING_STAGES : ONBOARDING_STAGES;
+  const displayStages = stages.map((stage) => t(stage));
   const { environments } = useEnvironments();
   const [selection, setSelection] = useState<ReadonlySet<EnvironmentId> | null>(null);
   const autoSelectedComputers = useRef(new Set<EnvironmentId>());
@@ -181,16 +184,42 @@ export function WelcomeWizard({
           }
           await onDone(projectRef);
           if (importWarning) {
+            const warningParts = importWarning.split(":");
+            const finalImportWarning =
+              warningParts[0] === "IMPORTED_AND_SKIPPED"
+                ? t(
+                    "Imported {imported} {importedUnit}. {skipped} {skippedUnit} could not be imported.",
+                    {
+                      imported: Number(warningParts[1]),
+                      importedUnit: Number(warningParts[1]) === 1 ? t("thread") : t("threads"),
+                      skipped: Number(warningParts[2]),
+                      skippedUnit: Number(warningParts[2]) === 1 ? t("thread") : t("threads"),
+                    },
+                  )
+                : warningParts[0] === "SKIPPED"
+                  ? t("{count} {unit} could not be imported.", {
+                      count: Number(warningParts[1]),
+                      unit: Number(warningParts[1]) === 1 ? t("thread") : t("threads"),
+                    })
+                  : warningParts[0] === "IMPORTED_PARTIAL"
+                    ? t("Imported {count} {unit}. Some thread history could not be imported.", {
+                        count: Number(warningParts[1]),
+                        unit: Number(warningParts[1]) === 1 ? t("thread") : t("threads"),
+                      })
+                    : t("Could not import thread history.");
             toastManager.add({
               type: "warning",
-              title: "Some history was not imported",
-              description: importWarning,
+              title: t("Some history was not imported"),
+              description: finalImportWarning,
               timeout: 0,
             });
           } else if (importedThreadCount > 0) {
             toastManager.add({
               type: "success",
-              title: `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}`,
+              title:
+                importedThreadCount === 1
+                  ? t("Imported 1 thread")
+                  : t("Imported {count} threads", { count: importedThreadCount }),
             });
           }
           return true;
@@ -198,8 +227,8 @@ export function WelcomeWizard({
         .catch(() => {
           const errorToast = {
             type: "error",
-            title: "Could not finish setup",
-            description: "Your settings could not be saved. Try again.",
+            title: t("Could not finish setup"),
+            description: t("Your settings could not be saved. Try again."),
           } as const;
           if (completionErrorToastIdRef.current === null) {
             completionErrorToastIdRef.current = toastManager.add(errorToast);
@@ -216,7 +245,7 @@ export function WelcomeWizard({
       finishingPromiseRef.current = completion;
       return completion;
     },
-    [completeOnboarding, onDone],
+    [completeOnboarding, onDone, t],
   );
 
   return (
@@ -228,7 +257,7 @@ export function WelcomeWizard({
         initialFocus={() => document.getElementById("onboarding-pairing-url") ?? true}
       >
         <WizardHeader
-          title="Set up OOP"
+          title={t("Set up OOP")}
           identity={
             <div className="flex items-baseline gap-1.5" role="img" aria-label="OOP">
               <OoPWordmark className="h-4 w-auto shrink-0" aria-hidden />
@@ -236,7 +265,7 @@ export function WelcomeWizard({
           }
         >
           <WizardSteps
-            steps={stages}
+            steps={displayStages}
             currentStep={stageIndex}
             isStepDisabled={(index) => isImporting || index >= stageIndex}
             onStepChange={(index) => {
@@ -315,6 +344,7 @@ async function checkUpdateFolder(): Promise<UpdateFolderCheck> {
 
 /** Checks that this computer reaches the folder OOP installs its updates from (Google Drive or a share). */
 function PrepareStep({ onContinue }: { readonly onContinue: () => void }) {
+  const t = useT();
   const updateState = useDesktopUpdateState();
   const [result, setResult] = useState<UpdateFolderCheck | null>(null);
   useEffect(() => {
@@ -338,64 +368,75 @@ function PrepareStep({ onContinue }: { readonly onContinue: () => void }) {
   const connect = async () => {
     const opened = await window.desktopBridge?.openUpdateSource?.();
     if (!opened) {
-      toastManager.add({ type: "error", title: "Could not open the shared folder" });
+      toastManager.add({ type: "error", title: t("Could not open the shared folder") });
     }
   };
 
   return (
     <StepShell
-      title="Get this computer ready"
-      description="OOP installs its updates from an update folder: OOP/release in your Google Drive, or a shared folder on your network. Make it available on this computer so new versions keep arriving."
+      title={t("Get this computer ready")}
+      description={t(
+        "OOP installs its updates from an update folder: OOP/release in your Google Drive, or a shared folder on your network. Make it available on this computer so new versions keep arriving.",
+      )}
     >
       <div className="mt-5 rounded-lg border border-border px-4 py-3">
-        <p className="text-xs text-muted-foreground">Update folder</p>
+        <p className="text-xs text-muted-foreground">{t("Update folder")}</p>
         <div role="status" className="mt-1.5 flex items-center gap-2 text-sm">
           {result === null ? (
             <>
               <Spinner className="size-3.5" />
-              Checking the update folder…
+              {t("Checking the update folder…")}
             </>
           ) : result.reachable ? (
             <>
               <CheckIcon className="size-3.5 text-success" />
-              Connected. Updates will install from this folder.
+              {t("Connected. Updates will install from this folder.")}
             </>
           ) : (
             <span className="text-destructive">
-              Can&apos;t reach the update folder.{result.message ? ` ${result.message}` : ""}
+              {t("Can't reach the update folder.")}
+              {result.message ? ` ${result.message}` : ""}
             </span>
           )}
         </div>
         {result !== null && !result.reachable ? (
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             {updateState?.canOpenUpdateSource
-              ? "Connect to the shared folder and sign in with your NAS account if asked, then check again. If it is already connected under another name, disconnect it and connect again."
-              : "Install Google Drive for desktop, sign in with the account that holds the OOP folder, and make OOP/release available offline. Then check again."}
+              ? t(
+                  "Connect to the shared folder and sign in with your NAS account if asked, then check again. If it is already connected under another name, disconnect it and connect again.",
+                )
+              : t(
+                  "Install Google Drive for desktop, sign in with the account that holds the OOP folder, and make OOP/release available offline. Then check again.",
+                )}
           </p>
         ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           {updateState?.canOpenUpdateSource ? (
             <Button size="sm" variant="outline" onClick={() => void connect()}>
               <LinkIcon className="size-3.5" />
-              Connect to shared folder
+              {t("Connect to shared folder")}
             </Button>
           ) : null}
           <Button size="sm" variant="ghost" disabled={result === null} onClick={recheck}>
-            Check again
+            {t("Check again")}
           </Button>
         </div>
       </div>
       <ul className="mt-4 list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
         <li>
-          Conversations, projects, and settings stay on each computer, so this one starts empty.
+          {t(
+            "Conversations, projects, and settings stay on each computer, so this one starts empty.",
+          )}
         </li>
         <li>
-          Next, sign in to the agents you use on this computer, such as Claude Code and Codex.
+          {t(
+            "Next, sign in to the agents you use on this computer, such as Claude Code and Codex.",
+          )}
         </li>
       </ul>
       <div className="mt-6 flex justify-end">
         <Button autoFocus onClick={onContinue}>
-          {result?.reachable === false ? "Continue without updates" : "Continue"}
+          {result?.reachable === false ? t("Continue without updates") : t("Continue")}
           <ArrowRightIcon className="size-3.5" />
         </Button>
       </div>
@@ -422,6 +463,7 @@ function ConnectionStep({
   readonly onContinue: () => void;
   readonly onPaired: (environmentId: EnvironmentId) => void;
 }) {
+  const t = useT();
   const { environments } = useEnvironments();
   const cloudEnabled = hasCloudPublicConfig();
   const directEnvironments = environments.filter(
@@ -450,14 +492,14 @@ function ConnectionStep({
   return (
     <>
       <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-        Connect your computers
+        {t("Connect your computers")}
       </h1>
       <p className="mt-2.5 text-sm leading-relaxed text-muted-foreground">
-        Choose one or more computers. We’ll set up agents and projects on each.
+        {t("Choose one or more computers. We’ll set up agents and projects on each.")}
       </p>
       {directEnvironments.length > 0 ? (
         <fieldset className="mt-5 space-y-2">
-          <legend className="sr-only">Computers to set up</legend>
+          <legend className="sr-only">{t("Computers to set up")}</legend>
           {directEnvironments.map((environment) => (
             <label
               key={environment.environmentId}
@@ -479,7 +521,9 @@ function ConnectionStep({
                     {environment.label}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground">
-                    {environment.connection.phase === "connected" ? "Connected" : "Connecting…"}
+                    {environment.connection.phase === "connected"
+                      ? t("Connected")
+                      : t("Connecting…")}
                   </span>
                 </span>
                 {environment.displayUrl ? (
@@ -514,7 +558,7 @@ function ConnectionStep({
               }
             >
               <LinkIcon className="size-4 text-muted-foreground" />
-              <span className="flex-1 text-left">Add a computer</span>
+              <span className="flex-1 text-left">{t("Add a computer")}</span>
               <ChevronRightIcon
                 className={cn("size-4 text-muted-foreground", pairingOpen && "rotate-90")}
               />
@@ -542,7 +586,7 @@ function ConnectionStep({
           disabled={!ready || isPairing}
           onClick={onContinue}
         >
-          Continue
+          {t("Continue")}
           <ArrowRightIcon className="size-3.5" />
         </Button>
       </div>
@@ -561,6 +605,7 @@ function ConnectAccountOption({
   readonly selectedIds: ReadonlySet<EnvironmentId>;
   readonly onToggleEnvironment: (environmentId: EnvironmentId, checked: boolean) => void;
 }) {
+  const t = useT();
   const { environments } = useEnvironments();
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
   const { openAuthPrompt } = useT3ConnectAuthPrompt();
@@ -588,11 +633,11 @@ function ConnectAccountOption({
           <span className="flex-1 text-left">OOP Connect</span>
           <span className="text-xs text-muted-foreground">
             {!isLoaded
-              ? "Loading sign-in…"
+              ? t("Loading sign-in…")
               : !isSignedIn
-                ? "Sign in"
+                ? t("Sign in")
                 : !discoveryReady
-                  ? "Loading computers…"
+                  ? t("Loading computers…")
                   : null}
           </span>
           <ChevronRightIcon
@@ -611,17 +656,19 @@ function ConnectAccountOption({
                   selection={{ selectedIds, onChange: onToggleEnvironment, autoSelectedComputers }}
                   refreshWhileEmpty
                   empty={
-                    <p className="py-3 text-sm text-muted-foreground">No computers linked yet.</p>
+                    <p className="py-3 text-sm text-muted-foreground">
+                      {t("No computers linked yet.")}
+                    </p>
                   }
                 />
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground">
-              Run this on each computer you want to connect.
+              {t("Run this on each computer you want to connect.")}
             </p>
             <CommandBlock command="npx t3 connect" className="mt-3" />
             <p className="mt-3 text-xs text-muted-foreground">
-              Keep OOP running. Select the computers you want to set up above.
+              {t("Keep OOP running. Select the computers you want to set up above.")}
             </p>
           </div>
         </CollapsiblePanel>
@@ -644,6 +691,7 @@ function PairingForm({
   readonly setIsPairing: (value: boolean) => void;
   readonly onPaired: (environmentId: EnvironmentId) => void;
 }) {
+  const t = useT();
   const connectPairingEnvironment = useAtomCommand(connectPairing, { reportFailure: false });
   const [pairingUrl, setPairingUrl] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -669,7 +717,7 @@ function PairingForm({
     }
     if (isAtomCommandInterrupted(result)) return;
     const cause = squashAtomCommandFailure(result);
-    setErrorMessage(cause instanceof Error ? cause.message : "Pairing failed.");
+    setErrorMessage(cause instanceof Error ? cause.message : t("Pairing failed."));
   };
 
   return (
@@ -683,7 +731,7 @@ function PairingForm({
       >
         <div>
           <label className="block text-sm text-muted-foreground" htmlFor="onboarding-pairing-url">
-            Pairing link
+            {t("Pairing link")}
           </label>
           <Input
             id="onboarding-pairing-url"
@@ -727,20 +775,20 @@ function PairingForm({
               className="group flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
             >
               <ChevronRightIcon className="size-3.5 group-data-panel-open:rotate-90" />
-              Need a pairing link?
+              {t("Need a pairing link?")}
             </CollapsibleTrigger>
             <Button type="submit" disabled={isPairing || pairingUrl.trim().length === 0}>
-              {isPairing ? "Pairing..." : "Pair"}
+              {isPairing ? t("Pairing...") : t("Pair")}
             </Button>
           </div>
           <CollapsiblePanel>
             <p className="pt-3 text-sm text-muted-foreground">
-              Run this on the computer with your code.
+              {t("Run this on the computer with your code.")}
             </p>
             <CommandBlock command="npx t3 pair" className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              Start OOP first, or run <code className="font-mono">npx t3 serve</code>. Add{" "}
-              <code className="font-mono">--tailscale</code> to use your tailnet.
+              {withCode(t("Start OOP first, or run {command}."), "npx t3 serve")}{" "}
+              {withCode(t("Add {command} to use your tailnet."), "--tailscale")}
             </p>
           </CollapsiblePanel>
         </Collapsible>
@@ -772,11 +820,12 @@ function AgentsStep({
   readonly environmentIds: readonly EnvironmentId[];
   readonly onContinue: () => void;
 }) {
+  const t = useT();
   const { environments } = useEnvironments();
   return (
     <StepShell
-      title="Connect your agents"
-      description="Choose an agent to start coding. You can add more later."
+      title={t("Connect your agents")}
+      description={t("Choose an agent to start coding. You can add more later.")}
     >
       <ScrollArea scrollFade className="mt-5 h-auto max-h-[min(32rem,55dvh)]">
         <div className="space-y-5 pr-3">
@@ -786,7 +835,7 @@ function AgentsStep({
               environmentId={environmentId}
               machineLabel={
                 environments.find((environment) => environment.environmentId === environmentId)
-                  ?.label ?? "Computer"
+                  ?.label ?? t("Computer")
               }
             />
           ))}
@@ -794,7 +843,7 @@ function AgentsStep({
       </ScrollArea>
       <div className="mt-6 flex justify-end">
         <Button autoFocus onClick={onContinue}>
-          Continue
+          {t("Continue")}
           <ArrowRightIcon className="size-3.5" />
         </Button>
       </div>
@@ -809,6 +858,7 @@ function ConnectedAgentsStep({
   readonly environmentId: EnvironmentId;
   readonly machineLabel: string;
 }) {
+  const t = useT();
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
@@ -925,7 +975,7 @@ function ConnectedAgentsStep({
       ) ? (
         <div className="mt-3">
           <Button size="xs" variant="ghost-muted" onClick={() => setAddingAccount(true)}>
-            Connect another ChatGPT account
+            {t("Connect another ChatGPT account")}
           </Button>
         </div>
       ) : null}
@@ -1052,6 +1102,7 @@ function AgentCard({
   readonly terminalAvailable: boolean;
   readonly onOpenTerminal: () => void;
 }) {
+  const t = useT();
   const meta = getDriverOption(ProviderDriverKind.make(driver));
   const Icon = meta?.icon;
   const displayName =
@@ -1067,7 +1118,7 @@ function AgentCard({
       <div className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-foreground">{displayName}</span>
         <p className="mt-0.5 text-xs leading-relaxed break-words whitespace-pre-wrap text-muted-foreground">
-          {providerState === "ready" ? "Ready to code." : summary.headline}
+          {providerState === "ready" ? t("Ready to code.") : summary.headline}
           {providerState !== "ready" && summary.detail ? ` · ${summary.detail}` : ""}
         </p>
       </div>
@@ -1075,12 +1126,12 @@ function AgentCard({
         {providerState === "ready" ? (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-success-foreground">
             <CheckIcon className="size-3.5" />
-            Ready
+            {t("Ready")}
           </span>
         ) : providerState === "checking" ? (
-          <span className="text-xs text-muted-foreground">Checking...</span>
+          <span className="text-xs text-muted-foreground">{t("Checking...")}</span>
         ) : providerState === "disabled" ? (
-          <span className="text-xs text-muted-foreground">Disabled</span>
+          <span className="text-xs text-muted-foreground">{t("Disabled")}</span>
         ) : providerState === "attention" ? (
           <span className="text-xs text-muted-foreground">{summary.headline}</span>
         ) : (
@@ -1091,7 +1142,7 @@ function AgentCard({
             disabled={terminalOpen || !terminalAvailable}
           >
             <TerminalIcon className="size-3.5" />
-            {providerState === "signIn" ? "Sign in" : "Install"}
+            {providerState === "signIn" ? t("Sign in") : t("Install")}
           </Button>
         )}
       </div>
@@ -1112,6 +1163,7 @@ function AgentInstallTerminal({
   readonly session: AgentTerminalSession;
   readonly onClose: () => void;
 }) {
+  const t = useT();
   const { command, cwd, driver, environmentId, keybindings, providerInstanceId } = session;
   // Same terminal typography preference the thread drawer honors.
   const [advancedTypography] = useLocalStorage(
@@ -1207,25 +1259,28 @@ function AgentInstallTerminal({
         <span className="text-2xs font-medium text-muted-foreground">
           {setupState === "writeFailed" ? (
             <>
-              Run <code className="rounded bg-muted px-1 font-mono">{command}</code> in this
-              terminal.
+              {withCode(
+                t("Run {command} in this terminal."),
+                command,
+                "rounded bg-muted px-1 font-mono",
+              )}
             </>
           ) : setupState === "ready" ? (
-            "Review the command, then press Enter to run it."
+            t("Review the command, then press Enter to run it.")
           ) : setupState === "openFailed" ? (
-            "Could not open the setup terminal."
+            t("Could not open the setup terminal.")
           ) : (
-            "Preparing command..."
+            t("Preparing command...")
           )}
         </span>
         <div className="flex items-center gap-1">
           {setupState === "openFailed" ? (
             <Button size="xs" variant="ghost" onClick={() => setSetupAttempt((value) => value + 1)}>
-              Retry
+              {t("Retry")}
             </Button>
           ) : null}
           <Button size="xs" variant="ghost-muted" onClick={onClose}>
-            Close
+            {t("Close")}
           </Button>
         </div>
       </div>
@@ -1235,7 +1290,9 @@ function AgentInstallTerminal({
             threadRef={threadRef}
             threadId={AGENT_ONBOARDING_THREAD_ID}
             terminalId={terminalId}
-            terminalLabel={`Install ${driver}`}
+            terminalLabel={t("Install {agent}", {
+              agent: driver === "codex" ? t("Codex") : t("Claude Code"),
+            })}
             cwd={cwd}
             providerInstanceId={providerInstanceId}
             advancedTypography={advancedTypography}
@@ -1270,6 +1327,7 @@ function ImportStep({
     importedThreadCount?: number,
   ) => Promise<boolean>;
 }) {
+  const t = useT();
   const { environments } = useEnvironments();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const importThreads = useAtomCommand(agentSessionImport, { reportFailure: false });
@@ -1453,13 +1511,13 @@ function ImportStep({
     importedThreadCountRef.current = importedThreadCount;
     if (importedProjectsCount < selection.length) {
       if (importedThreadCount > 0 && skippedThreadCount > 0) {
-        importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. ${skippedThreadCount} ${skippedThreadCount === 1 ? "thread" : "threads"} could not be imported.`;
+        importWarningRef.current = `IMPORTED_AND_SKIPPED:${importedThreadCount}:${skippedThreadCount}`;
       } else if (skippedThreadCount > 0) {
-        importWarningRef.current = `${skippedThreadCount} ${skippedThreadCount === 1 ? "thread could" : "threads could"} not be imported.`;
+        importWarningRef.current = `SKIPPED:${skippedThreadCount}`;
       } else if (importedThreadCount > 0) {
-        importWarningRef.current = `Imported ${importedThreadCount} ${importedThreadCount === 1 ? "thread" : "threads"}. Some thread history could not be imported.`;
+        importWarningRef.current = `IMPORTED_PARTIAL:${importedThreadCount}`;
       } else {
-        importWarningRef.current = "Could not import thread history.";
+        importWarningRef.current = "FAILED";
       }
     }
     finishAfterImport();
@@ -1468,16 +1526,18 @@ function ImportStep({
   if (scans.every((scan) => scan.data === null) && scans.some((scan) => scan.isPending)) {
     return (
       <div className="flex h-full min-h-40 flex-col">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Your projects</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          {t("Your projects")}
+        </h1>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6">
           <Spinner size="lg" tone="muted" />
           <p className="text-center text-sm text-muted-foreground">
-            Looking for projects from Claude Code and Codex…
+            {t("Looking for projects from Claude Code and Codex…")}
           </p>
         </div>
         <div className="flex justify-end">
           <Button variant="ghost-muted" onClick={() => void onDone()}>
-            Do not import projects
+            {t("Do not import projects")}
           </Button>
         </div>
       </div>
@@ -1486,13 +1546,16 @@ function ImportStep({
 
   return (
     <StepShell
-      title="Choose your projects"
-      description="Import projects and conversations from your selected computers."
+      title={t("Choose your projects")}
+      description={t("Import projects and conversations from your selected computers.")}
     >
       {candidates.length > 0 ? (
         <div className="mt-5 flex items-center justify-between gap-3 text-xs text-muted-foreground">
           <span role="status">
-            {selected.length} of {candidates.length} selected
+            {t("{selected} of {total} selected", {
+              selected: selected.length,
+              total: candidates.length,
+            })}
           </span>
           <div className="flex items-center gap-1">
             <Button
@@ -1501,7 +1564,7 @@ function ImportStep({
               disabled={isImporting || selected.length === candidates.length}
               onClick={() => setSelectedPaths(new Set(candidates.map((item) => item.key)))}
             >
-              Select all
+              {t("Select all")}
             </Button>
             <Button
               variant="ghost"
@@ -1509,7 +1572,7 @@ function ImportStep({
               disabled={isImporting || selected.length === 0}
               onClick={() => setSelectedPaths(new Set())}
             >
-              Select none
+              {t("Select none")}
             </Button>
           </div>
         </div>
@@ -1522,7 +1585,7 @@ function ImportStep({
             );
             const label =
               environments.find((environment) => environment.environmentId === scan.environmentId)
-                ?.label ?? "Computer";
+                ?.label ?? t("Computer");
             return (
               <fieldset
                 key={scan.environmentId}
@@ -1535,26 +1598,28 @@ function ImportStep({
                 {scan.isPending && scan.data === null ? (
                   <div className="flex items-center gap-2 py-3 text-sm text-muted-foreground">
                     <Spinner size="md" />
-                    Looking for projects…
+                    {t("Looking for projects…")}
                   </div>
                 ) : scan.error !== null ? (
                   <div
                     role="alert"
                     className="flex items-center justify-between gap-3 text-sm text-muted-foreground"
                   >
-                    <span>Could not check projects. {scan.error}</span>
+                    <span>
+                      {t("Could not check projects.")} {scan.error}
+                    </span>
                     <Button variant="ghost" size="sm" onClick={scan.refresh}>
-                      Retry
+                      {t("Retry")}
                     </Button>
                   </div>
                 ) : scanCandidates.length === 0 ? (
                   <p className="py-2 text-sm text-muted-foreground">
-                    No existing Claude Code or Codex projects found.
+                    {t("No existing Claude Code or Codex projects found.")}
                   </p>
                 ) : null}
                 {scan.data?.truncated ? (
                   <p className="text-xs text-muted-foreground" role="status">
-                    {SCAN_LIMIT_MESSAGE}
+                    {t(SCAN_LIMIT_MESSAGE)}
                   </p>
                 ) : null}
                 <ImportCandidateList
@@ -1569,7 +1634,7 @@ function ImportStep({
       </ScrollArea>
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
         <Button variant="ghost-muted" disabled={isImporting} onClick={finishAfterImport}>
-          Do not import projects
+          {t("Do not import projects")}
         </Button>
         <Button
           autoFocus
@@ -1577,8 +1642,11 @@ function ImportStep({
           onClick={() => void runImport(selected)}
         >
           {isImporting
-            ? "Importing…"
-            : `Import ${selected.length} ${selected.length === 1 ? "project" : "projects"}`}
+            ? t("Importing…")
+            : t("Import {count} {unit}", {
+                count: selected.length,
+                unit: selected.length === 1 ? t("project") : t("projects"),
+              })}
         </Button>
       </div>
     </StepShell>
@@ -1605,6 +1673,7 @@ function ImportCandidateList({
   readonly selectedKeys: ReadonlySet<string>;
   readonly onSelectionChange: (next: ReadonlySet<string>) => void;
 }) {
+  const t = useT();
   const { repositories, other } = useMemo(() => groupOnboardingProjects(candidates), [candidates]);
   const setKeys = (keys: ReadonlyArray<string>, checked: boolean) => {
     const next = new Set(selectedKeys);
@@ -1641,9 +1710,12 @@ function ImportCandidateList({
             />
             <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-1.5 text-left">
               <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90" />
-              <span className="truncate text-sm text-muted-foreground">Other folders</span>
+              <span className="truncate text-sm text-muted-foreground">{t("Other folders")}</span>
               <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
-                {other.length} {other.length === 1 ? "folder" : "folders"}
+                {t("{count} {unit}", {
+                  count: other.length,
+                  unit: other.length === 1 ? t("folder") : t("folders"),
+                })}
               </span>
             </CollapsibleTrigger>
           </div>
@@ -1782,18 +1854,19 @@ function ImportRowMeta({
   readonly threadCount: number;
   readonly lastActiveAt: string | null;
 }) {
+  const t = useT();
   const relative = lastActiveAt === null ? null : formatRelativeTime(lastActiveAt);
   // "just now" does not fit the fixed column, so collapse it.
-  const age = relative === null ? "" : relative.suffix === null ? "now" : relative.value;
+  const age = relative === null ? "" : relative.suffix === null ? t("now") : relative.value;
   return (
     <span className="ml-auto grid shrink-0 grid-cols-[1rem_1rem_2.5rem_2.25rem] items-center gap-x-1 text-xs text-muted-foreground tabular-nums">
       <span className="flex size-4 items-center justify-center">
         {sources?.includes("claudeAgent") ? (
-          <ClaudeAI className="size-3" aria-label="Claude Code" />
+          <ClaudeAI className="size-3" aria-label={t("Claude Code")} />
         ) : null}
       </span>
       <span className="flex size-4 items-center justify-center">
-        {sources?.includes("codex") ? <OpenAI className="size-3" aria-label="Codex" /> : null}
+        {sources?.includes("codex") ? <OpenAI className="size-3" aria-label={t("Codex")} /> : null}
       </span>
       <span className="text-right">{threadCount}</span>
       <span className="text-right whitespace-nowrap">{age}</span>
@@ -1832,6 +1905,7 @@ function CommandBlock({
   readonly className?: string;
   readonly prominent?: boolean;
 }) {
+  const t = useT();
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     timeout: 1500,
     target: "command",
@@ -1851,11 +1925,23 @@ function CommandBlock({
       <Button
         size="icon-xs"
         variant="ghost"
-        aria-label="Copy command"
+        aria-label={t("Copy command")}
         onClick={() => copyToClipboard(command, undefined)}
       >
         {isCopied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
       </Button>
     </div>
+  );
+}
+
+/** Puts an inline code span where `{command}` sits in a translated sentence. */
+function withCode(sentence: string, command: string, className = "font-mono") {
+  const [before = "", after = ""] = sentence.split("{command}");
+  return (
+    <>
+      {before}
+      <code className={className}>{command}</code>
+      {after}
+    </>
   );
 }

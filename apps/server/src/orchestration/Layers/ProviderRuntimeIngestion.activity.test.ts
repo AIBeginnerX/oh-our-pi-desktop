@@ -124,7 +124,7 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
     expect(JSON.stringify(data).length).toBeLessThan(1_000);
   });
 
-  it("persists the full terminal payload on tool.completed", () => {
+  it("persists tool.completed with the wire projection, so a large output is stored as a preview", () => {
     const event = {
       ...base,
       type: "item.completed",
@@ -141,7 +141,58 @@ describe("runtimeEventToActivities tool streaming persistence", () => {
 
     expect(activities).toHaveLength(1);
     const payload = activities[0]?.payload as Record<string, unknown>;
-    expect(payload.data).toEqual(streamingData);
+    const data = payload.data as Record<string, unknown>;
+    expect(payload.status).toBe("completed");
+    expect(data.toolCallId).toBe("tool-call-1");
+    expect(data.command).toBe("blender --render");
+    expect(data.rawOutput).toEqual({ content: "first line of output" });
+    expect(data.content).toBeUndefined();
+    expect(JSON.stringify(data).length).toBeLessThan(1_000);
+  });
+
+  it("keeps the command of a Codex item and reduces its aggregated output to a preview", () => {
+    const event = {
+      ...base,
+      type: "item.completed",
+      eventId: EventId.make("evt-tool-codex-completed"),
+      payload: {
+        itemType: "command_execution",
+        status: "completed",
+        title: "Ran command",
+        data: { item: { command: "bun test", aggregatedOutput: accumulatedStdout } },
+      },
+    } satisfies ProviderRuntimeEvent;
+
+    const [activity] = runtimeEventToActivities(event);
+    const payload = activity?.payload as Record<string, unknown>;
+    const data = payload.data as { item: Record<string, unknown> };
+
+    expect(data.item.command).toBe("bun test");
+    expect(data.item.aggregatedOutput).toBe("first line of output");
+    expect(JSON.stringify(data).length).toBeLessThan(1_000);
+  });
+
+  it("persists tool.started with the wire projection of data", () => {
+    const event = {
+      ...base,
+      type: "item.started",
+      eventId: EventId.make("evt-tool-streaming-started"),
+      payload: {
+        itemType: "command_execution",
+        status: "inProgress",
+        title: "Render",
+        data: streamingData,
+      },
+    } satisfies ProviderRuntimeEvent;
+
+    const [activity] = runtimeEventToActivities(event);
+    const payload = activity?.payload as Record<string, unknown>;
+    const data = payload.data as Record<string, unknown>;
+
+    expect(activity?.kind).toBe("tool.started");
+    expect(data.command).toBe("blender --render");
+    expect(data.rawOutput).toEqual({ content: "first line of output" });
+    expect(JSON.stringify(data).length).toBeLessThan(1_000);
   });
 });
 
@@ -200,6 +251,23 @@ describe("runtimeEventToActivities owned usage observations", () => {
       terminal: "completed",
       usage: completeUsage,
     });
+  });
+
+  it("keeps the cost a provider reported and adds none when it reported none", () => {
+    const completed = (eventId: string, payload: Record<string, unknown>) =>
+      ({
+        ...base,
+        type: "turn.completed",
+        eventId: EventId.make(eventId),
+        turnId: TurnId.make("turn-1"),
+        payload: { state: "completed", tokenUsage: completeUsage, ...payload },
+      }) as ProviderRuntimeEvent;
+
+    const [priced] = runtimeEventToActivities(completed("evt-priced", { totalCostUsd: 0.42 }));
+    const [unpriced] = runtimeEventToActivities(completed("evt-unpriced", {}));
+
+    expect(priced?.payload).toMatchObject({ costUsd: 0.42 });
+    expect(unpriced?.payload).not.toHaveProperty("costUsd");
   });
 
   it("records an aborted terminal without a native conversation id", () => {

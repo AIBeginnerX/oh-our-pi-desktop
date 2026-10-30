@@ -105,6 +105,19 @@ export const DesktopUpdateStatusSchema = Schema.Literals([
 export const DesktopRuntimeArchSchema = Schema.Literals(["arm64", "x64", "other"]);
 export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
+/**
+ * The language of the native application menu. `system` follows the OS locale; the other
+ * values are the languages the menu ships translations for. Anything else resolves to English.
+ */
+export const DesktopMenuLanguageSchema = Schema.Literals([
+  "system",
+  "en",
+  "ko",
+  "ja",
+  "zh-CN",
+  "es",
+]);
+export type DesktopMenuLanguage = typeof DesktopMenuLanguageSchema.Type;
 export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Dev", "Nightly"]);
 
 export interface DesktopAppBranding {
@@ -1285,6 +1298,13 @@ export interface DesktopBridge {
   onQuitShortcut?: (listener: (event: QuitShortcutHintEvent) => void) => () => void;
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
+  /**
+   * The native application menu's language. Optional: older desktop builds are
+   * English-only.
+   */
+  getMenuLanguage?: () => Promise<DesktopMenuLanguage>;
+  /** Reads the setting and rebuilds the application menu when it changed. */
+  setMenuLanguage?: (language: DesktopMenuLanguage) => Promise<DesktopMenuLanguage>;
   getUpdateState: () => Promise<DesktopUpdateState>;
   setUpdateChannel: (channel: DesktopUpdateChannel) => Promise<DesktopUpdateState>;
   checkForUpdate: () => Promise<DesktopUpdateCheckResult>;
@@ -1317,6 +1337,8 @@ export interface DesktopPreviewBridge {
   goBack: (tabId: string) => Promise<void>;
   goForward: (tabId: string) => Promise<void>;
   refresh: (tabId: string) => Promise<void>;
+  /** Cancel the page load in progress. */
+  stop: (tabId: string) => Promise<void>;
   zoomIn: (tabId: string) => Promise<void>;
   zoomOut: (tabId: string) => Promise<void>;
   resetZoom: (tabId: string) => Promise<void>;

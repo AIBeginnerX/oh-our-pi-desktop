@@ -179,6 +179,10 @@
       "types": "./src/threadFlow.ts",
       "default": "./src/threadFlow.ts"
     },
+    "./crew-board": {
+      "types": "./src/crewBoard.ts",
+      "default": "./src/crewBoard.ts"
+    },
     "./state/device": {
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"

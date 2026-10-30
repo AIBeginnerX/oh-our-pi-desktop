@@ -36,6 +36,11 @@ import * as NetService from "@t3tools/shared/Net";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { compareSemverVersions, parseSemver } from "@t3tools/shared/semver";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import {
+  generateOpenCode2Password,
+  isOpenCode2Version,
+  makeOpenCode2Client,
+} from "./opencode2/OpenCode2Client.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 const OPENCODE_EMPTY_CONFIG_CONTENT = "{}";
 
@@ -177,6 +182,30 @@ export const verifyOpenCodeServerVersion = Effect.fn("verifyOpenCodeServerVersio
   return health.version;
 });
 
+/** Only server info proves an OpenCode 2 server is ready and accepts the password. */
+export const verifyOpenCode2ServerVersion = Effect.fn("verifyOpenCode2ServerVersion")(function* (
+  baseUrl: string,
+  password: string,
+) {
+  const client = makeOpenCode2Client({ baseUrl, password });
+  const info = yield* runOpenCodeSdk("server.info", (signal) =>
+    client.server.info({ signal }),
+  ).pipe(Effect.timeoutOption(OPENCODE_HEALTH_TIMEOUT));
+  if (Option.isNone(info)) {
+    return yield* new OpenCodeRuntimeError({
+      operation: "server.info",
+      detail: "Timed out while checking the OpenCode server version.",
+    });
+  }
+  if (!isOpenCode2Version(info.value.version)) {
+    return yield* new OpenCodeRuntimeError({
+      operation: "server.info",
+      detail: "The server is not an OpenCode 2 server.",
+    });
+  }
+  return info.value.version;
+});
+
 export interface OpenCodeCommandResult {
   readonly stdout: string;
   readonly stderr: string;
@@ -236,6 +265,8 @@ export interface OpenCodeRuntimeShape {
     readonly binaryPath: string;
     readonly directory: string;
     readonly serverPassword?: string;
+    /** OpenCode 2 requires its own password variable and answers only its own API. */
+    readonly protocol?: "v2";
     readonly environment?: NodeJS.ProcessEnv;
     readonly port?: number;
     readonly hostname?: string;
@@ -251,6 +282,7 @@ export interface OpenCodeRuntimeShape {
     readonly directory: string;
     readonly serverUrl?: string | null;
     readonly serverPassword?: string;
+    readonly protocol?: "v2";
     readonly environment?: NodeJS.ProcessEnv;
     readonly port?: number;
     readonly hostname?: string;
@@ -584,6 +616,17 @@ function ensureRuntimeError(
     : new OpenCodeRuntimeError({ operation, detail, cause });
 }
 
+/**
+ * Signals the process group led by `pid`. A pid of 1 or less is never signalled:
+ * `kill(-1)` reaches every process the user owns, and test spawners report a
+ * fake pid of 1.
+ */
+function signalProcessGroup(pid: unknown, signal: NodeJS.Signals): void {
+  const leader = Number(pid);
+  if (!Number.isInteger(leader) || leader <= 1) return;
+  process.kill(-leader, signal);
+}
+
 const makeOpenCodeRuntime = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const netService = yield* NetService.NetService;
@@ -607,7 +650,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           ? child.kill({ killSignal: "SIGKILL" }).pipe(Effect.asVoid)
           : Effect.sync(() => {
               try {
-                process.kill(-Number(child.pid), "SIGKILL");
+                signalProcessGroup(child.pid, "SIGKILL");
               } catch {
                 // The command and its process group may already have exited.
               }
@@ -683,11 +726,22 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       const timeoutMs = input.timeoutMs ?? DEFAULT_OPENCODE_SERVER_TIMEOUT_MS;
       const args = ["serve", `--hostname=${hostname}`, `--port=${port}`];
       const spawnCommand = yield* resolveCommand(input.binaryPath, args, input.environment);
-      const serverPassword = resolveOpenCodeServerPassword({
-        external: false,
-        ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),
-        ...(input.environment !== undefined ? { environment: input.environment } : {}),
-      });
+      const v2 = input.protocol === "v2";
+      // OpenCode 2 always requires a password and prints a generated one
+      // otherwise, so OOP supplies its own. OPENCODE_PASSWORD outranks the
+      // inherited 1.x OPENCODE_SERVER_PASSWORD.
+      const serverPassword = v2
+        ? (input.serverPassword ?? generateOpenCode2Password())
+        : resolveOpenCodeServerPassword({
+            external: false,
+            ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),
+            ...(input.environment !== undefined ? { environment: input.environment } : {}),
+          });
+      const baseEnvironment = v2
+        ? (({ OPENCODE_SERVER_PASSWORD: _inherited, ...rest }) => rest)(
+            input.environment ?? process.env,
+          )
+        : input.environment;
 
       const child = yield* spawner
         .spawn(
@@ -695,8 +749,10 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
             detached: hostPlatform !== "win32",
             shell: spawnCommand.shell,
             env: {
-              ...input.environment,
-              ...(serverPassword !== undefined ? { OPENCODE_SERVER_PASSWORD: serverPassword } : {}),
+              ...baseEnvironment,
+              ...(serverPassword !== undefined
+                ? { [v2 ? "OPENCODE_PASSWORD" : "OPENCODE_SERVER_PASSWORD"]: serverPassword }
+                : {}),
               // Respect an OPENCODE_CONFIG_CONTENT provided by the caller or
               // the inherited process environment, only falling back to the
               // empty config when neither is set. Setting it unconditionally
@@ -706,7 +762,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
               // `input.environment` is provided.
               OPENCODE_CONFIG_CONTENT: resolveOpenCodeConfigContent(input.environment),
             },
-            extendEnv: input.environment === undefined,
+            extendEnv: baseEnvironment === undefined,
           }),
         )
         .pipe(
@@ -726,7 +782,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
           ? child.kill({ killSignal: signal, forceKillAfter: "1 second" }).pipe(Effect.asVoid)
           : Effect.sync(() => {
               try {
-                process.kill(-Number(child.pid), signal);
+                signalProcessGroup(child.pid, signal);
               } catch {
                 // The direct child may already have exited after starting the
                 // server; the process group kill is best-effort cleanup for
@@ -837,13 +893,15 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       yield* Ref.set(stderrRef, null);
 
       const url = readyOption.value;
-      const version = yield* verifyOpenCodeServerVersion(
-        createOpenCodeSdkClient({
-          baseUrl: url,
-          directory: input.directory,
-          ...(serverPassword !== undefined ? { serverPassword } : {}),
-        }),
-      );
+      const version = v2
+        ? yield* verifyOpenCode2ServerVersion(url, serverPassword ?? "")
+        : yield* verifyOpenCodeServerVersion(
+            createOpenCodeSdkClient({
+              baseUrl: url,
+              directory: input.directory,
+              ...(serverPassword !== undefined ? { serverPassword } : {}),
+            }),
+          );
 
       return {
         url,
@@ -864,12 +922,16 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
         external: true,
         ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),
       });
-      return verifyOpenCodeServerVersion(
-        createOpenCodeSdkClient({
-          baseUrl: serverUrl,
-          directory: input.directory,
-          ...(serverPassword !== undefined ? { serverPassword } : {}),
-        }),
+      return (
+        input.protocol === "v2"
+          ? verifyOpenCode2ServerVersion(serverUrl, serverPassword ?? "")
+          : verifyOpenCodeServerVersion(
+              createOpenCodeSdkClient({
+                baseUrl: serverUrl,
+                directory: input.directory,
+                ...(serverPassword !== undefined ? { serverPassword } : {}),
+              }),
+            )
       ).pipe(
         Effect.map((version) => ({
           url: serverUrl,
@@ -885,6 +947,7 @@ const makeOpenCodeRuntime = Effect.gen(function* () {
       binaryPath: input.binaryPath,
       directory: input.directory,
       ...(input.serverPassword !== undefined ? { serverPassword: input.serverPassword } : {}),
+      ...(input.protocol !== undefined ? { protocol: input.protocol } : {}),
       ...(input.environment !== undefined ? { environment: input.environment } : {}),
       ...(input.port !== undefined ? { port: input.port } : {}),
       ...(input.hostname !== undefined ? { hostname: input.hostname } : {}),

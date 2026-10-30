@@ -298,7 +298,7 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
       expect(yield* fs.readFileString(selected.executablePath)).toBe(serverContents);
       expect(yield* fs.readFileString(selected.harnessPath)).toBe(harnessContents);
       expect(yield* fs.readDirectory(path.join(installation.managedDirectory, "versions"))).toEqual(
-        expect.arrayContaining([previousReleaseId, releaseAsset().sha256]),
+        [releaseAsset().sha256],
       );
       expect(requests).toEqual([releaseAsset().url]);
     }),
@@ -775,6 +775,94 @@ it.layer(NodeServices.layer)("Antigravity installation", (it) => {
           yield* isolated.installation.resolve(executableName, { PATH: externalDirectory }),
         ).toMatchObject({ source: "override", executablePath: externalExecutable });
       }),
+  );
+
+  it.effect(
+    "removes superseded releases after activation and leaves staging and unrelated entries",
+    () =>
+      Effect.gen(function* () {
+        const { installation, fs, path, stagingReleased } = yield* makeHarness({ previous: true });
+        const versions = path.join(installation.managedDirectory, "versions");
+        yield* writeRelease(
+          installation.managedDirectory,
+          { ...releaseAsset(), sha256: "2".repeat(64), version: "fixture-older" },
+          false,
+        );
+        // Another install's in-flight staging and a foreign entry are not releases.
+        yield* fs.makeDirectory(path.join(versions, ".install-other"));
+        yield* fs.makeDirectory(path.join(versions, "notes"));
+        yield* installation.start;
+        expect((yield* terminalState(installation)).phase).toBe("succeeded");
+        yield* Deferred.await(stagingReleased);
+        expect((yield* fs.readDirectory(versions)).toSorted()).toEqual(
+          [".install-other", "notes", releaseAsset().sha256].toSorted(),
+        );
+        expect((yield* installation.resolve()).version).toBe("fixture-new");
+      }),
+  );
+
+  it.effect("removes releases left by earlier upgrades when the runtime is first checked", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-test-" });
+      const managedDirectory = path.join(
+        baseDir,
+        "tools",
+        "antigravity-acp",
+        `${hostPlatform}-x64`,
+      );
+      yield* writeRelease(
+        managedDirectory,
+        { ...releaseAsset(), sha256: "2".repeat(64), version: "fixture-older" },
+        false,
+      );
+      const { installation } = yield* makeHarness({ baseDir, previous: true });
+      expect(yield* fs.readDirectory(path.join(managedDirectory, "versions"))).toEqual([
+        previousReleaseId,
+      ]);
+      yield* expectPreviousRelease(installation);
+    }),
+  );
+
+  it.effect("does not fail the install when a superseded release cannot be deleted", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const staleReleaseId = "2".repeat(64);
+      const { installation, path, stagingReleased } = yield* makeHarness({
+        previous: true,
+        fileSystem: FileSystem.FileSystem.of({
+          ...fs,
+          remove: (target, options) =>
+            target.endsWith(staleReleaseId)
+              ? Effect.fail(
+                  PlatformError.systemError({
+                    _tag: "PermissionDenied",
+                    module: "FileSystem",
+                    method: "remove",
+                    pathOrDescriptor: target,
+                    description: "EBUSY: file is in use",
+                  }),
+                )
+              : fs.remove(target, options),
+        }),
+      });
+      yield* writeRelease(
+        installation.managedDirectory,
+        { ...releaseAsset(), sha256: staleReleaseId, version: "fixture-older" },
+        false,
+      );
+      yield* installation.start;
+      expect(yield* terminalState(installation)).toMatchObject({
+        phase: "succeeded",
+        installedVersion: "fixture-new",
+      });
+      yield* Deferred.await(stagingReleased);
+      expect(
+        (yield* fs.readDirectory(path.join(installation.managedDirectory, "versions"))).toSorted(),
+      ).toEqual([releaseAsset().sha256, staleReleaseId].toSorted());
+      expect((yield* installation.resolve()).version).toBe("fixture-new");
+    }),
   );
 
   it.effect("keeps leased releases available while new sessions resolve the new release", () =>

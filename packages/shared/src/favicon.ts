@@ -66,7 +66,9 @@ export function toolActivityFaviconUrl(
   },
   appearance: "light" | "dark",
   size = 32,
+  enabled = true,
 ): string | null {
+  if (!enabled) return null;
   if (appearance === "dark") {
     return (
       explicitFaviconUrl(icon.faviconUrlDark) ??
@@ -83,7 +85,12 @@ export function toolActivityFaviconUrl(
 }
 
 /** Return a public favicon URL without disclosing private or reserved hosts. */
-export function faviconUrlForOrigin(rawUrl: string | null | undefined, size = 32): string | null {
+export function faviconUrlForOrigin(
+  rawUrl: string | null | undefined,
+  size = 32,
+  enabled = true,
+): string | null {
+  if (!enabled) return null;
   if (!rawUrl) return null;
   try {
     const url = new URL(rawUrl);

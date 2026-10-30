@@ -6,6 +6,7 @@ import {
   ExternalLink,
   MousePointerClick,
   PictureInPicture2,
+  X,
 } from "lucide-react";
 import {
   type FormEvent,
@@ -19,6 +20,7 @@ import {
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "~/components/ui/input-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+import { useT } from "~/i18n";
 import { cn } from "~/lib/utils";
 
 interface Props {
@@ -33,6 +35,8 @@ interface Props {
   onBack: () => void;
   onForward: () => void;
   onRefresh: () => void;
+  /** While loading, the refresh button becomes a stop button. Omitted where a load cannot be cancelled. */
+  onStop?: (() => void) | undefined;
   onSubmit: (url: string) => void;
   /** When provided, renders an "Open in browser" affordance to the right. */
   onOpenInBrowser?: (() => void) | undefined;
@@ -77,6 +81,7 @@ export function PreviewChromeRow({
   onBack,
   onForward,
   onRefresh,
+  onStop,
   onSubmit,
   onOpenInBrowser,
   onCapture,
@@ -92,6 +97,7 @@ export function PreviewChromeRow({
   trailingActions,
   leadingActions,
 }: Props) {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [draft, setDraft] = useState(url);
   const [inputFocused, setInputFocused] = useState(false);
@@ -102,6 +108,8 @@ export function PreviewChromeRow({
     if (!node) return;
     node.focus();
   }, [focusUrlNonce]);
+
+  const stoppable = loading && onStop !== undefined;
 
   const submit = (event?: FormEvent | KeyboardEvent) => {
     event?.preventDefault();
@@ -159,16 +167,16 @@ export function PreviewChromeRow({
                 <Button
                   variant="ghost"
                   size="icon-xs"
-                  onClick={refreshDisabled ? NOOP : onRefresh}
-                  disabled={refreshDisabled}
-                  aria-label={loading ? "Stop" : "Refresh"}
+                  onClick={stoppable ? onStop : refreshDisabled ? NOOP : onRefresh}
+                  disabled={!stoppable && refreshDisabled}
+                  aria-label={stoppable ? t("Stop loading") : "Refresh"}
                   type="button"
                 />
               }
             >
-              <RefreshIcon refreshing={loading} />
+              {stoppable ? <X /> : <RefreshIcon refreshing={loading} />}
             </TooltipTrigger>
-            <TooltipPopup>{loading ? "Loading…" : "Refresh"}</TooltipPopup>
+            <TooltipPopup>{stoppable ? t("Stop loading") : "Refresh"}</TooltipPopup>
           </Tooltip>
         </div>
 

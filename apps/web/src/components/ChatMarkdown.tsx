@@ -141,7 +141,7 @@ import { createIncrementalHighlightedDocument } from "../lib/incrementalHighligh
 import { HighlightedCodeLines } from "./chat/HighlightedCodeLines";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
 import { useTheme } from "../hooks/useTheme";
-import { getClientSettings, useClientSettings } from "../hooks/useSettings";
+import { getClientSettings, useClientSettings, useLinkIconsEnabled } from "../hooks/useSettings";
 import {
   chatMarkdownClipboardPayload,
   serializeTableElementToCsv,
@@ -162,6 +162,7 @@ import {
 import { readLocalApi } from "../localApi";
 import { useAssetUrlRefresh, useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
+import { useT } from "../i18n";
 import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
 import { readThreadShell, useProjects } from "../state/entities";
@@ -935,6 +936,16 @@ function MarkdownCodeBlockTitleContent({
   );
 }
 
+const CODE_BLOCK_COLLAPSE_LINES = 24;
+
+function countCodeLines(code: string): number {
+  let lines = 1;
+  for (let index = code.indexOf("\n"); index !== -1; index = code.indexOf("\n", index + 1)) {
+    if (index < code.length - 1) lines += 1;
+  }
+  return lines;
+}
+
 function MarkdownCodeBlock({
   code,
   language,
@@ -954,6 +965,18 @@ function MarkdownCodeBlock({
 }) {
   const [copied, setCopied] = useState(false);
   const [wrapped, setWrapped] = useState(readInitialWordWrapSetting);
+  const [expanded, setExpanded] = useState(false);
+  // A block the reader watched stream in never collapses afterwards, so the
+  // finished message does not shift under them.
+  const [hasStreamed, setHasStreamed] = useState(isStreaming);
+  if (isStreaming && !hasStreamed) setHasStreamed(true);
+  const t = useT();
+  const lineCount = useMemo(
+    () => (isStreaming || hasStreamed ? 0 : countCodeLines(code)),
+    [code, hasStreamed, isStreaming],
+  );
+  const collapsible = lineCount > CODE_BLOCK_COLLAPSE_LINES;
+  const capped = collapsible && !expanded;
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapLabel = wrapped ? "Disable line wrap" : "Wrap lines";
   const copyLabel = copied ? "Copied" : "Copy code";
@@ -1022,6 +1045,17 @@ function MarkdownCodeBlock({
           />
         </span>
         <span className="flex items-center gap-0.5" role="toolbar" aria-label="Code block actions">
+          {collapsible ? (
+            <Button
+              type="button"
+              variant="ghost-muted"
+              size="xs"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((value) => !value)}
+            >
+              {expanded ? t("Collapse") : t("Expand ({count} lines)", { count: lineCount })}
+            </Button>
+          ) : null}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -1075,7 +1109,14 @@ function MarkdownCodeBlock({
           </Tooltip>
         </span>
       </div>
-      {children}
+      <div
+        className={cn(
+          capped &&
+            "max-h-96 overflow-hidden [mask-image:linear-gradient(to_bottom,black_calc(100%_-_4rem),transparent)]",
+        )}
+      >
+        {children}
+      </div>
     </div>
   );
 }
@@ -1306,8 +1347,9 @@ function brandLinkIcon(host: string): typeof GitHubIcon | null {
 
 const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string }) {
   const [failedHost, setFailedHost] = useState<string | null>(null);
-  const BrandIcon = brandLinkIcon(host);
-  const faviconUrl = BrandIcon ? null : faviconUrlForOrigin(`https://${host}`);
+  const loadLinkIcons = useLinkIconsEnabled();
+  const BrandIcon = loadLinkIcons ? brandLinkIcon(host) : null;
+  const faviconUrl = BrandIcon ? null : faviconUrlForOrigin(`https://${host}`, 32, loadLinkIcons);
   return (
     <span
       className="ms-[0.25em] me-[0.2em] inline-flex size-[14px] [vertical-align:-0.125em]"

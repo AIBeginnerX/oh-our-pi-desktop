@@ -642,8 +642,11 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
   readonly onPress: (href: string) => void;
 }) {
   const [failedHost, setFailedHost] = useState<string | null>(null);
-  const linkIcon = resolveMarkdownLinkIcon(props.host);
-  const faviconUrl = linkIcon ? null : faviconUrlForOrigin(`https://${props.host}`);
+  const { loadLinkIcons } = useAppearancePreferences();
+  const linkIcon = loadLinkIcons ? resolveMarkdownLinkIcon(props.host) : null;
+  const faviconUrl = linkIcon
+    ? null
+    : faviconUrlForOrigin(`https://${props.host}`, 32, loadLinkIcons);
 
   return (
     <NativeText

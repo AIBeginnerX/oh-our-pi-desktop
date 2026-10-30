@@ -241,6 +241,10 @@ export function PreviewView({
     if (previewBridge && runtimeTabId) void previewBridge.refresh(runtimeTabId);
   }, [runtimeTabId]);
 
+  const handleStop = useCallback(() => {
+    if (previewBridge && runtimeTabId) void previewBridge.stop(runtimeTabId);
+  }, [runtimeTabId]);
+
   const handleZoomIn = useCallback(() => {
     if (previewBridge && runtimeTabId) void previewBridge.zoomIn(runtimeTabId);
   }, [runtimeTabId]);
@@ -720,6 +724,7 @@ export function PreviewView({
         onBack={handleBack}
         onForward={handleForward}
         onRefresh={handleRefresh}
+        onStop={previewBridge && runtimeTabId ? handleStop : undefined}
         onSubmit={(next) => void handleSubmitUrl(next)}
         onOpenInBrowser={tabId ? handleOpenInBrowser : undefined}
         onCapture={previewBridge && tabId ? handleCapture : undefined}
@@ -813,6 +818,7 @@ export function PreviewView({
           <div className="absolute inset-0 z-10 bg-background">
             <PreviewUnreachable
               url={navStatus.url}
+              environmentId={threadRef.environmentId}
               code={navStatus.code}
               description={navStatus.description}
               onReload={handleRefresh}

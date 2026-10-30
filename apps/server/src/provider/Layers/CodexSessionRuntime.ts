@@ -38,7 +38,7 @@ import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
-import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
+import { codexSessionAppServerArgs, withCodexAnalyticsDefault } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import {
   buildCodexAdditionalContext,
@@ -1331,7 +1331,10 @@ export const makeCodexSessionRuntime = (
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
     };
     const extendEnv = options.environment === undefined;
-    const appServerArgs = codexSessionAppServerArgs(options.appServerArgs, options.launchArgs);
+    const appServerArgs = yield* withCodexAnalyticsDefault(
+      codexSessionAppServerArgs(options.appServerArgs, options.launchArgs),
+      extendEnv ? { ...process.env, ...env } : env,
+    );
     const spawnCommand = yield* resolveSpawnCommand(options.binaryPath, appServerArgs, {
       env,
       extendEnv,

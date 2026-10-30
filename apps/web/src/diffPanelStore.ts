@@ -3,6 +3,7 @@ import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import { withViewedDiffMark } from "./lib/diffReview";
 import { resolveStorage } from "./lib/storage";
 
 export type DiffPanelSelection =
@@ -11,13 +12,17 @@ export type DiffPanelSelection =
   | { kind: "turn"; turnId: TurnId; filePath: string | null; revealRequestId: number };
 
 const DEFAULT_SELECTION: DiffPanelSelection = { kind: "unstaged" };
+const EMPTY_VIEWED_MARKS: ReadonlyArray<string> = [];
 
 interface DiffPanelStoreState {
   byThreadKey: Record<string, DiffPanelSelection>;
   branchBaseRefByThreadKey: Record<string, string | null>;
+  /** Marks of the files the reader ticked "Viewed", per thread. See `viewedDiffMark`. */
+  viewedMarksByThreadKey: Record<string, ReadonlyArray<string>>;
   selectGitScope: (ref: ScopedThreadRef, scope: "branch" | "unstaged") => void;
   selectBranchBaseRef: (ref: ScopedThreadRef, baseRef: string | null) => void;
   selectTurn: (ref: ScopedThreadRef, turnId: TurnId, filePath?: string) => void;
+  setDiffFileViewed: (ref: ScopedThreadRef, mark: string, viewed: boolean) => void;
   reconcileTurnSelection: (ref: ScopedThreadRef, availableTurnIds: ReadonlyArray<TurnId>) => void;
   removeThread: (ref: ScopedThreadRef) => void;
 }
@@ -32,6 +37,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
     (set) => ({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      viewedMarksByThreadKey: {},
       selectGitScope: (ref, scope) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -85,6 +91,21 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             },
           };
         }),
+      setDiffFileViewed: (ref, mark, viewed) =>
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          const marks = state.viewedMarksByThreadKey[threadKey] ?? EMPTY_VIEWED_MARKS;
+          const next = withViewedDiffMark(marks, mark, viewed);
+          if (
+            next.length === marks.length &&
+            next.every((value, index) => value === marks[index])
+          ) {
+            return state;
+          }
+          return {
+            viewedMarksByThreadKey: { ...state.viewedMarksByThreadKey, [threadKey]: next },
+          };
+        }),
       reconcileTurnSelection: (ref, availableTurnIds) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
@@ -107,13 +128,19 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       removeThread: (ref) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);
-          if (!(threadKey in state.byThreadKey) && !(threadKey in state.branchBaseRefByThreadKey)) {
+          if (
+            !(threadKey in state.byThreadKey) &&
+            !(threadKey in state.branchBaseRefByThreadKey) &&
+            !(threadKey in state.viewedMarksByThreadKey)
+          ) {
             return state;
           }
           const { [threadKey]: _removed, ...byThreadKey } = state.byThreadKey;
           const { [threadKey]: _removedBaseRef, ...branchBaseRefByThreadKey } =
             state.branchBaseRefByThreadKey;
-          return { byThreadKey, branchBaseRefByThreadKey };
+          const { [threadKey]: _removedMarks, ...viewedMarksByThreadKey } =
+            state.viewedMarksByThreadKey;
+          return { byThreadKey, branchBaseRefByThreadKey, viewedMarksByThreadKey };
         }),
     }),
     {
@@ -125,6 +152,7 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
       partialize: (state) => ({
         byThreadKey: state.byThreadKey,
         branchBaseRefByThreadKey: state.branchBaseRefByThreadKey,
+        viewedMarksByThreadKey: state.viewedMarksByThreadKey,
       }),
     },
   ),
@@ -136,4 +164,12 @@ export function selectThreadDiffPanelSelection(
 ): DiffPanelSelection {
   if (!ref) return DEFAULT_SELECTION;
   return byThreadKey[scopedThreadKey(ref)] ?? DEFAULT_SELECTION;
+}
+
+export function selectThreadViewedDiffMarks(
+  viewedMarksByThreadKey: Record<string, ReadonlyArray<string>>,
+  ref: ScopedThreadRef | null | undefined,
+): ReadonlyArray<string> {
+  if (!ref) return EMPTY_VIEWED_MARKS;
+  return viewedMarksByThreadKey[scopedThreadKey(ref)] ?? EMPTY_VIEWED_MARKS;
 }

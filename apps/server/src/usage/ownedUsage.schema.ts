@@ -130,6 +130,8 @@ export const OwnedTurnUsageObservationV1 = Schema.Struct({
   }),
   terminal: OwnedTurnTerminal,
   usage: TurnTokenUsage,
+  /** The turn's cost as the provider reported it (USD); absent when it reported none. */
+  costUsd: Schema.optional(Schema.Number),
 });
 export type OwnedTurnUsageObservationV1 = typeof OwnedTurnUsageObservationV1.Type;
 

@@ -15,7 +15,7 @@ import {
   probeCodexSkillsForCwd,
 } from "../Layers/CodexProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeCodexProcessEnvironment } from "../Layers/codexLaunchArgs.ts";
 import { type ProviderDriverCreateInput, type ProviderInstance } from "../ProviderDriver.ts";
 import { codexContinuationIdentity } from "./CodexHomeLayout.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
@@ -33,7 +33,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     instanceId,
     enabled,
     config,
-    environment: mergeProviderInstanceEnvironment(input.environment),
+    environment: makeCodexProcessEnvironment(input.environment, input.config.telemetry),
   });
   const continuationIdentity = codexContinuationIdentity(runtime.homeLayout);
   const stamp = withInstanceIdentity({

@@ -58,7 +58,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
 
@@ -104,7 +104,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         gcpLocation: settings.gcpLocation,
       };
       const authConfigIssue = antigravityAuthConfigIssue(auth);
-      const processEnvironment = mergeProviderInstanceEnvironment(environment);
+      const processEnvironment = makeProviderProcessEnvironment(environment);
       const userHome = resolveAntigravityUserHome(yield* HostProcessPlatform, processEnvironment);
       const directories = yield* resolveAntigravityInstanceDirectories(
         serverConfig.stateDir,

@@ -60,6 +60,11 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedDiffToggle.command, "diff.toggle");
 
+    for (const command of ["diff.nextFile", "diff.previousFile", "diff.toggleViewed"] as const) {
+      const parsed = yield* decode(KeybindingRule, { key: "v", command, when: "diffFocus" });
+      assert.strictEqual(parsed.command, command);
+    }
+
     const parsedCommandPalette = yield* decode(KeybindingRule, {
       key: "mod+k",
       command: "commandPalette.toggle",

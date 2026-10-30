@@ -727,6 +727,10 @@ export function runtimeEventToActivities(
         },
         terminal: event.type === "turn.completed" ? event.payload.state : "aborted",
         usage: tokenUsage,
+        // Only providers that report a cost (Claude) carry one; it is never estimated.
+        ...(event.type === "turn.completed" && event.payload.totalCostUsd !== undefined
+          ? { costUsd: event.payload.totalCostUsd }
+          : {}),
       };
       return [
         {
@@ -1047,9 +1051,10 @@ export function runtimeEventToActivities(
       // so far (adapters merge state forward), and a new activity is emitted
       // per chunk, so persisting `data` verbatim writes O(N²) bytes per tool
       // call into both the event store and the projection table. No reader
-      // needs it: ws.ts and http.ts apply `projectActivityPayload` before any
-      // payload reaches a client. Persist the projected form for non-terminal
-      // updates; `item.completed` below still persists the full payload.
+      // needs it: every client path applies `projectActivityPayload`, and the
+      // server-side readers only use fields it keeps. All tool lifecycle
+      // activities (`started`, `updated`, `completed`) therefore persist the
+      // projected form.
       return [
         projectActivityPayload({
           id: event.eventId,
@@ -1083,7 +1088,7 @@ export function runtimeEventToActivities(
         return [];
       }
       return [
-        {
+        projectActivityPayload({
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
@@ -1106,7 +1111,7 @@ export function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
-        },
+        }),
       ];
     }
 
@@ -1115,7 +1120,7 @@ export function runtimeEventToActivities(
         return [];
       }
       return [
-        {
+        projectActivityPayload({
           id: event.eventId,
           createdAt: event.createdAt,
           tone: "tool",
@@ -1138,7 +1143,7 @@ export function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
-        },
+        }),
       ];
     }
 

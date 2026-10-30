@@ -45,7 +45,11 @@ window.addEventListener("vite:preloadError", (event) => {
 const app = (
   <>
     <AppRoot router={router} />
-    {isElectron ? <StartupNeonSplash /> : null}
+    {isElectron ? (
+      <StartupNeonSplash
+        onSeeAllUpdates={() => void router.navigate({ to: "/settings/whats-new" })}
+      />
+    ) : null}
   </>
 );
 

@@ -8,7 +8,9 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
+  PROJECT_MEMORY_BODY_MAX_LENGTH,
   PROJECT_MEMORY_MAX_LIMIT,
+  PROJECT_MEMORY_REASON_MAX_LENGTH,
   type ProjectMemory,
   type ProjectMemoryAcknowledgeThreadInput,
   type ProjectMemoryAcknowledgeThreadResult,
@@ -22,6 +24,11 @@ import {
   type ProjectMemoryListResult,
   ProjectMemoryNotFoundError,
   type ProjectId,
+  type ProjectMemoryProposal,
+  type ProjectMemoryProposalDecisionInput,
+  ProjectMemoryProposalId,
+  type ProjectMemoryProposalListInput,
+  type ProjectMemoryProposalListResult,
   ProjectMemoryRejectedError,
   type ProjectMemorySearchInput,
   type ProjectMemorySearchResult,
@@ -32,6 +39,7 @@ import {
   type ProjectMemoryThreadStateInput,
   type ProjectMemoryUpdateInput,
   type ProjectMemoryWriteResult,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 import { ProjectMemoryRepository } from "../persistence/ProjectMemories.ts";
@@ -40,6 +48,14 @@ import { ProjectionProjectRepository } from "../persistence/Services/ProjectionP
 import { ProjectionThreadRepository } from "../persistence/Services/ProjectionThreads.ts";
 import { makeSearchPlan, planHasTerms } from "./memorySearch.ts";
 import { looksLikeSensitiveText } from "./sensitiveText.ts";
+
+/** What an agent hands to `memory_propose`. */
+export interface ProjectMemoryProposeInput {
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+  readonly text: string;
+  readonly reason: string;
+}
 
 /**
  * Project memory management service (T5a). It owns validation policy:
@@ -53,6 +69,11 @@ import { looksLikeSensitiveText } from "./sensitiveText.ts";
  * Text is stored NFC-normalized: display is unchanged, and FTS/LIKE searches
  * match regardless of the paste-time normalization form. The estimate and the
  * sensitive scan run on the normalized text that will actually be stored.
+ *
+ * Agent proposals are not memories until a user approves them: they live in
+ * their own table, so list, search, get, and every send path never see them.
+ * `approveProposal` moves one into the memory store as a normal `fact`;
+ * `rejectProposal` deletes it.
  *
  * Expiry is *not* a read filter: expired memories stay listable and
  * deletable so users can manage them; `validUntil` is enforced when content
@@ -94,6 +115,21 @@ export class ProjectMemoryService extends Context.Service<
       void,
       ProjectMemoryNotFoundError | ProjectMemoryConflictError | ProjectMemoryStoreError
     >;
+    readonly propose: (
+      input: ProjectMemoryProposeInput,
+    ) => Effect.Effect<ProjectMemoryProposal, ProjectMemoryRejectedError | ProjectMemoryStoreError>;
+    readonly listProposals: (
+      input: ProjectMemoryProposalListInput,
+    ) => Effect.Effect<ProjectMemoryProposalListResult, ProjectMemoryStoreError>;
+    readonly approveProposal: (
+      input: ProjectMemoryProposalDecisionInput,
+    ) => Effect.Effect<
+      ProjectMemoryWriteResult,
+      ProjectMemoryRejectedError | ProjectMemoryStoreError
+    >;
+    readonly rejectProposal: (
+      input: ProjectMemoryProposalDecisionInput,
+    ) => Effect.Effect<void, ProjectMemoryRejectedError | ProjectMemoryStoreError>;
     readonly threadState: (
       input: ProjectMemoryThreadStateInput,
     ) => Effect.Effect<
@@ -131,6 +167,17 @@ const normalizeInstant = (value: string | null): string | null =>
   value === null ? null : new Date(value).toISOString();
 
 const PROJECT_MEMORY_THREAD_CHANGES_DEFAULT = 20;
+
+const PROPOSAL_TITLE_MAX_CODEPOINTS = 80;
+
+/** A proposal carries one text; its first line, clipped, is the title. */
+const proposalTitle = (body: string) => {
+  const firstLine = body.split("\n")[0]?.trim() ?? "";
+  const codepoints = [...firstLine];
+  return codepoints.length > PROPOSAL_TITLE_MAX_CODEPOINTS
+    ? `${codepoints.slice(0, PROPOSAL_TITLE_MAX_CODEPOINTS - 1).join("")}…`
+    : firstLine;
+};
 
 // Schema.Defect recursively serializes causes, which can contain memory text.
 // Public storage failures therefore carry only the fixed message.
@@ -339,6 +386,94 @@ export const make = Effect.gen(function* () {
       }
     }).pipe(Effect.mapError(passThroughOrStore(isDeleteError)));
 
+  const propose: ProjectMemoryService["Service"]["propose"] = (input) =>
+    Effect.gen(function* () {
+      const body = input.text.normalize("NFC").trim();
+      const reason = input.reason.normalize("NFC").trim();
+      if (body === "" || reason === "") {
+        return yield* new ProjectMemoryRejectedError({ reason: "empty" });
+      }
+      if (
+        body.length > PROJECT_MEMORY_BODY_MAX_LENGTH ||
+        reason.length > PROJECT_MEMORY_REASON_MAX_LENGTH
+      ) {
+        return yield* new ProjectMemoryRejectedError({ reason: "too-long" });
+      }
+      const title = proposalTitle(body);
+      if (looksLikeSensitiveText(body) || looksLikeSensitiveText(reason)) {
+        return yield* new ProjectMemoryRejectedError({ reason: "sensitive" });
+      }
+      const outcome = yield* repository.insertProposal({
+        proposalId: ProjectMemoryProposalId.make(yield* crypto.randomUUIDv4),
+        projectId: input.projectId,
+        threadId: input.threadId,
+        title,
+        body,
+        reason,
+        now: DateTime.formatIso(yield* DateTime.now),
+      });
+      switch (outcome.status) {
+        case "applied":
+          return outcome.record;
+        case "project-missing":
+          return yield* new ProjectMemoryRejectedError({ reason: "project-missing" });
+        case "limit-reached":
+          return yield* new ProjectMemoryRejectedError({ reason: "proposal-limit" });
+      }
+    }).pipe(Effect.mapError(passThroughOrStore(isRejectedOrStore)));
+
+  const listProposals: ProjectMemoryService["Service"]["listProposals"] = (input) =>
+    repository.listProposals(input).pipe(
+      Effect.map((items) => ({ items })),
+      Effect.mapError(toStoreError),
+    );
+
+  const approveProposal: ProjectMemoryService["Service"]["approveProposal"] = (input) =>
+    // One transaction: the memory exists and the proposal is gone, or neither
+    // happened. Local rejections stay values, like threadState.
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const proposal = yield* repository.getProposal(input);
+          if (Option.isNone(proposal)) return { status: "proposal-missing" } as const;
+          const { title, body } = proposal.value;
+          const outcome = yield* repository.insert({
+            memoryId: ProjectMemoryId.make(yield* crypto.randomUUIDv4),
+            projectId: input.projectId,
+            kind: "fact",
+            title,
+            body,
+            origin: { type: "manual" },
+            validUntil: null,
+            estimatedTokens: estimateTokens(title, body),
+            now: DateTime.formatIso(yield* DateTime.now),
+          });
+          if (outcome.status !== "applied") return { status: "project-missing" } as const;
+          yield* repository.deleteProposal(input);
+          return { status: "applied", memory: outcome.record } as const;
+        }),
+      )
+      .pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.fail(toStoreError()),
+        ),
+        Effect.flatMap((outcome) =>
+          outcome.status === "applied"
+            ? Effect.succeed({ memory: outcome.memory } satisfies ProjectMemoryWriteResult)
+            : Effect.fail(new ProjectMemoryRejectedError({ reason: outcome.status })),
+        ),
+      );
+
+  const rejectProposal: ProjectMemoryService["Service"]["rejectProposal"] = (input) =>
+    repository.deleteProposal(input).pipe(
+      Effect.mapError(toStoreError),
+      Effect.flatMap((deleted) =>
+        deleted
+          ? Effect.void
+          : Effect.fail(new ProjectMemoryRejectedError({ reason: "proposal-missing" })),
+      ),
+    );
+
   const threadState: ProjectMemoryService["Service"]["threadState"] = (input) =>
     // One transaction on the shared client: the live-scope read, the ledger
     // snapshot, and the memory-id masking all see the same read snapshot.
@@ -446,6 +581,10 @@ export const make = Effect.gen(function* () {
     create,
     update,
     delete: deleteMemory,
+    propose,
+    listProposals,
+    approveProposal,
+    rejectProposal,
     threadState,
     acknowledgeThread,
   } satisfies ProjectMemoryService["Service"];

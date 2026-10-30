@@ -1,3 +1,4 @@
+import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { QuestionAnswerHistory } from "./QuestionAnswerHistory";
 import {
   getQuestionAnswerPreview,
@@ -1238,11 +1239,12 @@ function ToolActivityIconView(props: {
   readonly fallbackColor: ColorValue;
   readonly themeAppearance: "light" | "dark";
 }) {
+  const { loadLinkIcons } = useAppearancePreferences();
   if (!props.icon) {
     return <WorkLogIcon icon={props.fallback} color={props.fallbackColor} />;
   }
   if (props.icon._tag === "website") {
-    const source = toolActivityFaviconUrl(props.icon, props.themeAppearance, 32);
+    const source = toolActivityFaviconUrl(props.icon, props.themeAppearance, 32, loadLinkIcons);
     return source ? (
       <ToolActivityImage
         key={source}

@@ -1872,7 +1872,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(payload?.detail).toBeUndefined();
     expect(data?.toolCallId).toBe("tool-read-1");
     expect(data?.kind).toBe("read");
-    expect(rawOutput?.content).toBe('import * as Effect from "effect/Effect"\n');
+    expect(rawOutput?.content).toBe('import * as Effect from "effect/Effect"');
   });
 
   it("normalizes command execution activities to ran-command summaries", async () => {
@@ -4116,7 +4116,7 @@ describe("ProviderRuntimeIngestion", () => {
       detail: "Bash: vp test run",
       data: {
         toolName: "Bash",
-        input: { command: "vp test run" },
+        command: "vp test run",
       },
     });
   });

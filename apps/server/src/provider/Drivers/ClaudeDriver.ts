@@ -48,7 +48,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makeCachedProviderMaintenanceResolution,
@@ -139,7 +139,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const eventLoggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
       const modelCatalog = modelManifest.current.pipe(Effect.map(resolveClaudeModelCatalog));
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = makeProviderProcessEnvironment(environment, process.env, {
+        ...(config.telemetry ? { telemetryOn: "claudeCode" as const } : {}),
+      });
       const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

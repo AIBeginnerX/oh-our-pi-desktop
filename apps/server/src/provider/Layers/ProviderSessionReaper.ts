@@ -14,8 +14,10 @@ import {
 import { forkParked } from "../../serverActivation.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 
-const DEFAULT_INACTIVITY_THRESHOLD_MS = 30 * 60 * 1000;
-const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+// An idle provider process holds roughly 200-400 MB. Prompt caches live on the provider's servers,
+// so a resumed session sends the same prefix and keeping the process longer saves no tokens.
+const DEFAULT_INACTIVITY_THRESHOLD_MS = 10 * 60 * 1000;
+const DEFAULT_SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 
 export interface ProviderSessionReaperLiveOptions {
   readonly inactivityThresholdMs?: number;

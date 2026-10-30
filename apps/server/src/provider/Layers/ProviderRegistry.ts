@@ -41,7 +41,7 @@ import * as Stream from "effect/Stream";
 import * as Semaphore from "effect/Semaphore";
 
 import * as ModelManifest from "../ModelManifest.ts";
-import { applyProviderCompatibility } from "../providerCompatibility.ts";
+import { applyProviderCompatibility, withoutOopOwnedPolicies } from "../providerCompatibility.ts";
 import { ServerConfig } from "../../config.ts";
 import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
@@ -367,7 +367,7 @@ export const ProviderRegistryLive = Layer.effect(
     ) =>
       applyProviderCompatibility(
         provider,
-        manifest.compatibility,
+        withoutOopOwnedPolicies(manifest.compatibility),
         ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
       );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(

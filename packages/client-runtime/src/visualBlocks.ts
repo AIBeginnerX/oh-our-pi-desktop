@@ -6,7 +6,21 @@
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-export type ChartKind = "bar" | "hbar" | "line" | "area" | "pie" | "donut" | "stats" | "progress";
+export type ChartKind =
+  | "bar"
+  | "hbar"
+  | "line"
+  | "area"
+  | "step"
+  | "sparkline"
+  | "slope"
+  | "bump"
+  | "calendar"
+  | "stream"
+  | "pie"
+  | "donut"
+  | "stats"
+  | "progress";
 
 export interface ChartSeries {
   readonly name: string;
@@ -21,6 +35,12 @@ export interface ChartItem {
   readonly hint?: string;
 }
 
+/** One day of a calendar heatmap; `date` is YYYY-MM-DD. */
+export interface CalendarDay {
+  readonly date: string;
+  readonly value: number;
+}
+
 export interface ChartSpec {
   readonly kind: ChartKind;
   readonly title?: string;
@@ -30,11 +50,16 @@ export interface ChartSpec {
   readonly labels: ReadonlyArray<string>;
   readonly series: ReadonlyArray<ChartSeries>;
   readonly items: ReadonlyArray<ChartItem>;
+  /** Only calendar charts have days, sorted by date. */
+  readonly days: ReadonlyArray<CalendarDay>;
 }
 
 const MAX_LABELS = 40;
 const MAX_SERIES = 6;
+/** Sparklines, slopes and bumps are small multiples or rank lines, so they carry more series. */
+const MAX_WIDE_SERIES = 12;
 const MAX_ITEMS = 12;
+const MAX_CALENDAR_DAYS = 371;
 
 const KIND_ALIASES: Record<string, ChartKind> = {
   bar: "bar",
@@ -49,6 +74,35 @@ const KIND_ALIASES: Record<string, ChartKind> = {
   line: "line",
   lines: "line",
   area: "area",
+  "stacked-area": "area",
+  stackedarea: "area",
+  "area-stacked": "area",
+  step: "step",
+  steps: "step",
+  "step-line": "step",
+  stepline: "step",
+  "line-step": "step",
+  sparkline: "sparkline",
+  sparklines: "sparkline",
+  spark: "sparkline",
+  slope: "slope",
+  slopegraph: "slope",
+  "slope-graph": "slope",
+  "slope-chart": "slope",
+  bump: "bump",
+  bumpchart: "bump",
+  "bump-chart": "bump",
+  rank: "bump",
+  ranks: "bump",
+  calendar: "calendar",
+  heatmap: "calendar",
+  "calendar-heatmap": "calendar",
+  calendarheatmap: "calendar",
+  contributions: "calendar",
+  stream: "stream",
+  streamgraph: "stream",
+  "stream-graph": "stream",
+  themeriver: "stream",
   pie: "pie",
   donut: "donut",
   doughnut: "donut",
@@ -62,6 +116,13 @@ const KIND_ALIASES: Record<string, ChartKind> = {
   gauge: "progress",
   bullet: "progress",
 };
+
+/** Aliases that name a stacked area chart rather than a plain one. */
+const STACKED_ALIASES: ReadonlySet<string> = new Set([
+  "stacked-area",
+  "stackedarea",
+  "area-stacked",
+]);
 
 const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
 
@@ -111,18 +172,100 @@ function readItems(value: unknown): ChartItem[] {
   });
 }
 
+function seriesCap(kind: ChartKind): number {
+  if (kind === "pie" || kind === "donut") return 1;
+  return kind === "sparkline" || kind === "slope" || kind === "bump" ? MAX_WIDE_SERIES : MAX_SERIES;
+}
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Days since 1970-01-01 for a proleptic Gregorian date (plain integer math, no timezones). */
+function daysFromCivil(year: number, month: number, day: number): number {
+  const y = month <= 2 ? year - 1 : year;
+  const era = Math.floor(y / 400);
+  const yearOfEra = y - era * 400;
+  const dayOfYear = Math.floor((153 * (month + (month > 2 ? -3 : 9)) + 2) / 5) + day - 1;
+  const dayOfEra =
+    yearOfEra * 365 + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100) + dayOfYear;
+  return era * 146_097 + dayOfEra - 719_468;
+}
+
+function civilFromDays(days: number): { year: number; month: number; day: number } {
+  const z = days + 719_468;
+  const era = Math.floor(z / 146_097);
+  const dayOfEra = z - era * 146_097;
+  const yearOfEra = Math.floor(
+    (dayOfEra -
+      Math.floor(dayOfEra / 1_460) +
+      Math.floor(dayOfEra / 36_524) -
+      Math.floor(dayOfEra / 146_096)) /
+      365,
+  );
+  const dayOfYear =
+    dayOfEra - (365 * yearOfEra + Math.floor(yearOfEra / 4) - Math.floor(yearOfEra / 100));
+  const shifted = Math.floor((5 * dayOfYear + 2) / 153);
+  const month = shifted < 10 ? shifted + 3 : shifted - 9;
+  return {
+    year: yearOfEra + era * 400 + (month <= 2 ? 1 : 0),
+    month,
+    day: dayOfYear - Math.floor((153 * shifted + 2) / 5) + 1,
+  };
+}
+
+/** The day number of a YYYY-MM-DD string, or undefined when it is not a real calendar date. */
+function parseIsoDay(value: string): number | undefined {
+  const match = ISO_DATE.exec(value);
+  if (match === null) return undefined;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const days = daysFromCivil(year, month, day);
+  const back = civilFromDays(days);
+  return back.year === year && back.month === month && back.day === day ? days : undefined;
+}
+
+const pad = (value: number, width: number) => String(value).padStart(width, "0");
+
+/** Days from `[{date, value}]`, `{"2026-10-01": 3}` or `[["2026-10-01", 3]]`, newest 371 kept. */
+function readCalendarDays(value: unknown): CalendarDay[] {
+  const entries: Array<readonly [unknown, unknown]> = Array.isArray(value)
+    ? value.flatMap((entry): Array<readonly [unknown, unknown]> => {
+        if (Array.isArray(entry)) return [[entry[0], entry[1]]];
+        if (!isRecord(entry)) return [];
+        return [
+          [
+            entry.date ?? entry.day ?? entry.x ?? entry.label,
+            entry.value ?? entry.count ?? entry.y ?? entry.amount,
+          ],
+        ];
+      })
+    : isRecord(value)
+      ? Object.entries(value)
+      : [];
+  const byDate = new Map<string, number>();
+  for (const [rawDate, rawValue] of entries) {
+    const date = typeof rawDate === "string" ? rawDate.trim() : undefined;
+    const amount = toNumber(rawValue);
+    if (date === undefined || amount === undefined || parseIsoDay(date) === undefined) continue;
+    byDate.set(date, amount);
+  }
+  return [...byDate]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .slice(-MAX_CALENDAR_DAYS)
+    .map(([date, amount]) => ({ date, value: amount }));
+}
+
 export function parseChartSpec(source: string): ChartSpec | null {
   const decoded = decodeJson(source.trim());
   if (Option.isNone(decoded) || !isRecord(decoded.value)) return null;
   const raw = decoded.value;
-  const kind = KIND_ALIASES[String(raw.type ?? raw.kind ?? raw.chart ?? "bar").toLowerCase()];
+  const alias = String(raw.type ?? raw.kind ?? raw.chart ?? "bar").toLowerCase();
+  const kind = KIND_ALIASES[alias];
   if (kind === undefined) return null;
   const title = text(raw.title);
   const subtitle = text(raw.subtitle ?? raw.description ?? raw.caption);
   const unit = text(raw.unit ?? raw.units ?? raw.suffix);
   const base = {
     kind,
-    stacked: raw.stacked === true,
+    stacked: raw.stacked === true || STACKED_ALIASES.has(alias),
     ...(title === undefined ? {} : { title }),
     ...(subtitle === undefined ? {} : { subtitle }),
     ...(unit === undefined ? {} : { unit }),
@@ -130,7 +273,12 @@ export function parseChartSpec(source: string): ChartSpec | null {
 
   if (kind === "stats" || kind === "progress") {
     const items = readItems(raw.items ?? raw.metrics ?? raw.data ?? raw.values).slice(0, MAX_ITEMS);
-    return items.length === 0 ? null : { ...base, labels: [], series: [], items };
+    return items.length === 0 ? null : { ...base, labels: [], series: [], items, days: [] };
+  }
+
+  if (kind === "calendar") {
+    const days = readCalendarDays(raw.days ?? raw.data ?? raw.values);
+    return days.length === 0 ? null : { ...base, labels: [], series: [], items: [], days };
   }
 
   // Object rows ({label, value}) are the most common shape a model writes for one series.
@@ -167,11 +315,112 @@ export function parseChartSpec(source: string): ChartSpec | null {
   }
   labels = labels.slice(0, MAX_LABELS);
   series = series
-    .slice(0, kind === "pie" || kind === "donut" ? 1 : MAX_SERIES)
+    .slice(0, seriesCap(kind))
     .map((entry) => ({ ...entry, data: entry.data.slice(0, labels.length) }))
     .filter((entry) => entry.data.some(Number.isFinite));
   if (series.length === 0 || labels.length === 0) return null;
-  return { ...base, labels, series, items: [] };
+  if (kind === "slope" && labels.length < 2) return null;
+  return { ...base, labels, series, items: [], days: [] };
+}
+
+export interface StackBand {
+  readonly name: string;
+  readonly lower: ReadonlyArray<number>;
+  readonly upper: ReadonlyArray<number>;
+}
+
+/**
+ * Cumulative bands, one per series, over `length` points. "zero" stacks up from 0 (stacked
+ * area); "silhouette" centers each column's total on 0 (streamgraph). Missing values count as 0.
+ */
+export function stackSeries(
+  series: ReadonlyArray<ChartSeries>,
+  length: number,
+  offset: "zero" | "silhouette",
+): StackBand[] {
+  const value = (entry: ChartSeries, index: number) => {
+    const amount = entry.data[index];
+    return amount !== undefined && Number.isFinite(amount) && amount > 0 ? amount : 0;
+  };
+  const running = Array.from({ length }, (_, index) =>
+    offset === "silhouette" ? -series.reduce((sum, entry) => sum + value(entry, index), 0) / 2 : 0,
+  );
+  return series.map((entry) => {
+    const lower = [...running];
+    const upper = lower.map((base, index) => base + value(entry, index));
+    upper.forEach((top, index) => {
+      running[index] = top;
+    });
+    return { name: entry.name, lower, upper };
+  });
+}
+
+export interface CalendarCell {
+  readonly date: string;
+  /** null for a day inside the range that has no data. */
+  readonly value: number | null;
+  /** Column, counting weeks from the first date's week. */
+  readonly week: number;
+  /** Row, 0 = Sunday. */
+  readonly weekday: number;
+  /** 0 for no data or a value <= 0, then 1-4 by share of the largest value. */
+  readonly level: 0 | 1 | 2 | 3 | 4;
+}
+
+export interface CalendarLayout {
+  readonly weeks: number;
+  readonly cells: ReadonlyArray<CalendarCell>;
+  /** The week column where each month starts, for month labels. `month` is 0-11. */
+  readonly months: ReadonlyArray<{
+    readonly week: number;
+    readonly month: number;
+    readonly year: number;
+  }>;
+  readonly max: number;
+  readonly total: number;
+}
+
+/** Lays every day from the first to the last date into Sunday-first week columns. */
+export function layoutCalendar(days: ReadonlyArray<CalendarDay>): CalendarLayout {
+  const byDay = new Map<number, number>();
+  for (const day of days) {
+    const index = parseIsoDay(day.date);
+    if (index !== undefined && Number.isFinite(day.value)) byDay.set(index, day.value);
+  }
+  const ordered = [...byDay.keys()].sort((a, b) => a - b);
+  const first = ordered[0];
+  const last = ordered.at(-1);
+  if (first === undefined || last === undefined) {
+    return { weeks: 0, cells: [], months: [], max: 0, total: 0 };
+  }
+
+  const max = Math.max(0, ...byDay.values());
+  const total = [...byDay.values()].reduce((sum, value) => sum + value, 0);
+  // Day 0 (1970-01-01) was a Thursday, so weekday 0 (Sunday) falls on day numbers = 3 mod 7.
+  const weekdayOf = (day: number) => (((day + 4) % 7) + 7) % 7;
+  const firstWeekStart = first - weekdayOf(first);
+  const cells: CalendarCell[] = [];
+  const months: Array<{ week: number; month: number; year: number }> = [];
+  for (let day = first; day <= last; day += 1) {
+    const civil = civilFromDays(day);
+    const week = Math.floor((day - firstWeekStart) / 7);
+    const value = byDay.get(day) ?? null;
+    const level =
+      value === null || value <= 0
+        ? 0
+        : (Math.min(4, Math.max(1, Math.ceil((value / max) * 4))) as 1 | 2 | 3 | 4);
+    cells.push({
+      date: `${pad(civil.year, 4)}-${pad(civil.month, 2)}-${pad(civil.day, 2)}`,
+      value,
+      week,
+      weekday: weekdayOf(day),
+      level,
+    });
+    if (day === first || civil.day === 1) {
+      months.push({ week, month: civil.month - 1, year: civil.year });
+    }
+  }
+  return { weeks: cells.at(-1)!.week + 1, cells, months, max, total };
 }
 
 export interface NiceScale {

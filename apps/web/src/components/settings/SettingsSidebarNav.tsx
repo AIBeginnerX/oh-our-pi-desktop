@@ -22,6 +22,7 @@ import {
   PaletteIcon,
   SearchIcon,
   Settings2Icon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
@@ -49,6 +50,8 @@ import {
 } from "./settingsSearch";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
 import { validateSettingsScopeSearch } from "./settingsScope";
+import { useT } from "../../i18n";
+import { useWhatsNewPageUnseen } from "../../lib/whatsNew";
 
 const SnapShotIcon = createLucideIcon("snap-shot", [
   [
@@ -87,6 +90,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/storage": HardDriveIcon,
   "/settings/connections": Link2Icon,
   "/settings/archived": ArchiveIcon,
+  "/settings/whats-new": SparklesIcon,
 };
 
 const SETTINGS_NAV_ITEMS: ReadonlyArray<{
@@ -105,6 +109,7 @@ function SettingsSectionIcon({ to }: { to: SettingsPath }) {
 }
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
+  const t = useT();
   const navigate = useNavigate();
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
@@ -113,11 +118,25 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
   );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
+  const [whatsNewUnseen] = useWhatsNewPageUnseen();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const searchableItems = useAvailableSettingsSearchItems(scopeSearch);
-  const results = useMemo(() => searchSettings(query, searchableItems), [query, searchableItems]);
+  // Titles and section names also match in the interface language, not only in English.
+  const translatedItems = useMemo(
+    () =>
+      searchableItems.map((item) => ({
+        ...item,
+        searchTerms: [
+          ...(item.searchTerms ?? []),
+          t(item.title),
+          t(SETTINGS_SECTION_LABELS[item.to]),
+        ],
+      })),
+    [searchableItems, t],
+  );
+  const results = useMemo(() => searchSettings(query, translatedItems), [query, translatedItems]);
   const isSearching = query.trim().length > 0;
   const hasResults = results.length > 0;
 
@@ -248,8 +267,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   setActiveResultIndex(0);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search"
-                aria-label="Search settings"
+                placeholder={t("Search")}
+                aria-label={t("Search settings")}
                 role="combobox"
                 aria-autocomplete="list"
                 aria-expanded={isSearching && hasResults}
@@ -267,7 +286,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   size="icon-micro"
                   variant="ghost-muted"
                   className="shrink-0"
-                  aria-label="Clear settings search"
+                  aria-label={t("Clear settings search")}
                   onClick={() => {
                     clearSearch();
                     searchInputRef.current?.focus();
@@ -284,14 +303,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No settings found
+                {t("No settings found")}
               </p>
             ) : null}
             {isSearching ? (
               <SidebarMenu
                 id={hasResults ? "settings-search-results" : undefined}
                 role={hasResults ? "listbox" : undefined}
-                aria-label={hasResults ? "Settings search results" : undefined}
+                aria-label={hasResults ? t("Settings search results") : undefined}
               >
                 {results.map((item, index) => (
                   <SidebarMenuItem key={item.id} role="presentation">
@@ -309,10 +328,10 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                       <SettingsSectionIcon to={item.to} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-sidebar-foreground">
-                          {item.title}
+                          {t(item.title)}
                         </span>
                         <span className="block truncate text-2xs text-sidebar-muted-foreground/75">
-                          {SETTINGS_SECTION_LABELS[item.to]}
+                          {t(SETTINGS_SECTION_LABELS[item.to])}
                         </span>
                       </span>
                     </SidebarMenuButton>
@@ -337,7 +356,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                         onClick={() => handleSectionClick(item.to)}
                       >
                         <Icon />
-                        <span className="truncate">{item.label}</span>
+                        <span className="truncate">{t(item.label)}</span>
+                        {item.to === "/settings/whats-new" && whatsNewUnseen ? (
+                          <span
+                            role="img"
+                            aria-label={t("New")}
+                            className="ml-auto size-1.5 shrink-0 rounded-full bg-primary"
+                          />
+                        ) : null}
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );

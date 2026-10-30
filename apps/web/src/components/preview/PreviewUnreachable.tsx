@@ -1,11 +1,17 @@
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { Button } from "~/components/ui/button";
+import { useT } from "~/i18n";
 
 import { describePreviewError } from "./errorCodeMessages";
+import { isFailedServerListeningAgain, isLocalDevUrl } from "./previewUnreachableLogic";
+import { useDiscoveredLocalServers } from "./useDiscoveredLocalServers";
 
 interface Props {
   url: string;
+  /** Environment whose port scan tells whether a local dev server answers again. */
+  environmentId: EnvironmentId;
   /** Chromium net error code, e.g. -105. */
   code: number;
   /** Stringified Chromium error, e.g. "ERR_NAME_NOT_RESOLVED". */
@@ -14,7 +20,13 @@ interface Props {
 }
 
 /** Theme-aware tailwind port of Chromium's "This site can't be reached" page. */
-export function PreviewUnreachable({ url, code, description, onReload }: Props) {
+export function PreviewUnreachable({ url, environmentId, code, description, onReload }: Props) {
+  const t = useT();
+  const servers = useDiscoveredLocalServers({ environmentId });
+  const localDev = isLocalDevUrl(url);
+  const serverBack =
+    localDev &&
+    isFailedServerListeningAgain({ failedUrl: url, errorDescription: description, servers });
   const [showDetails, setShowDetails] = useState(false);
   const host = safeHost(url) ?? url;
   const friendly = describePreviewError(description);
@@ -30,6 +42,23 @@ export function PreviewUnreachable({ url, code, description, onReload }: Props) 
         <p className="text-sm leading-relaxed text-muted-foreground">
           <span className="font-semibold text-foreground">{host}</span>: {friendly}.
         </p>
+
+        {localDev ? (
+          <div className="mt-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
+            <p className="font-medium text-foreground">
+              {serverBack
+                ? t("The dev server is answering again.")
+                : t("Is the dev server running?")}
+            </p>
+            {serverBack ? null : (
+              <p className="mt-1 text-muted-foreground">
+                {t("Nothing is answering on {host}. Start it from a terminal, then reload.", {
+                  host,
+                })}
+              </p>
+            )}
+          </div>
+        ) : null}
 
         {showDetails ? (
           <div className="mt-6 rounded-lg border border-border bg-muted/40 p-4 text-sm">
@@ -57,7 +86,7 @@ export function PreviewUnreachable({ url, code, description, onReload }: Props) 
           </Button>
           <div className="flex-1" />
           <Button type="button" size="sm" onClick={onReload}>
-            Reload
+            {serverBack ? t("Server is back — Reload") : "Reload"}
           </Button>
         </div>
       </div>

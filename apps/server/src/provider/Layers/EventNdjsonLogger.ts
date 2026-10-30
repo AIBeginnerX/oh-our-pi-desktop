@@ -29,8 +29,9 @@ const DAY_MS = 24 * 60 * 60 * 1_000;
 const DEFAULT_MAX_BYTES = 10 * MEBIBYTE;
 const DEFAULT_MAX_FILES = 10;
 const DEFAULT_BATCH_WINDOW_MS = 1_000;
-const DEFAULT_MAX_TOTAL_BYTES = 512 * MEBIBYTE;
-const DEFAULT_MAX_AGE_MS = 14 * DAY_MS;
+// Diagnostic logs: a week and 256 MiB cover a support request without filling a small disk.
+const DEFAULT_MAX_TOTAL_BYTES = 256 * MEBIBYTE;
+const DEFAULT_MAX_AGE_MS = 7 * DAY_MS;
 const DEFAULT_RETENTION_CHECK_INTERVAL_MS = 5 * 60 * 1_000;
 const DEFAULT_MAX_BUFFERED_BYTES = MEBIBYTE;
 const DEFAULT_MAX_BUFFERED_RECORDS = 512;

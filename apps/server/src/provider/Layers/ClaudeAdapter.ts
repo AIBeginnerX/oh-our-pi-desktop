@@ -1695,6 +1695,13 @@ interface ClaudeRouteProfileSeed {
   readonly systemPromptAppendSha256: string | null;
 }
 
+/**
+ * With no configured window, a model with a larger context compacts here. Measured on a real
+ * install: API calls whose context passed 300k tokens carried over half of all input tokens,
+ * because every call in a long turn re-reads the whole context.
+ */
+const DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW = 300_000;
+
 const sha256HexUtf8 = (text: string): string =>
   NodeCrypto.createHash("sha256").update(text, "utf8").digest("hex");
 
@@ -5370,6 +5377,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ? resolveClaudeCatalogApiModelId(modelCatalog, modelSelection)
         : undefined;
       const initialContextWindow = selectedClaudeContextWindow(modelCatalog, modelSelection);
+      const autoCompactWindow = claudeSettings.autoCompactWindow
+        ? Number(claudeSettings.autoCompactWindow)
+        : initialContextWindow !== undefined &&
+            initialContextWindow > DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW
+          ? DEFAULT_CLAUDE_AUTO_COMPACT_WINDOW
+          : undefined;
       const rawEffort = getModelSelectionStringOptionValue(modelSelection, "effort");
       const effort =
         resolveClaudeCatalogEffort(modelCatalog, modelSelection?.model, rawEffort) ?? null;
@@ -5414,9 +5427,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(requestThinkingSummaries ? { showThinkingSummaries: true } : {}),
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
-        ...(claudeSettings.autoCompactWindow
-          ? { autoCompactWindow: Number(claudeSettings.autoCompactWindow) }
-          : {}),
+        ...(autoCompactWindow !== undefined ? { autoCompactWindow } : {}),
       };
       if (requestThinkingSummaries && extraArgs["thinking-display"] === undefined) {
         extraArgs["thinking-display"] = "summarized";
@@ -5467,7 +5478,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         onUserDialog,
         supportedDialogKinds: ["resume_return"],
-        env: McpProviderSession.withAgentDeviceEnvironment(claudeEnvironment, mcpSession),
+        env: McpProviderSession.withAgentDeviceEnvironment(
+          claudeSettings.claudeAiConnectors
+            ? claudeEnvironment
+            : { ...claudeEnvironment, ENABLE_CLAUDEAI_MCP_SERVERS: "false" },
+          mcpSession,
+        ),
         additionalDirectories,
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession

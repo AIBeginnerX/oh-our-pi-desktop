@@ -21,6 +21,8 @@ import {
 
 export type { DiffFileTreeEntry } from "./diffFileTree.logic";
 
+const NO_VIEWED_PATHS: ReadonlySet<string> = new Set();
+
 interface DiffFileTreeProps {
   readonly entries: ReadonlyArray<DiffFileTreeEntry>;
   /** Called with the file's path when the reader picks a file row. */
@@ -31,6 +33,9 @@ interface DiffFileTreeProps {
    */
   readonly selectedPath?: string | null;
   readonly revealRequestId?: number;
+  /** Files the reader marked viewed; their rows carry a check, labelled with `viewedLabel`. */
+  readonly viewedPaths?: ReadonlySet<string>;
+  readonly viewedLabel?: string;
   readonly ariaLabel: string;
   /** Right-aligned content in the header row, after the file count. */
   readonly headerAccessory?: ReactNode;
@@ -48,6 +53,8 @@ export function DiffFileTree({
   onSelectFile,
   selectedPath = null,
   revealRequestId = 0,
+  viewedPaths = NO_VIEWED_PATHS,
+  viewedLabel,
   ariaLabel,
   headerAccessory,
   footer,
@@ -72,6 +79,8 @@ export function DiffFileTree({
   );
   const filePathsRef = useRef<ReadonlySet<string>>(new Set(paths));
   const onSelectFileRef = useRef(onSelectFile);
+  // The tree reads decorations when it renders, so the latest marks are handed over by ref.
+  const viewedRef = useRef({ paths: viewedPaths, label: viewedLabel });
   // Selection driven by `selectedPath` below is an echo of a file already on screen, not a
   // request to scroll to it again.
   const syncingSelectionRef = useRef(false);
@@ -94,6 +103,10 @@ export function DiffFileTree({
       if (path && filePathsRef.current.has(path)) onSelectFileRef.current(path);
     },
     paths: [],
+    renderRowDecoration: ({ item }) =>
+      viewedRef.current.paths.has(item.path)
+        ? { text: "\u2713", title: viewedRef.current.label ?? "" }
+        : null,
     search: false,
     sort: ordering.sort,
     unsafeCSS: PIERRE_TREE_UNSAFE_CSS,
@@ -128,6 +141,12 @@ export function DiffFileTree({
     }
     model.setGitStatus(gitStatus);
   }, [directoryPaths, gitStatus, model, ordering, paths, positions]);
+
+  useEffect(() => {
+    viewedRef.current = { paths: viewedPaths, label: viewedLabel };
+    // A status refresh is how the tree is asked to render its rows again.
+    model.setGitStatus(gitStatus);
+  }, [gitStatus, model, viewedLabel, viewedPaths]);
 
   useEffect(() => {
     if (selectedPath === null) {

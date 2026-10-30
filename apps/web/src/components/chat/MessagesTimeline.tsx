@@ -156,6 +156,7 @@ import { ChangedFilesCard } from "./ChangedFilesTree";
 import { useAtomValue } from "@effect/atom-react";
 import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThread } from "../../state/entities";
+import { useT } from "../../i18n";
 import { serverEnvironment } from "../../state/server";
 import {
   CHAT_TIMELINE_ANCHOR_OFFSET,
@@ -180,6 +181,7 @@ import {
   deriveMessagesTimelineRowsWithState,
   deriveUnsettledTurnId,
   type MessagesTimelineRowsProjection,
+  countFailedToolEntries,
   liveWorkEntryLabel,
   workEntryIsActiveTurnActivity,
   resolveAssistantMessageCopyState,
@@ -241,7 +243,7 @@ import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
 import { ContextChip, ContextChipLabel, type ContextChipKind } from "../ContextChip";
 import { createContextPresentationRegistry } from "../contextPresentationRegistry";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
-import { useClientSettings } from "~/hooks/useSettings";
+import { useClientSettings, useLinkIconsEnabled } from "~/hooks/useSettings";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
@@ -2538,8 +2540,9 @@ function ProposedPlanTimelineRow({
 }
 
 function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
-  const { isCompacting, isPreparingWorktree, backgroundWorktreeSetup } =
+  const { isCompacting, isPreparingWorktree, isRevertingCheckpoint, backgroundWorktreeSetup } =
     use(TimelineRowActivityCtx);
+  const t = useT();
   // One span for every label so the setup-to-working handoff swaps text in
   // place instead of remounting the row.
   const shimmer = isPreparingWorktree || isCompacting;
@@ -2547,6 +2550,8 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
     "Setting up worktree…"
   ) : isCompacting ? (
     <CompactingLabel />
+  ) : isRevertingCheckpoint ? (
+    t("Restoring checkpoint…")
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
@@ -2643,7 +2648,9 @@ function ActivityGroupTimelineRow({
   const liveWork = trailingWork.findLast(workEntryIsActiveTurnActivity) ?? trailingWork.at(-1);
   const thinking = row.active && liveWork === undefined;
   const iconWork = row.active ? liveWork : work.at(-1);
-  const failed = iconWork !== undefined && workEntryDisplayIndicatesToolFailure(iconWork);
+  const failedCount = row.active ? 0 : countFailedToolEntries(work);
+  const failed =
+    failedCount > 0 || (iconWork !== undefined && workEntryDisplayIndicatesToolFailure(iconWork));
   const label = row.active
     ? liveWork
       ? liveWorkEntryLabel(liveWork, ctx.workspaceRoot, true)
@@ -2702,6 +2709,7 @@ function ActivityGroupTimelineRow({
           iconName={iconWork ? workEntryIconName(iconWork) : "brain"}
           toolIcon={iconWork?.toolIcon ?? iconWork?.toolSource?.icon}
           failed={failed}
+          failedCount={failedCount}
           active={row.active}
           shimmer={thinking}
         />
@@ -3157,7 +3165,7 @@ function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
   );
 }
 
-const failedToolIconClassName = "text-tool-error-icon/40";
+const failedToolIconClassName = "text-tool-error-icon/80";
 
 /** Image icons and the gradient computer-use mark cannot take a currentColor
  *  tint, so failed rows using them get a trailing x instead. */
@@ -3168,11 +3176,23 @@ function toolIconAcceptsTint(
   return toolIcon === undefined && iconName !== "computer";
 }
 
+/** Keeps tool failures visible while the group is collapsed. */
+function FailedCountMarker({ count }: { count: number }) {
+  const t = useT();
+  return (
+    <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-warning-foreground">
+      <CircleAlertIcon aria-hidden className="size-3.5" />
+      {t("{count} failed", { count })}
+    </span>
+  );
+}
+
 function LiveActivityRow({
   label,
   iconName,
   toolIcon,
   failed = false,
+  failedCount = 0,
   active = false,
   shimmer = false,
 }: {
@@ -3180,6 +3200,7 @@ function LiveActivityRow({
   iconName?: WorkEntryIconName;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
+  failedCount?: number;
   active?: boolean;
   shimmer?: boolean;
 }) {
@@ -3195,6 +3216,7 @@ function LiveActivityRow({
         iconName={iconName}
         toolIcon={toolIcon}
         failed={failed}
+        failedCount={failedCount}
         announceFailure={failed}
         active={animated && !shimmer}
       />
@@ -3212,6 +3234,7 @@ function LiveActivityContent({
   iconName,
   toolIcon,
   failed = false,
+  failedCount = 0,
   announceFailure = false,
   active = false,
   highlighted = false,
@@ -3220,6 +3243,7 @@ function LiveActivityContent({
   iconName: WorkEntryIconName | undefined;
   toolIcon?: ToolActivityIcon | undefined;
   failed?: boolean;
+  failedCount?: number;
   announceFailure?: boolean;
   active?: boolean;
   highlighted?: boolean;
@@ -3253,6 +3277,7 @@ function LiveActivityContent({
         </span>
       ) : null}
       <span className={cn("min-w-0 flex-1 truncate", active && "live-tool-shine")}>{label}</span>
+      {failedCount > 0 ? <FailedCountMarker count={failedCount} /> : null}
       {showTrailingFailureMark ? (
         <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
       ) : null}
@@ -3358,7 +3383,7 @@ function WorkGroupToggleTimelineRow({
     <button
       type="button"
       className="group/tool-group group/timeline-row relative flex min-h-6 w-full cursor-pointer items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-sm leading-relaxed transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-      aria-label={row.hasFailure ? `${row.summary}, tool call failed` : undefined}
+      aria-label={row.failedCount > 0 ? `${row.summary}, tool call failed` : undefined}
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
@@ -3373,6 +3398,7 @@ function WorkGroupToggleTimelineRow({
         />
       </span>
       <span className="min-w-0 flex-1 truncate text-secondary-label">{row.summary}</span>
+      {row.failedCount > 0 ? <FailedCountMarker count={row.failedCount} /> : null}
       <TimelineRowTimestamp createdAt={row.createdAt} timestampFormat={ctx.timestampFormat} />
     </button>
   );
@@ -4192,12 +4218,13 @@ function ToolActivityIconView(props: {
   muted: boolean;
 }) {
   const { resolvedTheme } = use(TimelineRowCtx);
+  const loadLinkIcons = useLinkIconsEnabled();
   const fallbackClassName = cn(props.className, props.muted && "opacity-70 light:brightness-60");
   if (!props.icon) {
     return <WorkEntryIcon name={props.fallbackName} className={fallbackClassName} />;
   }
   if (props.icon._tag === "website") {
-    const src = toolActivityFaviconUrl(props.icon, resolvedTheme, 32);
+    const src = toolActivityFaviconUrl(props.icon, resolvedTheme, 32, loadLinkIcons);
     return src ? (
       <ToolActivityImageIcon
         key={src}

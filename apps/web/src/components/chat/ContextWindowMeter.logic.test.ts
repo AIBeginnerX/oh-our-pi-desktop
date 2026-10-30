@@ -6,6 +6,7 @@ import {
   hasAvailableCompactionProvider,
   hasDismissedResumeCompaction,
   resolveContextWindowModelDisplayName,
+  resolveContextWindowSeverity,
   shouldOfferResumeCompaction,
   shouldReserveContextWindowMeter,
 } from "./ContextWindowMeter.logic";
@@ -284,5 +285,18 @@ describe("shouldReserveContextWindowMeter", () => {
     expect(shouldReserveContextWindowMeter({ ...loadingStartedThread, meterEnabled: false })).toBe(
       false,
     );
+  });
+});
+
+describe("resolveContextWindowSeverity", () => {
+  it.each([
+    [0, "normal"],
+    [74.9, "normal"],
+    [75, "warning"],
+    [90, "warning"],
+    [90.1, "critical"],
+    [100, "critical"],
+  ] as const)("classifies %s%% used as %s", (percentage, expected) => {
+    expect(resolveContextWindowSeverity(percentage)).toBe(expected);
   });
 });

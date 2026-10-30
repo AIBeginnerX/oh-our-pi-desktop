@@ -6,6 +6,8 @@ import * as Scope from "effect/Scope";
 
 import * as Electron from "electron";
 
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+
 export interface ElectronAppMetadata {
   readonly appVersion: string;
   readonly appPath: string;
@@ -83,6 +85,25 @@ export class ElectronApp extends Context.Service<
   }
 >()("@t3tools/desktop/electron/ElectronApp") {}
 
+/**
+ * The OS locale. Electron's `app.getSystemLocale()` resolves through the Chromium locale paks
+ * the app ships, and a packaged app that carries only the `en` pak answers "en-US" however the
+ * machine is configured (an unpackaged dev Electron has every pak and answers the real locale).
+ * On macOS the user's `AppleLocale` preference is read directly instead, so the answer does not
+ * depend on what was packaged; other platforms keep Electron's value.
+ */
+function resolveSystemLocale(platform: NodeJS.Platform): string {
+  if (platform === "darwin") {
+    try {
+      const appleLocale = Electron.systemPreferences.getUserDefault("AppleLocale", "string");
+      if (appleLocale.trim() !== "") return appleLocale.trim().replace(/_/g, "-");
+    } catch {
+      // Fall through to Electron's value.
+    }
+  }
+  return Electron.app.getSystemLocale().replace(/_/g, "-");
+}
+
 const addScopedAppListener = <Args extends ReadonlyArray<unknown>>(
   eventName: string,
   listener: (...args: Args) => void,
@@ -129,7 +150,7 @@ export const make = ElectronApp.of({
   // macOS derives this from NSLocale, which uses POSIX-style identifiers
   // (`en_GB`). `Intl` rejects those outright rather than normalizing them, so
   // the tag is normalized here rather than in the renderer that consumes it.
-  systemLocale: Effect.sync(() => Electron.app.getSystemLocale().replace(/_/g, "-")),
+  systemLocale: Effect.map(HostProcessPlatform, resolveSystemLocale),
   whenReady: Effect.gen(function* () {
     const isPackaged = Electron.app.isPackaged;
     yield* Effect.tryPromise({

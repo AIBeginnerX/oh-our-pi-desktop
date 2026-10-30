@@ -221,6 +221,10 @@ export function CrewChip(props: {
                 Auto all
               </Button>
             </div>
+            <div className="text-2xs text-muted-foreground">
+              A change applies to work handed out from now on, even in a running turn. Tasks already
+              running keep the model they started with.
+            </div>
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="font-medium">Brain</span>
               <span className="truncate text-muted-foreground">this chat's model</span>

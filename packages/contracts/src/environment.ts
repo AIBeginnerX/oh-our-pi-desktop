@@ -205,6 +205,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
           `projectMemory.acknowledgeThread` recovery RPCs. Absent on older
           servers means unsupported — not that no thread is held. */
       threadRecovery: Schema.optionalKey(Schema.Boolean),
+      /** Server serves the `projectMemory.listProposals`, `approveProposal`
+          and `rejectProposal` RPCs for memories agents propose. Absent on
+          older servers means unsupported. */
+      proposals: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   /** Server persists inactive `projectSkill.*` candidates and serves their

@@ -3,7 +3,7 @@ import { useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
 import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { FolderPlusIcon } from "lucide-react";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, type ReactNode } from "react";
 
 import { openCommandPalette } from "~/commandPaletteBus";
 import { useClientSettings } from "~/hooks/useSettings";
@@ -31,6 +31,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { InlineButton } from "../ui/button";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { useT } from "../../i18n";
 
 interface DraftHeroHeadlineProps {
   readonly draftId: DraftId | null;
@@ -43,6 +44,7 @@ export function DraftHeroHeadline({
   activeProjectRef,
   activeProjectTitle,
 }: DraftHeroHeadlineProps) {
+  const t = useT();
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments } = useEnvironments();
@@ -147,7 +149,9 @@ export function DraftHeroHeadline({
             />
           }
         >
-          <span className="min-w-0 truncate">{activeProjectDisplayName ?? "Choose a project"}</span>
+          <span className="min-w-0 truncate">
+            {activeProjectDisplayName ?? t("Choose a project")}
+          </span>
         </TooltipTrigger>
         {activeProjectDisplayName ? (
           <TooltipPopup side="top">{activeProjectDisplayName}</TooltipPopup>
@@ -217,7 +221,7 @@ export function DraftHeroHeadline({
         <MenuSeparator />
         <MenuItem onClick={openAddProject}>
           <FolderPlusIcon />
-          New project
+          {t("New project")}
         </MenuItem>
       </MenuPopup>
     </Menu>
@@ -227,7 +231,7 @@ export function DraftHeroHeadline({
       onClick={openAddProject}
       className="pointer-events-auto inline cursor-pointer border-muted-foreground/35 border-b border-dotted text-muted-foreground/60 transition-colors hover:border-muted-foreground/60 hover:text-muted-foreground/80 focus-visible:rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {activeProjectTitle ?? "Add a project"}
+      {activeProjectTitle ?? t("Add a project")}
     </button>
   );
 
@@ -236,10 +240,10 @@ export function DraftHeroHeadline({
   // in the h1; without an explicit label its widget state bleeds into the
   // announced phrase.
   const headingLabel = hasResolvedProject
-    ? `What should we build in ${activeProjectDisplayName}?`
+    ? t("What should we build in {name}?", { name: String(activeProjectDisplayName) })
     : canChooseProject
-      ? `${activeProjectDisplayName ?? "Choose a project"} to start`
-      : "Add a project to start";
+      ? t("{name} to start", { name: activeProjectDisplayName ?? t("Choose a project") })
+      : t("Add a project to start");
 
   return (
     <h1
@@ -247,12 +251,24 @@ export function DraftHeroHeadline({
       className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl"
     >
       {hasResolvedProject ? (
-        <>What should we build in {projectSelector}?</>
+        withSelector(t("What should we build in {name}?"), projectSelector)
       ) : canChooseProject ? (
-        <>{projectSelector} to start</>
+        withSelector(t("{name} to start"), projectSelector)
       ) : (
-        <>Add a project to start</>
+        <>{t("Add a project to start")}</>
       )}
     </h1>
+  );
+}
+
+/** Puts the project selector where `{name}` sits in a translated sentence; word order varies by language. */
+function withSelector(sentence: string, selector: ReactNode) {
+  const [before = "", after = ""] = sentence.split("{name}");
+  return (
+    <>
+      {before}
+      {selector}
+      {after}
+    </>
   );
 }

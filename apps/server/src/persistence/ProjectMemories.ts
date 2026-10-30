@@ -7,10 +7,13 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import {
+  PROJECT_MEMORY_PENDING_PROPOSALS_MAX,
   type ProjectMemory,
   ProjectMemoryId,
   ProjectMemoryKind,
   ProjectMemoryOrigin,
+  type ProjectMemoryProposal,
+  ProjectMemoryProposalId,
   MessageId,
   NonNegativeInt,
   PositiveInt,
@@ -81,6 +84,28 @@ export const DeleteProjectMemoryInput = Schema.Struct({
 });
 export type DeleteProjectMemoryInput = typeof DeleteProjectMemoryInput.Type;
 
+export const InsertProjectMemoryProposalInput = Schema.Struct({
+  proposalId: ProjectMemoryProposalId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  title: Schema.String,
+  body: Schema.String,
+  reason: Schema.String,
+  now: Schema.String,
+});
+export type InsertProjectMemoryProposalInput = typeof InsertProjectMemoryProposalInput.Type;
+
+export const ProjectMemoryProposalKeyInput = Schema.Struct({
+  projectId: ProjectId,
+  proposalId: ProjectMemoryProposalId,
+});
+export type ProjectMemoryProposalKeyInput = typeof ProjectMemoryProposalKeyInput.Type;
+
+export type ProjectMemoryProposalInsertOutcome =
+  | { readonly status: "applied"; readonly record: ProjectMemoryProposal }
+  | { readonly status: "project-missing" }
+  | { readonly status: "limit-reached" };
+
 export interface ProjectMemoryPage {
   readonly items: ReadonlyArray<ProjectMemory>;
   readonly truncated: boolean;
@@ -122,8 +147,32 @@ export class ProjectMemoryRepository extends Context.Service<
     readonly delete: (
       input: DeleteProjectMemoryInput,
     ) => Effect.Effect<ProjectMemoryDeleteOutcome, ProjectMemoryRepositoryError>;
+    /** Proposals are not memories: nothing above reads them. */
+    readonly insertProposal: (
+      input: InsertProjectMemoryProposalInput,
+    ) => Effect.Effect<ProjectMemoryProposalInsertOutcome, ProjectMemoryRepositoryError>;
+    readonly listProposals: (input: {
+      readonly projectId: ProjectId;
+    }) => Effect.Effect<ReadonlyArray<ProjectMemoryProposal>, ProjectMemoryRepositoryError>;
+    readonly getProposal: (
+      input: ProjectMemoryProposalKeyInput,
+    ) => Effect.Effect<Option.Option<ProjectMemoryProposal>, ProjectMemoryRepositoryError>;
+    /** True when a row was deleted. */
+    readonly deleteProposal: (
+      input: ProjectMemoryProposalKeyInput,
+    ) => Effect.Effect<boolean, ProjectMemoryRepositoryError>;
   }
 >()("t3/persistence/ProjectMemories/ProjectMemoryRepository") {}
+
+const ProjectMemoryProposalDbRow = Schema.Struct({
+  proposalId: ProjectMemoryProposalId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  title: Schema.String,
+  body: Schema.String,
+  reason: Schema.String,
+  createdAt: Schema.String,
+});
 
 const ProjectMemoryDbRow = Schema.Struct({
   memoryRowid: Schema.Int,
@@ -617,6 +666,113 @@ export const make = Effect.gen(function* () {
         ),
       );
 
+  const proposalColumns = sql`
+    proposal_id AS "proposalId",
+    project_id AS "projectId",
+    thread_id AS "threadId",
+    title AS "title",
+    body AS "body",
+    reason AS "reason",
+    created_at AS "createdAt"
+  `;
+
+  const decodeProposal = Schema.decodeUnknownEffect(ProjectMemoryProposalDbRow);
+
+  const insertProposal: ProjectMemoryRepository["Service"]["insertProposal"] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          // The pending cap and the live-project check ride on the INSERT
+          // itself, so two racing proposals cannot both squeeze past the cap.
+          const rows = yield* sql`
+            INSERT INTO project_memory_proposals (
+              proposal_id, project_id, thread_id, title, body, reason, created_at
+            )
+            SELECT
+              ${input.proposalId}, ${input.projectId}, ${input.threadId}, ${input.title},
+              ${input.body}, ${input.reason}, ${input.now}
+            WHERE ${liveProjectFor(input.projectId)}
+              AND (
+                SELECT COUNT(*) FROM project_memory_proposals
+                WHERE project_id = ${input.projectId}
+              ) < ${PROJECT_MEMORY_PENDING_PROPOSALS_MAX}
+            RETURNING ${proposalColumns}
+          `;
+          const row = rows[0];
+          if (row === undefined) {
+            const live = yield* sql<{ readonly live: number }>`
+              SELECT ${liveProjectFor(input.projectId)} AS "live"
+            `;
+            return live[0]?.live === 1
+              ? ({ status: "limit-reached" } as const)
+              : ({ status: "project-missing" } as const);
+          }
+          return { status: "applied", record: yield* decodeProposal(row) } as const;
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectMemoryRepository.insertProposal:query",
+            "ProjectMemoryRepository.insertProposal:decodeRow",
+            { projectId: input.projectId },
+          ),
+        ),
+      );
+
+  const listProposals: ProjectMemoryRepository["Service"]["listProposals"] = ({ projectId }) =>
+    sql`
+      SELECT ${proposalColumns}
+      FROM project_memory_proposals
+      WHERE project_id = ${projectId}
+      ORDER BY created_at ASC, rowid ASC
+    `.pipe(
+      Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeProposal(row))),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.listProposals:query",
+          "ProjectMemoryRepository.listProposals:decodeRows",
+          { projectId },
+        ),
+      ),
+    );
+
+  const getProposal: ProjectMemoryRepository["Service"]["getProposal"] = (input) =>
+    sql`
+      SELECT ${proposalColumns}
+      FROM project_memory_proposals
+      WHERE project_id = ${input.projectId} AND proposal_id = ${input.proposalId}
+    `.pipe(
+      Effect.flatMap((rows) =>
+        rows[0] === undefined
+          ? Effect.succeedNone
+          : Effect.map(decodeProposal(rows[0]), Option.some),
+      ),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.getProposal:query",
+          "ProjectMemoryRepository.getProposal:decodeRow",
+          { projectId: input.projectId },
+        ),
+      ),
+    );
+
+  const deleteProposal: ProjectMemoryRepository["Service"]["deleteProposal"] = (input) =>
+    sql<{ readonly proposalId: string }>`
+      DELETE FROM project_memory_proposals
+      WHERE project_id = ${input.projectId} AND proposal_id = ${input.proposalId}
+      RETURNING proposal_id AS "proposalId"
+    `.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.deleteProposal:query",
+          "ProjectMemoryRepository.deleteProposal:decodeRow",
+          { projectId: input.projectId },
+        ),
+      ),
+    );
+
   return {
     insert,
     getById,
@@ -624,6 +780,10 @@ export const make = Effect.gen(function* () {
     search,
     update,
     delete: deleteMemory,
+    insertProposal,
+    listProposals,
+    getProposal,
+    deleteProposal,
   } satisfies ProjectMemoryRepository["Service"];
 });
 

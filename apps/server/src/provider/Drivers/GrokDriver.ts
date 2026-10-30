@@ -27,7 +27,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import { discoverGrokSkills } from "./GrokSkills.ts";
 import {
   makeCachedProviderMaintenanceResolution,
@@ -100,7 +100,9 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       const serverSettings = yield* ServerSettingsService;
       const { cwd } = yield* ServerConfig;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = makeProviderProcessEnvironment(environment, process.env, {
+        ...(config.telemetry ? { telemetryOn: "grok" as const } : {}),
+      });
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,

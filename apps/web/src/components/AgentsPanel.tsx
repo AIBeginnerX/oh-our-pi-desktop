@@ -22,6 +22,7 @@ import {
 } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   agentFlow,
+  LEAD_AGENT_ID,
   type AgentFlowBox,
   type AgentFlowEntry,
   type AgentFlowState,
@@ -30,10 +31,41 @@ import type { EnvironmentId, OrchestrationThreadActivity, ThreadId } from "@t3to
 import { Bot, Braces, Check, ChevronDown, ChevronRight, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useT } from "~/i18n";
 import { cn } from "~/lib/utils";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Button } from "~/components/ui/button";
+import { doingText, modelText, toolSummaryText, type Translate } from "./workflows/workflowText";
+
+/** Settled agents listed before "Show all"; agents still working always show. */
+const ROSTER_LIMIT = 6;
+const DETAILS_LIMIT = 5;
+
+/** The newest `limit` items in their original order, plus any item that is still live. */
+function newestOrLive<T>(
+  items: ReadonlyArray<T>,
+  limit: number,
+  isLive: (item: T) => boolean,
+): T[] {
+  const cutoff = items.length - limit;
+  return items.filter((item, index) => index >= cutoff || isLive(item));
+}
+
+function ShowAllToggle(props: {
+  total: number;
+  shown: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const t = useT();
+  if (props.total <= props.shown && !props.expanded) return null;
+  return (
+    <Button size="xs" variant="ghost-muted" className="self-start" onClick={props.onToggle}>
+      {props.expanded ? t("Show fewer") : t("Show all ({count})", { count: props.total })}
+    </Button>
+  );
+}
 
 /**
  * In-flight states all present as Working (one steady state, per the
@@ -345,8 +377,11 @@ function PhaseSection({
   phase: AgentPanelWorkflowGroup["phases"][number];
   defaultOpen?: boolean;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(defaultOpen || phase.state === "running");
   const previousState = useRef(phase.state);
+  const failed = phase.members.filter((member) => member.status === "failed").length;
+  const done = phase.settledCount - failed;
 
   useEffect(() => {
     if (previousState.current !== "running" && phase.state === "running") {
@@ -380,10 +415,18 @@ function PhaseSection({
         <span className="font-normal normal-case text-muted-foreground/70">
           {phase.state === "pending" && phase.members.length === 0
             ? "pending"
-            : phase.state === "done"
-              ? `${phase.settledCount} done`
-              : `${phase.activeCount} active · ${phase.settledCount} done`}
+            : [
+                phase.state === "done" ? null : t("{count} active", { count: phase.activeCount }),
+                t("{count} done", { count: done }),
+              ]
+                .filter(Boolean)
+                .join(" · ")}
         </span>
+        {failed > 0 ? (
+          <span className="font-normal normal-case text-destructive-foreground">
+            {t("{count} failed", { count: failed })}
+          </span>
+        ) : null}
         {!open && phase.members.length > 0 ? (
           <span className="ml-auto flex items-center gap-0.5">
             {phase.members.map((member) => (
@@ -409,6 +452,7 @@ function ExpandedWorkflowSection({
   threadId: ThreadId | null;
   onCollapse: () => void;
 }) {
+  const t = useT();
   const [scriptOpen, setScriptOpen] = useState(false);
   const members = workflowMembers(group);
   const settled = members.filter(
@@ -418,6 +462,7 @@ function ExpandedWorkflowSection({
       member.status === "cancelled" ||
       member.status === "interrupted",
   ).length;
+  const failedMembers = members.filter((member) => member.status === "failed").length;
   const scriptPath = group.workflow.runHandles?.scriptPath;
   const canShowScript = scriptPath !== undefined && environmentId !== null && threadId !== null;
   return (
@@ -442,6 +487,12 @@ function ExpandedWorkflowSection({
         ) : null}
         <span className="ml-auto font-mono normal-case text-muted-foreground/80">
           {settled}/{members.length} settled
+          {failedMembers > 0 ? (
+            <span className="text-destructive-foreground">
+              {" · "}
+              {t("{count} failed", { count: failedMembers })}
+            </span>
+          ) : null}
         </span>
         <Button
           size="icon-micro"
@@ -559,6 +610,18 @@ function isLive(state: AgentFlowState): boolean {
 }
 
 /** One agent in the roster: who it is, what it was asked, and what it has done, in English. */
+/**
+ * The roster's summary line. The lead says what it is doing and has done in plain words; the
+ * others keep the summary the flow built.
+ */
+function rosterSummary(agent: AgentFlowEntry, t: Translate): string {
+  if (agent.kind !== "lead") return agent.summary;
+  const tools = toolSummaryText(agent.tools ?? [], t);
+  if (agent.doing !== undefined)
+    return [doingText(agent.doing, t), tools].filter(Boolean).join(" · ");
+  return tools === "" ? agent.summary : [t("Finished the turn"), tools].join(" · ");
+}
+
 function AgentRosterRow({
   agent,
   color,
@@ -570,7 +633,9 @@ function AgentRosterRow({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const t = useT();
   const visuals = FLOW_STATE[agent.state];
+  const model = modelText(agent.model ?? undefined);
   return (
     <button
       type="button"
@@ -585,8 +650,8 @@ function AgentRosterRow({
       <span className="flex min-w-0 items-center gap-1.5">
         <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", visuals.dotClass)} />
         <span className="shrink-0 text-xs font-medium">{agent.name}</span>
-        {agent.model ? (
-          <span className="min-w-0 truncate text-2xs text-muted-foreground">{agent.model}</span>
+        {model ? (
+          <span className="min-w-0 truncate text-2xs text-muted-foreground">{model}</span>
         ) : null}
         <span className="ml-auto shrink-0 font-mono text-3xs uppercase tracking-wide text-muted-foreground">
           {visuals.label}
@@ -596,7 +661,7 @@ function AgentRosterRow({
         <span className="truncate text-2xs text-foreground/90">{agent.task}</span>
       ) : null}
       <span className="truncate text-2xs text-muted-foreground">
-        {agent.summary}
+        {rosterSummary(agent, t)}
         {agent.kind !== "lead" && agent.startedAt ? (
           <>
             {" · "}
@@ -612,10 +677,7 @@ function AgentRosterRow({
   );
 }
 
-/**
- * The link into a box. Only the one feeding a live box flows; its dash period (8) divides the
- * flow offset (16), so the loop never jumps.
- */
+/** The link into a box; the one feeding a live box is drawn in its agent's color. */
 function FlowConnector({ live, color }: { live: boolean; color: string }) {
   return (
     <svg aria-hidden width={12} height={14} className="ml-3 shrink-0">
@@ -627,14 +689,20 @@ function FlowConnector({ live, color }: { live: boolean; color: string }) {
         stroke={live ? color : "var(--border)"}
         strokeWidth={live ? 2 : 1.5}
         strokeLinecap="round"
-        strokeDasharray={live ? "5 3" : undefined}
-        className={live ? "motion-safe:wf-edge-flow" : undefined}
       />
     </svg>
   );
 }
 
 /** The latest turn's core work, box by box in the order it happened, each in its agent's color. */
+/** A box's words: what the lead is doing or did by category, or the agent's own task. */
+function boxText(box: AgentFlowBox, t: Translate): { title: string; detail: string | null } {
+  const tools = toolSummaryText(box.tools ?? [], t);
+  if (box.doing !== undefined) return { title: doingText(box.doing, t), detail: tools || null };
+  if (tools !== "") return { title: tools, detail: null };
+  return { title: box.agentId === LEAD_AGENT_ID ? t(box.title) : box.title, detail: box.detail };
+}
+
 function AgentFlowLane({
   boxes,
   colorOf,
@@ -644,6 +712,7 @@ function AgentFlowLane({
   colorOf: (agentId: string) => string;
   highlighted: string | null;
 }) {
+  const t = useT();
   if (boxes.length === 0) {
     return <p className="px-1 text-2xs text-muted-foreground">No work in this turn yet.</p>;
   }
@@ -653,6 +722,7 @@ function AgentFlowLane({
         const live = isLive(box.state);
         const color = colorOf(box.agentId);
         const dimmed = highlighted !== null && highlighted !== box.agentId;
+        const text = boxText(box, t);
         return (
           <li
             key={box.id}
@@ -662,7 +732,7 @@ function AgentFlowLane({
             <div
               className={cn(
                 "flex flex-col gap-0.5 rounded-lg border border-l-4 bg-card px-2.5 py-1.5 motion-safe:wf-box-enter",
-                live ? "wf-card-neon" : "border-border/70",
+                live ? "border-primary ring-1 ring-primary/60" : "border-border/70",
                 box.state === "failed" && "border-destructive/50",
               )}
               style={{ borderLeftColor: color }}
@@ -672,10 +742,10 @@ function AgentFlowLane({
                   aria-hidden
                   className={cn("size-1.5 shrink-0 rounded-full", FLOW_STATE[box.state].dotClass)}
                 />
-                <span className="min-w-0 truncate text-xs font-medium">{box.title}</span>
+                <span className="min-w-0 truncate text-xs font-medium">{text.title}</span>
               </span>
               <span className="truncate text-2xs text-muted-foreground">
-                {[box.detail, FLOW_STATE[box.state].label].filter(Boolean).join(" · ")}
+                {[text.detail, FLOW_STATE[box.state].label].filter(Boolean).join(" · ")}
               </span>
             </div>
           </li>
@@ -683,6 +753,34 @@ function AgentFlowLane({
       })}
     </ol>
   );
+}
+
+function isSettledAgent(status: RuntimeSubagent["status"]): boolean {
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "interrupted"
+  );
+}
+
+/** How the settled agents ended, so a failure never hides inside a "settled" total. */
+function settledBreakdown(model: AgentPanelModel) {
+  // A workflow with members is a container for them, as in the model's own counts.
+  const agents = [
+    ...model.workflows.flatMap((group) => {
+      const members = workflowMembers(group);
+      return members.length > 0 ? members : [group.workflow];
+    }),
+    ...model.directAgents,
+  ];
+  const count = (...statuses: ReadonlyArray<RuntimeSubagent["status"]>) =>
+    agents.filter((agent) => statuses.includes(agent.status)).length;
+  return {
+    completed: count("completed"),
+    failed: count("failed"),
+    stopped: count("cancelled", "interrupted"),
+  };
 }
 
 export function AgentsPanel({
@@ -707,7 +805,10 @@ export function AgentsPanel({
   /** Accent color per provider instance, as chosen in Settings. */
   accentColors?: ReadonlyMap<string, string>;
 }) {
+  const t = useT();
   const [highlighted, setHighlighted] = useState<string | null>(null);
+  const [showAllAgents, setShowAllAgents] = useState(false);
+  const [showAllDetails, setShowAllDetails] = useState(false);
   const flow = useMemo(
     () =>
       activities === undefined
@@ -732,6 +833,23 @@ export function AgentsPanel({
     return (agentId: string) => byAgent.get(agentId) ?? FALLBACK_AGENT_COLOR;
   }, [flow, accentColors]);
 
+  // The lead row stays; settled agents beyond the newest few fold behind "Show all".
+  const roster = (flow?.agents ?? []).filter(
+    (agent, index) =>
+      showAllAgents ||
+      index <= ROSTER_LIMIT ||
+      agent.state === "working" ||
+      agent.state === "thinking" ||
+      agent.state === "waiting",
+  );
+  const workflows = showAllDetails
+    ? model.workflows
+    : newestOrLive(model.workflows, DETAILS_LIMIT, workflowIsLive);
+  const directAgents = showAllDetails
+    ? model.directAgents
+    : newestOrLive(model.directAgents, DETAILS_LIMIT, (agent) => !isSettledAgent(agent.status));
+  const detailsTotal = model.workflows.length + model.directAgents.length;
+  const breakdown = settledBreakdown(model);
   const hasFlow = flow !== null && (flow.boxes.length > 0 || flow.agents.length > 1);
   if (!model.hasAgents && !hasFlow) {
     return (
@@ -754,7 +872,7 @@ export function AgentsPanel({
             <div className="@container">
               <div className="grid gap-2 @md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
                 <section aria-label="Agents" className="flex flex-col gap-1">
-                  {flow.agents.map((agent) => (
+                  {roster.map((agent) => (
                     <AgentRosterRow
                       key={agent.id}
                       agent={agent}
@@ -765,6 +883,12 @@ export function AgentsPanel({
                       }
                     />
                   ))}
+                  <ShowAllToggle
+                    total={flow.agents.length - 1}
+                    shown={roster.length - 1}
+                    expanded={showAllAgents}
+                    onToggle={() => setShowAllAgents((value) => !value)}
+                  />
                 </section>
                 <section aria-label="Flow" className="min-w-0">
                   <AgentFlowLane boxes={flow.boxes} colorOf={colorOf} highlighted={highlighted} />
@@ -777,7 +901,7 @@ export function AgentsPanel({
               <div className="px-1.5 text-3xs font-medium uppercase tracking-wider text-muted-foreground">
                 Details
               </div>
-              {model.workflows.map((group) => (
+              {workflows.map((group) => (
                 <WorkflowSection
                   key={group.workflow.id}
                   group={group}
@@ -785,16 +909,22 @@ export function AgentsPanel({
                   threadId={threadId}
                 />
               ))}
-              {model.directAgents.length > 0 ? (
+              {directAgents.length > 0 ? (
                 <section>
                   <div className="px-1.5 pt-1 text-3xs font-medium uppercase tracking-wider text-muted-foreground">
                     Direct spawns
                   </div>
-                  {model.directAgents.map((agent) => (
+                  {directAgents.map((agent) => (
                     <AgentRow key={agent.id} agent={agent} />
                   ))}
                 </section>
               ) : null}
+              <ShowAllToggle
+                total={detailsTotal}
+                shown={workflows.length + directAgents.length}
+                expanded={showAllDetails}
+                onToggle={() => setShowAllDetails((value) => !value)}
+              />
             </div>
           ) : null}
         </div>
@@ -808,7 +938,17 @@ export function AgentsPanel({
               </span>
             ) : null}
             {model.idleCount > 0 ? <span>{model.idleCount} idle</span> : null}
-            {model.settledCount > 0 ? <span>{model.settledCount} settled</span> : null}
+            {breakdown.completed > 0 ? (
+              <span>{t("{count} done", { count: breakdown.completed })}</span>
+            ) : null}
+            {breakdown.failed > 0 ? (
+              <span className="text-destructive-foreground">
+                {t("{count} failed", { count: breakdown.failed })}
+              </span>
+            ) : null}
+            {breakdown.stopped > 0 ? (
+              <span>{t("{count} stopped", { count: breakdown.stopped })}</span>
+            ) : null}
           </span>
           <span className="tabular-nums">Σ {formatSubagentTokenCount(model.totalTokens)} tok</span>
         </footer>

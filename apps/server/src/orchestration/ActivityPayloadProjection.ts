@@ -191,7 +191,7 @@ function summarizeToolTextOutput(value: string): string | null {
  * Fields of an MCP tool-call item both clients render in the expanded
  * work-log row. Everything else — notably `result`, which carries the full
  * tool output and dominates wire size on MCP-heavy threads — is summarized
- * or dropped. Full payloads remain in persistence.
+ * or dropped.
  */
 const MCP_ITEM_KEPT_FIELDS = [
   "type",
@@ -419,8 +419,10 @@ function projectAcpContent(value: unknown): Record<string, unknown> | undefined 
 }
 
 /**
- * Removes activity payload fields that no current client reads while retaining
- * the full payload in persistence and the event store.
+ * Removes activity payload fields that no current client or server reader uses.
+ * Tool lifecycle activities are persisted in this form (see
+ * `runtimeEventToActivities`), and it is applied again on every read path, so
+ * it must stay idempotent.
  */
 export function projectActivityPayload(
   activity: OrchestrationThreadActivity,

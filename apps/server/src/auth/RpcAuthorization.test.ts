@@ -92,6 +92,16 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryAcknowledgeThread)).toBe(
       AuthOrchestrationOperateScope,
     );
+    // Agent proposals: reading the queue is a read; deciding one is a write.
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryListProposals)).toBe(
+      AuthOrchestrationReadScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryApproveProposal)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryRejectProposal)).toBe(
+      AuthOrchestrationOperateScope,
+    );
   });
 
   it("lets a read-only token list and read inactive skill candidates but keeps writes behind operate", () => {

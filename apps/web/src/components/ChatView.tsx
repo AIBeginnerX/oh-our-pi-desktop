@@ -175,6 +175,7 @@ import {
   type Thread,
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
+import { useT } from "../i18n";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { subscribeSnapShotComposerFocus } from "../lib/desktopSnapShot";
@@ -275,7 +276,11 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useRemoveClonedProject } from "../hooks/useRemoveClonedProject";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { useThreadActions } from "../hooks/useThreadActions";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import {
+  getAppModelOptionsForInstance,
+  resolveAppModelSelectionForInstance,
+} from "../modelSelection";
+import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
@@ -1705,6 +1710,7 @@ export default function ChatView(props: ChatViewProps) {
   );
   const [isWorkspaceFileDragActive, setIsWorkspaceFileDragActive] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const t = useT();
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   useEffect(() => {
     const item = expandedImage?.images[expandedImage.index];
@@ -2945,8 +2951,21 @@ export default function ChatView(props: ChatViewProps) {
   // until orchestration-v2 lands (source precedence lives in the derive).
   // sessionLive derives interruption for agents orphaned by session death.
   const agentSessionLive = phase !== "disconnected";
-  const leadModel = activeThread?.modelSelection.model ?? null;
+  const leadModelSlug = activeThread?.modelSelection.model ?? null;
   const leadInstanceId = activeThread?.modelSelection.instanceId ?? null;
+  // The lead's model as the composer's picker names it ("Claude Opus 5.5"), not its slug.
+  const leadModel = useMemo(() => {
+    if (leadModelSlug === null) return null;
+    const entry = providerInstanceEntries.find(
+      (candidate) => candidate.instanceId === leadInstanceId,
+    );
+    const option = entry
+      ? getAppModelOptionsForInstance(settings, entry, leadModelSlug).find(
+          (candidate) => candidate.slug === leadModelSlug,
+        )
+      : undefined;
+    return option ? getTriggerDisplayModelName(option) : leadModelSlug;
+  }, [leadInstanceId, leadModelSlug, providerInstanceEntries, settings]);
   const agentPanelLead = useMemo(
     () => ({
       model: leadModel,
@@ -3293,6 +3312,8 @@ export default function ChatView(props: ChatViewProps) {
     isCompacting ||
     awaitingBootstrapTurn;
   const isPreparingWorktree = isLocallyPreparingWorktree || awaitingBootstrapTurn;
+  const needsInput = pendingApprovals.length > 0 || pendingUserInputs.length > 0;
+  const pillWorking = isWorking && !isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -5041,20 +5062,24 @@ export default function ChatView(props: ChatViewProps) {
   const requestCloseTerminal = useCallback(
     (terminalId: string) => {
       const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
-      void confirmTerminalClose([label]).then((confirmed) => {
-        if (confirmed) closeTerminal(terminalId);
-      });
+      void confirmTerminalClose([label], { running: runningTerminalIds.includes(terminalId) }).then(
+        (confirmed) => {
+          if (confirmed) closeTerminal(terminalId);
+        },
+      );
     },
-    [activeTerminalLabelsById, closeTerminal],
+    [activeTerminalLabelsById, closeTerminal, runningTerminalIds],
   );
   const requestClosePanelTerminal = useCallback(
     (terminalId: string) => {
       const label = activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId);
-      void confirmTerminalClose([label]).then((confirmed) => {
-        if (confirmed) closePanelTerminal(terminalId);
-      });
+      void confirmTerminalClose([label], { running: runningTerminalIds.includes(terminalId) }).then(
+        (confirmed) => {
+          if (confirmed) closePanelTerminal(terminalId);
+        },
+      );
     },
-    [activeTerminalLabelsById, closePanelTerminal],
+    [activeTerminalLabelsById, closePanelTerminal, runningTerminalIds],
   );
   const activateRightPanelSurface = useCallback(
     (surface: RightPanelSurface) => {
@@ -5180,7 +5205,10 @@ export default function ChatView(props: ChatViewProps) {
         .map(
           (terminalId) => activeTerminalLabelsById.get(terminalId) ?? getTerminalLabel(terminalId),
         );
-      void confirmTerminalClose([activeLabel, ...otherLabels]).then((confirmed) => {
+      const running = surface.terminalIds.some((terminalId) =>
+        runningTerminalIds.includes(terminalId),
+      );
+      void confirmTerminalClose([activeLabel, ...otherLabels], { running }).then((confirmed) => {
         if (confirmed) finishClose();
       });
     },
@@ -5189,6 +5217,7 @@ export default function ChatView(props: ChatViewProps) {
       activeTerminalLabelsById,
       closeAfterAgentBrowserConfirmation,
       finishRightPanelSurfaceClose,
+      runningTerminalIds,
     ],
   );
   const closeOtherRightPanelSurfaces = useCallback(
@@ -9862,6 +9891,9 @@ export default function ChatView(props: ChatViewProps) {
       <WorkflowsPanel
         activities={threadActivities}
         agents={agentPanelModel}
+        lead={agentPanelLead}
+        environmentId={activeThreadRef?.environmentId ?? null}
+        threadId={activeThreadRef?.threadId ?? null}
         activeTurnId={latestTurnSettled ? null : (activeLatestTurn?.turnId ?? null)}
         activeTurnStartedAt={
           latestTurnSettled
@@ -10160,10 +10192,18 @@ export default function ChatView(props: ChatViewProps) {
                     }}
                     className="pointer-events-auto"
                     size="xs"
-                    variant="glass"
+                    variant={needsInput ? "warning-outline" : "glass"}
                   >
-                    <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
+                    {needsInput || pillWorking ? (
+                      <span aria-hidden className="size-1.5 rounded-full bg-current" />
+                    ) : (
+                      <ChevronDownIcon className="size-3.5" />
+                    )}
+                    {needsInput
+                      ? t("Needs your input")
+                      : pillWorking
+                        ? t("Working")
+                        : "Scroll to end"}
                   </Button>
                 </div>
               )}

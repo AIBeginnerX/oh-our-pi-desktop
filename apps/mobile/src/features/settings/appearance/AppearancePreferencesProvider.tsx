@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { AppState, Appearance, Platform, useColorScheme } from "react-native";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -59,6 +60,8 @@ interface AppearancePreferencesContextValue {
   >;
   readonly systemColorPalettes: ReturnType<typeof readSystemColorPalettes>;
   readonly isReady: boolean;
+  readonly loadLinkIcons: boolean;
+  readonly setLoadLinkIcons: (value: boolean) => void;
   readonly setThemeIdForAppearance: (
     appearance: MobileThemeAppearance,
     value: MobileThemeId,
@@ -272,6 +275,13 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
     [updatePreferences],
   );
 
+  const loadLinkIcons =
+    isReady && (storedPreferences?.loadLinkIcons ?? DEFAULT_CLIENT_SETTINGS.loadLinkIcons);
+  const setLoadLinkIcons = useCallback(
+    (value: boolean) => updatePreferences({ loadLinkIcons: value }),
+    [updatePreferences],
+  );
+
   const value = useMemo(
     (): AppearancePreferencesContextValue => ({
       appearance,
@@ -292,6 +302,8 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       setTerminalFontSize,
       setCodeFontSize,
       setCodeWordBreak,
+      loadLinkIcons,
+      setLoadLinkIcons,
     }),
     [
       appearance,
@@ -311,6 +323,8 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       setTerminalFontSize,
       setCodeFontSize,
       setCodeWordBreak,
+      loadLinkIcons,
+      setLoadLinkIcons,
     ],
   );
 

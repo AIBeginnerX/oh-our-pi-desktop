@@ -266,7 +266,7 @@ function failingSpawnerLayer(description: string) {
   );
 }
 
-function hangingScopedSpawnerLayer(killCalls: Ref.Ref<number>) {
+function hangingScopedSpawnerLayer(killCalls: Ref.Ref<number>, spawned: Deferred.Deferred<void>) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make(() =>
@@ -285,6 +285,7 @@ function hangingScopedSpawnerLayer(killCalls: Ref.Ref<number>) {
           getOutputFd: () => Stream.empty,
         });
         yield* Effect.addFinalizer(() => handle.kill().pipe(Effect.ignore));
+        yield* Deferred.succeed(spawned, undefined);
         return handle;
       }),
     ),
@@ -570,12 +571,15 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
       it.effect("closes the app-server probe scope when provider status times out", () =>
         Effect.gen(function* () {
           const killCalls = yield* Ref.make(0);
+          const spawned = yield* Deferred.make<void>();
           const statusFiber = yield* checkCodexProviderStatus(defaultCodexSettings).pipe(
-            Effect.provide(hangingScopedSpawnerLayer(killCalls)),
+            Effect.provide(hangingScopedSpawnerLayer(killCalls, spawned)),
             Effect.forkChild,
           );
 
-          yield* Effect.yieldNow;
+          // The probe reads the user's Codex config from disk before it spawns, so wait for the
+          // spawn instead of guessing how many ticks that takes.
+          yield* Deferred.await(spawned);
           yield* TestClock.adjust("11 seconds");
           yield* Effect.yieldNow;
 

@@ -1009,3 +1009,21 @@ it("validates remote device hosts and rejects ambiguous host ids", () => {
   ).toThrow();
   expect(() => decodeDeviceHostSettings({ deviceHosts: [{ ...host, port: 0 }] })).toThrow();
 });
+
+describe("ClientSettings link icons", () => {
+  it("keeps external link icons enabled for existing clients", () => {
+    expect(decodeClientSettings({}).loadLinkIcons).toBe(true);
+    expect(decodeClientSettingsPatch({})).not.toHaveProperty("loadLinkIcons");
+  });
+
+  it.each([true, false])("round trips the local preference %s", (loadLinkIcons) => {
+    const preference = { loadLinkIcons };
+    expect(encodeClientSettings(decodeClientSettings(preference))).toMatchObject(preference);
+    expect(decodeClientSettingsPatch(preference)).toEqual(preference);
+  });
+
+  it("rejects non-boolean preferences", () => {
+    expect(() => decodeClientSettings({ loadLinkIcons: "false" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ loadLinkIcons: "false" })).toThrow();
+  });
+});

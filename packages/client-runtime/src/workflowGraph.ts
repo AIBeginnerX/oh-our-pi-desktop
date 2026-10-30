@@ -22,6 +22,8 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
+import type { CrewEvidence } from "./crewBoard.ts";
+
 export type WorkflowNodeState =
   | "pending"
   | "blocked"
@@ -32,7 +34,46 @@ export type WorkflowNodeState =
   | "cancelled"
   | "skipped";
 
+/** What a tool call did, in the terms a person uses: reading, editing, running, searching. */
+export type ToolCategory = "read" | "edit" | "run" | "search" | "web" | "other";
+
+export interface ToolCount {
+  readonly category: ToolCategory;
+  readonly count: number;
+}
+
+export type WorkflowActorRole =
+  | "main"
+  | "worker"
+  | "expert"
+  | "auditor"
+  | "crew"
+  | "subagent"
+  | "workflow";
+
+/** What a main agent is doing right now; "waiting" means its helpers are busy and it is not. */
+export type WorkflowDoing = ToolCategory | "thinking" | "waiting";
+
+/**
+ * A node that stands for an agent rather than a tool call. Language-neutral: clients turn the
+ * role, task, tool counts, and current action into words.
+ */
+export interface WorkflowActor {
+  readonly role: WorkflowActorRole;
+  /** The task a crew member or subagent was given, as the lead named it. */
+  readonly task?: string;
+  /** On the main agent: its tool activity so far, by category. */
+  readonly tools?: ReadonlyArray<ToolCount>;
+  /** On the main agent while its turn runs. */
+  readonly doing?: WorkflowDoing;
+  /** On the main agent: how many tasks it handed to OOP Crew this turn. */
+  readonly delegated?: number;
+}
+
 export interface WorkflowNodeInfo {
+  readonly actor?: WorkflowActor;
+  /** On a tool step: the category it counts under; absent for steps that launch agents. */
+  readonly toolCategory?: ToolCategory;
   readonly subtitle?: string;
   readonly model?: string;
   readonly description?: string;
@@ -42,6 +83,23 @@ export interface WorkflowNodeInfo {
   readonly tokens?: number;
   readonly toolUses?: number;
   readonly error?: string;
+  /** Reported cost in USD; set only where the provider reported one. */
+  readonly costUsd?: number;
+  /** On a crew brain node: some of the turn's usage came with no reported cost. */
+  readonly unpriced?: boolean;
+  /** On a crew task: how far its result can be trusted. */
+  readonly evidence?: CrewEvidence;
+  /** On a crew task: what the board's Stop, Open, and Retry act on. */
+  readonly crew?: WorkflowCrewTask;
+}
+
+export interface WorkflowCrewTask {
+  readonly taskId: string;
+  readonly role: string;
+  /** The crew thread of the task's current or last attempt; older tasks have none. */
+  readonly threadId?: string;
+  /** The task.completed status; absent while the task runs. */
+  readonly outcome?: string;
 }
 
 export interface WorkflowNode {
@@ -64,9 +122,16 @@ export interface WorkflowGraph {
   /** The lead turn a turn or crew graph belongs to; provider workflows outlive turns. */
   readonly turnId?: string;
   readonly name: string;
+  /** Which turn this is, counting from 1; clients name the flow from it. */
+  readonly turnIndex?: number;
   readonly status: WorkflowNodeState;
   readonly startedAt: string;
   readonly updatedAt: string;
+  /** On a turn's step graph: every tool call the turn made, and its tools by category. */
+  readonly stepCount?: number;
+  readonly tools?: ReadonlyArray<ToolCount>;
+  /** On an agent flow: the same turn drawn as one node per tool call. */
+  readonly steps?: WorkflowGraph;
   /** Column titles by wave index; untitled columns read "Wave n". */
   readonly waveTitles: ReadonlyArray<string>;
   readonly nodes: ReadonlyArray<WorkflowNode>;
@@ -83,6 +148,47 @@ const LIVE: ReadonlySet<WorkflowNodeState> = new Set(["running", "blocked", "pau
 
 export const isSettledState = (state: WorkflowNodeState): boolean => SETTLED.has(state);
 
+export interface WorkflowCounts {
+  readonly total: number;
+  readonly completed: number;
+  readonly failed: number;
+  /** Cancelled or skipped: settled without a result either way. */
+  readonly stopped: number;
+  readonly running: number;
+}
+
+/** Counts failures apart from completions, so a done count never hides a failed step. */
+export function workflowCounts(nodes: ReadonlyArray<Pick<WorkflowNode, "state">>): WorkflowCounts {
+  let completed = 0;
+  let failed = 0;
+  let stopped = 0;
+  let running = 0;
+  for (const { state } of nodes) {
+    if (state === "completed") completed += 1;
+    else if (state === "failed") failed += 1;
+    else if (state === "cancelled" || state === "skipped") stopped += 1;
+    else if (state === "running") running += 1;
+  }
+  return { total: nodes.length, completed, failed, stopped, running };
+}
+
+/**
+ * Splits flows (newest first) into the chips to show and the ones tucked behind "Earlier". The
+ * selected flow always shows, even when it is older than the newest `limit`.
+ */
+export function boundFlows<T extends { readonly id: string }>(
+  flows: ReadonlyArray<T>,
+  selectedId: string | null,
+  limit = 4,
+): { readonly visible: T[]; readonly earlier: T[] } {
+  const visible = flows.slice(0, limit);
+  const rest = flows.slice(limit);
+  const selected = rest.find((flow) => flow.id === selectedId);
+  return selected === undefined
+    ? { visible, earlier: rest }
+    : { visible: [...visible, selected], earlier: rest.filter((flow) => flow !== selected) };
+}
+
 export interface WorkflowMetrics {
   readonly cardWidth: number;
   readonly cardHeight: number;
@@ -97,7 +203,7 @@ export interface WorkflowMetrics {
 
 export const WORKFLOW_METRICS: WorkflowMetrics = {
   cardWidth: 200,
-  cardHeight: 84,
+  cardHeight: 100,
   maxRows: 10,
   miniCardHeight: 30,
   colGap: 56,
@@ -108,7 +214,7 @@ export const WORKFLOW_METRICS: WorkflowMetrics = {
 
 export const COMPACT_WORKFLOW_METRICS: WorkflowMetrics = {
   cardWidth: 164,
-  cardHeight: 84,
+  cardHeight: 100,
   maxRows: 10,
   miniCardHeight: 30,
   colGap: 36,
@@ -134,6 +240,8 @@ export interface WorkflowWave {
   readonly title: string;
   readonly total: number;
   readonly settled: number;
+  readonly completed: number;
+  readonly failed: number;
   readonly running: number;
   readonly x: number;
   readonly width: number;
@@ -366,6 +474,8 @@ export function layoutWorkflow(
       title: graph.waveTitles[index] ?? `Wave ${index + 1}`,
       total: column.length,
       settled: column.filter((node) => isSettledState(node.state)).length,
+      completed: column.filter((node) => node.state === "completed").length,
+      failed: column.filter((node) => node.state === "failed").length,
       running: column.filter((node) => node.state === "running").length,
       x,
       width,
@@ -479,8 +589,10 @@ export interface WorkflowActivityEntry {
   readonly key: string;
   readonly at: number;
   readonly nodeId: string;
+  readonly event: "started" | "settled" | "error" | "progress";
   readonly state: WorkflowNodeState | null;
-  readonly text: string;
+  /** The error or progress text the node reported; absent for starts and finishes. */
+  readonly detail?: string;
 }
 
 /** Starts, finishes, errors, and live progress, newest first. */
@@ -499,8 +611,8 @@ export function workflowActivity(
         key: `${node.id}:start`,
         at: started,
         nodeId: node.id,
+        event: "started",
         state: "running",
-        text: `${node.label} started`,
       });
     }
     if (isSettledState(node.state) && Number.isFinite(ended)) {
@@ -508,16 +620,17 @@ export function workflowActivity(
         key: `${node.id}:end`,
         at: ended,
         nodeId: node.id,
+        event: "settled",
         state: node.state,
-        text: `${node.label} ${node.state}`,
       });
       if (info.error !== undefined) {
         entries.push({
           key: `${node.id}:error`,
           at: ended,
           nodeId: node.id,
+          event: "error",
           state: null,
-          text: `${node.label}: ${info.error}`,
+          detail: info.error,
         });
       }
     }
@@ -526,8 +639,9 @@ export function workflowActivity(
         key: `${node.id}:progress`,
         at: now,
         nodeId: node.id,
+        event: "progress",
         state: null,
-        text: `${node.label}: ${info.progress}`,
+        detail: info.progress,
       });
     }
   }

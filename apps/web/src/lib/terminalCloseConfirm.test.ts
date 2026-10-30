@@ -69,6 +69,17 @@ describe("terminal close confirmation", () => {
     );
   });
 
+  it("closes an idle terminal without prompting and still asks when a process is running", async () => {
+    confirmMock.mockResolvedValue(false);
+
+    await expect(confirmTerminalClose(["Terminal 1"], { running: false })).resolves.toBe(true);
+    expect(confirmMock).not.toHaveBeenCalled();
+
+    await expect(confirmTerminalClose(["Terminal 1"], { running: true })).resolves.toBe(false);
+    await expect(confirmTerminalClose(["Terminal 1"])).resolves.toBe(false);
+    expect(confirmMock).toHaveBeenCalledTimes(2);
+  });
+
   it("closes without prompting when no local API is available", async () => {
     readLocalApiMock.mockReturnValue(undefined);
 

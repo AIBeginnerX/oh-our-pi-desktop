@@ -245,6 +245,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         shadowHomePath: "",
         launchArgs: "",
         customModels: [],
+        telemetry: false,
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
@@ -253,6 +254,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: ["claude-custom"],
         launchArgs: "",
         autoCompactWindow: "",
+        claudeAiConnectors: false,
+        telemetry: true,
       });
       assert.deepEqual(
         next.textGenerationModelSelection,
@@ -954,6 +957,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         shadowHomePath: "",
         launchArgs: "",
         customModels: [],
+        telemetry: false,
       });
       assert.deepEqual(next.providers.claudeAgent, {
         enabled: true,
@@ -962,6 +966,8 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         customModels: [],
         launchArgs: "",
         autoCompactWindow: "",
+        claudeAiConnectors: false,
+        telemetry: true,
       });
       assert.deepEqual(next.providers.opencode, {
         // OpenCode is disabled by default; this update only touches paths.

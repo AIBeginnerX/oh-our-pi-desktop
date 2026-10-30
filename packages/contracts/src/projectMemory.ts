@@ -13,12 +13,20 @@ export const PROJECT_MEMORY_TITLE_MAX_LENGTH = 200;
 export const PROJECT_MEMORY_BODY_MAX_LENGTH = 8000;
 export const PROJECT_MEMORY_QUERY_MAX_LENGTH = 256;
 export const PROJECT_MEMORY_MAX_LIMIT = 100;
+export const PROJECT_MEMORY_REASON_MAX_LENGTH = 500;
+/** Agent proposals waiting for review, per project. Bounds a looping agent. */
+export const PROJECT_MEMORY_PENDING_PROPOSALS_MAX = 20;
 /** Page bound for thread-recovery change listings. Held equal to the send
     ledger's PROJECT_MEMORY_AFFECTED_PAGE_MAX; a server test pins the two. */
 export const PROJECT_MEMORY_THREAD_CHANGES_MAX = 50;
 
 export const ProjectMemoryId = TrimmedNonEmptyString.pipe(Schema.brand("ProjectMemoryId"));
 export type ProjectMemoryId = typeof ProjectMemoryId.Type;
+
+export const ProjectMemoryProposalId = TrimmedNonEmptyString.pipe(
+  Schema.brand("ProjectMemoryProposalId"),
+);
+export type ProjectMemoryProposalId = typeof ProjectMemoryProposalId.Type;
 
 export const ProjectMemoryKind = Schema.Literals(["fact", "procedure", "work-log"]);
 export type ProjectMemoryKind = typeof ProjectMemoryKind.Type;
@@ -181,6 +189,39 @@ export const ProjectMemoryWriteResult = Schema.Struct({
 });
 export type ProjectMemoryWriteResult = typeof ProjectMemoryWriteResult.Type;
 
+/**
+ * A durable fact an agent proposed through the `memory_propose` tool. It lives
+ * outside the memory store until the user approves it, so it is never
+ * searched, listed as a memory, or sent to a provider while pending.
+ */
+export const ProjectMemoryProposal = Schema.Struct({
+  proposalId: ProjectMemoryProposalId,
+  projectId: ProjectId,
+  /** The thread whose agent made the proposal. */
+  threadId: ThreadId,
+  title: ProjectMemoryTitle,
+  body: ProjectMemoryBody,
+  /** Why the agent thinks this should be remembered. */
+  reason: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_MEMORY_REASON_MAX_LENGTH)),
+  createdAt: IsoDateTime,
+});
+export type ProjectMemoryProposal = typeof ProjectMemoryProposal.Type;
+
+export const ProjectMemoryProposalListInput = Schema.Struct({ projectId: ProjectId });
+export type ProjectMemoryProposalListInput = typeof ProjectMemoryProposalListInput.Type;
+
+export const ProjectMemoryProposalListResult = Schema.Struct({
+  items: Schema.Array(ProjectMemoryProposal),
+});
+export type ProjectMemoryProposalListResult = typeof ProjectMemoryProposalListResult.Type;
+
+/** Shared by approve and reject. */
+export const ProjectMemoryProposalDecisionInput = Schema.Struct({
+  projectId: ProjectId,
+  proposalId: ProjectMemoryProposalId,
+});
+export type ProjectMemoryProposalDecisionInput = typeof ProjectMemoryProposalDecisionInput.Type;
+
 export const ProjectMemoryThreadStateInput = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,
@@ -234,6 +275,8 @@ export const ProjectMemoryRejectedReason = Schema.Literals([
   "origin-invalid",
   "thread-missing",
   "acknowledgement-invalid",
+  "proposal-missing",
+  "proposal-limit",
 ]);
 export type ProjectMemoryRejectedReason = typeof ProjectMemoryRejectedReason.Type;
 
@@ -245,6 +288,9 @@ const REJECTED_REASON_MESSAGES: Record<ProjectMemoryRejectedReason, string> = {
   "origin-invalid": "Source message does not belong to this project.",
   "thread-missing": "Thread is missing, deleted, or not in this project.",
   "acknowledgement-invalid": "Acknowledgement watermark is invalid.",
+  "proposal-missing": "Proposal is missing or was already handled.",
+  "proposal-limit":
+    "Too many proposals are waiting for the user's review. Do not propose more until they decide.",
 };
 
 type ProjectMemoryErrorContext = {

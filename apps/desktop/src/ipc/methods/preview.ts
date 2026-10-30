@@ -137,6 +137,11 @@ export const refresh = tabMethod(
   "desktop.ipc.preview.refresh",
   (manager, tabId) => manager.refresh(tabId),
 );
+export const stop = tabMethod(
+  IpcChannels.PREVIEW_STOP_CHANNEL,
+  "desktop.ipc.preview.stop",
+  (manager, tabId) => manager.stop(tabId),
+);
 export const zoomIn = tabMethod(
   IpcChannels.PREVIEW_ZOOM_IN_CHANNEL,
   "desktop.ipc.preview.zoomIn",
@@ -490,6 +495,7 @@ export const methods = [
   goBack,
   goForward,
   refresh,
+  stop,
   zoomIn,
   zoomOut,
   resetZoom,

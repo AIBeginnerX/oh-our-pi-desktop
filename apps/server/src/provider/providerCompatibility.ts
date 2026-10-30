@@ -99,6 +99,18 @@ export function resolveProviderCompatibility(
   };
 }
 
+/**
+ * Drivers whose OOP integration differs from upstream T3 Code. The remote
+ * manifest describes upstream builds, so OOP keeps its bundled policy for these.
+ */
+const OOP_OWNED_COMPATIBILITY_DRIVERS: ReadonlySet<string> = new Set(["opencode"]);
+
+export function withoutOopOwnedPolicies(
+  policies: ReadonlyArray<ProviderCompatibilityPolicy> | undefined,
+): ReadonlyArray<ProviderCompatibilityPolicy> | undefined {
+  return policies?.filter((policy) => !OOP_OWNED_COMPATIBILITY_DRIVERS.has(policy.driver));
+}
+
 /** A remote policy replaces its matching bundled policy; omission keeps the bundle. */
 export function applyProviderCompatibility(
   snapshot: ServerProvider,

@@ -3,6 +3,9 @@
  * progress reads from a thread shell, and which finished turns earn an audit.
  */
 import type { CrewRole, OrchestrationThreadShell } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 // Clients nest crew threads by this title too, so its rules live in the shared package.
 import { CREW_ROLE_LABEL, isCrewThreadTitle } from "@t3tools/shared/crew";
@@ -50,19 +53,123 @@ export function crewTaskStatus(
 export const isSettledCrewStatus = (status: CrewTaskStatus): boolean =>
   status === "completed" || status === "failed" || status === "interrupted";
 
+const FINDING_SHAPE =
+  '{"severity":"P0"|"P1"|"P2"|"P3","confidence":number from 0 to 1,"title":string,"file"?:string,"line"?:number}';
+const FINDING_SEVERITIES =
+  "P0 breaks the build or loses data, P1 is wrong behavior, P2 should be fixed, P3 is a nit";
+
+const REPORT_SHAPE = `{"status":"done"|"partial"|"blocked","summary":string,"changedFiles":string[],"verification":{"command":string,"passed":boolean|null}|null,"findings":[${FINDING_SHAPE}]}`;
+
+const AUDIT_REPORT_SHAPE = `{"verdict":"approve"|"needs changes","summary":string,"findings":[${FINDING_SHAPE}],"preExistingFailures":string[]}`;
+
+/**
+ * The prompt for a delegated task. The preamble is the same for every task so providers can cache
+ * it; the task and its optional sections come last.
+ */
 export function delegatePrompt(input: {
   readonly role: CrewRole;
   readonly leadTitle: string;
   readonly task: string;
+  /** Repo-relative files or directories the task may change. */
+  readonly writeScope?: ReadonlyArray<string> | undefined;
+  /** The literal command(s) that prove the task is done. */
+  readonly verify?: string | undefined;
+  readonly doneWhen?: string | undefined;
 }): string {
+  const verify = input.verify?.trim();
+  const doneWhen = input.doneWhen?.trim();
   return [
     `You are the ${CREW_ROLE_LABEL[input.role].toLowerCase()} on an OOP crew. The lead agent of the thread "${input.leadTitle}" handed you this task.`,
     "Work in the current workspace. Do only this task; the lead owns the plan and the conversation with the user.",
     "When you finish, reply with a short report: what you did, which files you changed, and anything left undone or uncertain.",
     "End the report with one line: `Status: done`, `Status: partial` when part of the task is left, or `Status: blocked` when you could not do it.",
+    `After that line, close the reply with the same report as one fenced \`\`\`json block of this shape: ${REPORT_SHAPE}`,
+    `In it, \`verification\` is the check you ran (null when you ran none, and \`passed\` null when it gave no clear result), and \`findings\` are problems you found but did not fix (${FINDING_SEVERITIES}); use [] when there are none.`,
     "",
-    "Task:",
+    "TASK:",
     input.task.trim(),
+    ...(input.writeScope === undefined || input.writeScope.length === 0
+      ? []
+      : [
+          "",
+          "SCOPE (the files you may change; leave everything else alone, and say so in your report if the task needs more):",
+          ...input.writeScope.map((path) => `- ${path}`),
+        ]),
+    ...(verify
+      ? [
+          "",
+          "VERIFY (run exactly this before you report, and put its result in your report):",
+          verify,
+        ]
+      : []),
+    ...(doneWhen ? ["", "DONE WHEN:", doneWhen] : []),
+  ].join("\n");
+}
+
+/** Appended to a delegated task's prompt when the task works in its own git worktree. */
+export const ISOLATED_CHECKOUT_PROMPT =
+  "ISOLATED CHECKOUT: you work in your own copy of the repository, started from the lead's tracked files. Untracked and ignored files (for example installed dependencies) are not in it. There is no need to commit; your changes, new files included, are applied back to the lead's workspace when you finish.";
+
+/** A path as its directory segments, without "./" or trailing globs; none means the whole repo. */
+function scopeSegments(path: string): ReadonlyArray<string> {
+  const segments = path.split("/").filter((segment) => segment !== "" && segment !== ".");
+  const glob = segments.findIndex((segment) => segment.includes("*"));
+  return glob === -1 ? segments : segments.slice(0, glob);
+}
+
+/** Two write scopes overlap when one path is the other, or a directory containing it. */
+function scopesOverlap(a: string, b: string): boolean {
+  const left = scopeSegments(a);
+  const right = scopeSegments(b);
+  return left.slice(0, right.length).every((segment, index) => segment === right[index]);
+}
+
+export interface WriteScopeOverlap {
+  readonly taskId: string;
+  readonly subject: string;
+  readonly paths: ReadonlyArray<{ readonly mine: string; readonly theirs: string }>;
+}
+
+/**
+ * The running tasks whose write scope overlaps a new task's. A running task without a scope is
+ * unknown, not overlapping, so only scopes both sides declared can warn. An isolated task writes
+ * to its own worktree and cannot clobber anything, so it is left out.
+ */
+export function overlappingWriteScopes(
+  scope: ReadonlyArray<string>,
+  running: ReadonlyArray<{
+    readonly taskId: string;
+    readonly subject: string;
+    readonly writeScope?: ReadonlyArray<string> | undefined;
+    readonly isolated?: boolean | undefined;
+  }>,
+): ReadonlyArray<WriteScopeOverlap> {
+  return running.flatMap((task) => {
+    if (task.isolated === true) return [];
+    const paths = scope.flatMap((mine) =>
+      (task.writeScope ?? []).flatMap((theirs) =>
+        scopesOverlap(mine, theirs) ? [{ mine, theirs }] : [],
+      ),
+    );
+    return paths.length === 0 ? [] : [{ taskId: task.taskId, subject: task.subject, paths }];
+  });
+}
+
+const WARNED_PATHS_PER_TASK = 5;
+
+/** What crew_delegate tells the brain when the task it just started may collide with others. */
+export function writeScopeWarning(overlaps: ReadonlyArray<WriteScopeOverlap>): string | null {
+  if (overlaps.length === 0) return null;
+  return [
+    "The task started, but its write scope overlaps running tasks, which can overwrite each other's edits:",
+    ...overlaps.map((overlap) => {
+      const shown = overlap.paths
+        .slice(0, WARNED_PATHS_PER_TASK)
+        .map(({ mine, theirs }) => (mine === theirs ? mine : `${mine} vs ${theirs}`));
+      const more = overlap.paths.length - shown.length;
+      return `- ${reportExcerpt(overlap.subject, 80)} (task ${overlap.taskId}): ${shown.join(", ")}${more > 0 ? `, and ${more} more` : ""}`;
+    }),
+    "Wait for those tasks with crew_wait before relying on these files, or narrow the scopes so each task writes different files.",
   ].join("\n");
 }
 
@@ -81,11 +188,14 @@ export function auditPrompt(input: {
   readonly request: string | null;
   /** Everything the thread changed so far, from `auditDiff`; without it the auditor reads the workspace. */
   readonly diff?: string | null;
+  /** The workspace snapshots (hidden git refs) from before and after the audited turn. */
+  readonly turnRefs?: { readonly from: string; readonly to: string } | null;
 }): string {
   const listed = input.files.slice(0, 40);
   const more = input.files.length - listed.length;
   const request = input.request?.trim();
   const diff = input.diff ?? null;
+  const turnRefs = input.turnRefs ?? null;
   // Longer than any backtick run in the diff, so a changed markdown file cannot close the fence.
   const fence = "`".repeat(
     Math.max(3, ...[...(diff ?? "").matchAll(/`+/g)].map((run) => run[0].length + 1)),
@@ -105,7 +215,14 @@ export function auditPrompt(input: {
       ? "Review the change in this workspace (read the files and the git diff). Do not edit anything."
       : "Review the change from the diff above. Read other files or run checks only to settle a specific doubt about it. Do not edit anything.",
     "Judge it against what the user asked. A blocking problem means the request is not done or something that worked is now broken: wrong results, failing tests, a broken build, a requested part missing. Hardening beyond the request, style, and extra tests are not blocking; list them under risky changes or missing tests.",
+    "A failing test, typecheck, or lint run is a regression only if this turn's change could have caused it. Before calling one a regression, check whether it already failed before the turn.",
+    turnRefs === null
+      ? "Read the diff to see whether the failing code was touched."
+      : `The turn ran from the workspace snapshot \`${turnRefs.from}\` to \`${turnRefs.to}\`. \`git diff ${turnRefs.from} ${turnRefs.to} -- <path>\` shows what the turn changed in a file, and \`git show ${turnRefs.from}:<path>\` reads it as it was before. Never check out, stash, or reset anything.`,
+    "A failure in code the turn did not touch, or one that also happens at the turn's start, is pre-existing: list it under preExistingFailures and do not call for changes because of it.",
     "Reply with: blocking problems, risky or unclear changes, missing tests, then one verdict line: `Verdict: needs changes` only when a blocking problem remains, otherwise `Verdict: approve`.",
+    `After that line, close the reply with the same review as one fenced \`\`\`json block of this shape: ${AUDIT_REPORT_SHAPE}`,
+    `In it, blocking problems are P0 or P1 findings and the rest are P2 or P3 (${FINDING_SEVERITIES}); \`preExistingFailures\` has one string per failure that predates the turn, naming the command or test; use [] when a list is empty.`,
   ].join("\n");
 }
 
@@ -248,6 +365,20 @@ export function turnRanPassingTests(
   return passed;
 }
 
+const REPORT_CLIP_MARKER = "\n…[truncated]…\n";
+
+/**
+ * Caps a stored report at `limit` characters, keeping its head and its tail. Reports end with the
+ * `Status:` and `Verdict:` lines, so cutting only the end would hide them. Judge the status and
+ * verdict from the full text; the clipped one is only for storing and handing on.
+ */
+export function clipCrewReport(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const room = Math.max(limit - REPORT_CLIP_MARKER.length, 0);
+  const tail = Math.floor(room / 2);
+  return `${text.slice(0, room - tail)}${REPORT_CLIP_MARKER}${tail === 0 ? "" : text.slice(-tail)}`;
+}
+
 /** The first lines of a report, kept short enough for an activity summary. */
 export function reportExcerpt(text: string, limit = 280): string {
   const trimmed = text.replace(/\s+/g, " ").trim();
@@ -300,7 +431,7 @@ export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string
   );
   return [
     "<oop_crew>",
-    "OOP Crew is on for this chat. You are the brain: you plan, decide, talk with the user, and write the final answer. Your crew uses other models:",
+    "OOP Crew is on for this chat. You are the brain: you plan, decide, talk with the user, and write the final answer. This note replaces any earlier <oop_crew> note in this chat: the user can change the crew between messages, so use only the assignments below, including the model you pass to the Agent tool. Your crew uses other models:",
     ...staffed.map((role) => {
       const entry = roles[role];
       const route =
@@ -320,9 +451,10 @@ export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string
       : []),
     ...(delegated.length > 0
       ? [
-          `${fast.length > 0 ? "3" : "2"}. Other roles (${delegated.join(", ")}): use the crew_delegate tool of the t3-code MCP server (in Claude Code: mcp__t3-code__crew_delegate; if it is not loaded yet, load it with ToolSearch query "select:mcp__t3-code__crew_delegate,mcp__t3-code__crew_wait"), then collect results with crew_wait, calling it again while tasks run. A failed crew model is replaced automatically by another model of the same level.`,
+          `${fast.length > 0 ? "3" : "2"}. Other roles (${delegated.join(", ")}): use the crew_delegate tool of the t3-code MCP server (in Claude Code: mcp__t3-code__crew_delegate; if it is not loaded yet, load it with ToolSearch query "select:mcp__t3-code__crew_delegate,mcp__t3-code__crew_wait"), then collect results with crew_wait, calling it again while tasks run. A failed crew model is replaced automatically by another model of the same level. Give each task that edits files a writeScope, and a verify command when one proves it done; if crew_delegate returns a warning, wait for the overlapping tasks or narrow the scopes. For parallel tasks that edit code, pass isolation "worktree" so they cannot clobber each other.`,
         ]
       : []),
+    "The user can change the crew while this turn runs. Before you hand out more tasks later in this turn, call crew_roster (mcp__t3-code__crew_roster; load it with ToolSearch if it is not loaded yet): when it differs from this note, follow crew_roster, and for a Claude role pass the Agent tool the matching model (haiku, sonnet, opus or fable).",
     "Do not use built-in subagents with other models, or Workflow tools, for work the crew can do. Check every report, combine them into your answer, and say which crew member did what.",
     "Name every task (the crew_delegate title, the Agent tool description) with a short English summary of its core work, at most eight words, even when you talk with the user in another language; the OOP Agents board shows it.",
     "A report with status partial or blocked is not finished: do the rest yourself or hand a follow-up task to the crew.",
@@ -342,9 +474,96 @@ export function crewExhaustedReport(
   ].join("\n");
 }
 
-/** The auditor's verdict: its last `Verdict:` line, or null when the report has none. */
+const Finding = Schema.Struct({
+  severity: Schema.Literals(["P0", "P1", "P2", "P3"]),
+  confidence: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  title: Schema.String,
+  file: Schema.optional(Schema.String),
+  line: Schema.optional(Schema.Int),
+});
+
+// Only the verdict or status and the summary are required: a crew model that drops an optional
+// list still reports, and one that gets the shape wrong falls back to the text lines.
+const emptyList = <S extends Schema.Top>(item: S) =>
+  Schema.Array(item).pipe(Schema.withDecodingDefault(Effect.succeed([])));
+
+/** The JSON block a worker or expert ends its reply with. */
+export const CrewMemberReport = Schema.Struct({
+  status: Schema.Literals(["done", "partial", "blocked"]),
+  summary: Schema.String,
+  changedFiles: emptyList(Schema.String),
+  verification: Schema.NullOr(
+    Schema.Struct({ command: Schema.String, passed: Schema.NullOr(Schema.Boolean) }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  findings: emptyList(Finding),
+});
+export type CrewMemberReport = typeof CrewMemberReport.Type;
+
+/** The JSON block the auditor ends its reply with. */
+export const CrewAuditReport = Schema.Struct({
+  verdict: Schema.Literals(["approve", "needs changes"]),
+  summary: Schema.String,
+  findings: emptyList(Finding),
+  preExistingFailures: emptyList(Schema.String),
+});
+export type CrewAuditReport = typeof CrewAuditReport.Type;
+
+/** The most findings a parsed report keeps; the most severe come first. */
+export const CREW_REPORT_MAX_FINDINGS = 20;
+
+const SEVERITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 } as const;
+
+const capFindings = <T extends { readonly severity: keyof typeof SEVERITY_RANK }>(
+  findings: ReadonlyArray<T>,
+) =>
+  findings
+    .toSorted((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+    .slice(0, CREW_REPORT_MAX_FINDINGS);
+
+const FENCED_JSON = /`{3,}json[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}/gi;
+
+/** The reply's prose: the text lines are the fallback for a json block, so its keys must not read as them. */
+const withoutJsonBlocks = (text: string | null) => (text ?? "").replace(FENCED_JSON, "");
+
+/** Decodes the last fenced json block of a reply; any other reply, or a block of another shape, gives null. */
+function parseLastJsonBlock<S extends Schema.Decoder<unknown>>(
+  schema: S,
+  text: string | null,
+): S["Type"] | null {
+  const block = [...(text ?? "").matchAll(FENCED_JSON)].at(-1)?.[1];
+  return block === undefined
+    ? null
+    : Option.getOrNull(Schema.decodeOption(Schema.fromJsonString(schema))(block));
+}
+
+/** A crew member's structured report from the end of its reply, or null when it has none that decodes. */
+export function parseCrewReport(text: string | null): CrewMemberReport | null {
+  const report = parseLastJsonBlock(CrewMemberReport, text);
+  return report === null ? null : { ...report, findings: capFindings(report.findings) };
+}
+
+/** The auditor's structured review from the end of its reply, or null when it has none that decodes. */
+export function parseAuditReport(text: string | null): CrewAuditReport | null {
+  const report = parseLastJsonBlock(CrewAuditReport, text);
+  return report === null ? null : { ...report, findings: capFindings(report.findings) };
+}
+
+/**
+ * The auditor's verdict: from its JSON review when it has one, else its last `Verdict:` line, or
+ * null when the report has neither. A review that asks for changes only because of failures that
+ * predate the turn (it lists some and names no P0 or P1 problem) approves.
+ */
 export function auditVerdict(report: string | null): "approve" | "needs-changes" | null {
-  const verdicts = [...(report ?? "").matchAll(/verdict\W{0,4}\s*(approve|needs changes)/gi)];
+  const audit = parseAuditReport(report);
+  if (audit !== null) {
+    const onlyPreExisting =
+      audit.preExistingFailures.length > 0 &&
+      !audit.findings.some((finding) => finding.severity === "P0" || finding.severity === "P1");
+    return audit.verdict === "approve" || onlyPreExisting ? "approve" : "needs-changes";
+  }
+  const verdicts = [
+    ...withoutJsonBlocks(report).matchAll(/verdict\W{0,4}\s*(approve|needs changes)/gi),
+  ];
   const last = verdicts.at(-1)?.[1]?.toLowerCase();
   return last === undefined ? null : last === "approve" ? "approve" : "needs-changes";
 }
@@ -424,12 +643,32 @@ export function planFollowUp(input: {
   };
 }
 
-/** The status line a crew member ends its report with; a report without one counts as done. */
+/**
+ * How a crew member says its task ended: the status of its JSON report, else the last `Status:`
+ * line; a report with neither counts as done.
+ */
 export function crewReportStatus(report: string | null): "done" | "partial" | "blocked" {
-  const last = [...(report ?? "").matchAll(/status\W{0,4}\s*(done|partial|blocked)\b/gi)]
+  const structured = parseCrewReport(report);
+  if (structured !== null) return structured.status;
+  const last = [...withoutJsonBlocks(report).matchAll(/status\W{0,4}\s*(done|partial|blocked)\b/gi)]
     .at(-1)?.[1]
     ?.toLowerCase();
   return last === "partial" || last === "blocked" ? last : "done";
+}
+
+/**
+ * What a finished crew thread amounts to as a task: its outcome for the lead and, for a worker or
+ * expert whose reply ended in a valid JSON block, that report. Judge from the full reply, not the
+ * clipped one that is stored.
+ */
+export function crewMemberOutcome(
+  role: CrewRole,
+  status: CrewTaskStatus,
+  reply: string | null,
+): { readonly status: CrewTaskOutcome; readonly report: CrewMemberReport | null } {
+  if (status !== "completed" || role === "auditor") return { status, report: null };
+  const reported = crewReportStatus(reply);
+  return { status: reported === "done" ? status : reported, report: parseCrewReport(reply) };
 }
 
 /**

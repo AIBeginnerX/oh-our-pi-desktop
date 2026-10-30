@@ -24,9 +24,15 @@ import {
   MINIMUM_OPENCODE_VERSION,
   OpenCodeRuntime,
   openCodeRuntimeErrorDetail,
+  verifyOpenCode2ServerVersion,
   type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
-import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
+import type { Agent } from "@opencode-ai/sdk/v2";
+import { isOpenCode2Version, makeOpenCode2Client } from "../opencode2/OpenCode2Client.ts";
+import {
+  loadOpenCode2Inventory,
+  type OpenCode2Inventory,
+} from "../opencode2/OpenCode2Inventory.ts";
 import * as OpenCodeServerOwner from "../OpenCodeServerOwner.ts";
 import type { OpenCodeProviderScope } from "../openCodeProviderScope.ts";
 
@@ -169,7 +175,9 @@ function inferDefaultVariant(
   return undefined;
 }
 
-function inferDefaultAgent(agents: ReadonlyArray<Agent>): string | undefined {
+type OpenCodeAgentChoice = Pick<Agent, "name" | "mode" | "hidden">;
+
+function inferDefaultAgent(agents: ReadonlyArray<OpenCodeAgentChoice>): string | undefined {
   return agents.find((agent) => agent.name === "build")?.name ?? agents[0]?.name ?? undefined;
 }
 
@@ -202,10 +210,10 @@ const DEFAULT_OPENCODE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabi
 
 function openCodeCapabilitiesForModel(input: {
   readonly providerID: string;
-  readonly model: ProviderListResponse["all"][number]["models"][string];
-  readonly agents: ReadonlyArray<Agent>;
+  readonly variants: ReadonlyArray<string>;
+  readonly agents: ReadonlyArray<OpenCodeAgentChoice>;
 }): ModelCapabilities {
-  const rawVariantValues = Object.keys(input.model.variants ?? {});
+  const rawVariantValues = input.variants;
   // When a model advertises no variants, synthesize the standard reasoning
   // levels so the composer still offers a Reasoning selector (mirrors the
   // Codex/Grok experience where reasoning is always configurable). The set
@@ -279,13 +287,35 @@ function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerPr
         isCustom: false,
         capabilities: openCodeCapabilitiesForModel({
           providerID: provider.id,
-          model,
+          variants: Object.keys(model.variants ?? {}),
           agents: input.agents,
         }),
       });
     }
   }
 
+  return dedupeModelsBySlug(models.toSorted((left, right) => left.name.localeCompare(right.name)));
+}
+
+function flattenOpenCode2Models(input: OpenCode2Inventory): ReadonlyArray<ServerProviderModel> {
+  const models: Array<ServerProviderModel> = [];
+  for (const model of input.models) {
+    const name = nonEmptyTrimmed(model.name);
+    if (!name) continue;
+    const subProvider = nonEmptyTrimmed(model.providerName);
+    models.push({
+      slug: `${model.providerID}/${model.id}`,
+      name,
+      ...(subProvider ? { subProvider } : {}),
+      isCustom: false,
+      capabilities: openCodeCapabilitiesForModel({
+        providerID: model.providerID,
+        // OpenCode 2 lists a "default" variant that means "no variant".
+        variants: model.variants.filter((variant) => variant !== "default"),
+        agents: input.agents,
+      }),
+    });
+  }
   return dedupeModelsBySlug(models.toSorted((left, right) => left.name.localeCompare(right.name)));
 }
 
@@ -391,6 +421,7 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
   cwd: string,
   environment?: NodeJS.ProcessEnv,
   providerScope?: OpenCodeProviderScope,
+  openCode2ServerOwner?: OpenCodeServerOwner.OpenCodeServerOwner["Service"],
 ): Effect.fn.Return<
   ServerProviderDraft,
   never,
@@ -525,6 +556,80 @@ export const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatu
         message: isExternalServer
           ? "This provider preset requires a local OpenCode server. Clear the server URL."
           : "This provider preset needs its API key in Settings.",
+      },
+    });
+  }
+
+  // OpenCode 2 speaks a different protocol; an external server reveals its
+  // generation only by answering the 2.x server info request.
+  const externalV2Version =
+    isExternalServer && openCode2ServerOwner !== undefined
+      ? yield* verifyOpenCode2ServerVersion(
+          openCodeSettings.serverUrl.trim(),
+          openCodeSettings.serverPassword,
+        ).pipe(Effect.option)
+      : undefined;
+  const useV2 =
+    openCode2ServerOwner !== undefined &&
+    (isOpenCode2Version(version) || externalV2Version?._tag === "Some");
+  if (useV2) {
+    const loadV2 = (server: {
+      readonly url: string;
+      readonly serverPassword?: string;
+      readonly version: string;
+    }) =>
+      loadOpenCode2Inventory(
+        makeOpenCode2Client({ baseUrl: server.url, password: server.serverPassword ?? "" }),
+        cwd,
+      ).pipe(Effect.map((inventory) => ({ inventory, version: server.version })));
+    const v2Exit = yield* Effect.exit(
+      (isExternalServer
+        ? loadV2({
+            url: openCodeSettings.serverUrl.trim(),
+            serverPassword: openCodeSettings.serverPassword,
+            version: externalV2Version?._tag === "Some" ? externalV2Version.value : (version ?? ""),
+          })
+        : openCode2ServerOwner.withServer(loadV2)
+      ).pipe(
+        Effect.mapError(
+          (cause) => new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+        ),
+      ),
+    );
+    if (v2Exit._tag === "Failure") {
+      return fallback(Cause.squash(v2Exit.cause), version, "inventory");
+    }
+    const { inventory } = v2Exit.value;
+    const models = scopedModels(
+      providerModelsFromSettings(
+        flattenOpenCode2Models(inventory),
+        customModels,
+        DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+      ),
+    );
+    const connectedProviders = new Set(inventory.models.map((model) => model.providerID));
+    const connectedCount = providerScope
+      ? Number(connectedProviders.has(providerScope.providerId))
+      : connectedProviders.size;
+    return buildServerProvider({
+      presentation: OPENCODE_PRESENTATION,
+      enabled: true,
+      checkedAt,
+      models,
+      skills: openCodeSkillsToServerProviderSkills(inventory.skills),
+      slashCommands: openCodeCommandsToServerProviderSlashCommands(inventory.commands),
+      probe: {
+        installed: true,
+        version: v2Exit.value.version || version,
+        status: connectedCount > 0 ? "ready" : "warning",
+        auth: {
+          status: connectedCount > 0 ? "authenticated" : "unknown",
+          type: "opencode",
+        },
+        message:
+          connectedCount > 0
+            ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
+            : "OpenCode is available, but it did not report any connected upstream providers.",
       },
     });
   }

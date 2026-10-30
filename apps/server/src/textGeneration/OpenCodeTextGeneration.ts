@@ -28,6 +28,7 @@ import {
 } from "./TextGenerationUtils.ts";
 import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
 import * as OpenCodeServerOwner from "../provider/OpenCodeServerOwner.ts";
+import { makeOpenCode2Client } from "../provider/opencode2/OpenCode2Client.ts";
 import {
   scopedOpenCodeModelIssue,
   type OpenCodeProviderScope,
@@ -174,9 +175,16 @@ function getOpenCodeTextResponse(parts: ReadonlyArray<unknown> | undefined): str
     .trim();
 }
 
+export interface OpenCode2TextGenerationRoute {
+  /** Whether the configured OpenCode currently speaks the 2.x protocol. */
+  readonly isV2: Effect.Effect<boolean>;
+  readonly serverOwner: OpenCodeServerOwner.OpenCodeServerOwner["Service"];
+}
+
 export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration")(function* (
   openCodeSettings: OpenCodeSettings,
   providerScope?: OpenCodeProviderScope,
+  openCode2?: OpenCode2TextGenerationRoute,
 ) {
   const serverConfig = yield* ServerConfig.ServerConfig;
   const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
@@ -334,8 +342,59 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-    const serverOutput =
-      openCodeSettings.serverUrl.length > 0
+    // OpenCode 2 answers a one-shot prompt directly; a throwaway session holds the model.
+    const runAgainstV2Server = (
+      server: Pick<OpenCodeRuntime.OpenCodeServerConnection, "url" | "serverPassword">,
+    ) =>
+      Effect.gen(function* () {
+        const client = makeOpenCode2Client({
+          baseUrl: server.url,
+          password: server.serverPassword ?? "",
+        });
+        const variant = getModelSelectionStringOptionValue(input.modelSelection, "variant");
+        const session = yield* OpenCodeRuntime.runOpenCodeSdk("session.create", (signal) =>
+          client.session.create(
+            {
+              location: { directory: input.cwd },
+              title: `OOP ${input.operation}`,
+              model: {
+                providerID: parsedModel.providerID,
+                id: parsedModel.modelID,
+                ...(variant ? { variant } : {}),
+              },
+              permissions: [{ action: "*", resource: "*", effect: "deny" }],
+            },
+            { signal },
+          ),
+        );
+        const generated = yield* OpenCodeRuntime.runOpenCodeSdk("session.generate", (signal) =>
+          client.session.generate({ sessionID: session.id, prompt: input.prompt }, { signal }),
+        ).pipe(
+          Effect.ensuring(
+            OpenCodeRuntime.runOpenCodeSdk("session.remove", (signal) =>
+              client.session.remove({ sessionID: session.id }, { signal }),
+            ).pipe(Effect.ignore),
+          ),
+        );
+        const text = generated.text.trim();
+        if (text.length === 0) {
+          return yield* new TextGenerationError({
+            operation: input.operation,
+            detail: "OpenCode returned empty output.",
+          });
+        }
+        return text;
+      });
+    const useV2 = openCode2 !== undefined && (yield* openCode2.isV2);
+
+    const serverOutput = useV2
+      ? openCodeSettings.serverUrl.length > 0
+        ? runAgainstV2Server({
+            url: openCodeSettings.serverUrl,
+            serverPassword: openCodeSettings.serverPassword,
+          })
+        : openCode2.serverOwner.withServer(runAgainstV2Server)
+      : openCodeSettings.serverUrl.length > 0
         ? openCodeRuntime
             .connectToOpenCodeServer({
               binaryPath: openCodeSettings.binaryPath,

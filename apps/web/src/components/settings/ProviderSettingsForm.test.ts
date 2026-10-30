@@ -17,6 +17,7 @@ describe("ProviderSettingsForm helpers", () => {
       "homePath",
       "shadowHomePath",
       "launchArgs",
+      "telemetry",
     ]);
   });
 
@@ -66,6 +67,8 @@ describe("ProviderSettingsForm helpers", () => {
       "binaryPath",
       "homePath",
       "autoCompactWindow",
+      "claudeAiConnectors",
+      "telemetry",
       "launchArgs",
     ]);
   });

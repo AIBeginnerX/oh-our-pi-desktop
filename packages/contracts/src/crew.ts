@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { ThreadId } from "./baseSchemas.ts";
+import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ModelSelection } from "./orchestration.ts";
 
 /**
@@ -52,3 +52,22 @@ export const DEFAULT_CREW_SETTINGS: CrewSettings = {
   pinned: {},
   threads: {},
 };
+
+/** Runs a crew task that ended without finishing again, as a new task on the same lead thread. */
+export const CrewRetryTaskInput = Schema.Struct({
+  leadThreadId: ThreadId,
+  taskId: TrimmedNonEmptyString,
+});
+export type CrewRetryTaskInput = typeof CrewRetryTaskInput.Type;
+
+export const CrewRetryTaskResult = Schema.Struct({ taskId: TrimmedNonEmptyString });
+export type CrewRetryTaskResult = typeof CrewRetryTaskResult.Type;
+
+export class CrewRetryTaskError extends Schema.TaggedError<CrewRetryTaskError>()(
+  "CrewRetryTaskError",
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}

@@ -182,6 +182,8 @@ import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../../keybindings";
+import { useT } from "../../i18n";
+import { useEnvironmentSettings } from "../../hooks/useSettings";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
@@ -1601,6 +1603,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
     onFileOpen,
   } = props;
+  const t = useT();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   // Opening a running thread resyncs for a few frames. Show the sync row, and
@@ -1934,6 +1937,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // back once the catalog lands.
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
   const showProviderUnavailable = noProviderAvailable && !providerCatalogPending;
+  const followUpBehavior = useEnvironmentSettings(
+    environmentId,
+    (settings) => settings.followUpBehavior,
+  );
+  const sendNowShortcutLabel =
+    phase === "running" && followUpBehavior === "queue"
+      ? shortcutLabelForCommand(keybindings, "thread.steerQueuedMessage", {
+          context: { terminalFocus: false },
+        })
+      : null;
+  const runningComposerPlaceholder =
+    phase !== "running" || followUpBehavior !== "queue"
+      ? null
+      : sendNowShortcutLabel
+        ? t(
+            "Your message will be queued while the agent works ({shortcut} sends the next one now)",
+            {
+              shortcut: sendNowShortcutLabel,
+            },
+          )
+        : t("Your message will be queued while the agent works");
   // Memory picker gating combines the server capability with the driver kind of
   // the instance that will actually run the turn; unresolved states only ever
   // disable or hide, never imply support.
@@ -6465,7 +6489,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     : prompt.trim() ||
                       (showProviderUnavailable
                         ? "Enable a provider in Settings"
-                        : "Ask anything...")}
+                        : (runningComposerPlaceholder ?? "Ask anything..."))}
                 </button>
                 {collapsedComposerImagePreviews}
                 <button
@@ -6971,7 +6995,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                                   ? "Enable a provider in Settings to send a message"
                                   : phase === "disconnected"
                                     ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                    : "Ask anything, @tag files/folders, $use skills, or / for commands"
+                                    : (runningComposerPlaceholder ??
+                                      "Ask anything, @tag files/folders, $use skills, or / for commands")
                       }
                       disabled={
                         isConnecting ||

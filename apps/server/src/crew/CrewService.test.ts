@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  DEFAULT_SERVER_SETTINGS,
   IsoDateTime,
   MessageId,
   NonNegativeInt,
@@ -24,6 +25,7 @@ import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
 import { CheckpointDiffQuery } from "../checkpointing/CheckpointDiffQuery.ts";
+import { layerTest as serverConfigLayerTest } from "../config.ts";
 import { OrchestrationCommandInvariantError } from "../orchestration/Errors.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -38,6 +40,7 @@ import { CrewRuntimeState } from "../persistence/Services/CrewRuntimeState.ts";
 import { OrchestrationCommandReceiptRepository } from "../persistence/Services/OrchestrationCommandReceipts.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import * as CrewService from "./CrewService.ts";
 import {
   CrewFollowUpRecoveryJson,
@@ -116,6 +119,7 @@ const makeHarness = Effect.gen(function* () {
   const shouldFail = yield* Ref.make(false);
   const recordRejection = yield* Ref.make(false);
   const busy = yield* Ref.make(false);
+  const crewOn = yield* Ref.make(false);
   const workerTurns = yield* Ref.make<ReadonlyArray<ProjectionTurn>>([]);
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   const dependencies = Layer.mergeAll(
@@ -127,9 +131,18 @@ const makeHarness = Effect.gen(function* () {
           Effect.map((rows) => rows.filter((row) => row.threadId === threadId)),
         ),
     }),
-    Layer.mock(ProviderRegistry)({}),
-    Layer.mock(ServerSettingsService)({}),
+    Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+    Layer.mock(ServerSettingsService)({
+      getSettings: Ref.get(crewOn).pipe(
+        Effect.map((enabled) => ({
+          ...DEFAULT_SERVER_SETTINGS,
+          crew: { ...DEFAULT_SERVER_SETTINGS.crew, enabled },
+        })),
+      ),
+    }),
     Layer.mock(CheckpointDiffQuery)({}),
+    Layer.mock(GitVcsDriver)({}),
+    serverConfigLayerTest(process.cwd(), { prefix: "t3-crew-service-test-" }),
     Layer.mock(ProjectionSnapshotQuery)({
       getThreadShellById: (threadId) =>
         Ref.get(busy).pipe(
@@ -245,6 +258,7 @@ const makeHarness = Effect.gen(function* () {
     shouldFail,
     recordRejection,
     busy,
+    crewOn,
     workerTurns,
     commands,
     start,
@@ -446,5 +460,56 @@ describe("Crew service restart delivery", () => {
       );
       yield* third.close;
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+});
+
+describe("Crew service task retry", () => {
+  const failedTask: typeof CrewTaskRecoveryState.Type = {
+    ...finishedTask,
+    taskId: "task-2",
+    report: { taskId: "task-2", role: "worker", status: "failed", result: null },
+  };
+  const refusal = (
+    input: { readonly threadId?: ThreadId; readonly taskId: string },
+    options: { readonly crewOn: boolean },
+  ) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* harness.seedTask(finishedTask);
+      yield* harness.seedTask(failedTask);
+      yield* Ref.set(harness.crewOn, options.crewOn);
+      const service = yield* harness.start;
+      const error = yield* service.crew
+        .retryTask({ threadId: input.threadId ?? LEAD, taskId: input.taskId })
+        .pipe(Effect.flip);
+      yield* service.close;
+      return error.reason;
+    }).pipe(Effect.scoped);
+
+  it.effect("refuses while crew is off", () =>
+    Effect.gen(function* () {
+      assert.include(yield* refusal({ taskId: "task-2" }, { crewOn: false }), "off");
+    }).pipe(Effect.provide(testLayers)),
+  );
+
+  it.effect("refuses an unknown lead, an unknown task, and a task that finished", () =>
+    Effect.gen(function* () {
+      const on = { crewOn: true };
+      assert.include(
+        yield* refusal({ threadId: ThreadId.make("other"), taskId: "task-2" }, on),
+        "not available",
+      );
+      assert.include(yield* refusal({ taskId: "missing" }, on), "not available to retry");
+      assert.include(yield* refusal({ taskId: "task-1" }, on), "without finishing");
+    }).pipe(Effect.provide(testLayers)),
+  );
+
+  it.effect("refuses a failed task whose brief is gone", () =>
+    Effect.gen(function* () {
+      assert.include(
+        yield* refusal({ taskId: "task-2" }, { crewOn: true }),
+        "original brief is no longer available",
+      );
+    }).pipe(Effect.provide(testLayers)),
   );
 });

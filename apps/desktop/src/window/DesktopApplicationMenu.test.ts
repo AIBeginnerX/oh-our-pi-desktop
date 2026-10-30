@@ -10,6 +10,12 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronDialog from "../electron/ElectronDialog.ts";
 import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as DesktopApplicationMenu from "./DesktopApplicationMenu.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import {
+  MENU_LANGUAGES,
+  resolveMenuLanguage,
+  type MenuLanguage,
+} from "./DesktopApplicationMenuLabels.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
@@ -27,27 +33,28 @@ const environmentInput = {
   runningUnderArm64Translation: false,
 } satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
 
-const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
-  metadata: Effect.die("unexpected metadata read"),
-  name: Effect.succeed("T3 Code"),
-  systemLocale: Effect.succeed("en-US"),
-  whenReady: Effect.void,
-  quit: Effect.void,
-  exit: () => Effect.void,
-  relaunch: () => Effect.void,
-  setPath: () => Effect.void,
-  setName: () => Effect.void,
-  setAboutPanelOptions: () => Effect.void,
-  setAppUserModelId: () => Effect.void,
-  getAppMetrics: Effect.succeed([]),
-  setAsDefaultProtocolClient: () => Effect.succeed(true),
-  setDesktopName: () => Effect.void,
-  setDockIcon: () => Effect.void,
-  appendCommandLineSwitch: () => Effect.void,
-  onBeforeQuitForUpdate: () => Effect.void,
-  removeCommandLineSwitch: () => Effect.void,
-  on: () => Effect.void,
-} satisfies ElectronApp.ElectronApp["Service"]);
+const makeElectronAppLayer = (systemLocale: string) =>
+  Layer.succeed(ElectronApp.ElectronApp, {
+    metadata: Effect.die("unexpected metadata read"),
+    name: Effect.succeed("T3 Code"),
+    systemLocale: Effect.succeed(systemLocale),
+    whenReady: Effect.void,
+    quit: Effect.void,
+    exit: () => Effect.void,
+    relaunch: () => Effect.void,
+    setPath: () => Effect.void,
+    setName: () => Effect.void,
+    setAboutPanelOptions: () => Effect.void,
+    setAppUserModelId: () => Effect.void,
+    getAppMetrics: Effect.succeed([]),
+    setAsDefaultProtocolClient: () => Effect.succeed(true),
+    setDesktopName: () => Effect.void,
+    setDockIcon: () => Effect.void,
+    appendCommandLineSwitch: () => Effect.void,
+    onBeforeQuitForUpdate: () => Effect.void,
+    removeCommandLineSwitch: () => Effect.void,
+    on: () => Effect.void,
+  } satisfies ElectronApp.ElectronApp["Service"]);
 
 const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
   pickFolder: () => Effect.succeedNone,
@@ -103,6 +110,10 @@ const makeElectronMenuLayer = (
 const configureMenu = (
   selectedAction: Deferred.Deferred<string>,
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  options: {
+    readonly menuLanguage?: DesktopAppSettings.DesktopSettings["menuLanguage"];
+    readonly systemLocale?: string;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -114,7 +125,13 @@ const configureMenu = (
         Layer.provideMerge(makeDesktopWindowLayer(selectedAction)),
         Layer.provideMerge(desktopUpdatesLayer),
         Layer.provideMerge(electronDialogLayer),
-        Layer.provideMerge(electronAppLayer),
+        Layer.provideMerge(makeElectronAppLayer(options.systemLocale ?? "en-US")),
+        Layer.provideMerge(
+          DesktopAppSettings.layerTest({
+            ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+            ...(options.menuLanguage === undefined ? {} : { menuLanguage: options.menuLanguage }),
+          }),
+        ),
         Layer.provideMerge(
           DesktopEnvironment.layer(environmentInput).pipe(
             Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
@@ -245,4 +262,100 @@ describe("DesktopApplicationMenu", () => {
       assert.equal(yield* Deferred.await(selectedAction), "zoom-in");
     }),
   );
+});
+
+describe("menu languages", () => {
+  it("resolves the system locale to a shipped language, else English", () => {
+    assert.equal(resolveMenuLanguage("system", "ko-KR"), "ko");
+    assert.equal(resolveMenuLanguage("system", "ja-JP"), "ja");
+    assert.equal(resolveMenuLanguage("system", "zh-TW"), "zh-CN");
+    assert.equal(resolveMenuLanguage("system", "es-419"), "es");
+    assert.equal(resolveMenuLanguage("system", "fr-FR"), "en");
+    assert.equal(resolveMenuLanguage("ko", "fr-FR"), "ko");
+  });
+
+  it.effect("builds the menu in the configured language", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate, { menuLanguage: "ko" });
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      assert.isDefined(template.find((item) => item.label === "파일"));
+      const editMenu = template.find((item) => item.label === "편집");
+      assert.isDefined(editMenu);
+      if (!Array.isArray(editMenu.submenu)) {
+        throw new Error("Expected Edit menu submenu to be an array.");
+      }
+      assert.isDefined(editMenu.submenu.find((item) => item.label === "텍스트로 붙여넣기"));
+      assert.isDefined(template.find((item) => item.label === "도움말"));
+    }),
+  );
+
+  it.effect("follows the OS locale when the setting is system", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate, { systemLocale: "es-ES" });
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      assert.isDefined(template.find((item) => item.label === "Archivo"));
+    }),
+  );
+
+  // Every language must keep the wired accelerators and roles; only labels move.
+  for (const language of Object.keys(MENU_LANGUAGES) as MenuLanguage[]) {
+    it(`${language} menu keeps the accelerators and roles of the English menu`, () => {
+      const noop = () => {};
+      const labels = MENU_LANGUAGES[language];
+      const template = DesktopApplicationMenu.buildApplicationMenuTemplate({
+        platform: "darwin",
+        appName: "OOP",
+        labels,
+        handlers: {
+          checkForUpdatesClick: noop,
+          settingsClick: noop,
+          pasteAsTextClick: noop,
+          zoomClick: () => noop,
+        },
+      });
+      const flat = (
+        items: readonly Electron.MenuItemConstructorOptions[],
+      ): readonly Electron.MenuItemConstructorOptions[] =>
+        items.flatMap((item: Electron.MenuItemConstructorOptions) =>
+          Array.isArray(item.submenu) ? [item, ...flat(item.submenu)] : [item],
+        );
+      const items = flat(template);
+      assert.includeMembers(
+        items
+          .map((item: Electron.MenuItemConstructorOptions) => item.role)
+          .filter(
+            (role: unknown): role is NonNullable<Electron.MenuItemConstructorOptions["role"]> =>
+              role !== undefined,
+          ),
+        ["about", "quit", "undo", "paste", "selectAll", "toggleDevTools", "front"],
+      );
+      // Roles carry their own accelerators at runtime; only the custom items
+      // declare them here, so those are the ones that must not drift.
+      const accelerators = items
+        .filter((item: Electron.MenuItemConstructorOptions) => item.accelerator !== undefined)
+        .map((item: Electron.MenuItemConstructorOptions) => `${item.label}:${item.accelerator}`);
+      assert.includeMembers(accelerators, [
+        `${labels.pasteAsText}:CmdOrCtrl+Shift+V`,
+        `${labels.actualSize}:CmdOrCtrl+0`,
+        `${labels.zoomIn}:CmdOrCtrl+=`,
+        `${labels.zoomOut}:CmdOrCtrl+-`,
+      ]);
+      assert.isDefined(
+        items.find(
+          (item) => item.role === "quit" && item.label === labels.quit.replace("{app}", "OOP"),
+        ),
+      );
+      assert.isDefined(items.find((item) => item.role === "zoom" && item.label === labels.zoom));
+    });
+  }
 });

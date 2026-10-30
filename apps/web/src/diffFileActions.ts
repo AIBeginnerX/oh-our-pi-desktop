@@ -9,6 +9,8 @@ interface OpenDiffFilePrimaryActionInput {
   readonly filePath: string;
   readonly activeCwd: string | undefined;
   readonly repositoryRoot?: string | undefined;
+  /** Line of the file to scroll to when the file viewer opens it. */
+  readonly line?: number | undefined;
   readonly openInEditor: (targetPath: string) => void;
 }
 
@@ -82,6 +84,7 @@ export function openDiffFilePrimaryAction({
   filePath,
   activeCwd,
   repositoryRoot,
+  line,
   openInEditor,
 }: OpenDiffFilePrimaryActionInput): void {
   const workspaceFilePath = resolveDiffPathForWorkspace({
@@ -92,7 +95,7 @@ export function openDiffFilePrimaryAction({
   if (!workspaceFilePath) return;
 
   if (threadRef) {
-    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath);
+    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath, line);
     return;
   }
 

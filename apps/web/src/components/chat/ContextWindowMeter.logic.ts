@@ -135,3 +135,15 @@ export function shouldReserveContextWindowMeter(input: {
     input.providerReportsContextWindow !== false
   );
 }
+
+const CONTEXT_WINDOW_WARNING_PERCENTAGE = 75;
+const CONTEXT_WINDOW_CRITICAL_PERCENTAGE = 90;
+
+export type ContextWindowSeverity = "normal" | "warning" | "critical";
+
+/** Amber from 75% used, red above 90%. */
+export function resolveContextWindowSeverity(usedPercentage: number): ContextWindowSeverity {
+  if (usedPercentage > CONTEXT_WINDOW_CRITICAL_PERCENTAGE) return "critical";
+  if (usedPercentage >= CONTEXT_WINDOW_WARNING_PERCENTAGE) return "warning";
+  return "normal";
+}

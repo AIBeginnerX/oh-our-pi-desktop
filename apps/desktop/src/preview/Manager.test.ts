@@ -433,6 +433,7 @@ const makeFaviconWebContents = (options?: {
       options?.rasterize ? options.rasterize(scripts[0]?.code ?? "") : TEST_FAVICON,
   );
   const reload = vi.fn();
+  const stop = vi.fn();
   const loadURL = vi.fn(async (url: string) => {
     currentUrl = url;
   });
@@ -452,6 +453,7 @@ const makeFaviconWebContents = (options?: {
     isCurrentlyAudible: () => false,
     reload,
     reloadIgnoringCache: vi.fn(),
+    stop,
     loadURL,
     on: vi.fn((event: string, listener: (...args: never[]) => void) => {
       listeners.set(event, listener);
@@ -480,6 +482,7 @@ const makeFaviconWebContents = (options?: {
     loadURL,
     off,
     reload,
+    stop,
     setDestroyed: (value: boolean) => {
       destroyed = value;
     },
@@ -1118,6 +1121,22 @@ describe("PreviewManager", () => {
         yield* settle(() => false);
 
         expect(states.some((state) => state.favicon !== undefined)).toBe(false);
+      }),
+    ),
+  );
+
+  effectIt.effect("stops the page load in progress without reloading", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const preview = makeFaviconWebContents();
+        fromId.mockReturnValue(preview.webContents);
+        yield* manager.createTab("tab_stop");
+        yield* manager.registerWebview("tab_stop", 42);
+
+        yield* manager.stop("tab_stop");
+
+        expect(preview.stop).toHaveBeenCalledOnce();
+        expect(preview.reload).not.toHaveBeenCalled();
       }),
     ),
   );

@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./releaseNotes": {
+      "types": "./src/releaseNotes.ts",
+      "import": "./src/releaseNotes.ts"
+    },
     "./legacyCliLauncher": {
       "types": "./src/legacyCliLauncher.ts",
       "import": "./src/legacyCliLauncher.ts"

@@ -1,0 +1,1295 @@
+<!doctype html>
+<html lang="en" data-lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OOP — one desktop app for every coding agent</title>
+    <meta
+      name="description"
+      content="OOP is an open source desktop app that wraps the coding-agent CLIs you already use (Codex, Claude Code, Cursor, OpenCode and more) in one local workspace, with an optional multi-model Crew."
+    />
+    <meta name="theme-color" content="#fbfaf7" />
+    <link rel="canonical" href="https://oop-desktop.github.io/" />
+    <meta property="og:url" content="https://oop-desktop.github.io/" />
+    <meta property="og:image" content="https://oop-desktop.github.io/assets/shots/chat.webp" />
+    <meta property="og:image:type" content="image/webp" />
+    <meta property="og:image:width" content="1440" />
+    <meta property="og:image:height" content="900" />
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <script>
+      // Pick the language before first paint: ?lang=, then the saved choice, then the browser.
+      (function () {
+        var q = new URLSearchParams(location.search).get("lang");
+        var saved = null;
+        try {
+          saved = localStorage.getItem("oop-site-lang");
+        } catch (e) {}
+        var pick = q || saved || (navigator.language || "").slice(0, 2);
+        var lang = pick === "ko" ? "ko" : "en";
+        document.documentElement.lang = lang;
+        document.documentElement.dataset.lang = lang;
+        document.documentElement.classList.add("js");
+      })();
+    </script>
+  </head>
+  <body>
+    <a class="skip" href="#main"
+      ><span lang="en">Skip to content</span><span lang="ko">본문으로 건너뛰기</span></a
+    >
+
+    <header class="site-header">
+      <div class="bar">
+        <a class="brand" href="#top" aria-label="OOP">
+          <img src="assets/logo-128.png" width="28" height="28" alt="" />
+          <span>OOP</span>
+        </a>
+        <nav class="nav" aria-label="Sections">
+          <a href="#what"><span lang="en">What it is</span><span lang="ko">소개</span></a>
+          <a href="#features"><span lang="en">Features</span><span lang="ko">기능</span></a>
+          <a href="#crew">Crew</a>
+          <a href="#screens"><span lang="en">Screens</span><span lang="ko">화면</span></a>
+          <a href="#install"><span lang="en">Install</span><span lang="ko">설치</span></a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="bar-tools">
+          <div class="lang" role="group" aria-label="Language / 언어">
+            <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
+            <button type="button" data-set-lang="ko" aria-pressed="false">한</button>
+          </div>
+          <a
+            class="icon-link"
+            href="https://github.com/AIBeginnerX/oh-our-pi-desktop"
+            aria-label="OOP on GitHub"
+          >
+            <svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              />
+            </svg>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- Hero -->
+      <section class="hero" id="top">
+        <div class="wrap hero-grid">
+          <p class="eyebrow">
+            <span lang="en">Open source · MIT · Local-first</span>
+            <span lang="ko">오픈소스 · MIT · 로컬 우선</span>
+          </p>
+          <h1>
+            <span lang="en">One desktop app for<br /><em>every coding agent.</em></span>
+            <span lang="ko">쓰던 코딩 에이전트를<br /><em>하나의 앱에서.</em></span>
+          </h1>
+          <p class="lede">
+            <span lang="en"
+              >OOP wraps the agent CLIs you already have, Codex, Claude Code, Cursor, OpenCode and
+              more, in one chat-style workspace on your own computer. Bring your own subscriptions.
+              Optionally let several models share a task as a Crew.</span
+            >
+            <span lang="ko"
+              >OOP는 이미 쓰고 있는 Codex, Claude Code, Cursor, OpenCode 같은 에이전트 CLI를 내
+              컴퓨터의 채팅형 작업 공간 하나로 묶어 줍니다. 구독은 직접 준비하고, 원하면 여러 모델이
+              한 작업을 나눠 맡는 Crew도 쓸 수 있습니다.</span
+            >
+          </p>
+          <div class="cta">
+            <a class="pill pill-solid" href="#install"
+              ><span lang="en">Install OOP</span><span lang="ko">OOP 설치하기</span></a
+            >
+            <a class="pill" href="https://github.com/AIBeginnerX/oh-our-pi-desktop">
+              <span lang="en">View on GitHub</span><span lang="ko">GitHub에서 보기</span>
+            </a>
+            <a class="pill" href="#screens"
+              ><span lang="en">See screenshots</span><span lang="ko">화면 보기</span></a
+            >
+          </div>
+          <p class="status-line">
+            <span lang="en"
+              >Early release. macOS Apple Silicon is the tested target; Windows is
+              experimental.</span
+            >
+            <span lang="ko"
+              >초기 릴리스입니다. macOS Apple Silicon이 검증 대상이고, Windows는 실험
+              단계입니다.</span
+            >
+          </p>
+        </div>
+        <figure class="wrap shot hero-shot reveal">
+          <img
+            src="assets/shots/chat.webp"
+            width="1440"
+            height="900"
+            alt="OOP main chat view with composer, model picker and permission mode"
+            data-alt-ko="작성창, 모델 선택기, 권한 모드가 있는 OOP 메인 채팅 화면"
+            fetchpriority="high"
+          />
+        </figure>
+      </section>
+
+      <!-- Facts strip: every number comes from the public README -->
+      <section class="wrap facts reveal" aria-label="At a glance">
+        <div class="fact">
+          <b>8</b>
+          <span
+            ><span lang="en"
+              >agent providers: Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity,
+              ZCode, MiniMax Code</span
+            ><span lang="ko"
+              >에이전트 provider: Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity,
+              ZCode, MiniMax Code</span
+            ></span
+          >
+        </div>
+        <div class="fact">
+          <b>4</b>
+          <span
+            ><span lang="en">permission modes, from Supervised to Full access</span
+            ><span lang="ko">권한 모드: Supervised부터 Full access까지</span></span
+          >
+        </div>
+        <div class="fact">
+          <b>3</b>
+          <span
+            ><span lang="en">ways to use it: desktop app, browser, phone</span
+            ><span lang="ko">사용 방법: 데스크톱 앱, 브라우저, 휴대폰</span></span
+          >
+        </div>
+        <div class="fact">
+          <b>0</b>
+          <span
+            ><span lang="en">OOP accounts or OOP servers; your code stays on your machine</span
+            ><span lang="ko">OOP 계정·OOP 서버; 코드는 내 컴퓨터에만 남습니다</span></span
+          >
+        </div>
+      </section>
+
+      <!-- 01 -->
+      <section class="section wrap" id="what">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>01</span> · <span lang="en">What it is</span><span lang="ko">소개</span>
+          </p>
+          <h2>
+            <span lang="en">Agents are good.<br /><em>Juggling them is not.</em></span>
+            <span lang="ko"
+              >에이전트는 훌륭합니다.<br /><em>여러 개를 오가는 일이 문제죠.</em></span
+            >
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >Each coding agent lives in its own terminal or app, with its own login, history and
+              approval prompts. OOP puts them side by side with one diff, one terminal and one
+              approval flow.</span
+            >
+            <span lang="ko"
+              >코딩 에이전트마다 터미널이나 앱, 로그인, 기록, 승인 프롬프트가 따로 있습니다. OOP는
+              이들을 나란히 놓고 diff, 터미널, 승인 흐름을 하나로 맞춥니다.</span
+            >
+          </p>
+        </header>
+
+        <div
+          class="equation reveal"
+          role="img"
+          aria-label="Your agent CLIs plus your subscriptions plus OOP equals one workspace"
+        >
+          <div class="eq-term">
+            <small><span lang="en">You bring</span><span lang="ko">내가 준비</span></small>
+            <b><span lang="en">Agent CLIs</span><span lang="ko">에이전트 CLI</span></b>
+          </div>
+          <span class="eq-op" aria-hidden="true">+</span>
+          <div class="eq-term">
+            <small><span lang="en">You bring</span><span lang="ko">내가 준비</span></small>
+            <b
+              ><span lang="en">Subscriptions &amp; keys</span
+              ><span lang="ko">구독과 API 키</span></b
+            >
+          </div>
+          <span class="eq-op" aria-hidden="true">+</span>
+          <div class="eq-term accent">
+            <small>OOP</small>
+            <b
+              ><span lang="en">Desktop &middot; browser &middot; phone</span
+              ><span lang="ko">데스크톱 · 브라우저 · 휴대폰</span></b
+            >
+          </div>
+          <span class="eq-op" aria-hidden="true">=</span>
+          <div class="eq-term result">
+            <small><span lang="en">You get</span><span lang="ko">결과</span></small>
+            <b><span lang="en">One workspace</span><span lang="ko">하나의 작업 공간</span></b>
+          </div>
+        </div>
+
+        <div class="two reveal">
+          <p>
+            <span lang="en"
+              ><strong>Not a hosted service.</strong> OOP runs on your computer. Projects, provider
+              logins and agent work stay there. There is no OOP account and no OOP server.</span
+            >
+            <span lang="ko"
+              ><strong>호스팅 서비스가 아닙니다.</strong> OOP는 내 컴퓨터에서 실행됩니다. 프로젝트,
+              provider 로그인, 에이전트 작업이 모두 그곳에 남고, OOP 계정도 OOP 서버도
+              없습니다.</span
+            >
+          </p>
+          <p>
+            <span lang="en"
+              ><strong>Built on T3 Code.</strong> OOP is a fork of
+              <a href="https://github.com/pingdotgg/t3code">T3 Code</a> by T3 Tools Inc. (MIT),
+              based on upstream v0.0.44. Almost all of the foundation is their work.</span
+            >
+            <span lang="ko"
+              ><strong>T3 Code 기반입니다.</strong> OOP는 T3 Tools Inc.의
+              <a href="https://github.com/pingdotgg/t3code">T3 Code</a>(MIT)를 포크한 프로젝트이며
+              업스트림 v0.0.44를 기반으로 합니다. 기반 코드의 거의 전부가 T3 Code 팀의
+              작업물입니다.</span
+            >
+          </p>
+        </div>
+      </section>
+
+      <!-- 02 -->
+      <section class="section wrap" id="features">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>02</span> · <span lang="en">Key features</span><span lang="ko">주요 기능</span>
+          </p>
+          <h2>
+            <span lang="en">Control, review and<br /><em>keep an eye on the work.</em></span>
+            <span lang="ko">제어하고, 검토하고,<br /><em>작업을 지켜봅니다.</em></span>
+          </h2>
+        </header>
+        <div class="cards">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F1</span
+              ><span class="tag"
+                ><span lang="en">Providers</span><span lang="ko">Provider</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">Eight agents, one thread view</span
+              ><span lang="ko">여덟 가지 에이전트, 하나의 스레드 화면</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Switch the provider and model per thread. Install, update and sign in to each CLI
+                from one page.</span
+              >
+              <span lang="ko"
+                >스레드마다 provider와 모델을 바꿔 쓰고, 각 CLI의 설치·업데이트·로그인을 한
+                페이지에서 처리합니다.</span
+              >
+            </p>
+            <code>Settings → Providers</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top"><span class="num">F2</span><span class="tag">Crew</span></p>
+            <h3>
+              <span lang="en">Several models, one chat</span
+              ><span lang="ko">한 채팅, 여러 모델</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >A brain model plans and talks to you, workers and an expert do the work, and an
+                auditor reviews the result.</span
+              >
+              <span lang="ko"
+                >총괄 brain 모델이 계획하고 대화하며, worker와 expert가 작업하고, auditor가 결과를
+                검토합니다.</span
+              >
+            </p>
+            <code>Composer → Crew</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F3</span
+              ><span class="tag"
+                ><span lang="en">Autonomy</span><span lang="ko">자율 실행</span></span
+              >
+            </p>
+            <h3><span lang="en">Thread goals</span><span lang="ko">스레드 목표</span></h3>
+            <p>
+              <span lang="en"
+                >Describe what should be true when the chat is done. OOP keeps the thread going
+                until the goal is complete, blocked or stopped.</span
+              >
+              <span lang="ko"
+                >채팅이 끝났을 때 참이어야 할 조건을 적어 두면, 목표가 완료·차단·중지될 때까지
+                스레드를 이어 갑니다.</span
+              >
+            </p>
+            <code>Composer → Goal</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F4</span
+              ><span class="tag"><span lang="en">Review</span><span lang="ko">검토</span></span>
+            </p>
+            <h3>
+              <span lang="en">Diff panel with checkpoints</span
+              ><span lang="ko">체크포인트가 있는 diff 패널</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Review what the agent changed and restore from a checkpoint if you do not like
+                it.</span
+              >
+              <span lang="ko"
+                >에이전트가 바꾼 내용을 검토하고, 마음에 들지 않으면 체크포인트에서
+                복원합니다.</span
+              >
+            </p>
+            <code>Right panel → Diff</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F5</span
+              ><span class="tag"><span lang="en">Safety</span><span lang="ko">안전</span></span>
+            </p>
+            <h3>
+              <span lang="en">Four permission modes</span><span lang="ko">네 가지 권한 모드</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Supervised, Auto-accept edits, Auto or Full access, per thread. New threads default
+                to Full access; use Supervised for repos you do not trust.</span
+              >
+              <span lang="ko"
+                >스레드마다 Supervised, Auto-accept edits, Auto, Full access 중에서 고릅니다. 새
+                스레드의 기본값은 Full access이니 믿기 어려운 저장소에는 Supervised를 쓰세요.</span
+              >
+            </p>
+            <code>Composer · Settings → General</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F6</span
+              ><span class="tag"><span lang="en">Remote</span><span lang="ko">원격</span></span>
+            </p>
+            <h3>
+              <span lang="en">Steer from your phone</span
+              ><span lang="ko">휴대폰으로 지켜보고 조정</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Pair a phone over your Wi-Fi, Tailscale, or a Cloudflare relay you deploy yourself.
+                The agents keep running on your computer.</span
+              >
+              <span lang="ko"
+                >같은 Wi-Fi, Tailscale, 또는 직접 배포한 Cloudflare relay로 휴대폰을 페어링합니다.
+                에이전트는 계속 내 컴퓨터에서 실행됩니다.</span
+              >
+            </p>
+            <code>Sidebar → Connect mobile</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F7</span
+              ><span class="tag"><span lang="en">Cost</span><span lang="ko">비용</span></span>
+            </p>
+            <h3><span lang="en">Usage page</span><span lang="ko">사용량 페이지</span></h3>
+            <p>
+              <span lang="en"
+                >Token use, cache savings and estimated cost across providers. Estimates, not your
+                bill.</span
+              >
+              <span lang="ko"
+                >provider 전체의 토큰 사용량, 캐시 절감, 추정 비용을 보여 줍니다. 실제 청구액이 아닌
+                추정치입니다.</span
+              >
+            </p>
+            <code>Sidebar · mod+u</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F8</span
+              ><span class="tag"
+                ><span lang="en">Visibility</span><span lang="ko">가시성</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">Workflows and agents</span><span lang="ko">워크플로와 에이전트</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >A live diagram of tool calls and subagents while the agent works.</span
+              >
+              <span lang="ko"
+                >에이전트가 작업하는 동안 도구 호출과 서브에이전트를 실시간 다이어그램으로 보여
+                줍니다.</span
+              >
+            </p>
+            <code>Right panel · mod+alt+w</code>
+          </article>
+        </div>
+      </section>
+
+      <!-- 03 -->
+      <section class="section wrap" id="crew">
+        <header class="sec-head reveal">
+          <p class="eyebrow"><span>03</span> · OOP Crew</p>
+          <h2>
+            <span lang="en">Cheap models for the bulk.<br /><em>A strong one to check.</em></span>
+            <span lang="ko">대부분은 저렴한 모델로.<br /><em>검토는 강한 모델로.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >Turn on Crew next to the model picker. The chat's own model becomes the brain, and
+              OOP routes the rest by role.</span
+            >
+            <span lang="ko"
+              >모델 선택기 옆에서 Crew를 켜면, 채팅의 모델이 brain이 되고 나머지는 역할에 따라
+              나뉩니다.</span
+            >
+          </p>
+        </header>
+        <div class="roles reveal">
+          <div class="role">
+            <b>Brain</b>
+            <span lang="en">Plans and talks to you.</span>
+            <span lang="ko">계획을 세우고 사용자와 대화합니다.</span>
+          </div>
+          <div class="role">
+            <b>Worker</b>
+            <span lang="en">Routine work: searches, edits, tests.</span>
+            <span lang="ko">반복 작업: 검색, 수정, 테스트.</span>
+          </div>
+          <div class="role">
+            <b>Expert</b>
+            <span lang="en">Hard implementation.</span>
+            <span lang="ko">어려운 구현.</span>
+          </div>
+          <div class="role">
+            <b>Auditor</b>
+            <span lang="en">Reviews turns that changed files.</span>
+            <span lang="ko">파일을 바꾼 턴을 검토합니다.</span>
+          </div>
+        </div>
+        <ul class="notes reveal">
+          <li>
+            <span lang="en"
+              >Presets: <b>OOP pick</b>, <b>Speed</b>, <b>Quality</b>, <b>Budget</b>, with a
+              per-role model override.</span
+            >
+            <span lang="ko"
+              >프리셋: <b>OOP pick</b>, <b>Speed</b>, <b>Quality</b>, <b>Budget</b>. 역할별로 모델을
+              직접 지정할 수도 있습니다.</span
+            >
+          </li>
+          <li>
+            <span lang="en"
+              >If a crew model fails, for example it ran out of credit, OOP hands the task to
+              another signed-in model of the same level.</span
+            >
+            <span lang="ko"
+              >crew 모델이 크레딧 소진 등으로 실패하면, 같은 수준의 다른 로그인된 모델에 작업을
+              넘깁니다.</span
+            >
+          </li>
+          <li>
+            <span lang="en">Small, test-passing changes of 20 lines or fewer are not audited.</span>
+            <span lang="ko">테스트를 통과한 20줄 이하의 작은 변경은 감사하지 않습니다.</span>
+          </li>
+          <li>
+            <span lang="en"
+              >Crew runs several models per chat, so it multiplies usage. Check the Usage
+              page.</span
+            >
+            <span lang="ko"
+              >Crew는 채팅 하나에서 여러 모델을 돌리므로 사용량이 늘어납니다. 사용량 페이지를
+              확인하세요.</span
+            >
+          </li>
+        </ul>
+      </section>
+
+      <!-- 04 -->
+      <section class="section wrap" id="screens">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>04</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
+          </p>
+          <h2>
+            <span lang="en">See it before<br /><em>you install it.</em></span>
+            <span lang="ko">설치하기 전에<br /><em>먼저 둘러보세요.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >All screenshots come from an isolated demo profile with no personal data.</span
+            >
+            <span lang="ko"
+              >모든 스크린샷은 개인 정보가 없는 격리된 데모 프로필에서 찍었습니다.</span
+            >
+          </p>
+        </header>
+
+        <div class="tabs reveal" data-tabs>
+          <div class="tablist" role="tablist" aria-label="Screenshots" data-tablist>
+            <button role="tab" aria-selected="true" aria-controls="shot-chat" id="tab-chat">
+              <span lang="en">Chat</span><span lang="ko">채팅</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-crew"
+              id="tab-crew"
+              tabindex="-1"
+            >
+              Crew
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-goal"
+              id="tab-goal"
+              tabindex="-1"
+            >
+              <span lang="en">Goal</span><span lang="ko">목표</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-diff"
+              id="tab-diff"
+              tabindex="-1"
+            >
+              Diff
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-workflows"
+              id="tab-workflows"
+              tabindex="-1"
+            >
+              <span lang="en">Workflows</span><span lang="ko">워크플로</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-permissions"
+              id="tab-permissions"
+              tabindex="-1"
+            >
+              <span lang="en">Permissions</span><span lang="ko">권한</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-usage"
+              id="tab-usage"
+              tabindex="-1"
+            >
+              <span lang="en">Usage</span><span lang="ko">사용량</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-providers"
+              id="tab-providers"
+              tabindex="-1"
+            >
+              Providers
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-dark"
+              id="tab-dark"
+              tabindex="-1"
+            >
+              <span lang="en">Dark</span><span lang="ko">다크</span>
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="shot-mobile"
+              id="tab-mobile"
+              tabindex="-1"
+            >
+              <span lang="en">Phone</span><span lang="ko">휴대폰</span>
+            </button>
+          </div>
+
+          <figure class="panel shot" role="tabpanel" id="shot-chat" aria-labelledby="tab-chat">
+            <img
+              src="assets/shots/chat.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Main chat with composer, model picker and permission mode"
+              data-alt-ko="작성창, 모델 선택기, 권한 모드가 있는 메인 채팅"
+            />
+            <figcaption>
+              <span lang="en"
+                >Pick a provider and model, set the permission mode, and follow the thread.</span
+              ><span lang="ko"
+                >provider와 모델을 고르고, 권한 모드를 설정한 뒤, 스레드를 따라가 보세요.</span
+              >
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-crew"
+            aria-labelledby="tab-crew"
+            hidden
+          >
+            <img
+              src="assets/shots/crew.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="OOP Crew board showing a brain model delegating to workers and an auditor"
+              data-alt-ko="brain 모델이 worker와 auditor에게 작업을 맡기는 OOP Crew 보드"
+            />
+            <figcaption>
+              <span lang="en"
+                >OOP Crew: one chat, several models, with a live board of who is doing what.</span
+              ><span lang="ko"
+                >OOP Crew: 한 채팅에서 여러 모델이 일하고, 누가 무엇을 하는지 실시간 보드로
+                확인합니다.</span
+              >
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-goal"
+            aria-labelledby="tab-goal"
+            hidden
+          >
+            <img
+              src="assets/shots/goal.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Goal control in the composer showing continuations used"
+              data-alt-ko="사용한 자동 이어가기 횟수를 보여 주는 작성창의 목표 컨트롤"
+            />
+            <figcaption>
+              <span lang="en"
+                >Thread goal: the chat keeps going until the goal is done, blocked or stopped.</span
+              ><span lang="ko">스레드 목표: 목표가 완료·차단·중지될 때까지 채팅이 계속됩니다.</span>
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-diff"
+            aria-labelledby="tab-diff"
+            hidden
+          >
+            <img
+              src="assets/shots/diff.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Diff panel with changed files"
+              data-alt-ko="변경된 파일이 있는 diff 패널"
+            />
+            <figcaption>
+              <span lang="en"
+                >Diff panel: review the agent's changes and restore from a checkpoint.</span
+              ><span lang="ko"
+                >diff 패널: 에이전트의 변경을 검토하고 체크포인트에서 복원합니다.</span
+              >
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-workflows"
+            aria-labelledby="tab-workflows"
+            hidden
+          >
+            <img
+              src="assets/shots/workflows.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Workflows panel with a live diagram of tool calls and subagents"
+              data-alt-ko="도구 호출과 서브에이전트의 실시간 다이어그램이 있는 워크플로 패널"
+            />
+            <figcaption>
+              <span lang="en">Workflows: a live diagram of tool calls and subagents.</span
+              ><span lang="ko">워크플로: 도구 호출과 서브에이전트의 실시간 다이어그램.</span>
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-permissions"
+            aria-labelledby="tab-permissions"
+            hidden
+          >
+            <img
+              src="assets/shots/permissions.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Permission mode selector in the composer"
+              data-alt-ko="작성창의 권한 모드 선택기"
+            />
+            <figcaption>
+              <span lang="en">Permission modes: from Supervised to Full access.</span
+              ><span lang="ko">권한 모드: Supervised부터 Full access까지.</span>
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-usage"
+            aria-labelledby="tab-usage"
+            hidden
+          >
+            <img
+              src="assets/shots/usage.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Usage page with token and estimated cost history per provider"
+              data-alt-ko="provider별 토큰과 추정 비용 기록이 있는 사용량 페이지"
+            />
+            <figcaption>
+              <span lang="en">Usage: token and estimated cost history per provider.</span
+              ><span lang="ko">사용량: provider별 토큰과 추정 비용 기록.</span>
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-providers"
+            aria-labelledby="tab-providers"
+            hidden
+          >
+            <img
+              src="assets/shots/providers.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="Settings, Providers page with install, update and sign-in status per provider"
+              data-alt-ko="provider별 설치·업데이트·로그인 상태가 있는 설정의 Providers 페이지"
+            />
+            <figcaption>
+              <span lang="en"
+                >Settings → Providers: install, update and sign in to each provider.</span
+              ><span lang="ko"
+                >설정 → Providers: 각 provider를 설치, 업데이트하고 로그인합니다.</span
+              >
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot"
+            role="tabpanel"
+            id="shot-dark"
+            aria-labelledby="tab-dark"
+            hidden
+          >
+            <img
+              src="assets/shots/dark.webp"
+              width="1440"
+              height="900"
+              loading="lazy"
+              alt="OOP in the dark theme"
+              data-alt-ko="다크 테마의 OOP"
+            />
+            <figcaption>
+              <span lang="en">The dark theme.</span><span lang="ko">다크 테마.</span>
+            </figcaption>
+          </figure>
+          <figure
+            class="panel shot phone"
+            role="tabpanel"
+            id="shot-mobile"
+            aria-labelledby="tab-mobile"
+            hidden
+          >
+            <img
+              src="assets/shots/mobile.webp"
+              width="390"
+              height="844"
+              loading="lazy"
+              alt="OOP web client at phone size"
+              data-alt-ko="휴대폰 크기의 OOP 웹 클라이언트"
+            />
+            <figcaption>
+              <span lang="en">The web client at phone size, paired to a desktop host.</span
+              ><span lang="ko">데스크톱 호스트에 페어링한 휴대폰 크기의 웹 클라이언트.</span>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- 05 -->
+      <section class="section wrap" id="install">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>05</span> · <span lang="en">Install</span><span lang="ko">설치</span>
+          </p>
+          <h2>
+            <span lang="en">One command.<br /><em>Checked before it installs.</em></span>
+            <span lang="ko">명령 한 줄.<br /><em>설치 전에 검증합니다.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >The installer downloads the desktop app from a GitHub release and verifies its
+              SHA-256 before installing. It needs no Node.js, pnpm, git or compiler.</span
+            >
+            <span lang="ko"
+              >설치 스크립트는 GitHub 릴리스에서 데스크톱 앱을 내려받아 설치 전에 SHA-256을
+              검증합니다. Node.js, pnpm, git, 컴파일러가 필요 없습니다.</span
+            >
+          </p>
+        </header>
+
+        <div class="tabs reveal" data-tabs>
+          <div class="tablist" role="tablist" aria-label="Operating system" data-tablist>
+            <button role="tab" aria-selected="true" aria-controls="inst-mac" id="itab-mac">
+              macOS
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="inst-win"
+              id="itab-win"
+              tabindex="-1"
+            >
+              Windows
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="inst-linux"
+              id="itab-linux"
+              tabindex="-1"
+            >
+              Linux
+            </button>
+            <button
+              role="tab"
+              aria-selected="false"
+              aria-controls="inst-src"
+              id="itab-src"
+              tabindex="-1"
+            >
+              <span lang="en">From source</span><span lang="ko">소스 빌드</span>
+            </button>
+          </div>
+
+          <div class="panel" role="tabpanel" id="inst-mac" aria-labelledby="itab-mac">
+            <p class="platform">
+              <b>macOS · Apple Silicon</b>
+              <span class="badge ok"
+                ><span lang="en">tested</span><span lang="ko">검증됨</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >Installs <code>~/Applications/OOP.app</code> (an existing
+                <code>/Applications/OOP.app</code> is updated in place). Remove the app to
+                uninstall. The app is not notarized: if macOS warns, right-click it and choose
+                <b>Open</b>, or use System Settings → Privacy &amp; Security →
+                <b>Open Anyway</b>.</span
+              >
+              <span lang="ko"
+                ><code>~/Applications/OOP.app</code>에 설치합니다(기존
+                <code>/Applications/OOP.app</code>이 있으면 그 앱을 갱신). 삭제하려면 앱을 지우면
+                됩니다. 앱은 공증(notarize)되지 않았으므로 macOS가 경고하면 앱을 우클릭해
+                <b>열기</b>를 고르거나, 시스템 설정 → 개인정보 보호 및 보안 → <b>그래도 열기</b>를
+                쓰세요.</span
+              >
+            </p>
+          </div>
+
+          <div class="panel" role="tabpanel" id="inst-win" aria-labelledby="itab-win" hidden>
+            <p class="platform">
+              <b>Windows · x64</b>
+              <span class="badge warn"
+                ><span lang="en">experimental</span><span lang="ko">실험적</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >Run in PowerShell. Silent per-user install with a Start menu entry; uninstall from
+                Settings → Apps. Windows SmartScreen may warn: click <b>More info</b> →
+                <b>Run anyway</b>. The Windows installer was built by the maintainer and is not yet
+                verified on clean machines.</span
+              >
+              <span lang="ko"
+                >PowerShell에서 실행하세요. 사용자 단위 무음 설치이며 시작 메뉴에 등록됩니다. 삭제는
+                설정 → 앱에서 합니다. SmartScreen이 경고하면 <b>추가 정보</b> → <b>실행</b>을
+                누르세요. Windows 설치 파일은 개발자가 빌드했으며 깨끗한 환경에서는 아직 검증되지
+                않았습니다.</span
+              >
+            </p>
+          </div>
+
+          <div class="panel" role="tabpanel" id="inst-linux" aria-labelledby="itab-linux" hidden>
+            <p class="platform">
+              <b>Linux · x64</b>
+              <span class="badge warn"
+                ><span lang="en">not verified</span><span lang="ko">미검증</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >Installs an AppImage under <code>~/.local/share/oop-desktop</code>, a launcher at
+                <code>~/.local/bin/oop-desktop</code> and a menu entry. It needs GTK and NSS runtime
+                libraries. The Linux GUI has not been verified.</span
+              >
+              <span lang="ko"
+                >AppImage를 <code>~/.local/share/oop-desktop</code>에, 실행 파일을
+                <code>~/.local/bin/oop-desktop</code>에, 메뉴 항목을 함께 설치합니다. GTK와 NSS
+                런타임 라이브러리가 필요하며, Linux GUI는 아직 검증되지 않았습니다.</span
+              >
+            </p>
+          </div>
+
+          <div class="panel" role="tabpanel" id="inst-src" aria-labelledby="itab-src" hidden>
+            <p class="platform">
+              <b
+                ><span lang="en">Build it yourself (macOS Apple Silicon)</span
+                ><span lang="ko">직접 빌드 (macOS Apple Silicon)</span></b
+              >
+              <span class="badge"
+                ><span lang="en">Node 24.x · pnpm 11.10.0 · git</span
+                ><span lang="ko">Node 24.x · pnpm 11.10.0 · git</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>git clone https://github.com/AIBeginnerX/oh-our-pi-desktop.git
+cd oh-our-pi-desktop
+node scripts/macos.mjs doctor
+node scripts/macos.mjs setup
+node scripts/macos.mjs package</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >Run the script with <code>node</code>, not through <code>pnpm</code>.
+                <code>package</code> writes an ad hoc signed DMG to <code>release/macos/</code>.
+                Windows and generic dev paths are in the
+                <a
+                  href="https://github.com/AIBeginnerX/oh-our-pi-desktop#install--build-from-source"
+                  >README</a
+                >.</span
+              >
+              <span lang="ko"
+                >스크립트는 <code>pnpm</code>이 아니라 <code>node</code>로 직접 실행하세요.
+                <code>package</code>는 ad hoc 서명된 DMG를 <code>release/macos/</code>에 만듭니다.
+                Windows와 일반 개발 경로는
+                <a
+                  href="https://github.com/AIBeginnerX/oh-our-pi-desktop#install--build-from-source"
+                  >README</a
+                >를 참고하세요.</span
+              >
+            </p>
+          </div>
+        </div>
+
+        <p class="hint install-update reveal">
+          <span lang="en"
+            >To update later, quit OOP and rerun the same command; your data is kept. See
+            <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop/releases">Releases</a> and the
+            <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop/blob/main/INSTALL.md"
+              >install guide</a
+            >.</span
+          >
+          <span lang="ko"
+            >나중에 업데이트하려면 OOP를 종료하고 같은 명령을 다시 실행하면 되며 데이터는
+            유지됩니다.
+            <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop/releases">Releases</a>와
+            <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop/blob/main/INSTALL.md"
+              >설치 안내</a
+            >를 참고하세요.</span
+          >
+        </p>
+
+        <div class="after reveal">
+          <h3><span lang="en">After installing</span><span lang="ko">설치한 뒤에</span></h3>
+          <ol>
+            <li>
+              <span lang="en"
+                >Install and sign in to <b>one</b> provider CLI (the desktop installer does not do
+                this for you). Settings → Providers shows the state.</span
+              >
+              <span lang="ko"
+                >provider CLI <b>하나</b>를 설치하고 로그인하세요(데스크톱 설치 스크립트가 대신해
+                주지 않습니다). 상태는 설정 → Providers에서 볼 수 있습니다.</span
+              >
+            </li>
+            <li>
+              <span lang="en"
+                >Add a project folder, ideally a git repository, and start a thread.</span
+              >
+              <span lang="ko"
+                >프로젝트 폴더(가능하면 git 저장소)를 추가하고 스레드를 시작합니다.</span
+              >
+            </li>
+            <li>
+              <span lang="en"
+                >Pick a model and a permission mode in the composer, then send a message.</span
+              >
+              <span lang="ko">작성창에서 모델과 권한 모드를 고르고 메시지를 보냅니다.</span>
+            </li>
+            <li>
+              <span lang="en">Review the result in the diff panel.</span>
+              <span lang="ko">diff 패널에서 결과를 검토합니다.</span>
+            </li>
+          </ol>
+          <ul class="chips" aria-label="Provider sign-in commands">
+            <li><span>Codex</span><code>codex login</code></li>
+            <li><span>Claude Code</span><code>claude auth login</code></li>
+            <li><span>Cursor</span><code>agent login</code></li>
+            <li><span>Grok Build</span><code>grok login</code></li>
+            <li><span>OpenCode</span><code>opencode auth login</code></li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- GitHub CTA -->
+      <section class="wrap">
+        <div class="gh-band reveal">
+          <div>
+            <h2>
+              <span lang="en">Read the code.<br /><em>Report what breaks.</em></span>
+              <span lang="ko">코드를 읽어 보세요.<br /><em>문제는 이슈로 알려 주세요.</em></span>
+            </h2>
+            <p>
+              <span lang="en"
+                >OOP is MIT licensed and developed in the open. Issues are welcome; please never
+                include secrets, pairing links or personal paths.</span
+              >
+              <span lang="ko"
+                >OOP는 MIT 라이선스로 공개되어 있습니다. 이슈는 언제든 환영하지만, 비밀 값, 페어링
+                링크, 개인 경로는 절대 올리지 마세요.</span
+              >
+            </p>
+          </div>
+          <div class="cta">
+            <a class="pill pill-solid" href="https://github.com/AIBeginnerX/oh-our-pi-desktop">
+              <span lang="en">Open on GitHub</span><span lang="ko">GitHub 열기</span>
+            </a>
+            <a class="pill" href="https://github.com/AIBeginnerX/oh-our-pi-desktop/releases"
+              >Releases</a
+            >
+            <a class="pill" href="https://github.com/AIBeginnerX/oh-our-pi-desktop/issues"
+              >Issues</a
+            >
+          </div>
+        </div>
+      </section>
+
+      <!-- 06 -->
+      <section class="section wrap" id="faq">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>06</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
+          </p>
+          <h2>
+            <span lang="en">Early, local,<br /><em>and clear about it.</em></span>
+            <span lang="ko">초기 단계, 로컬 실행,<br /><em>그리고 솔직하게.</em></span>
+          </h2>
+        </header>
+
+        <div class="table-wrap reveal">
+          <table>
+            <caption class="sr">
+              <span lang="en">Platform support</span
+              ><span lang="ko">플랫폼 지원</span>
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col"><span lang="en">Platform</span><span lang="ko">플랫폼</span></th>
+                <th scope="col"><span lang="en">Status</span><span lang="ko">상태</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">macOS · Apple Silicon</th>
+                <td>
+                  <span class="badge ok"
+                    ><span lang="en">tested</span><span lang="ko">검증됨</span></span
+                  >
+                  <span lang="en">The main target.</span><span lang="ko">주요 대상입니다.</span>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Windows · x64</th>
+                <td>
+                  <span class="badge warn"
+                    ><span lang="en">experimental</span><span lang="ko">실험적</span></span
+                  >
+                  <span lang="en">Built by the maintainer; not verified on clean machines.</span
+                  ><span lang="ko">개발자가 빌드했으며 깨끗한 환경에서는 검증되지 않았습니다.</span>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">macOS · Intel, Linux</th>
+                <td>
+                  <span class="badge"
+                    ><span lang="en">untested</span><span lang="ko">미검증</span></span
+                  >
+                  <span lang="en">No promises.</span><span lang="ko">보장하지 않습니다.</span>
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">
+                  <span lang="en">Phone browser</span><span lang="ko">휴대폰 브라우저</span>
+                </th>
+                <td>
+                  <span class="badge ok"
+                    ><span lang="en">checked</span><span lang="ko">확인됨</span></span
+                  >
+                  <span lang="en"
+                    >Web UI checked at phone size. The native iOS and Android apps are untested by
+                    this fork.</span
+                  ><span lang="ko"
+                    >웹 UI를 휴대폰 크기에서 확인했습니다. iOS·Android 네이티브 앱은 이 포크에서
+                    검증하지 않았습니다.</span
+                  >
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="faq reveal">
+          <details>
+            <summary>
+              <span lang="en">Who is OOP for?</span><span lang="ko">누구를 위한 앱인가요?</span>
+            </summary>
+            <p>
+              <span lang="en"
+                >Developers who already pay for one or more coding-agent subscriptions or API plans,
+                can accept an early, unsigned desktop app, and want one control surface. If you want
+                a polished, signed, auto-updating product, the upstream T3 Code is the better fit
+                today.</span
+              >
+              <span lang="ko"
+                >이미 코딩 에이전트 구독이나 API 요금제를 쓰고 있고, 초기 단계의 서명되지 않은
+                데스크톱 앱을 감수할 수 있으며, 하나의 제어 화면을 원하는 개발자를 위한 앱입니다.
+                서명되고 자동 업데이트되는 완성형 제품을 원하신다면 현재로서는 업스트림 T3 Code가 더
+                잘 맞습니다.</span
+              >
+            </p>
+          </details>
+          <details>
+            <summary>
+              <span lang="en">What does it cost?</span><span lang="ko">비용은 얼마인가요?</span>
+            </summary>
+            <p>
+              <span lang="en"
+                >OOP itself is free and MIT licensed. Every provider uses your own subscription or
+                API credit, and Crew multiplies usage by running several models per chat. The Usage
+                page shows estimates, not your bill.</span
+              >
+              <span lang="ko"
+                >OOP 자체는 무료이며 MIT 라이선스입니다. 모든 provider는 내 구독이나 API 크레딧을
+                쓰고, Crew는 채팅 하나에서 여러 모델을 돌리므로 사용량이 늘어납니다. 사용량 페이지는
+                청구액이 아닌 추정치를 보여 줍니다.</span
+              >
+            </p>
+          </details>
+          <details>
+            <summary>
+              <span lang="en">Is it safe to let agents run?</span
+              ><span lang="ko">에이전트를 실행해도 안전한가요?</span>
+            </summary>
+            <p>
+              <span lang="en"
+                >Agents run with your account's permissions and can edit files and run commands. New
+                threads default to Full access. For untrusted repositories, switch to Supervised
+                (Settings → General → New threads). Treat pairing links as passwords and prefer
+                Tailscale away from home.</span
+              >
+              <span lang="ko"
+                >에이전트는 내 계정의 권한으로 실행되어 파일을 수정하고 명령을 실행할 수 있습니다.
+                새 스레드의 기본값은 Full access이므로, 믿을 수 없는 저장소에서는 Supervised로
+                바꾸세요(설정 → General → New threads). 페어링 링크는 비밀번호처럼 다루고, 집
+                밖에서는 Tailscale을 권장합니다.</span
+              >
+            </p>
+          </details>
+          <details>
+            <summary>
+              <span lang="en">Does OOP collect telemetry?</span
+              ><span lang="ko">텔레메트리를 수집하나요?</span>
+            </summary>
+            <p>
+              <span lang="en"
+                >OOP has no servers and the maintainers receive nothing from your app. The anonymous
+                usage reporter inherited from upstream is off by default and needs your own project
+                key to turn on.</span
+              >
+              <span lang="ko"
+                >OOP에는 서버가 없고 개발자는 앱에서 아무것도 받지 않습니다. 업스트림에서 물려받은
+                익명 사용 통계 보고기는 기본으로 꺼져 있고, 켜려면 직접 발급한 프로젝트 키가
+                필요합니다.</span
+              >
+            </p>
+          </details>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap foot">
+        <a class="brand" href="#top" aria-label="OOP, back to top">
+          <img src="assets/logo-128.png" width="28" height="28" alt="" />
+          <span>OOP</span>
+        </a>
+        <p>
+          <span lang="en"
+            >MIT licensed. Built on <a href="https://github.com/pingdotgg/t3code">T3 Code</a> by T3
+            Tools Inc. Provider names belong to their respective owners; OOP is not affiliated with
+            them.</span
+          >
+          <span lang="ko"
+            >MIT 라이선스. <a href="https://github.com/pingdotgg/t3code">T3 Code</a>(T3 Tools Inc.)
+            기반입니다. provider 이름은 각 소유자의 것이며 OOP는 이들과 제휴 관계가 아닙니다.</span
+          >
+        </p>
+        <p class="foot-links">
+          <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop">GitHub</a>
+          <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop/blob/main/LICENSE">License</a>
+          <a href="https://github.com/AIBeginnerX/oh-our-pi-desktop/blob/main/SECURITY.md"
+            >Security</a
+          >
+          <a href="#top"><span lang="en">Back to top</span><span lang="ko">맨 위로</span></a>
+        </p>
+      </div>
+    </footer>
+
+    <p class="sr" id="copy-status" role="status" aria-live="polite"></p>
+    <script src="app.js" defer></script>
+  </body>
+</html>

@@ -18,7 +18,7 @@
 - [Workflow board](./user/workflows.md)
 - [OOP Crew](./user/crew.md)
 - [Reports in chat](./user/reports.md)
-- [Product usage data](./user/telemetry.md)
+- [Product usage data and network requests](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Running in the background](./user/background-service.md)
 - [Updating OOP](./user/updating.md)

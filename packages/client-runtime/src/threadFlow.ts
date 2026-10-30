@@ -1,10 +1,18 @@
 /**
  * A thread's work as graphs for the workflow board: each provider workflow with its phases as
- * columns, and each turn's tool calls with overlapping calls sharing a column. Built from the
- * activities and subagent roster a client already holds for the thread; nothing new is fetched.
+ * columns, and each turn's tool calls with overlapping calls sharing a column. `actorFlows` draws
+ * the same work as the agents doing it (the main agent, its crew, the subagents it launched).
+ * Built from the activities and subagent roster a client already holds for the thread; nothing
+ * new is fetched.
  */
 import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
+import {
+  crewEvidence,
+  crewTurnUsage,
+  type CrewEvidenceTask,
+  type CrewTaskUsage,
+} from "./crewBoard.ts";
 import type {
   AgentPanelModel,
   RuntimeSubagent,
@@ -13,6 +21,10 @@ import type {
 import {
   connectColumns,
   isSettledState,
+  type ToolCategory,
+  type ToolCount,
+  type WorkflowActorRole,
+  type WorkflowDoing,
   type WorkflowEdge,
   type WorkflowGraph,
   type WorkflowNode,
@@ -26,6 +38,9 @@ const TARGET_LIMIT = 40;
 
 /** Id prefix of the node that stands for the agent thinking between steps of a running turn. */
 export const THINKING_NODE_PREFIX = "thinking:";
+
+/** Id prefix of the node that stands for the thread's own agent in an agent flow. */
+export const MAIN_NODE_PREFIX = "main:";
 
 /** Verbs for tool kinds that carry no tool name (ACP `kind`, canonical `itemType`). */
 const TOOL_VERBS: Readonly<Record<string, string>> = {
@@ -44,6 +59,100 @@ const TOOL_VERBS: Readonly<Record<string, string>> = {
   collab_agent_tool_call: "Agent",
 };
 const GENERIC_TOOL_TITLES = new Set(["tool", "tool call", "ran command"]);
+
+/** Tool categories by ACP `kind` and canonical `itemType`; null steps are not tool work. */
+const CATEGORY_BY_KIND: Readonly<Record<string, ToolCategory | null>> = {
+  execute: "run",
+  command_execution: "run",
+  read: "read",
+  edit: "edit",
+  file_change: "edit",
+  delete: "edit",
+  move: "edit",
+  search: "search",
+  web_search: "web",
+  fetch: "web",
+  think: null,
+  mcp_tool_call: "other",
+  collab_agent_tool_call: null,
+};
+/** Tool categories by lower-cased tool name, including the verbs of `TOOL_VERBS`. */
+const CATEGORY_BY_TOOL: Readonly<Record<string, ToolCategory | null>> = {
+  read: "read",
+  notebookread: "read",
+  view: "read",
+  edit: "edit",
+  write: "edit",
+  multiedit: "edit",
+  notebookedit: "edit",
+  apply_patch: "edit",
+  delete: "edit",
+  move: "edit",
+  bash: "run",
+  bashoutput: "run",
+  killshell: "run",
+  shell: "run",
+  exec_command: "run",
+  run: "run",
+  grep: "search",
+  glob: "search",
+  ls: "search",
+  search: "search",
+  toolsearch: "search",
+  websearch: "web",
+  webfetch: "web",
+  fetch: "web",
+  mcp: "other",
+  task: null,
+  agent: null,
+  think: null,
+  todowrite: null,
+  exitplanmode: null,
+  enterplanmode: null,
+  askuserquestion: null,
+};
+const TOOL_CATEGORY_ORDER: ReadonlyArray<ToolCategory> = [
+  "read",
+  "run",
+  "edit",
+  "search",
+  "web",
+  "other",
+];
+
+/**
+ * What a tool call counts as. Null for calls that are not tool work a person would count: the
+ * ones that launch agents (those become agents on their own), crew plumbing, and planning.
+ */
+export function toolCategory(
+  name: string,
+  kind?: unknown,
+  itemType?: unknown,
+): ToolCategory | null {
+  const tool = name.toLowerCase().replace(/^mcp__.*__/, "");
+  if (tool.startsWith("crew_")) return null;
+  if (Object.hasOwn(CATEGORY_BY_TOOL, tool)) return CATEGORY_BY_TOOL[tool] ?? null;
+  for (const key of [kind, itemType]) {
+    if (typeof key === "string" && Object.hasOwn(CATEGORY_BY_KIND, key)) {
+      return CATEGORY_BY_KIND[key] ?? null;
+    }
+  }
+  return "other";
+}
+
+/** Tool calls per category, in a fixed order, leaving out categories nothing used. */
+export function toolCounts(categories: Iterable<ToolCategory | null | undefined>): ToolCount[] {
+  const counts = new Map<ToolCategory, number>();
+  for (const category of categories) {
+    if (category !== null && category !== undefined) {
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    }
+  }
+  return TOOL_CATEGORY_ORDER.flatMap((category) => {
+    const count = counts.get(category);
+    return count === undefined ? [] : [{ category, count }];
+  });
+}
 
 function optional<K extends string, V>(key: K, value: V | undefined | null): Partial<Record<K, V>> {
   return value === undefined || value === null ? {} : ({ [key]: value } as Record<K, V>);
@@ -98,6 +207,7 @@ function graphStatus(
 
 function agentInfo(agent: RuntimeSubagent): WorkflowNodeInfo {
   return {
+    actor: { role: "subagent", ...optional("task", text(agent.title)) },
     ...optional("subtitle", [agent.role, agent.model].filter(Boolean).join(" · ") || undefined),
     ...optional("model", agent.model),
     ...optional("progress", text(agent.progress)),
@@ -161,12 +271,28 @@ export function workflowGraphs(model: AgentPanelModel): WorkflowGraph[] {
   });
 }
 
+/** A crew task as the lead's task activities describe it. */
+type CrewStep = ToolStep & {
+  role: string;
+  title?: string;
+  threadId?: string;
+  /** The task.completed status; absent while the task runs. */
+  outcome?: string | undefined;
+  tested?: boolean;
+  verdict?: string | undefined;
+  usage?: CrewTaskUsage | undefined;
+};
+
 interface ToolStep {
   readonly id: string;
   readonly turnId: string;
   /** What the step does ("Run", "Read", a tool name) and what it works on. */
   name: string;
   target?: string;
+  category: ToolCategory | null;
+  /** Set once the step is known to have launched a subagent or a workflow. */
+  launch?: "agent" | "workflow";
+  launchTitle?: string;
   /** Set once a launched agent or workflow names the step. */
   fixedLabel?: boolean;
   label: string;
@@ -254,7 +380,11 @@ function taskState(kind: string, status: unknown): WorkflowNodeState | undefined
  * open runs in parallel with them; otherwise it starts the next column.
  */
 function turnColumns(
-  steps: ReadonlyArray<Pick<ToolStep, "id" | "startedAt" | "completedAt">>,
+  steps: ReadonlyArray<{
+    readonly id: string;
+    readonly startedAt: string;
+    readonly completedAt?: string | undefined;
+  }>,
 ): string[][] {
   const columns: string[][] = [];
   let columnEnd = Number.NEGATIVE_INFINITY;
@@ -287,10 +417,14 @@ function visibleSteps(sorted: ReadonlyArray<ToolStep>): ToolStep[] {
   return sorted.filter((step) => keep.has(step));
 }
 
-/** One graph per turn that called tools, oldest turn first. */
-export function turnGraphs(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-): WorkflowGraph[] {
+interface TurnSteps {
+  readonly turnId: string;
+  /** Every tool call the turn made, oldest first. */
+  readonly steps: ToolStep[];
+}
+
+/** The tool calls of every turn, oldest turn first, folded from the thread's activities. */
+function collectToolSteps(activities: ReadonlyArray<OrchestrationThreadActivity>): TurnSteps[] {
   const steps = new Map<string, ToolStep>();
   const stepByToolUse = new Map<string, ToolStep>();
   const taskOwner = new Map<string, ToolStep>();
@@ -308,6 +442,7 @@ export function turnGraphs(
         id,
         turnId: activity.turnId,
         name: name ?? text(payload.title, 80) ?? "Tool",
+        category: null,
         label: "",
         state: "running",
         startedAt: activity.createdAt,
@@ -317,6 +452,9 @@ export function turnGraphs(
         stepByToolUse.set(id, step);
       }
       if (name !== undefined) step.name = name;
+      // A later update that names nothing must not erase what an earlier one made clear.
+      const category = toolCategory(step.name, data?.kind, payload.itemType);
+      if (existing === undefined || category !== "other") step.category = category;
       step.state = toolState(payload.status);
       const detail = text(payload.detail);
       if (detail !== undefined) step.description = detail;
@@ -340,12 +478,25 @@ export function turnGraphs(
     if (taskId !== undefined) taskOwner.set(taskId, step);
     const title = text(payload.title, 80);
     const workflowName = text(payload.workflowName, 80);
+    // A crew task is drawn as a crew member; only other launches become agents of their own.
+    const crewMember = text(payload.crewRole, 20) !== undefined;
     if (payload.taskType === "local_workflow") {
       step.label = `Workflow · ${workflowName ?? title ?? step.name}`;
       step.fixedLabel = true;
+      step.category = null;
+      if (!crewMember) {
+        step.launch = "workflow";
+        const launchTitle = workflowName ?? title;
+        if (launchTitle !== undefined) step.launchTitle = launchTitle;
+      }
     } else if (title !== undefined && payload.agentKind === "agent") {
       step.label = `Agent · ${title}`;
       step.fixedLabel = true;
+      step.category = null;
+      if (!crewMember) {
+        step.launch = "agent";
+        step.launchTitle = title;
+      }
     }
     const model = text(payload.model, 80);
     if (model !== undefined) {
@@ -370,59 +521,90 @@ export function turnGraphs(
   const byTurn = new Map<string, ToolStep[]>();
   for (const step of steps.values())
     byTurn.set(step.turnId, [...(byTurn.get(step.turnId) ?? []), step]);
-  const turns = [...byTurn.entries()]
+  return [...byTurn.entries()]
     .map(([turnId, turnSteps]) => ({
       turnId,
-      total: turnSteps.length,
-      steps: visibleSteps(
-        turnSteps.sort(
-          (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
-        ),
+      steps: turnSteps.sort(
+        (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
       ),
     }))
     .sort((a, b) => (a.steps[0]?.startedAt ?? "").localeCompare(b.steps[0]?.startedAt ?? ""));
+}
 
-  return turns.map(({ turnId, total, steps: turnSteps }, index) => {
-    const columns = turnColumns(turnSteps);
-    const waveById = new Map(columns.flatMap((column, wave) => column.map((id) => [id, wave])));
-    const nodes: WorkflowNode[] = turnSteps.map((step) => ({
-      id: step.id,
-      label: step.label,
-      state: step.state,
-      wave: waveById.get(step.id) ?? 0,
-      info: {
-        ...optional("subtitle", step.subtitle),
-        ...optional("model", step.model),
-        ...optional("description", step.description),
-        ...optional("progress", step.progress),
-        startedAt: step.startedAt,
-        ...optional("completedAt", step.completedAt),
-        ...optional("tokens", step.tokens),
-        ...optional("error", step.error),
-      },
-    }));
-    const edges: WorkflowEdge[] = [];
-    for (let wave = 1; wave < columns.length; wave += 1) {
-      edges.push(...connectColumns(columns[wave - 1] ?? [], columns[wave] ?? []));
-    }
-    const last = turnSteps.at(-1);
-    return {
-      id: `turn:${turnId}`,
-      kind: "turn",
-      turnId,
-      name: `Turn ${index + 1} · ${total} step${total === 1 ? "" : "s"}${
-        total > turnSteps.length ? ` · ${total - turnSteps.length} older hidden` : ""
-      }`,
-      status: graphStatus(nodes),
-      startedAt: turnSteps[0]?.startedAt ?? "",
-      updatedAt: last?.completedAt ?? last?.startedAt ?? "",
-      waveTitles: columns.map((column, wave) =>
-        column.length > 1 ? `Step ${wave + 1} · ${column.length} parallel` : `Step ${wave + 1}`,
-      ),
-      nodes,
-      edges,
-    };
-  });
+function stepInfo(step: ToolStep): WorkflowNodeInfo {
+  return {
+    ...optional("subtitle", step.subtitle),
+    ...optional("model", step.model),
+    ...optional("description", step.description),
+    ...optional("progress", step.progress),
+    startedAt: step.startedAt,
+    ...optional("completedAt", step.completedAt),
+    ...optional("tokens", step.tokens),
+    ...optional("error", step.error),
+  };
+}
+
+function turnGraphOf({ turnId, steps: allSteps }: TurnSteps, index: number): WorkflowGraph {
+  const total = allSteps.length;
+  const turnSteps = visibleSteps(allSteps);
+  const columns = turnColumns(turnSteps);
+  const waveById = new Map(columns.flatMap((column, wave) => column.map((id) => [id, wave])));
+  const nodes: WorkflowNode[] = turnSteps.map((step) => ({
+    id: step.id,
+    label: step.label,
+    state: step.state,
+    wave: waveById.get(step.id) ?? 0,
+    info: {
+      ...stepInfo(step),
+      ...(step.category === null ? {} : { toolCategory: step.category }),
+    },
+  }));
+  const edges: WorkflowEdge[] = [];
+  for (let wave = 1; wave < columns.length; wave += 1) {
+    edges.push(...connectColumns(columns[wave - 1] ?? [], columns[wave] ?? []));
+  }
+  const last = turnSteps.at(-1);
+  return {
+    id: `turn:${turnId}`,
+    kind: "turn",
+    turnId,
+    name: `Turn ${index + 1} · ${total} step${total === 1 ? "" : "s"}${
+      total > turnSteps.length ? ` · ${total - turnSteps.length} older hidden` : ""
+    }`,
+    turnIndex: index + 1,
+    stepCount: total,
+    tools: toolCounts(allSteps.map((step) => step.category)),
+    status: graphStatus(nodes),
+    startedAt: turnSteps[0]?.startedAt ?? "",
+    updatedAt: last?.completedAt ?? last?.startedAt ?? "",
+    waveTitles: columns.map((_, wave) => `Step ${wave + 1}`),
+    nodes,
+    edges,
+  };
+}
+
+/** One graph per turn that called tools, oldest turn first. */
+export function turnGraphs(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): WorkflowGraph[] {
+  return collectToolSteps(activities).map(turnGraphOf);
+}
+
+/** A crew report that stopped partway (partial, blocked) did not finish its task. */
+function crewTaskState(status: unknown): WorkflowNodeState {
+  return status === "partial" || status === "blocked" ? "failed" : toolState(status);
+}
+
+/** The usage a crew task's completion carries: tokens always, a cost only when it was reported. */
+function crewUsage(value: unknown): CrewTaskUsage | undefined {
+  const usage = record(value);
+  if (usage === undefined) return undefined;
+  const { inputTokens, outputTokens, costUsd } = usage;
+  if (typeof inputTokens !== "number" || typeof outputTokens !== "number") return undefined;
+  return {
+    tokens: inputTokens + outputTokens,
+    ...(typeof costUsd === "number" ? { costUsd } : {}),
+  };
 }
 
 const CREW_LABEL: Record<string, string> = {
@@ -431,14 +613,15 @@ const CREW_LABEL: Record<string, string> = {
   auditor: "Auditor",
 };
 
-/**
- * One graph per lead turn that used OOP Crew: the brain fans work out to workers and experts
- * (overlapping tasks share a column) and the auditor reviews last.
- */
-export function crewGraphs(
+function crewActorRole(role: string): WorkflowActorRole {
+  return role === "worker" || role === "expert" || role === "auditor" ? role : "crew";
+}
+
+/** The crew tasks of every lead turn, folded from the lead's task activities. */
+function collectCrewTasks(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-): WorkflowGraph[] {
-  const tasks = new Map<string, ToolStep & { role: string }>();
+): Array<[string, CrewStep[]]> {
+  const tasks = new Map<string, CrewStep>();
   for (const activity of activities) {
     if (!activity.kind.startsWith("task.")) continue;
     const payload = record(activity.payload);
@@ -446,12 +629,15 @@ export function crewGraphs(
     const taskId = text(payload?.taskId, 200);
     if (payload === undefined || role === undefined || taskId === undefined) continue;
     const existing = tasks.get(taskId);
+    const title = text(payload.title, 80);
     const task = existing ?? {
       id: taskId,
       turnId: activity.turnId ?? "untracked",
       role,
+      category: null,
       name: CREW_LABEL[role] ?? role,
-      label: `${CREW_LABEL[role] ?? role} · ${text(payload.title, 80) ?? "task"}`,
+      label: `${CREW_LABEL[role] ?? role} · ${title ?? "task"}`,
+      ...optional("title", title),
       state: "running" as WorkflowNodeState,
       startedAt: activity.createdAt,
     };
@@ -463,19 +649,79 @@ export function crewGraphs(
     }
     const summary = text(payload.summary);
     if (summary !== undefined) task.progress = summary;
+    // Each attempt of a task runs in its own thread; the latest one is the one to open or stop.
+    const threadId = text(payload.threadId, 200);
+    if (threadId !== undefined) task.threadId = threadId;
     if (activity.kind === "task.completed") {
-      task.state = toolState(payload.status);
+      task.state = crewTaskState(payload.status);
       task.completedAt = activity.createdAt;
+      task.outcome = text(payload.status, 20);
+      task.tested = payload.tested === true;
+      task.verdict = text(payload.verdict, 20);
+      task.usage = crewUsage(payload.usage);
     }
   }
 
-  const byTurn = new Map<string, Array<ToolStep & { role: string }>>();
+  const byTurn = new Map<string, CrewStep[]>();
   for (const task of tasks.values())
     byTurn.set(task.turnId, [...(byTurn.get(task.turnId) ?? []), task]);
-  return [...byTurn.entries()].map(([turnId, turnTasks]) => {
-    const sorted = turnTasks.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-    const delegated = sorted.filter((task) => task.role !== "auditor");
-    const audits = sorted.filter((task) => task.role === "auditor");
+  return [...byTurn.entries()];
+}
+
+/** One lead turn's crew: who was delegated to, who audited, what it cost, and how to draw each. */
+function crewTurn(turnTasks: ReadonlyArray<CrewStep>) {
+  const sorted = [...turnTasks].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+  const evidence = crewEvidence(
+    sorted.map((task): CrewEvidenceTask => ({
+      id: task.id,
+      role: task.role,
+      outcome: task.outcome,
+      tested: task.tested,
+      completedAt: task.completedAt,
+      verdict: task.verdict,
+    })),
+  );
+  const toNode = (task: CrewStep, wave: number): WorkflowNode => ({
+    id: task.id,
+    label: task.label,
+    state: task.state,
+    wave,
+    info: {
+      actor: { role: crewActorRole(task.role), ...optional("task", task.title) },
+      ...optional("subtitle", task.subtitle),
+      ...optional("model", task.model),
+      ...optional("progress", task.progress),
+      startedAt: task.startedAt,
+      ...optional("completedAt", task.completedAt),
+      ...optional("tokens", task.usage?.tokens),
+      ...optional("costUsd", task.usage?.costUsd),
+      ...optional("evidence", evidence.get(task.id)),
+      crew: {
+        taskId: task.id,
+        role: task.role,
+        ...optional("threadId", task.threadId),
+        ...optional("outcome", task.outcome),
+      },
+    },
+  });
+  return {
+    sorted,
+    delegated: sorted.filter((task) => task.role !== "auditor"),
+    audits: sorted.filter((task) => task.role === "auditor"),
+    usage: crewTurnUsage(sorted.map((task) => task.usage)),
+    toNode,
+  };
+}
+
+/**
+ * One graph per lead turn that used OOP Crew: the brain fans work out to workers and experts
+ * (overlapping tasks share a column) and the auditor reviews last.
+ */
+export function crewGraphs(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): WorkflowGraph[] {
+  return collectCrewTasks(activities).map(([turnId, turnTasks]) => {
+    const { sorted, delegated, audits, usage, toNode } = crewTurn(turnTasks);
     const columns = turnColumns(delegated);
     const brainId = `brain:${turnId}`;
     const working = delegated.some((task) => task.state === "running");
@@ -484,21 +730,14 @@ export function crewGraphs(
       label: "Brain · lead",
       state: working || delegated.length === 0 ? "running" : "completed",
       wave: 0,
-      info: { subtitle: "Plans and hands out the work", startedAt: sorted[0]?.startedAt ?? "" },
-    };
-    const toNode = (task: ToolStep, wave: number): WorkflowNode => ({
-      id: task.id,
-      label: task.label,
-      state: task.state,
-      wave,
       info: {
-        ...optional("subtitle", task.subtitle),
-        ...optional("model", task.model),
-        ...optional("progress", task.progress),
-        startedAt: task.startedAt,
-        ...optional("completedAt", task.completedAt),
+        subtitle: "Plans and hands out the work",
+        startedAt: sorted[0]?.startedAt ?? "",
+        ...optional("tokens", usage?.tokens),
+        ...optional("costUsd", usage?.costUsd),
+        ...(usage?.unpriced === true ? { unpriced: true } : {}),
       },
-    });
+    };
     const nodes: WorkflowNode[] = [
       brain,
       ...columns.flatMap((column, index) =>
@@ -668,12 +907,209 @@ export function threadFlows(input: {
   ).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+function latest(times: ReadonlyArray<string | undefined>): string {
+  return times.reduce<string>(
+    (newest, time) => (time !== undefined && time > newest ? time : newest),
+    "",
+  );
+}
+
+interface TurnInput {
+  readonly turnId: string;
+  readonly steps: ReadonlyArray<ToolStep>;
+  readonly tasks: ReadonlyArray<CrewStep>;
+  /** Whether the lead's turn still runs; nothing in a finished turn is still working. */
+  readonly live: boolean;
+  readonly leadModel: string | null;
+  /** When a running turn began, which may be before its first tool call. */
+  readonly startedAt: string | undefined;
+  /** The turn's tool calls as a step graph, kept behind the agent view for a closer look. */
+  readonly stepGraph: WorkflowGraph | undefined;
+}
+
+/** A subagent or workflow a tool call launched, as a node of its own. */
+function launchNode(step: ToolStep): WorkflowNode {
+  return {
+    id: step.id,
+    label: step.label,
+    state: step.state,
+    wave: 0,
+    info: {
+      actor: {
+        role: step.launch === "workflow" ? "workflow" : "subagent",
+        ...optional("task", step.launchTitle),
+      },
+      ...stepInfo(step),
+    },
+  };
+}
+
+/** A turn drawn as agents: the main agent, then the crew and subagents it handed work to. */
+function agentFlowOfTurn(input: TurnInput): WorkflowGraph {
+  const { turnId, steps, live } = input;
+  const crew = crewTurn(input.tasks);
+  const updatedAt =
+    latest([
+      ...steps.flatMap((step) => [step.startedAt, step.completedAt]),
+      ...crew.sorted.flatMap((task) => [task.startedAt, task.completedAt]),
+    ]) ||
+    input.startedAt ||
+    "";
+  const startedAt =
+    [steps[0]?.startedAt, crew.sorted[0]?.startedAt, input.startedAt]
+      .filter((time): time is string => time !== undefined && time !== "")
+      .sort()[0] ?? "";
+
+  // A turn that has ended leaves nothing running: a task with no final report reads as stopped.
+  const settle = (node: WorkflowNode): WorkflowNode =>
+    live || node.state !== "running"
+      ? node
+      : {
+          ...node,
+          state: "cancelled",
+          info: { ...node.info, completedAt: node.info.completedAt ?? updatedAt },
+        };
+  const delegates = [
+    ...crew.delegated.map((task) => crew.toNode(task, 0)),
+    ...steps.filter((step) => step.launch !== undefined).map(launchNode),
+  ]
+    .map(settle)
+    .sort(
+      (a, b) =>
+        (a.info.startedAt ?? "").localeCompare(b.info.startedAt ?? "") || a.id.localeCompare(b.id),
+    );
+  const delegateById = new Map(delegates.map((node) => [node.id, node]));
+  const columns = turnColumns(
+    delegates.map((node) => ({
+      id: node.id,
+      startedAt: node.info.startedAt ?? "",
+      completedAt: node.info.completedAt,
+    })),
+  );
+  const audits = crew.audits.map((task) => settle(crew.toNode(task, columns.length + 1)));
+  const children = [...delegates, ...audits];
+
+  let runningTool: ToolStep | undefined;
+  for (const step of steps) {
+    if (step.state === "running" && step.category !== null) runningTool = step;
+  }
+  const doing: WorkflowDoing | undefined = live
+    ? (runningTool?.category ??
+      (children.some((child) => child.state === "running") ? "waiting" : "thinking"))
+    : undefined;
+  const mainId = `${MAIN_NODE_PREFIX}${turnId}`;
+  const main: WorkflowNode = {
+    id: mainId,
+    label: "Main agent",
+    state: live ? "running" : "completed",
+    wave: 0,
+    info: {
+      actor: {
+        role: "main",
+        tools: toolCounts(steps.map((step) => step.category)),
+        ...optional("doing", doing),
+        ...(crew.delegated.length > 0 ? { delegated: crew.delegated.length } : {}),
+      },
+      ...optional("model", input.leadModel),
+      startedAt,
+      ...(live ? {} : { completedAt: updatedAt }),
+      ...optional("tokens", crew.usage?.tokens),
+      ...optional("costUsd", crew.usage?.costUsd),
+      ...(crew.usage?.unpriced === true ? { unpriced: true } : {}),
+    },
+  };
+  const nodes: WorkflowNode[] = [
+    main,
+    ...columns.flatMap((column, index) =>
+      column.flatMap((id) => {
+        const node = delegateById.get(id);
+        return node === undefined ? [] : [{ ...node, wave: index + 1 }];
+      }),
+    ),
+    ...audits,
+  ];
+  const chain = [[mainId], ...columns, audits.map((node) => node.id)].filter(
+    (column) => column.length > 0,
+  );
+  const edges: WorkflowEdge[] = [];
+  for (let index = 1; index < chain.length; index += 1) {
+    edges.push(...connectColumns(chain[index - 1] ?? [], chain[index] ?? []));
+  }
+  return {
+    id: `turn:${turnId}`,
+    kind: crew.sorted.length > 0 ? "crew" : "turn",
+    turnId,
+    name: "Turn",
+    status: live ? "running" : children.length === 0 ? "completed" : graphStatus(children),
+    startedAt,
+    updatedAt,
+    waveTitles: [
+      "Main agent",
+      ...columns.map(() => "Delegated work"),
+      ...(audits.length > 0 ? ["Review"] : []),
+    ],
+    nodes,
+    edges,
+    ...(input.stepGraph === undefined ? {} : { steps: input.stepGraph }),
+  };
+}
+
+/**
+ * Every flow in a thread as the agents doing the work, newest first. One turn is one flow: the
+ * main agent, the crew it delegated to, and the subagents and workflows it launched, each a node.
+ * The turn's tool calls stay available as `steps`. Provider workflows are flows of their own.
+ */
+export function actorFlows(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly agents: AgentPanelModel;
+  /** The running turn, or null when the thread is idle. */
+  readonly activeTurnId: string | null;
+  /** When the running turn started; lets a turn that has called no tool yet show its agent. */
+  readonly activeTurnStartedAt?: string | null;
+  /** The main agent's model, as the composer selected it. */
+  readonly leadModel?: string | null;
+}): WorkflowGraph[] {
+  const { activeTurnId } = input;
+  const turns = collectToolSteps(input.activities);
+  const rawTurns = new Map(turns.map((turn, index) => [turn.turnId, turnGraphOf(turn, index)]));
+  const stepsByTurn = new Map(turns.map((turn) => [turn.turnId, turn.steps]));
+  const tasksByTurn = new Map(collectCrewTasks(input.activities));
+  const turnIds = new Set([...stepsByTurn.keys(), ...tasksByTurn.keys()]);
+  if (typeof activeTurnId === "string" && typeof input.activeTurnStartedAt === "string") {
+    turnIds.add(activeTurnId);
+  }
+  const built = [...turnIds]
+    .map((turnId) => {
+      const raw = rawTurns.get(turnId);
+      return agentFlowOfTurn({
+        turnId,
+        steps: stepsByTurn.get(turnId) ?? [],
+        tasks: tasksByTurn.get(turnId) ?? [],
+        live: turnId === activeTurnId,
+        leadModel: input.leadModel ?? null,
+        startedAt: turnId === activeTurnId ? (input.activeTurnStartedAt ?? undefined) : undefined,
+        stepGraph: raw === undefined ? undefined : settleWithTurn(raw, activeTurnId),
+      });
+    })
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+    .map((flow, index): WorkflowGraph => ({
+      ...flow,
+      name: `Turn ${index + 1}`,
+      turnIndex: index + 1,
+    }));
+  return [...built, ...workflowGraphs(input.agents)].sort((a, b) =>
+    b.startedAt.localeCompare(a.startedAt),
+  );
+}
+
 const LEAD_TRAIL = 6;
 
 export interface LeadFlowStep {
   readonly id: string;
   readonly label: string;
   readonly state: WorkflowNodeState;
+  /** What kind of work the step is; absent for steps that launch agents. */
+  readonly category?: ToolCategory;
 }
 
 /** What the thread's own agent is doing in its latest turn, for the Agents panel's lead row. */
@@ -683,6 +1119,8 @@ export interface LeadFlowSummary {
   readonly state: "working" | "thinking" | "done";
   /** Tool steps the turn has taken so far. */
   readonly steps: number;
+  /** Every tool call the turn made so far, by category. */
+  readonly tools: ReadonlyArray<ToolCount>;
   readonly current: LeadFlowStep | null;
   /** The last few steps in order, ending with the current one while the turn runs. */
   readonly recent: ReadonlyArray<LeadFlowStep>;
@@ -702,6 +1140,7 @@ export function leadFlowSummary(flows: ReadonlyArray<WorkflowGraph>): LeadFlowSu
     id: node.id,
     label: node.label,
     state: node.state,
+    ...optional("category", node.info.toolCategory),
   });
   const thinking = ordered.find((node) => node.id.startsWith(THINKING_NODE_PREFIX));
   const running = ordered.find((node) => node !== thinking && node.state === "running");
@@ -710,6 +1149,7 @@ export function leadFlowSummary(flows: ReadonlyArray<WorkflowGraph>): LeadFlowSu
     turnId: turn.turnId,
     state: running !== undefined ? "working" : thinking !== undefined ? "thinking" : "done",
     steps: ordered.length - (thinking === undefined ? 0 : 1),
+    tools: turn.tools ?? [],
     current: current === undefined ? null : step(current),
     recent: ordered.slice(-LEAD_TRAIL).map(step),
   };

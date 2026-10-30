@@ -57,7 +57,7 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
 );
 
 it.effect(
-  "always grants pull-requests and crew and gates browser and device access independently",
+  "always grants pull-requests, crew and memory and gates browser and device access independently",
   () =>
     Effect.gen(function* () {
       const registry = yield* makeRegistry(() => 1_000);
@@ -81,9 +81,19 @@ it.effect(
           .resolve(issued.config.authorizationHeader.replace(/^Bearer\s+/, ""))
           .pipe(Effect.map((scope) => [...(scope?.capabilities ?? [])].sort()));
 
-      expect(yield* capabilitiesOf(withPreview)).toEqual(["crew", "preview", "pull-requests"]);
-      expect(yield* capabilitiesOf(withoutPreview)).toEqual(["crew", "pull-requests"]);
-      expect(yield* capabilitiesOf(withDevice)).toEqual(["crew", "device", "pull-requests"]);
+      expect(yield* capabilitiesOf(withPreview)).toEqual([
+        "crew",
+        "memory",
+        "preview",
+        "pull-requests",
+      ]);
+      expect(yield* capabilitiesOf(withoutPreview)).toEqual(["crew", "memory", "pull-requests"]);
+      expect(yield* capabilitiesOf(withDevice)).toEqual([
+        "crew",
+        "device",
+        "memory",
+        "pull-requests",
+      ]);
     }),
 );
 

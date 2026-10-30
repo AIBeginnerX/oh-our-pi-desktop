@@ -31,7 +31,7 @@ import {
   type ProviderDriver,
   type ProviderInstance,
 } from "../ProviderDriver.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
   makeCachedProviderMaintenanceResolution,
   makePackageManagedProviderMaintenanceResolver,
@@ -88,7 +88,9 @@ export const ZCodeDriver: ProviderDriver<ZCodeSettings, ZCodeDriverEnv> = {
       const path = yield* Path.Path;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+      const processEnv = makeProviderProcessEnvironment(environment, process.env, {
+        ...(config.telemetry ? { telemetryOn: "zcode" as const } : {}),
+      });
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER_KIND,
         instanceId,
@@ -106,6 +108,7 @@ export const ZCodeDriver: ProviderDriver<ZCodeSettings, ZCodeDriverEnv> = {
         enabled,
         binaryPath: effectiveConfig.binaryPath,
         customModels: effectiveConfig.customModels,
+        telemetry: effectiveConfig.telemetry,
       } satisfies GrokSettings;
       const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
         resolveProviderMaintenanceCapabilitiesEffect(ZCODE_MAINTENANCE, {

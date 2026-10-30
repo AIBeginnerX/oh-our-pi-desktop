@@ -77,7 +77,9 @@ import { readLocalApi } from "~/localApi";
 import { confirmTerminalClose } from "~/lib/terminalCloseConfirm";
 import { useClientSettings } from "../hooks/useSettings";
 import { useLocalStorage } from "../hooks/useLocalStorage";
-import { useAttachedTerminalSession } from "../state/terminalSessions";
+import { useAttachedTerminalSession, useThreadRunningTerminalIds } from "../state/terminalSessions";
+import { useT } from "../i18n";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { serverEnvironment } from "../state/server";
 import { previewEnvironment } from "../state/preview";
 import { terminalEnvironment } from "../state/terminal";
@@ -1077,6 +1079,12 @@ export default function ThreadTerminalDrawer({
   terminalLaunchLocationsById,
 }: ThreadTerminalDrawerProps) {
   const isPanel = mode === "panel";
+  const t = useT();
+  const runningTerminalIds = useThreadRunningTerminalIds({
+    environmentId: threadRef.environmentId,
+    threadId,
+  });
+  const runningTerminalIdSet = useMemo(() => new Set(runningTerminalIds), [runningTerminalIds]);
   const [advancedTypography] = useLocalStorage(
     TYPOGRAPHY_ADVANCED_STORAGE_KEY,
     false,
@@ -1280,11 +1288,13 @@ export default function ThreadTerminalDrawer({
   const confirmCloseTerminal = useCallback(
     (terminalId: string) => {
       const label = terminalLabelById.get(terminalId) ?? getTerminalLabel(terminalId);
-      void confirmTerminalClose([label]).then((confirmed) => {
-        if (confirmed) onCloseTerminal(terminalId);
-      });
+      void confirmTerminalClose([label], { running: runningTerminalIdSet.has(terminalId) }).then(
+        (confirmed) => {
+          if (confirmed) onCloseTerminal(terminalId);
+        },
+      );
     },
-    [onCloseTerminal, terminalLabelById],
+    [onCloseTerminal, runningTerminalIdSet, terminalLabelById],
   );
 
   useEffect(() => {
@@ -1699,6 +1709,20 @@ export default function ThreadTerminalDrawer({
                               >
                                 <span className="truncate">{terminalLabel}</span>
                               </button>
+                              {runningTerminalIdSet.has(terminalId) ? (
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={
+                                      <span
+                                        role="img"
+                                        aria-label={t("Process running")}
+                                        className="size-1.5 shrink-0 rounded-full bg-success"
+                                      />
+                                    }
+                                  />
+                                  <TooltipPopup side="top">{t("Process running")}</TooltipPopup>
+                                </Tooltip>
+                              ) : null}
                             </div>
                           );
                         })}

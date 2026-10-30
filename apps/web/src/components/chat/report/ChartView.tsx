@@ -1,67 +1,29 @@
 import {
   formatCompact,
   niceScale,
-  textWidth,
+  stackSeries,
   type ChartItem,
   type ChartSpec,
 } from "@t3tools/client-runtime/visual-blocks";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
+import { CalendarHeatmap } from "./CalendarHeatmap";
+import { smoothPath, stepPath } from "./chartLayout";
+import {
+  Legend,
+  XAxisLabels,
+  clipToWidth,
+  reportColor,
+  svgId,
+  useWidth,
+  widthAt,
+  withUnit,
+} from "./chartShared";
+import { BumpChart, SlopeChart, SparklineList, StreamChart } from "./TrendCharts";
 
-export const reportColor = (index: number) => `var(--report-${(index % 6) + 1})`;
-
-const svgId = (raw: string) => raw.replaceAll(/[^a-zA-Z0-9_-]/g, "");
-
-function useWidth(fallback: number) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(fallback);
-  useLayoutEffect(() => {
-    const element = ref.current;
-    if (element === null) return;
-    setWidth(Math.floor(element.getBoundingClientRect().width) || fallback);
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry !== undefined && entry.contentRect.width > 0) {
-        setWidth(Math.floor(entry.contentRect.width));
-      }
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [fallback]);
-  return [ref, width] as const;
-}
-
-const withUnit = (value: number, unit: string | undefined) =>
-  `${formatCompact(value)}${unit ? ` ${unit}` : ""}`;
-
-/** Width of SVG text at `fontSize`; textWidth measures 12px text. */
-const widthAt = (value: string, fontSize: number) => (textWidth(value) * fontSize) / 12;
-
-/** Shortens a label to fit `width` pixels at `fontSize`, ending in an ellipsis when cut. */
-function clipToWidth(label: string, width: number, fontSize: number): string {
-  if (widthAt(label, fontSize) <= width) return label;
-  let clipped = "";
-  for (const char of label) {
-    if (widthAt(`${clipped}${char}…`, fontSize) > width) break;
-    clipped += char;
-  }
-  return clipped.length === 0 ? "…" : `${clipped}…`;
-}
-
-function Legend({ names }: { names: ReadonlyArray<string> }) {
-  if (names.length < 2) return null;
-  return (
-    <div className="mb-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      {names.map((name, index) => (
-        <span key={name + index} className="flex items-center gap-1.5">
-          <span className="size-2.5 rounded-sm" style={{ background: reportColor(index) }} />
-          {name}
-        </span>
-      ))}
-    </div>
-  );
-}
+export { reportColor };
 
 /** One ```chart block drawn as SVG; every shape animates in once when it mounts. */
 export function ChartView({ spec }: { spec: ChartSpec }) {
@@ -69,7 +31,18 @@ export function ChartView({ spec }: { spec: ChartSpec }) {
     case "bar":
     case "line":
     case "area":
+    case "step":
       return <CartesianChart spec={spec} />;
+    case "sparkline":
+      return <SparklineList spec={spec} />;
+    case "slope":
+      return <SlopeChart spec={spec} />;
+    case "bump":
+      return <BumpChart spec={spec} />;
+    case "calendar":
+      return <CalendarHeatmap spec={spec} />;
+    case "stream":
+      return <StreamChart spec={spec} />;
     case "hbar":
       return <HorizontalBars spec={spec} />;
     case "pie":
@@ -92,27 +65,29 @@ function CartesianChart({ spec }: { spec: ChartSpec }) {
   const innerHeight = height - margin.top - margin.bottom;
   const count = spec.labels.length;
   const stacked = spec.kind === "bar" && spec.stacked && spec.series.length > 1;
+  const stackedArea = spec.kind === "area" && spec.stacked && spec.series.length > 1;
+  const bands = stackedArea ? stackSeries(spec.series, count, "zero") : [];
 
-  const values = stacked
-    ? spec.labels.flatMap((_, index) => {
-        let positive = 0;
-        let negative = 0;
-        for (const series of spec.series) {
-          const value = series.data[index] ?? Number.NaN;
-          if (!Number.isFinite(value)) continue;
-          if (value >= 0) positive += value;
-          else negative += value;
-        }
-        return [positive, negative];
-      })
-    : spec.series.flatMap((series) => series.data.filter(Number.isFinite));
+  const values = stackedArea
+    ? [0, ...bands.flatMap((entry) => entry.upper)]
+    : stacked
+      ? spec.labels.flatMap((_, index) => {
+          let positive = 0;
+          let negative = 0;
+          for (const series of spec.series) {
+            const value = series.data[index] ?? Number.NaN;
+            if (!Number.isFinite(value)) continue;
+            if (value >= 0) positive += value;
+            else negative += value;
+          }
+          return [positive, negative];
+        })
+      : spec.series.flatMap((series) => series.data.filter(Number.isFinite));
   const scale = niceScale(Math.min(...values), Math.max(...values));
   const y = (value: number) =>
     margin.top + innerHeight - ((value - scale.min) / (scale.max - scale.min)) * innerHeight;
   const zeroY = y(0);
   const band = innerWidth / count;
-  const widestLabel = Math.max(...spec.labels.map((label) => widthAt(label, 10)));
-  const labelEvery = Math.max(1, Math.ceil(Math.min(widestLabel + 10, 90) / band));
   const xOf = (index: number) =>
     spec.kind === "bar"
       ? margin.left + band * index + band / 2
@@ -155,36 +130,44 @@ function CartesianChart({ spec }: { spec: ChartSpec }) {
             </text>
           </g>
         ))}
-        {spec.labels.map((label, index) =>
-          index % labelEvery === 0 ? (
-            <text
-              key={label + index}
-              x={xOf(index)}
-              y={height - 10}
-              textAnchor="middle"
-              fontSize="10"
-              className="fill-muted-foreground"
-            >
-              {clipToWidth(label, band * labelEvery - 6, 10)}
-            </text>
-          ) : null,
-        )}
+        <XAxisLabels labels={spec.labels} xOf={xOf} band={band} y={height - 10} />
         {spec.kind === "bar" ? (
           <Bars spec={spec} stacked={stacked} band={band} margin={margin} y={y} />
+        ) : stackedArea ? (
+          <g className="motion-safe:rpt-reveal-x">
+            {bands.map((entry, index) => {
+              const upper = entry.upper.map((value, at) => [xOf(at), y(value)] as const);
+              const lower = entry.lower.map((value, at) => [xOf(at), y(value)] as const);
+              const top = smoothPath(upper);
+              return (
+                <g key={entry.name + index}>
+                  <path
+                    d={`${top} ${smoothPath(lower.toReversed(), "L")} Z`}
+                    fill={reportColor(index)}
+                    fillOpacity={0.5}
+                  >
+                    <title>{entry.name}</title>
+                  </path>
+                  <path
+                    d={top}
+                    fill="none"
+                    stroke={reportColor(index)}
+                    strokeWidth={2}
+                    strokeLinejoin="round"
+                  />
+                </g>
+              );
+            })}
+          </g>
         ) : (
           spec.series.map((series, seriesIndex) => {
             const points = series.data.flatMap((value, index) =>
               Number.isFinite(value) ? [[xOf(index), y(value), value] as const] : [],
             );
             if (points.length === 0) return null;
-            const line = points
-              .map(([px, py], index) => {
-                if (index === 0) return `M ${px} ${py}`;
-                const [ox, oy] = points[index - 1]!;
-                const dx = (px - ox) / 3;
-                return `C ${ox + dx} ${oy}, ${px - dx} ${py}, ${px} ${py}`;
-              })
-              .join(" ");
+            const line = (spec.kind === "step" ? stepPath : smoothPath)(
+              points.map(([px, py]) => [px, py] as const),
+            );
             const first = points[0]!;
             const last = points.at(-1)!;
             const spacing = points.length > 1 ? innerWidth / (count - 1) : innerWidth;

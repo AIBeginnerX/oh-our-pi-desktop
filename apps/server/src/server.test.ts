@@ -1790,6 +1790,9 @@ const buildAppUnderTest = (options?: {
             }),
         })),
         Layer.provideMerge(projectMemoryServiceLayer),
+        // The MCP memory toolkit reads the send gate. This is the same layer
+        // value the real provider stack uses, so one gate is memoized per build.
+        Layer.provideMerge(memoryGateLayer),
       )
       .pipe(
         // Expose the same memoized in-memory SqlClient on the built context so
@@ -16576,6 +16579,7 @@ it.effect("production memory policy binds descriptor and gate to Claude only", (
       manage: true,
       send: true,
       threadRecovery: true,
+      proposals: true,
       sendDriverKinds: [ProviderDriverKind.make("claudeAgent")],
     });
     assert.deepEqual(descriptor.capabilities.projectSkills, {
@@ -16607,6 +16611,7 @@ it.effect("production memory policy binds descriptor and gate to Claude only", (
       manage: true,
       send: false,
       threadRecovery: true,
+      proposals: true,
     });
     assert.deepEqual(controlDescriptor.capabilities.projectSkills, {
       manage: true,
