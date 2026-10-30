@@ -87,6 +87,18 @@
       "types": "./src/rpc/index.ts",
       "default": "./src/rpc/index.ts"
     },
+    "./rpc/session": {
+      "types": "./src/rpc/session.ts",
+      "default": "./src/rpc/session.ts"
+    },
+    "./state/thread-reducer": {
+      "types": "./src/state/threadReducer.ts",
+      "default": "./src/state/threadReducer.ts"
+    },
+    "./state/shell-reducer": {
+      "types": "./src/state/shellReducer.ts",
+      "default": "./src/state/shellReducer.ts"
+    },
     "./operations": {
       "types": "./src/operations/index.ts",
       "default": "./src/operations/index.ts"

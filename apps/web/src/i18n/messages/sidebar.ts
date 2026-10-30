@@ -326,4 +326,65 @@ export const SIDEBAR_MESSAGES: MessageCatalog = {
     es: "{name} para empezar",
   },
   Settle: { ko: "정리", ja: "完了", "zh-CN": "归档", es: "Cerrar" },
+  "Use this computer's OOP from your phone's browser or the OOP app.": {
+    ko: "모바일 웹 또는 OOP 앱으로 연결",
+    ja: "このコンピューターの OOP を、スマートフォンのブラウザーまたは OOP アプリから使えます。",
+    "zh-CN": "通过手机浏览器或 OOP 应用使用这台电脑上的 OOP。",
+    es: "Usa el OOP de este equipo desde el navegador del teléfono o la app de OOP.",
+  },
+  "Mobile web": { ko: "모바일 웹", ja: "モバイル Web", "zh-CN": "手机网页版", es: "Web móvil" },
+  "OOP app": { ko: "OOP 앱", ja: "OOP アプリ", "zh-CN": "OOP 应用", es: "App de OOP" },
+  "How to connect": {
+    ko: "연결 방법",
+    ja: "接続方法",
+    "zh-CN": "连接方式",
+    es: "Cómo conectar",
+  },
+  "Scan with your phone camera to open OOP": {
+    ko: "휴대폰 카메라로 스캔해 OOP 열기",
+    ja: "スマートフォンのカメラでスキャンして OOP を開く",
+    "zh-CN": "用手机相机扫描以打开 OOP",
+    es: "Escanea con la cámara del teléfono para abrir OOP",
+  },
+  "Scan with the OOP app to connect": {
+    ko: "OOP 앱으로 스캔해 연결",
+    ja: "OOP アプリでスキャンして接続",
+    "zh-CN": "用 OOP 应用扫描以连接",
+    es: "Escanea con la app de OOP para conectar",
+  },
+  "Copy pairing link": {
+    ko: "페어링 링크 복사",
+    ja: "ペアリングリンクをコピー",
+    "zh-CN": "复制配对链接",
+    es: "Copiar enlace de emparejamiento",
+  },
+  Copied: { ko: "복사됨", ja: "コピーしました", "zh-CN": "已复制", es: "Copiado" },
+  "Could not copy the pairing link.": {
+    ko: "페어링 링크를 복사하지 못했습니다.",
+    ja: "ペアリングリンクをコピーできませんでした。",
+    "zh-CN": "无法复制配对链接。",
+    es: "No se pudo copiar el enlace de emparejamiento.",
+  },
+  "Scan with your phone camera to open OOP in the browser.": {
+    ko: "휴대폰 카메라로 스캔하면 브라우저에서 OOP가 열립니다.",
+    ja: "スマートフォンのカメラでスキャンすると、ブラウザーで OOP が開きます。",
+    "zh-CN": "用手机相机扫描，即可在浏览器中打开 OOP。",
+    es: "Escanea con la cámara del teléfono para abrir OOP en el navegador.",
+  },
+  "Open the OOP app, choose Connect with QR code, and scan this code. If the app isn't installed, choose Mobile web.":
+    {
+      ko: "OOP 앱을 열고 [QR 코드로 연결]에서 이 QR을 스캔하세요. 앱이 없으면 '모바일 웹'을 선택하세요.",
+      ja: "OOP アプリを開き、[QR コードで接続] を選んでこのコードをスキャンしてください。アプリがない場合は「モバイル Web」を選んでください。",
+      "zh-CN":
+        "打开 OOP 应用，选择“通过二维码连接”并扫描此二维码。如果尚未安装应用，请选择“手机网页版”。",
+      es: "Abre la app de OOP, elige Conectar con código QR y escanea este código. Si no tienes la app instalada, elige Web móvil.",
+    },
+  "Once paired, the phone reconnects on its own whenever this computer is online. Manage paired phones in Settings → Connections.":
+    {
+      ko: "한 번 페어링하면 이 컴퓨터가 온라인일 때마다 휴대폰이 자동으로 다시 연결됩니다. 페어링된 휴대폰은 설정 → 연결에서 관리하세요.",
+      ja: "一度ペアリングすると、このコンピューターがオンラインの間、スマートフォンは自動的に再接続されます。ペアリング済みのスマートフォンは、設定 → 接続で管理できます。",
+      "zh-CN":
+        "配对完成后，只要这台电脑在线，手机就会自动重新连接。可在“设置 → 连接”中管理已配对的手机。",
+      es: "Una vez emparejado, el teléfono se reconecta solo siempre que este equipo esté en línea. Gestiona los teléfonos emparejados en Configuración → Conexiones.",
+    },
 };

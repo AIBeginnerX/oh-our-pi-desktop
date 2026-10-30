@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.0.127",
+      "date": "2026-10-31",
+      "highlights": [
+        {
+          "en": "Connect mobile now has a Mobile web / OOP app switch. Pick OOP app to get a QR code for the OOP mobile app. Your choice is remembered.",
+          "ko": "Connect mobile 창에 모바일 웹 / OOP 앱 스위치가 생겼습니다. OOP 앱을 고르면 모바일 앱용 QR이 나오고, 선택은 다음에도 유지됩니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.126",
       "date": "2026-10-30",
       "highlights": [

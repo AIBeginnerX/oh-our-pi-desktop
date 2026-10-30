@@ -42,6 +42,10 @@ To use the desktop from a phone browser, click the phone icon next to Settings i
 the sidebar. It turns on network access if needed and shows a one-time QR code
 for this computer. Scan it with the phone camera.
 
+With the OOP mobile app installed, pick **OOP app** in the same dialog and scan
+the code from the app's **Connect with QR code** screen instead. The dialog
+remembers your choice.
+
 To use it away from your Wi-Fi without router setup, deploy your own Cloudflare
 relay once (see `infra/oop-relay/README.md`), then enter its address under
 **Use away from home** in the same dialog. The desktop dials out to the relay,

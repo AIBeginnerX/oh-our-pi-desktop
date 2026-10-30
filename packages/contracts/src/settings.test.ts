@@ -301,6 +301,19 @@ describe("ClientSettings diff colors", () => {
   });
 });
 
+describe("ClientSettings mobile connect mode", () => {
+  it("defaults to mobile web", () => {
+    expect(decodeClientSettings({}).mobileConnectMode).toBe("mobile-web");
+  });
+
+  it("accepts the OOP app mode in a patch and rejects unknown modes", () => {
+    expect(decodeClientSettingsPatch({ mobileConnectMode: "oop-app" }).mobileConnectMode).toBe(
+      "oop-app",
+    );
+    expect(() => decodeClientSettingsPatch({ mobileConnectMode: "carrier-pigeon" })).toThrow();
+  });
+});
+
 describe("ClientSettings chat width", () => {
   it("keeps the comfortable width for existing settings without a saved width", () => {
     expect(decodeClientSettings({}).chatWidth).toBe("comfortable");

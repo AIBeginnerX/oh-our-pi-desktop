@@ -1,7 +1,7 @@
 import type { AdvertisedEndpoint } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { mobileConnectEndpoints } from "./mobileConnect.logic";
+import { mobileConnectEndpoints, mobileConnectQrValue } from "./mobileConnect.logic";
 
 function endpoint(
   id: string,
@@ -38,5 +38,25 @@ describe("mobileConnectEndpoints", () => {
       "lan",
       "unverified-forward",
     ]);
+  });
+});
+
+describe("mobileConnectQrValue", () => {
+  const pairingUrl = "http://192.168.0.163:3773/pair#token=ABC123";
+
+  it("leaves the pairing URL untouched for the mobile web", () => {
+    expect(mobileConnectQrValue(pairingUrl, "mobile-web")).toBe(pairingUrl);
+  });
+
+  it("wraps the pairing URL in the app's connect link", () => {
+    expect(mobileConnectQrValue(pairingUrl, "oop-app")).toBe(
+      "oop://connect?url=http%3A%2F%2F192.168.0.163%3A3773%2Fpair%23token%3DABC123",
+    );
+  });
+
+  it("round-trips the pairing URL, fragment included", () => {
+    const relayUrl = "https://relay.example.com/pair#token=ABC123";
+    const link = new URL(mobileConnectQrValue(relayUrl, "oop-app"));
+    expect(link.searchParams.get("url")).toBe(relayUrl);
   });
 });

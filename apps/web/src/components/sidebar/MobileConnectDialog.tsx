@@ -1,12 +1,15 @@
 import {
   AuthStandardClientScopes,
   type AdvertisedEndpoint,
+  type ClientSettings,
   type DesktopRemoteRelayState,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { createServerPairingCredential } from "~/environments/primary";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import {
   desktopNetworkAccessStateAtom,
@@ -14,6 +17,7 @@ import {
 } from "~/state/desktopNetworkAccess";
 import { useEnvironmentQuery } from "~/state/query";
 import { formatExpiresInLabel } from "~/timestampFormat";
+import { useT } from "../../i18n";
 import { resolveDesktopPairingUrl } from "../settings/pairingUrls";
 import { Button } from "../ui/button";
 import {
@@ -27,12 +31,19 @@ import {
 import { Input } from "../ui/input";
 import { QRCodeSvg } from "../ui/qr-code";
 import { Spinner } from "../ui/spinner";
-import { mobileConnectEndpoints, mobileEndpointHint } from "./mobileConnect.logic";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import {
+  mobileConnectEndpoints,
+  mobileConnectQrValue,
+  mobileEndpointHint,
+} from "./mobileConnect.logic";
 
 type MobilePairing = {
   readonly credential: string;
   readonly expiresAt: string;
 };
+
+const selectMobileConnectMode = (settings: ClientSettings) => settings.mobileConnectMode;
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message.trim().length > 0 ? error.message : fallback;
@@ -143,6 +154,9 @@ function RemoteRelaySection({ relayEndpoint }: { relayEndpoint: AdvertisedEndpoi
 }
 
 function MobileConnectPanel() {
+  const t = useT();
+  const mode = useClientSettings(selectMobileConnectMode);
+  const updateClientSettings = useUpdateClientSettings();
   const networkAccess = useEnvironmentQuery(desktopNetworkAccessStateAtom);
   const isNetworkAccessible = networkAccess.data?.serverExposureState.mode === "network-accessible";
   const endpoints = useMemo(
@@ -157,6 +171,10 @@ function MobileConnectPanel() {
   const [isCreatingPairing, setIsCreatingPairing] = useState(false);
   const [isEnablingNetwork, setIsEnablingNetwork] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { copyToClipboard, isCopied } = useCopyToClipboard({
+    target: "pairing link",
+    onError: (cause) => setError(errorMessage(cause, t("Could not copy the pairing link."))),
+  });
   const nowMs = useNowTick(pairing !== null);
   const isPairingExpired = pairing !== null && Date.parse(pairing.expiresAt) <= nowMs;
 
@@ -256,6 +274,21 @@ function MobileConnectPanel() {
 
   return (
     <div className="space-y-4">
+      <ToggleGroup
+        aria-label={t("How to connect")}
+        className="w-full *:flex-1"
+        value={[mode]}
+        onValueChange={(next) => {
+          const value = next[0];
+          if (value === "mobile-web" || value === "oop-app") {
+            updateClientSettings({ mobileConnectMode: value });
+          }
+        }}
+      >
+        <Toggle value="mobile-web">{t("Mobile web")}</Toggle>
+        <Toggle value="oop-app">{t("OOP app")}</Toggle>
+      </ToggleGroup>
+
       {endpoints.length > 1 ? (
         <div className="space-y-1.5" role="radiogroup" aria-label="How your phone reaches OOP">
           {endpoints.map((option) => {
@@ -298,16 +331,25 @@ function MobileConnectPanel() {
           <>
             <div className="w-fit rounded-xl bg-white p-3">
               <QRCodeSvg
-                value={pairingUrl}
+                value={mobileConnectQrValue(pairingUrl, mode)}
                 size={200}
                 level="M"
                 marginSize={1}
-                title="Scan with your phone camera to open OOP"
+                title={
+                  mode === "oop-app"
+                    ? t("Scan with the OOP app to connect")
+                    : t("Scan with your phone camera to open OOP")
+                }
               />
             </div>
             <p className="text-xs text-muted-foreground">
               {formatExpiresInLabel(pairing?.expiresAt ?? "", nowMs)} · one phone per code
             </p>
+            {mode === "oop-app" ? (
+              <Button size="xs" variant="outline" onClick={() => copyToClipboard(pairingUrl)}>
+                {isCopied ? t("Copied") : t("Copy pairing link")}
+              </Button>
+            ) : null}
           </>
         ) : (
           <div className="flex size-[224px] flex-col items-center justify-center gap-3 rounded-xl border border-border/50 p-4 text-center">
@@ -331,9 +373,16 @@ function MobileConnectPanel() {
       {remoteRelaySection}
 
       <p className="text-xs text-muted-foreground">
-        Scan with your phone camera to open OOP in the browser. Once paired, the phone reconnects on
-        its own whenever this computer is online. Manage paired phones in Settings → Connections.
+        {mode === "oop-app"
+          ? t(
+              "Open the OOP app, choose Connect with QR code, and scan this code. If the app isn't installed, choose Mobile web.",
+            )
+          : t("Scan with your phone camera to open OOP in the browser.")}{" "}
+        {t(
+          "Once paired, the phone reconnects on its own whenever this computer is online. Manage paired phones in Settings → Connections.",
+        )}
       </p>
+      {/* App store links go here once the listings are public. */}
     </div>
   );
 }
@@ -345,12 +394,15 @@ export function MobileConnectDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const t = useT();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Connect mobile</DialogTitle>
-          <DialogDescription>Use this computer's OOP from your phone's browser.</DialogDescription>
+          <DialogTitle>{t("Connect mobile")}</DialogTitle>
+          <DialogDescription>
+            {t("Use this computer's OOP from your phone's browser or the OOP app.")}
+          </DialogDescription>
         </DialogHeader>
         <DialogPanel>{open ? <MobileConnectPanel /> : null}</DialogPanel>
       </DialogPopup>

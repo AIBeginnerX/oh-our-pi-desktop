@@ -1,4 +1,8 @@
-import type { AdvertisedEndpoint, AdvertisedEndpointReachability } from "@t3tools/contracts";
+import type {
+  AdvertisedEndpoint,
+  AdvertisedEndpointReachability,
+  MobileConnectMode,
+} from "@t3tools/contracts";
 
 import { isQrShareableEndpoint } from "../settings/ConnectionsSettings.logic";
 
@@ -35,4 +39,13 @@ export function mobileEndpointHint(endpoint: AdvertisedEndpoint): string {
     case "loopback":
       return "Phone must be on the same Wi-Fi";
   }
+}
+
+/**
+ * What the QR code encodes. Mobile web is the plain pairing URL a phone camera
+ * opens in the browser. The OOP app gets a deep link around that same URL, so
+ * switching modes never needs a second credential.
+ */
+export function mobileConnectQrValue(pairingUrl: string, mode: MobileConnectMode): string {
+  return mode === "oop-app" ? `oop://connect?url=${encodeURIComponent(pairingUrl)}` : pairingUrl;
 }
