@@ -102,6 +102,13 @@ export class ServerConfig extends Context.Service<
     readonly logWebSocketEvents: boolean;
     readonly tailscaleServeEnabled: boolean;
     readonly tailscaleServePort: number;
+    /** `serve --daemon`: a headless server a terminal started when no app was running. */
+    readonly daemon?: boolean | undefined;
+    /**
+     * Hold `server.lock` for the server's lifetime so no second server can
+     * share the state directory. Opt-in: daemons and desktop-started servers.
+     */
+    readonly instanceLock?: boolean | undefined;
   }
 >()("t3/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */

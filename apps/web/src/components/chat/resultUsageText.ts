@@ -5,6 +5,7 @@ import type {
   OwnedResultUsageTrailingV1,
   OwnedResultUsageV1,
 } from "@t3tools/contracts";
+import { formatPercent } from "@t3tools/shared/usageFormat";
 import type { ResultUsageDisclosureState } from "../../state/resultUsage";
 
 /**
@@ -68,16 +69,38 @@ function formatCachePart(
   return `${label} ${cache.sum}(${cache.reportedTurns}/${completeTurns}턴 보고)`;
 }
 
+/**
+ * Cached share of observed input (cached + uncached). Recorded input includes
+ * cache writes, which are not part of "observed input", so they are taken out.
+ * Null unless every complete turn reported its cache reads (and any cache
+ * writes were reported for all turns or none) and observed input is above
+ * zero: an unreported dimension is not a 0% rate.
+ */
+function cacheHitRate(subtotal: OwnedMainUsageBucketV1["reportedCompleteSubtotal"]): number | null {
+  const { completeTurns, inputTokens, cachedInputTokens, cacheCreationTokens } = subtotal;
+  if (completeTurns === 0 || cachedInputTokens.reportedTurns !== completeTurns) return null;
+  if (
+    cacheCreationTokens.reportedTurns !== 0 &&
+    cacheCreationTokens.reportedTurns !== completeTurns
+  )
+    return null;
+  const observedInput = inputTokens - cacheCreationTokens.sum;
+  if (observedInput <= 0) return null;
+  return cachedInputTokens.sum / observedInput;
+}
+
 export function formatResultUsageBucketLine(bucket: OwnedMainUsageBucketV1): string {
   const scope = bucket.scope;
   const subtotal = bucket.reportedCompleteSubtotal;
   const conversation =
     scope.nativeConversationId === null ? "대화 미확인" : `대화 ${scope.nativeConversationId}`;
+  const hitRate = cacheHitRate(subtotal);
   return [
     `${scope.driver} · ${scope.instanceId} · ${conversation}`,
     `입력 ${subtotal.inputTokens}`,
     `출력 ${subtotal.outputTokens}`,
     formatCachePart("캐시 입력", subtotal.cachedInputTokens, subtotal.completeTurns),
+    ...(hitRate === null ? [] : [`캐시 적중률 ${formatPercent(hitRate)}`]),
     formatCachePart("캐시 생성", subtotal.cacheCreationTokens, subtotal.completeTurns),
     formatCachePart("추론", subtotal.reasoningTokens, subtotal.completeTurns),
     `완전 턴 ${subtotal.completeTurns}`,

@@ -16,6 +16,7 @@ describe("CursorTransportFailure", () => {
     "Error: ConnectError: [unavailable] transport closed",
     "Error: ConnectError: [aborted] aborted",
     "Error: ConnectError: [deadline_exceeded] timed out",
+    "Error: NonRetriableError: Provider Error We're having trouble connecting to the model provider. This might be temporary - please try again in a moment.",
     "Something went wrong communicating with the server. Please try again.",
   ])("recognizes a terminal diagnostic: %s", (message) => {
     expect(failureFor([message])).toBe(message);
@@ -38,6 +39,7 @@ describe("CursorTransportFailure", () => {
     "Error: ConnectError: [unauthenticated] sign in",
     "Error: ConnectError: [permission_denied] subscription required",
     "Error: HTTP 500 from the application being debugged",
+    "Error: NonRetriableError: the build script exited with 1",
     "Error: RetriableError: [internal] Failed to run step, exceeded max retries",
     "Error: RetriableError: [internal] Failed to run step, exceeded max retries\n    at step (cli.js:1:2)",
   ])("preserves prose, code and non-transport errors: %s", (message) => {

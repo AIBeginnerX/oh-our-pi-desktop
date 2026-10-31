@@ -77,6 +77,30 @@ describe("ClientSettings rich text composer", () => {
   });
 });
 
+describe("opt-in agent behaviour settings", () => {
+  it("are off for new and existing settings without a saved preference", () => {
+    expect(decodeServerSettings({}).continueUnfinishedPlans).toBe(false);
+    expect(DEFAULT_SERVER_SETTINGS.continueUnfinishedPlans).toBe(false);
+    expect(decodeClientSettings({}).turnStallNoticeEnabled).toBe(false);
+    expect(decodeClientSettings({ sendShortcut: "mod-enter" }).turnStallNoticeEnabled).toBe(false);
+  });
+
+  it("round-trip an explicit opt-in through patches and persistence", () => {
+    expect(decodeServerSettingsPatch({ continueUnfinishedPlans: true })).toEqual({
+      continueUnfinishedPlans: true,
+    });
+    expect(decodeClientSettingsPatch({ turnStallNoticeEnabled: true })).toEqual({
+      turnStallNoticeEnabled: true,
+    });
+    expect(
+      encodeServerSettings(decodeServerSettings({ continueUnfinishedPlans: true })),
+    ).toMatchObject({ continueUnfinishedPlans: true });
+    expect(
+      encodeClientSettings(decodeClientSettings({ turnStallNoticeEnabled: true })),
+    ).toMatchObject({ turnStallNoticeEnabled: true });
+  });
+});
+
 describe("ServerSettings default permissions", () => {
   it("keeps full access for settings saved before a default was configured", () => {
     expect(decodeServerSettings({}).defaultRuntimeMode).toBe("full-access");

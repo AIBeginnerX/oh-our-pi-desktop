@@ -104,6 +104,7 @@ import * as ProcessRunner from "./processRunner.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
+import * as ServerInstanceLock from "./serverInstanceLock.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
@@ -113,6 +114,7 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as ThreadSettlementReactor from "./orchestration/ThreadSettlementReactor.ts";
 import * as ThreadGoalReactor from "./orchestration/ThreadGoalReactor.ts";
+import * as ThreadPlanContinuationReactor from "./orchestration/ThreadPlanContinuationReactor.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
 import * as ThreadPullRequestReactor from "./orchestration/ThreadPullRequestReactor.ts";
@@ -295,6 +297,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(ThreadSettlementReactor.layer),
   Layer.provideMerge(ThreadGoalReactor.layer),
+  Layer.provideMerge(ThreadPlanContinuationReactor.layer),
   Layer.provideMerge(PullRequestSyncReactor.layer),
   Layer.provideMerge(ThreadPullRequestReactor.layer),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
@@ -797,7 +800,9 @@ const makeServerLayer = Layer.unwrap(
           );
         }),
         () =>
-          clearPersistedServerRuntimeState(config.serverRuntimeStatePath).pipe(
+          clearPersistedServerRuntimeState(config.serverRuntimeStatePath, {
+            ownerPid: process.pid,
+          }).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Failed to clear server runtime state", { cause }),
             ),
@@ -1114,5 +1119,8 @@ const makeServerLayer = Layer.unwrap(
   }),
 );
 
-// The CLI supplies configuration.
-export const runServer = Layer.launch(makeServerLayer);
+// The CLI supplies configuration. The instance lock is provided first so a
+// second server on the same data directory stops before building anything.
+export const runServer = Layer.launch(
+  makeServerLayer.pipe(Layer.provide(ServerInstanceLock.layer)),
+);

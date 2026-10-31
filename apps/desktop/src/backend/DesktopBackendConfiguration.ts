@@ -14,6 +14,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import serverPackageJson from "../../../server/package.json" with { type: "json" };
 
+import * as DesktopBackendInstanceLock from "./DesktopBackendInstanceLock.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopServerExposure from "./DesktopServerExposure.ts";
@@ -564,6 +565,9 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       tailscaleServePort: backendExposure.tailscaleServePort,
       desktopTelemetryFd: 4,
       desktopTelemetryControlFd: 5,
+      // One server per data directory; ensureInstanceLockFree hands the
+      // directory over from a terminal daemon before this one starts.
+      instanceLock: true,
       ...Option.match(input.resourceMonitorPath, {
         onNone: () => ({}),
         onSome: (resourceMonitorPath) => ({ resourceMonitorPath }),
@@ -891,6 +895,13 @@ export const make = Effect.gen(function* () {
   });
 
   const buildWindowsPrimaryConfig = Effect.gen(function* () {
+    // Runs on every start, including the restart after a server exits with
+    // code 75 (it lost the lock race), which is how the check-to-start gap
+    // closes. The WSL backend keeps its own Linux home and needs no handover.
+    yield* DesktopBackendInstanceLock.ensureInstanceLockFree(
+      { stateDir: environment.stateDir, joinPath: environment.path.join },
+      DesktopBackendInstanceLock.makeLivePorts(fileSystem),
+    );
     const shared = yield* sharedInputs;
     const resourceMonitorPath = yield* resolveResourceMonitorPath().pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),

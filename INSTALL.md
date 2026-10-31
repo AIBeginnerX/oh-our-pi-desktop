@@ -47,6 +47,17 @@ quarantine or Windows SmartScreen.
   AppImage is extracted and run directly, avoiding a FUSE requirement. Remove
   the launcher, `~/.local/share/oop-desktop`, and menu entry to uninstall.
 
+On macOS and Windows the installers also add an `oop` command: OOP in a terminal,
+which runs the terminal app bundled inside OOP and needs no Node.js. It goes to
+`~/.local/bin/oop` on macOS and `%LOCALAPPDATA%\oop-terminal\oop.cmd` on Windows
+(`OOP_BIN_DIR` overrides the folder). An existing `oop` that OOP did not create is
+never overwritten, and `PATH` is never edited: if `oop` is not found, add that
+folder to your `PATH`. On Windows, an app installed in a folder whose name has
+non-ASCII characters outside `%LOCALAPPDATA%` and `%ProgramFiles%` gets no command.
+Releases without the bundled terminal app get no command,
+and the Linux AppImage does not include it. See
+[`docs/user/terminal-app.md`](docs/user/terminal-app.md).
+
 Linux needs GTK and NSS runtime libraries and the Electron sandbox runtime
 dependencies. The Linux GUI and real Windows NSIS installation have not been
 verified.

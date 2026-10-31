@@ -19,6 +19,7 @@ import { readAgentActivityPublishingActive } from "../cloud/config.ts";
 import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
+import { APP_RELEASE_VERSION } from "../oopBuild.ts";
 import { ProjectMemorySendPolicy } from "../memory/ProjectMemorySendGate.ts";
 import { ProjectSkillUsePolicy } from "../skills/ProjectSkillUsePolicy.ts";
 import * as ProcessRunner from "../processRunner.ts";
@@ -219,10 +220,14 @@ export const make = Effect.gen(function* () {
       arch: platformArch(hostArchitecture),
       ...(machine === null ? {} : { machine }),
     },
+    // A terminal daemon reports the app release like the desktop does, or the
+    // terminal would take the upstream package version for an older app.
     serverVersion:
       serverConfig.mode === "desktop"
         ? (serverConfig.desktopAppVersion ?? packageJson.version)
-        : packageJson.version,
+        : serverConfig.daemon === true
+          ? APP_RELEASE_VERSION
+          : packageJson.version,
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     capabilities: {
       repositoryIdentity: true,

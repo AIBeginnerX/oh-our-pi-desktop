@@ -476,6 +476,9 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("queue")),
   ),
   proactivePanelsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Opt-in passive notice when a running turn has been silent for ten minutes. Derived in the
+  // client from the thread's last activity; it never interrupts or retries anything.
+  turnStallNoticeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   showSkillsInSlashMenu: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // Legacy sidebar (the original per-project tree). Deliberately a fresh key
   // (was `sidebarV2Enabled` + `sidebarV2ConfiguredByUser`): decoding drops the
@@ -1455,6 +1458,11 @@ export const ServerSettings = Schema.Struct({
   /** OOP Crew role assignments; see `crew.ts`. */
   crew: CrewSettings.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_CREW_SETTINGS))),
   threadGoals: ThreadGoals.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  /**
+   * Opt-in. When a turn ends normally with the agent's own plan or todo list unfinished and no
+   * goal active, the server sends up to two automatic continuations per user message.
+   */
+  continueUnfinishedPlans: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1760,6 +1768,7 @@ export const ServerSettingsPatch = Schema.Struct({
   /** Replaces the whole crew object; clients send the complete next value. */
   crew: Schema.optionalKey(CrewSettings),
   threadGoals: Schema.optionalKey(ThreadGoals),
+  continueUnfinishedPlans: Schema.optionalKey(Schema.Boolean),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
@@ -1843,6 +1852,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sendShortcut: Schema.optionalKey(Schema.Literals(["enter", "mod-enter-multiline", "mod-enter"])),
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),
   proactivePanelsEnabled: Schema.optionalKey(Schema.Boolean),
+  turnStallNoticeEnabled: Schema.optionalKey(Schema.Boolean),
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
   legacySidebarEnabled: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),

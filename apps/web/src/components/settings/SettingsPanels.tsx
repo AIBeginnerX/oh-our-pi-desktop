@@ -679,6 +679,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
         ? ["Proactive panels"]
         : []),
+      ...(settings.turnStallNoticeEnabled !== DEFAULT_UNIFIED_SETTINGS.turnStallNoticeEnabled
+        ? ["Quiet turn notice"]
+        : []),
       ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
         ? ["Show skills in slash menu"]
         : []),
@@ -705,6 +708,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.continueThreadsAfterServerUpdate !==
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
         ? ["Continue threads after restarts"]
+        : []),
+      ...(settings.continueUnfinishedPlans !== DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans
+        ? ["Continue unfinished plans"]
         : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
@@ -763,6 +769,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffIgnoreWhitespace,
       settings.diffLayout,
       settings.proactivePanelsEnabled,
+      settings.turnStallNoticeEnabled,
       settings.environmentIdentificationMode,
       settings.contextWindowMeterEnabled,
       settings.fontFamilyCode,
@@ -778,6 +785,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.responseStreamingMode,
       settings.enableProviderUpdateChecks,
       settings.continueThreadsAfterServerUpdate,
+      settings.continueUnfinishedPlans,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarAutoArchiveAfterDays,
@@ -870,6 +878,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
       proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
+      turnStallNoticeEnabled: DEFAULT_UNIFIED_SETTINGS.turnStallNoticeEnabled,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
       composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
       composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
@@ -887,6 +896,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+      continueUnfinishedPlans: DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
@@ -2876,6 +2886,35 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
+          {...searchableSetting("turn-stall-notice")}
+          title={t(searchableSetting("turn-stall-notice").title)}
+          description={t(
+            "Show a notice when a running turn has had no activity for 10 minutes and is not waiting on you, a tool, or background agents. It never stops anything.",
+          )}
+          resetAction={
+            settings.turnStallNoticeEnabled !== DEFAULT_UNIFIED_SETTINGS.turnStallNoticeEnabled ? (
+              <SettingResetButton
+                label={t("quiet turn notice")}
+                onClick={() =>
+                  updateSettings({
+                    turnStallNoticeEnabled: DEFAULT_UNIFIED_SETTINGS.turnStallNoticeEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.turnStallNoticeEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ turnStallNoticeEnabled: Boolean(checked) })
+              }
+              aria-label={t("Quiet turn notice")}
+            />
+          }
+        />
+
+        <SettingsRow
           {...searchableSetting("skills-in-slash-menu")}
           title={t(searchableSetting("skills-in-slash-menu").title)}
           description={t(
@@ -3126,6 +3165,39 @@ export function GeneralSettingsPanel() {
                 updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
               }
               aria-label={t("Continue threads after restarts")}
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("continue-unfinished-plans")}
+          title={t(searchableSetting("continue-unfinished-plans").title)}
+          serverScoped
+          settingKeys={["continueUnfinishedPlans"]}
+          description={t(
+            "When a turn ends with the agent's own plan or todo list unfinished, send up to two automatic follow-ups asking it to finish or say what blocks it.",
+          )}
+          resetAction={
+            settings.continueUnfinishedPlans !==
+            DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans ? (
+              <SettingResetButton
+                label={t("continue unfinished plans")}
+                onClick={() =>
+                  updateSettings({
+                    continueUnfinishedPlans: DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <ScopedSwitch
+              settingKeys={["continueUnfinishedPlans"]}
+              checked={settings.continueUnfinishedPlans}
+              onCheckedChange={(checked) =>
+                updateSettings({ continueUnfinishedPlans: Boolean(checked) })
+              }
+              aria-label={t("Continue unfinished plans")}
             />
           }
         />

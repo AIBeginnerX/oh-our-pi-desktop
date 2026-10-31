@@ -120,7 +120,7 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Visual Studio Installer failed with exit code $($process.ExitCode)." }
 
       - name: Install desktop dependencies
-        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts... --filter=oop-tui...
 
       # The profile is compiled into the bundle: it names the app OOP, keeps its data in
       # ~/.oop-desktop, and turns on the release-feed updater. Packaging alone is too late.

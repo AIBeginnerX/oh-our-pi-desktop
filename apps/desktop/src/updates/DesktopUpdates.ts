@@ -1,4 +1,5 @@
 import {
+  DESKTOP_UPDATE_INSTALLING_MARKER_FILE,
   DESKTOP_UPDATE_RESTART_MARKER_FILE,
   DesktopUpdateChannelSchema,
   type DesktopBuildInfo,
@@ -864,11 +865,33 @@ export const make = Effect.gen(function* () {
     .remove(updateRestartMarkerPath, { force: true })
     .pipe(Effect.ignore);
 
+  // Written before the app quits on every install path so other local
+  // processes can tell an installer may be replacing the app. Removed when
+  // the install fails to start and at the next app start.
+  const updateInstallingMarkerPath = environment.path.join(
+    updateRestartMarkerDir,
+    DESKTOP_UPDATE_INSTALLING_MARKER_FILE,
+  );
+  const writeUpdateInstallingMarker = fileSystem
+    .makeDirectory(updateRestartMarkerDir, { recursive: true })
+    .pipe(
+      Effect.andThen(fileSystem.writeFileString(updateInstallingMarkerPath, "")),
+      Effect.catch((error) =>
+        logUpdaterWarning("Could not write the update installing marker.", {
+          errorTag: error._tag,
+        }),
+      ),
+    );
+  const removeUpdateInstallingMarker = fileSystem
+    .remove(updateInstallingMarkerPath, { force: true })
+    .pipe(Effect.ignore);
+
   const resetInstallAction = Effect.all(
     [
       finishUpdateAction("install"),
       Ref.set(desktopState.quitting, false),
       removeUpdateRestartMarker,
+      removeUpdateInstallingMarker,
     ],
     { discard: true },
   );
@@ -885,6 +908,7 @@ export const make = Effect.gen(function* () {
 
     yield* Ref.set(desktopState.quitting, false);
     yield* removeUpdateRestartMarker;
+    yield* removeUpdateInstallingMarker;
     yield* Effect.gen(function* () {
       const instances = yield* pool.list;
       const restartExit = yield* Effect.forEach(instances, (instance) => instance.start, {
@@ -1028,6 +1052,7 @@ export const make = Effect.gen(function* () {
         yield* Ref.set(desktopState.quitting, true);
 
         return yield* Effect.gen(function* () {
+          yield* writeUpdateInstallingMarker;
           if (Option.isNone(stagedForInstall)) yield* writeUpdateRestartMarker;
           // Stop every backend in the pool, not just the primary. With
           // parallel WSL + Windows backends, leaving the WSL instance up
@@ -1350,6 +1375,9 @@ export const make = Effect.gen(function* () {
     emitState,
     disabledReason: resolveDisabledReason,
     configure: Effect.gen(function* () {
+      // An earlier install left this to say the app was about to be replaced;
+      // reaching this point means the app is running again.
+      yield* removeUpdateInstallingMarker;
       const context = yield* Effect.context<never>();
       const runEffect = (effect: Effect.Effect<void>) => {
         void Effect.runPromiseWith(context)(effect);

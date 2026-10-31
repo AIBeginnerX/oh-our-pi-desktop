@@ -29,6 +29,7 @@ import {
   projectSkillUsePolicyFrom,
 } from "../skills/ProjectSkillUsePolicy.ts";
 import { ProjectMemorySendLedger } from "../persistence/ProjectMemorySendLedger.ts";
+import { APP_RELEASE_VERSION } from "../oopBuild.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 
 const isServerEnvironmentIdPersistenceError = Schema.is(
@@ -418,6 +419,11 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       });
       expect(web.serverVersion).toBe(packageJson.version);
       expect(web.capabilities.desktopAppUpdate).toBeUndefined();
+
+      // The terminal's daemon has no desktop to ask; it reports the app release.
+      const daemon = yield* describeWith({ mode: "web", daemon: true });
+      expect(daemon.serverVersion).toBe(APP_RELEASE_VERSION);
+      expect(daemon.serverVersion).not.toBe(packageJson.version);
     }),
   );
 

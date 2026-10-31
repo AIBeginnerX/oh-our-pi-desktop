@@ -123,6 +123,146 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     }),
   );
 
+  it.effect("`serve --daemon` locks the data directory and binds loopback by default", () =>
+    Effect.gen(function* () {
+      const baseDir = yield* FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "t3-cli-daemon-" })),
+      );
+      const flags = {
+        mode: Option.none<"web" | "desktop">(),
+        port: Option.some(8789),
+        host: Option.none<string>(),
+        baseDir: Option.some(baseDir),
+        cwd: Option.none<string>(),
+        devUrl: Option.none<URL>(),
+        noBrowser: Option.none<boolean>(),
+        bootstrapFd: Option.none<number>(),
+        autoBootstrapProjectFromCwd: Option.none<boolean>(),
+        logWebSocketEvents: Option.none<boolean>(),
+        tailscaleServeEnabled: Option.none<boolean>(),
+        tailscaleServePort: Option.none<number>(),
+      };
+      const provide = Effect.provide(
+        Layer.mergeAll(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })), NetService.layer),
+      );
+
+      const daemon = yield* resolveServerConfig(
+        { ...flags, daemon: Option.some(true) },
+        Option.none(),
+      ).pipe(provide);
+      const explicitHost = yield* resolveServerConfig(
+        { ...flags, host: Option.some("localhost"), daemon: Option.some(true) },
+        Option.none(),
+      ).pipe(provide);
+      const plain = yield* resolveServerConfig(flags, Option.none()).pipe(provide);
+      const plainServe = yield* resolveServerConfig(
+        { ...flags, daemon: Option.some(false) },
+        Option.none(),
+      ).pipe(provide);
+
+      expect(daemon.daemon).toBe(true);
+      expect(daemon.instanceLock).toBe(true);
+      expect(daemon.host).toBe("127.0.0.1");
+      expect(explicitHost.host).toBe("localhost");
+      for (const config of [plain, plainServe]) {
+        expect(config.daemon).toBeUndefined();
+        expect(config.instanceLock).toBeUndefined();
+        expect(config.host).toBeUndefined();
+      }
+    }),
+  );
+
+  it.effect("`serve --daemon` refuses a non-loopback host from the flag, env, or bootstrap", () =>
+    Effect.gen(function* () {
+      const baseDir = yield* FileSystem.FileSystem.pipe(
+        Effect.flatMap((fs) => fs.makeTempDirectoryScoped({ prefix: "t3-cli-daemon-host-" })),
+      );
+      const flags = {
+        mode: Option.none<"web" | "desktop">(),
+        port: Option.some(8789),
+        host: Option.none<string>(),
+        baseDir: Option.some(baseDir),
+        cwd: Option.none<string>(),
+        devUrl: Option.none<URL>(),
+        noBrowser: Option.none<boolean>(),
+        bootstrapFd: Option.none<number>(),
+        autoBootstrapProjectFromCwd: Option.none<boolean>(),
+        logWebSocketEvents: Option.none<boolean>(),
+        tailscaleServeEnabled: Option.none<boolean>(),
+        tailscaleServePort: Option.none<number>(),
+        daemon: Option.some(true),
+      };
+      const withEnv = (env: Record<string, string>) =>
+        Effect.provide(
+          Layer.mergeAll(ConfigProvider.layer(ConfigProvider.fromEnv({ env })), NetService.layer),
+        );
+
+      const fromFlag = yield* resolveServerConfig(
+        { ...flags, host: Option.some("0.0.0.0") },
+        Option.none(),
+      ).pipe(withEnv({}), Effect.flip);
+      const fromEnv = yield* resolveServerConfig(flags, Option.none()).pipe(
+        withEnv({ T3CODE_HOST: "192.168.1.20" }),
+        Effect.flip,
+      );
+      const fromBootstrap = yield* Effect.gen(function* () {
+        const fd = yield* openBootstrapFd(makeDesktopBootstrap({ host: "::" }));
+        return yield* resolveServerConfig(flags, Option.none()).pipe(
+          withEnv({ T3CODE_BOOTSTRAP_FD: String(fd) }),
+          Effect.flip,
+        );
+      });
+      const loopbackEnv = yield* resolveServerConfig(flags, Option.none()).pipe(
+        withEnv({ T3CODE_HOST: "127.0.0.1" }),
+      );
+
+      expect(fromFlag).toMatchObject({ _tag: "DaemonHostNotLoopbackError", host: "0.0.0.0" });
+      expect(fromEnv).toMatchObject({ _tag: "DaemonHostNotLoopbackError", host: "192.168.1.20" });
+      expect(fromBootstrap).toMatchObject({ _tag: "DaemonHostNotLoopbackError", host: "::" });
+      expect(loopbackEnv.host).toBe("127.0.0.1");
+    }),
+  );
+
+  it.effect("takes the instance lock when the desktop bootstrap asks for it", () =>
+    Effect.gen(function* () {
+      const flags = {
+        mode: Option.none<"web" | "desktop">(),
+        port: Option.none<number>(),
+        host: Option.none<string>(),
+        baseDir: Option.none<string>(),
+        cwd: Option.none<string>(),
+        devUrl: Option.none<URL>(),
+        noBrowser: Option.none<boolean>(),
+        bootstrapFd: Option.none<number>(),
+        autoBootstrapProjectFromCwd: Option.none<boolean>(),
+        logWebSocketEvents: Option.none<boolean>(),
+        tailscaleServeEnabled: Option.none<boolean>(),
+        tailscaleServePort: Option.none<number>(),
+      };
+      const resolveWith = (bootstrap: DesktopBackendBootstrapValue) =>
+        Effect.gen(function* () {
+          const fd = yield* openBootstrapFd(bootstrap);
+          return yield* resolveServerConfig(flags, Option.none()).pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                ConfigProvider.layer(
+                  ConfigProvider.fromEnv({ env: { T3CODE_BOOTSTRAP_FD: String(fd) } }),
+                ),
+                NetService.layer,
+              ),
+            ),
+          );
+        });
+
+      const locked = yield* resolveWith(makeDesktopBootstrap({ instanceLock: true }));
+      const unlocked = yield* resolveWith(makeDesktopBootstrap());
+
+      expect(locked.instanceLock).toBe(true);
+      expect(locked.daemon).toBeUndefined();
+      expect(unlocked.instanceLock).toBeUndefined();
+    }),
+  );
+
   it.effect("does not expose an invalid reusable auth token", () =>
     Effect.gen(function* () {
       const secret = "short-secret";

@@ -5,6 +5,8 @@
 # OOP_INSTALL_DIR overrides ~/Applications (macOS) or ~/.local (Linux). On macOS an existing
 # /Applications/OOP.app is updated in place instead of adding a second copy; a location the
 # current user cannot change is replaced only after the macOS administrator approval dialog.
+# On macOS the app also carries the terminal app; this script adds an "oop" command for it in
+# OOP_BIN_DIR (default ~/.local/bin), unless an "oop" that is not ours is already there.
 set -eu
 
 fail() { printf 'OOP install: %s\n' "$1" >&2; exit 1; }
@@ -66,6 +68,52 @@ if [ "$platform" = mac ]; then
     printf 'Note: /Applications/OOP.app also exists; remove one copy to avoid opening an outdated app.\n'
   fi
 fi
+
+# The command line "oop" for the terminal app inside OOP.app. The launcher runs the app's own
+# runtime as plain Node (ELECTRON_RUN_AS_NODE applies to that one process only) and looks for the
+# app again at every start, so moving or updating OOP.app does not break it.
+launcher_mark='oop-desktop-terminal-launcher'
+sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# True when the file is a launcher this script wrote, or the "oop" the repository's own terminal
+# installer builds (a node bundle that starts with an env-node shebang and names oop-tui).
+is_our_oop() {
+  [ -f "$1" ] && [ ! -L "$1" ] || return 1
+  grep -q "^# $launcher_mark" "$1" 2>/dev/null && return 0
+  [ "$(head -n 1 "$1" 2>/dev/null)" = '#!/usr/bin/env node' ] && grep -q 'oop-tui' "$1" 2>/dev/null
+}
+install_terminal_command() {
+  app="$1/OOP.app"
+  bin_dir="${OOP_BIN_DIR:-$HOME/.local/bin}"
+  target="$bin_dir/oop"
+  # Apps older than the terminal app have nothing to run.
+  [ -f "$app/Contents/Resources/oop/oop.mjs" ] && [ -x "$app/Contents/MacOS/OOP" ] || return 0
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if ! is_our_oop "$target"; then
+      printf 'Note: %s already exists and was not made by OOP, so it was left alone. The terminal app is at %s/Contents/Resources/oop/oop.mjs.\n' "$target" "$app"
+      return 0
+    fi
+  fi
+  mkdir -p "$bin_dir" || return 1
+  launcher_tmp="$(mktemp "$bin_dir/.oop.XXXXXX")" || return 1
+  {
+    printf '#!/bin/sh\n# %s (written by OOP Desktop install-desktop.sh; safe to delete)\n' "$launcher_mark"
+    printf 'for app in %s "$HOME/Applications/OOP.app" /Applications/OOP.app; do\n' "$(sh_quote "$app")"
+    cat <<'BODY'
+  if [ -x "$app/Contents/MacOS/OOP" ] && [ -f "$app/Contents/Resources/oop/oop.mjs" ]; then
+    exec env ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/OOP" "$app/Contents/Resources/oop/oop.mjs" "$@"
+  fi
+done
+echo "oop: OOP.app was not found, or it is too old to include the terminal app. Install or update OOP Desktop." >&2
+exit 127
+BODY
+  } > "$launcher_tmp" || { rm -f "$launcher_tmp"; return 1; }
+  chmod 755 "$launcher_tmp" && mv -f "$launcher_tmp" "$target" || { rm -f "$launcher_tmp"; return 1; }
+  printf 'Installed the terminal command %s.\n' "$target"
+  case ":$PATH:" in
+    *":$bin_dir:"*) ;;
+    *) printf 'Note: %s is not on PATH. Add it to your shell profile to run "oop" from anywhere.\n' "$bin_dir" ;;
+  esac
+}
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/oop-install.XXXXXX")"
 mounted=false
@@ -136,6 +184,8 @@ REPLACE
       fail "Could not install OOP.app; the existing app was not changed."
   fi
   printf 'Installed %s/OOP.app. Open it from Finder.\n' "$install_dir"
+  install_terminal_command "$install_dir" ||
+    printf 'Note: the "oop" terminal command could not be set up; OOP.app itself is installed.\n'
   printf 'This unsigned/notarization-free build may require Privacy & Security > Open Anyway.\n'
 else
   prefix="${OOP_INSTALL_DIR:-$HOME/.local}"

@@ -17,6 +17,11 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/resources/browser-secret/**/*",
   "!apps/desktop/prod-resources/browser-secret",
   "!apps/desktop/prod-resources/browser-secret/**/*",
+  // The terminal app is one loose file that ships once, at resources/oop/oop.mjs.
+  "!apps/desktop/resources/oop",
+  "!apps/desktop/resources/oop/**/*",
+  "!apps/desktop/prod-resources/oop",
+  "!apps/desktop/prod-resources/oop/**/*",
   // Windows stages the server sidecar below prod-resources so electron-builder
   // can copy it using project-relative extraResources matchers. Keep those
   // staging inputs out of app.asar; they are emitted once at resources/.
@@ -134,6 +139,34 @@ export const DESKTOP_EXTRA_RESOURCES = [
     to: "resource-monitor",
   },
 ] as const;
+// The bundled terminal app (apps/oop-tui). The desktop runtime itself runs it
+// (ELECTRON_RUN_AS_NODE=1 <app> resources/oop/oop.mjs), so it needs no Node install. It is
+// never inside an asar: Windows keeps it loose next to the other resources, like the monitor.
+// Only OOP builds on macOS and Windows carry it; Linux AppImages keep their current behavior,
+// and the upstream T3 Code release pipelines do not build it.
+export const TERMINAL_APP_BUNDLE_SOURCE = "apps/oop-tui/dist/oop.mjs";
+/**
+ * What a terminal app bundle still imports from outside itself. The bundle runs alone, so anything
+ * but a Node built-in is a dependency the build could not find (the packager leaves those as
+ * imports instead of failing) and the installed `oop` would crash on start.
+ */
+export const terminalAppBundleImports = (bundle: string): ReadonlyArray<string> =>
+  [...bundle.matchAll(/^(?:import|export)\b[^"'\n]*(?:from\s+)?["']([^"']+)["']/gmu)]
+    .map((match) => match[1] ?? "")
+    .filter((specifier) => !specifier.startsWith("node:"));
+
+export const TERMINAL_APP_RESOURCE_DIR = "oop";
+export const TERMINAL_APP_RESOURCE_NAME = "oop.mjs";
+export const TERMINAL_APP_EXTRA_RESOURCES = [
+  {
+    from: `apps/desktop/prod-resources/${TERMINAL_APP_RESOURCE_DIR}`,
+    to: TERMINAL_APP_RESOURCE_DIR,
+  },
+] as const;
+export const bundlesTerminalApp = (input: {
+  readonly platform: BuildPlatform;
+  readonly oopBrand: boolean;
+}): boolean => input.oopBrand && input.platform !== "linux";
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/hyprland-capture",

@@ -76,6 +76,7 @@ const SETTINGS_MUTATION_UI_ONLY_KEYS: ReadonlySet<keyof ServerSettings> = new Se
   "backgroundActivityProfile",
   "storageCleanup",
   "enableProviderUpdateChecks",
+  "continueUnfinishedPlans",
 ]);
 
 const stableSettingsJson = (value: unknown): string => JSON.stringify(value);

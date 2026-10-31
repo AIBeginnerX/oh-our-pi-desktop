@@ -21,6 +21,24 @@ export const CHAT_MESSAGES: MessageCatalog = {
     es: "Expandir ({count} líneas)",
   },
   Collapse: { ko: "접기", ja: "折りたたむ", "zh-CN": "收起", es: "Contraer" },
+  "This turn has been quiet for a while": {
+    ko: "이 턴이 한동안 조용합니다",
+    ja: "このターンはしばらく応答がありません",
+    "zh-CN": "这一轮已经安静了一段时间",
+    es: "Este turno lleva un rato en silencio",
+  },
+  "No activity for {minutes} minutes. The agent may still be working.": {
+    ko: "{minutes}분 동안 활동이 없습니다. 에이전트가 아직 작업 중일 수 있습니다.",
+    ja: "{minutes}分間動きがありません。エージェントはまだ作業中の可能性があります。",
+    "zh-CN": "已有 {minutes} 分钟没有活动。智能体可能仍在工作。",
+    es: "Sin actividad durante {minutes} minutos. Es posible que el agente siga trabajando.",
+  },
+  "Dismiss quiet turn notice": {
+    ko: "조용한 턴 알림 닫기",
+    ja: "応答なしの通知を閉じる",
+    "zh-CN": "关闭无响应提示",
+    es: "Descartar el aviso de turno en silencio",
+  },
   "Needs your input": {
     ko: "입력이 필요합니다",
     ja: "入力が必要です",

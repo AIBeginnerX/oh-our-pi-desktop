@@ -6,7 +6,6 @@ import { UserInputAttachmentAnswerPayload } from "@t3tools/contracts";
 import { foldUserInputActivities } from "@t3tools/client-runtime/work-log/user-input";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as Arr from "effect/Array";
 import { shallow } from "zustand/vanilla/shallow";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
@@ -21,14 +20,13 @@ import {
   type WorkLogToolLifecycleStatus,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
+import { compareActivitiesByOrder } from "@t3tools/client-runtime/thread-plan";
 import {
   isToolLifecycleItemType,
   type AssetResource,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
-  type OrchestrationProposedPlanId,
   type ToolLifecycleItemType,
-  type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
 
@@ -44,6 +42,14 @@ import {
 } from "./types";
 
 export type { PendingApproval, PendingUserInput } from "@t3tools/client-runtime/pending-requests";
+
+export {
+  deriveActivePlanState,
+  findLatestProposedPlan,
+  hasActionableProposedPlan,
+  type ActivePlanState,
+  type LatestProposedPlanState,
+} from "@t3tools/client-runtime/thread-plan";
 
 export { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
@@ -110,27 +116,6 @@ const derivedWorkLogEntryByActivity = new WeakMap<
   OrchestrationThreadActivity,
   DerivedWorkLogEntry
 >();
-
-export interface ActivePlanState {
-  createdAt: string;
-  turnId: TurnId | null;
-  explanation?: string | null;
-  steps: Array<{
-    durationMs?: number;
-    step: string;
-    status: "pending" | "inProgress" | "completed";
-  }>;
-}
-
-export interface LatestProposedPlanState {
-  id: OrchestrationProposedPlanId;
-  createdAt: string;
-  updatedAt: string;
-  turnId: TurnId | null;
-  planMarkdown: string;
-  implementedAt: string | null;
-  implementationThreadId: ThreadId | null;
-}
 
 export type TimelineEntry =
   | {
@@ -221,170 +206,6 @@ export function deriveActiveWorkStartedAt(
     return latestTurn?.startedAt ?? sendStartedAt;
   }
   return sendStartedAt;
-}
-
-function planStateFromActivity(activity: OrchestrationThreadActivity): ActivePlanState | null {
-  const payload =
-    activity.payload && typeof activity.payload === "object"
-      ? (activity.payload as Record<string, unknown>)
-      : null;
-  const rawPlan = payload?.plan;
-  if (!Array.isArray(rawPlan)) {
-    return null;
-  }
-  const steps: Array<{
-    step: string;
-    status: "pending" | "inProgress" | "completed";
-  }> = [];
-  for (const entry of rawPlan) {
-    if (!entry || typeof entry !== "object") {
-      continue;
-    }
-    const record = entry as Record<string, unknown>;
-    if (typeof record.step !== "string") {
-      continue;
-    }
-    const status =
-      record.status === "completed" || record.status === "inProgress" ? record.status : "pending";
-    steps.push({
-      step: record.step,
-      status,
-    });
-  }
-  if (steps.length === 0) {
-    return null;
-  }
-  return {
-    createdAt: activity.createdAt,
-    turnId: activity.turnId,
-    ...(payload && "explanation" in payload
-      ? { explanation: payload.explanation as string | null }
-      : {}),
-    steps,
-  };
-}
-
-function addPlanStepDurations(
-  plan: ActivePlanState,
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-): ActivePlanState {
-  const timings = new Map<string, { completedAt?: number; startedAt?: number }>();
-  let planStartedAt: number | undefined;
-
-  const keyedSteps = (steps: ActivePlanState["steps"]) => {
-    const occurrences = new Map<string, number>();
-    return steps.map((step) => {
-      const occurrence = occurrences.get(step.step) ?? 0;
-      occurrences.set(step.step, occurrence + 1);
-      return { key: `${step.step}:${occurrence}`, step };
-    });
-  };
-
-  for (const activity of activities) {
-    const snapshot = planStateFromActivity(activity);
-    const activityAt = Date.parse(activity.createdAt);
-    if (!snapshot || Number.isNaN(activityAt)) continue;
-    planStartedAt ??= activityAt;
-
-    for (const { key, step } of keyedSteps(snapshot.steps)) {
-      const timing = timings.get(key) ?? {};
-      if (step.status === "inProgress" && timing.startedAt === undefined) {
-        timing.startedAt = activityAt;
-      }
-      if (step.status === "completed" && timing.completedAt === undefined) {
-        timing.completedAt = activityAt;
-      }
-      timings.set(key, timing);
-    }
-  }
-
-  const durationByKey = new Map<string, number>();
-  let previousCompletedAt = planStartedAt;
-  for (const [key, timing] of [...timings.entries()].toSorted(
-    (left, right) => (left[1].completedAt ?? Infinity) - (right[1].completedAt ?? Infinity),
-  )) {
-    const completedAt = timing.completedAt;
-    const startedAt = timing.startedAt ?? previousCompletedAt;
-    if (completedAt === undefined) continue;
-    if (startedAt !== undefined && completedAt > startedAt) {
-      durationByKey.set(key, completedAt - startedAt);
-    }
-    previousCompletedAt = completedAt;
-  }
-
-  return {
-    ...plan,
-    steps: keyedSteps(plan.steps).map(({ key, step }) => {
-      if (step.status !== "completed") return step;
-      const durationMs = durationByKey.get(key);
-      return durationMs === undefined ? step : { ...step, durationMs };
-    }),
-  };
-}
-
-export function deriveActivePlanState(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
-  latestTurnId: TurnId | undefined,
-): ActivePlanState | null {
-  const allPlanActivities = activities
-    .filter((activity) => activity.kind === "turn.plan.updated")
-    .sort(compareActivitiesByOrder);
-  // Prefer plan from the current turn; fall back to the most recent plan from any turn
-  // so that TodoWrite tasks persist across follow-up messages.
-  const latest = Option.firstSomeOf([
-    ...(latestTurnId
-      ? Arr.findLast(allPlanActivities, (activity) => activity.turnId === latestTurnId)
-      : Option.none()),
-    Arr.last(allPlanActivities),
-  ]).pipe(Option.getOrNull);
-  if (!latest) {
-    return null;
-  }
-  const plan = planStateFromActivity(latest);
-  if (!plan) return null;
-  const matchingActivities = allPlanActivities.filter(
-    (activity) => activity.turnId === latest.turnId,
-  );
-  const latestClearIndex = matchingActivities.findLastIndex(
-    (activity) => planStateFromActivity(activity) === null,
-  );
-  return addPlanStepDurations(plan, matchingActivities.slice(latestClearIndex + 1));
-}
-
-export function findLatestProposedPlan(
-  proposedPlans: ReadonlyArray<ProposedPlan>,
-  latestTurnId: TurnId | string | null | undefined,
-): LatestProposedPlanState | null {
-  if (latestTurnId) {
-    const matchingTurnPlan = [...proposedPlans]
-      .filter((proposedPlan) => proposedPlan.turnId === latestTurnId)
-      .toSorted(
-        (left, right) =>
-          left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
-      )
-      .at(-1);
-    if (matchingTurnPlan) {
-      return toLatestProposedPlanState(matchingTurnPlan);
-    }
-  }
-
-  const latestPlan = [...proposedPlans]
-    .toSorted(
-      (left, right) =>
-        left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
-    )
-    .at(-1);
-  if (!latestPlan) {
-    return null;
-  }
-
-  return toLatestProposedPlanState(latestPlan);
-}
-
-export function hasActionableProposedPlan(
-  proposedPlan: LatestProposedPlanState | Pick<ProposedPlan, "implementedAt"> | null,
-): boolean {
-  return proposedPlan !== null && proposedPlan.implementedAt === null;
 }
 
 /**
@@ -928,18 +749,6 @@ function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
-function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPlanState {
-  return {
-    id: proposedPlan.id,
-    createdAt: proposedPlan.createdAt,
-    updatedAt: proposedPlan.updatedAt,
-    turnId: proposedPlan.turnId,
-    planMarkdown: proposedPlan.planMarkdown,
-    implementedAt: proposedPlan.implementedAt,
-    implementationThreadId: proposedPlan.implementationThreadId,
-  };
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
@@ -1388,47 +1197,6 @@ function extractChangedFiles(payload: Record<string, unknown> | null): string[] 
   const seen = new Set<string>();
   collectChangedFiles(asRecord(payload?.data), changedFiles, seen, 0);
   return changedFiles;
-}
-
-function compareActivitiesByOrder(
-  left: OrchestrationThreadActivity,
-  right: OrchestrationThreadActivity,
-): number {
-  if (left.sequence !== undefined && right.sequence !== undefined) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence;
-    }
-  } else if (left.sequence !== undefined) {
-    return 1;
-  } else if (right.sequence !== undefined) {
-    return -1;
-  }
-
-  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
-  if (createdAtComparison !== 0) {
-    return createdAtComparison;
-  }
-
-  const lifecycleRankComparison =
-    compareActivityLifecycleRank(left.kind) - compareActivityLifecycleRank(right.kind);
-  if (lifecycleRankComparison !== 0) {
-    return lifecycleRankComparison;
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
-function compareActivityLifecycleRank(kind: string): number {
-  if (kind.endsWith(".started") || kind === "tool.started") {
-    return 0;
-  }
-  if (kind.endsWith(".progress") || kind.endsWith(".updated")) {
-    return 1;
-  }
-  if (kind.endsWith(".completed") || kind.endsWith(".resolved")) {
-    return 2;
-  }
-  return 1;
 }
 
 function timelineEntryFromMessage(message: ChatMessage): TimelineEntry {

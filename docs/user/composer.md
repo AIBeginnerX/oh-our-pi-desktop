@@ -99,6 +99,15 @@ continuations were used and whether the goal is done, blocked, or stopped. Stopp
 a turn does not start another one; select **Stop goal** to end the goal. Saving a changed goal
 restarts the count.
 
+## Continue unfinished plans
+
+Turn on **Continue unfinished plans** in Settings, General to have OOP follow up when a turn ends
+normally while the agent's own plan or todo list still has unfinished steps. It sends at most two
+automatic messages per message you send, and stops early when a follow-up completes no new step. It
+does nothing while a goal is open, on chats with Crew on, when something is waiting for you or
+background agents are running, or after a stopped or failed turn. A provider that does not report
+a plan or todo list is left alone.
+
 ## Project memories
 
 When the selected provider can receive project memories, the memory button next to **Attach

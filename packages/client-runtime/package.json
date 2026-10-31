@@ -7,6 +7,10 @@
       "types": "./src/localDecision.ts",
       "default": "./src/localDecision.ts"
     },
+    "./thread-plan": {
+      "types": "./src/threadPlan.ts",
+      "default": "./src/threadPlan.ts"
+    },
     "./provider-presets": {
       "types": "./src/provider-presets.ts",
       "default": "./src/provider-presets.ts"
@@ -90,6 +94,10 @@
     "./rpc/session": {
       "types": "./src/rpc/session.ts",
       "default": "./src/rpc/session.ts"
+    },
+    "./state/thread-snapshot-http": {
+      "types": "./src/state/threadSnapshotHttp.ts",
+      "default": "./src/state/threadSnapshotHttp.ts"
     },
     "./state/thread-reducer": {
       "types": "./src/state/threadReducer.ts",

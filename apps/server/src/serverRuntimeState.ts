@@ -24,6 +24,8 @@ export const PersistedServerRuntimeState = Schema.Struct({
    * the difference between "restart the service" and "stop your terminal".
    */
   serviceManaged: Schema.optional(Schema.Boolean),
+  /** Set when started with `serve --daemon`, the terminal's background server. */
+  daemon: Schema.optional(Schema.Boolean),
 });
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
 
@@ -54,7 +56,7 @@ const runtimeOriginForConfig = (
 };
 
 export const makePersistedServerRuntimeState = (input: {
-  readonly config: Pick<ServerConfig.ServerConfig["Service"], "host" | "devUrl">;
+  readonly config: Pick<ServerConfig.ServerConfig["Service"], "host" | "devUrl" | "daemon">;
   readonly port: number;
   readonly serviceManaged?: boolean;
 }): Effect.Effect<PersistedServerRuntimeState> =>
@@ -67,6 +69,7 @@ export const makePersistedServerRuntimeState = (input: {
     ...(input.config.devUrl ? { devUrl: input.config.devUrl.toString() } : {}),
     startedAt: DateTime.formatIso(now),
     ...(input.serviceManaged ? { serviceManaged: true } : {}),
+    ...(input.config.daemon ? { daemon: true } : {}),
   }));
 
 export const persistServerRuntimeState = (input: {
@@ -87,9 +90,20 @@ export const persistServerRuntimeState = (input: {
     ),
   );
 
-export const clearPersistedServerRuntimeState = (path: string) =>
+/**
+ * Remove the runtime state file. With `ownerPid`, only a file recording that
+ * pid is removed: a server shutting down must not delete the file a newer
+ * server wrote after taking over (an unreadable file is still removed).
+ */
+export const clearPersistedServerRuntimeState = (path: string, options?: { ownerPid?: number }) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    if (options?.ownerPid !== undefined) {
+      const current = yield* readPersistedServerRuntimeState(path);
+      if (Option.isSome(current) && current.value.pid !== options.ownerPid) {
+        return;
+      }
+    }
     yield* fs.remove(path, { force: true }).pipe(
       Effect.mapError(
         (cause) =>

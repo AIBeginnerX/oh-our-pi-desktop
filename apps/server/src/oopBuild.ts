@@ -1,3 +1,4 @@
+import release from "../../../OOP_RELEASE.json" with { type: "json" };
 import packageJson from "../package.json" with { type: "json" };
 
 declare const __T3CODE_BUILD_OOP_RELEASE__: string | undefined;
@@ -13,6 +14,15 @@ export const OOP_RELEASE_VERSION: string | null =
   typeof __T3CODE_BUILD_OOP_RELEASE__ === "string" && __T3CODE_BUILD_OOP_RELEASE__ !== ""
     ? __T3CODE_BUILD_OOP_RELEASE__
     : null;
+
+/**
+ * The OOP app version this server belongs to. The desktop passes its own
+ * (taken from the root OOP_RELEASE.json at build time) to the server it
+ * starts; a daemon the terminal starts has no desktop to ask, so it reads the
+ * same file, which the bundler inlines. `packageJson.version` is the upstream
+ * T3 package version and means nothing to an OOP client.
+ */
+export const APP_RELEASE_VERSION = OOP_RELEASE_VERSION ?? release.version;
 
 export const CLI_VERSION = OOP_RELEASE_VERSION ?? packageJson.version;
 

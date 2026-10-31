@@ -2,6 +2,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   EventId,
+  type OwnedMainUsageBucketV1,
   type OwnedResultCoverageV1,
   type OwnedResultUsageTrailingV1,
   type OwnedResultUsageV1,
@@ -141,6 +142,60 @@ describe("result usage disclosure copy", () => {
     );
     expect(explicitZero).toContain("캐시 입력 0(2/2턴 보고)");
     expect(explicitZero).not.toContain("캐시 입력 미보고");
+  });
+
+  describe("cache hit rate", () => {
+    const lineFor = (
+      overrides: Parameters<typeof measuredRow>[0],
+      subtotal: Partial<OwnedMainUsageBucketV1["reportedCompleteSubtotal"]> = {},
+    ) => {
+      const bucket = measuredUsage(measuredRow(overrides)).buckets[0]!;
+      return formatResultUsageBucketLine({
+        ...bucket,
+        reportedCompleteSubtotal: { ...bucket.reportedCompleteSubtotal, ...subtotal },
+      });
+    };
+
+    it("shows cached share of observed input when every turn reported cache reads", () => {
+      const line = lineFor({ cached: { sum: 250, reportedTurns: 2 } });
+      expect(line).toContain("캐시 입력 250(2/2턴 보고) · 캐시 적중률 25.0%");
+    });
+
+    it("leaves cache writes out of observed input", () => {
+      const line = lineFor(
+        { cached: { sum: 300, reportedTurns: 2 }, cacheCreation: { sum: 400, reportedTurns: 2 } },
+        { inputTokens: 1000 },
+      );
+      expect(line).toContain("캐시 적중률 50.0%");
+    });
+
+    it("shows no rate when cache reads were reported by only some turns", () => {
+      expect(lineFor({ cached: { sum: 300, reportedTurns: 1 } })).not.toContain("적중률");
+    });
+
+    it("shows no rate when cache reads were never reported", () => {
+      const line = lineFor({ cached: { sum: 0, reportedTurns: 0 } });
+      expect(line).toContain("캐시 입력 미보고");
+      expect(line).not.toContain("적중률");
+    });
+
+    it("shows no rate when cache writes were only partly reported", () => {
+      const line = lineFor({
+        cached: { sum: 300, reportedTurns: 2 },
+        cacheCreation: { sum: 100, reportedTurns: 1 },
+      });
+      expect(line).not.toContain("적중률");
+    });
+
+    it("shows no rate when observed input is zero", () => {
+      const line = lineFor({ cached: { sum: 0, reportedTurns: 2 } }, { inputTokens: 0 });
+      expect(line).toContain("캐시 입력 0(2/2턴 보고)");
+      expect(line).not.toContain("적중률");
+    });
+
+    it("keeps an explicit zero of reported cache reads as a real rate", () => {
+      expect(lineFor({ cached: { sum: 0, reportedTurns: 2 } })).toContain("캐시 적중률 0.0%");
+    });
   });
 
   it("keeps missing time measurements distinct from zero", () => {

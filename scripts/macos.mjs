@@ -560,6 +560,8 @@ async function install(paths, runner) {
       "@t3tools/scripts...",
       "--filter",
       "t3...",
+      "--filter",
+      "oop-tui...",
     ],
     { cwd: paths.checkout, env: checkoutEnvironment(paths, process.env) },
   );

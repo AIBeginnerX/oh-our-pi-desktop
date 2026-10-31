@@ -1,0 +1,153 @@
+# Terminal app
+
+`oop` is OOP in a terminal. Pick a project and a thread, chat with an agent, approve what it
+wants to do, and set up providers without opening the desktop window. Your threads, providers,
+and settings are the same ones the desktop app shows.
+
+## Get started
+
+On macOS and Windows the OOP installer adds the `oop` command along with the app. Open a new
+terminal window and run:
+
+```sh
+oop
+```
+
+If the shell says `command not found`, the folder holding `oop` is not on your `PATH`: add
+`~/.local/bin` on macOS or `%LOCALAPPDATA%\oop-terminal` on Windows. The installer does not edit
+`PATH`, and it leaves alone an `oop` it did not create.
+
+`oop --help` lists everything. The ones you will use most:
+
+| Task                                    | Command                   |
+| --------------------------------------- | ------------------------- |
+| Resume the latest thread of this folder | `oop --continue`          |
+| Start a thread with a first message     | `oop "fix the login bug"` |
+| Manage providers                        | `oop provider`            |
+| Connect to OOP on another computer      | `oop pair <link>`         |
+| Check your setup                        | `oop doctor`              |
+| See what is new in the latest release   | `oop update`              |
+| Stop the server the terminal started    | `oop stop`                |
+
+## Start with a message
+
+`oop "fix the login bug"` opens a new thread in the project of the current folder, sends the
+message, and carries on in the usual conversation. With `--continue` the message goes to the
+latest thread instead. The model and permission mode are the ones a conversation starts with;
+`--mode` sets the mode.
+
+If the folder belongs to no project, `oop` asks you to pick one and then sends the message. A
+message that starts with `/` is read as a command, as it would be in the conversation. A single
+word that is not a command name, or a message that starts with `-`, goes after `--`:
+`oop -- explain`. The terminal does not read piped input, so `echo ... | oop` does not work.
+
+## Messages while the agent works
+
+Press Enter while a turn runs and the message waits above the composer; it is sent after the turn
+ends, one message per turn, in the order you typed them. On an empty composer, Up takes the newest
+waiting message back so you can edit it (Enter queues it again) or clear it. Esc and Ctrl-C stop the
+turn and put every waiting message back in the composer.
+
+Waiting messages stay with their thread and are kept only while `oop` is open. A thread that ends
+in an error, or one you left and came back to, stops its queue: press Enter on an empty composer to
+let it go on.
+
+## Provider commands and skills
+
+Typing `/` lists the commands built into `oop` and, after them, the slash commands and skills the
+current provider offers for the project folder, marked `[provider]` and `[스킬]`. Picking one puts
+its name in the composer (`/name ` for a command, `$name ` for a skill) so you can add what it
+needs, then press Enter to send. When a provider command has the same name as one of `oop`'s, the
+`oop` command is the one that runs. The list comes from the same place as in the desktop app; a
+project's own commands can take a moment to appear after you open a thread.
+
+## Pasting long text
+
+A long paste is kept whole but drawn in a window of at most ten rows; the rows above or below it
+are counted ("↑ N줄 더", "↓ N줄 더") and the window follows the cursor. A message can be at most
+120,000 characters, the limit of the server; a longer one is not sent, and `oop` says how many
+characters to cut.
+
+## Knowing when the agent needs you
+
+`oop` rings the terminal bell when a turn finishes and when the agent asks for an approval or an
+answer, so a terminal in another window or tab can flag itself. A request is rung for once, and one
+that was already waiting when you opened the thread is not. Turn it off with
+`oop config set notify false`. The bell is the only signal; it does not check whether the terminal
+is the window you are looking at.
+
+## Find and pin threads
+
+On the project and thread lists, start typing to narrow the list: threads match on their title,
+projects on their title or folder, Korean included. Because letters go to the search, the lists
+have no one-letter shortcuts. Use the arrows to move, Enter to open, and Esc to clear the search or
+step back (thread list, then project list, then the conversation you came from). Ctrl+C quits.
+
+On the thread list, **Ctrl+P** pins the thread under the pointer, or unpins it. Pinned threads sit
+at the top of the list and are the same pins the desktop app shows.
+
+## Read earlier messages
+
+Opening a thread prints its last 30 messages, and a line under the header says when there are
+more. `/history` prints the 30 messages before those, and `/history 100` prints up to 100 (at most
+200). Run it again to keep going back; it says when it reaches the start. The messages are printed
+again at the bottom, under the conversation, because a terminal cannot add lines above what it
+already shows. In the side-by-side layout they are added to the bottom of the conversation pane.
+
+While a reply is being written it says so and prints nothing, so it does not land in the middle
+of the reply; run it again once the reply ends. Older messages are fetched from the server a page
+at a time, so a long thread opens as fast as a short one.
+
+## Review and undo a turn
+
+Each turn ends with a checkpoint when the project is a git repository. In a conversation:
+
+- `/diff` shows what the last turn changed. `/diff 2` shows turn 2, and `/diff 2 src/app.ts`
+  shows one file in full. A long diff stops after a few hundred lines and says so. Like
+  `/history`, it is refused while a reply is being written.
+- `/undo` removes the last turn from the conversation and puts your question back in the
+  input. It asks for confirmation first and cannot run while the agent is working. Messages
+  waiting in the queue go back to the input too, after the question, since they may have
+  assumed the turn that is gone.
+
+Files are restored only for a thread that has its own worktree. In a folder shared with other
+threads, `/undo` rewinds the conversation and leaves your files alone, as the desktop app does.
+There is no way to undo an undo, in the terminal or in the desktop app.
+
+## With and without the desktop app
+
+With the app open, `oop` connects to its server on its own.
+
+With the app closed, `oop` starts the installed app's server in the background, and no window
+opens. That server keeps running after you close the terminal, so your threads stay available;
+`oop stop` stops it. `oop stop` never stops the server the app is using.
+
+Only one server uses your OOP data at a time. When you open the app, it takes over from the
+terminal's server and `oop` reconnects on its own. When you quit the app while a terminal is open,
+that terminal starts its server again after a few seconds. A turn that is running when the server
+changes hands is interrupted, unless **Settings → General → Continue threads after restarts** is
+on.
+
+`oop` needs OOP Desktop installed on the computer it runs on. The Linux AppImage does not include
+the terminal app yet.
+
+## Task list
+
+`/tasks` opens the thread's task list under the conversation, on the left of the terminal, and
+`/tasks` again closes it. It shows the steps the agent is keeping (waiting, in progress, done) and
+how many are done, and it keeps the last list after the turn ends. An agent that keeps no list
+leaves it empty. The terminal switches to a full-screen view while the list is open, and it needs
+a terminal at least 16 rows tall. It works with or without the side panels of `/dag-workflow` and
+`/dag-agents`.
+
+## Plans
+
+When a turn in plan mode (`/plan`) ends with a proposed plan, it is printed in the conversation once,
+with a line saying how to build it. `/implement` sends the latest plan back to the agent in the
+default mode, the same as the desktop app's implement button. Send a message instead to keep
+refining the plan.
+
+## Updates
+
+The terminal app is part of the desktop app, so updating the app updates `oop` too. `oop update`
+shows what changed since your version; it does not install anything.

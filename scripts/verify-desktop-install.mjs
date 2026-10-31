@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Installs one built OOP installer the way a user does (through install-desktop.sh / .ps1 and a
 // local release mirror), launches the installed app to its readiness signal, reinstalls over it,
-// launches again, then uninstalls and checks that the app is gone. The same artifact that will be
+// launches again, then uninstalls and checks that the app is gone. On macOS and Windows it also
+// checks that the installer's "oop" command prints this version (no terminal or console input). The same artifact that will be
 // attached to the release is the one verified; signing checks and the Electron sandbox stay on.
 //
 //   node scripts/verify-desktop-install.mjs --installer <path> --version X.Y.Z
@@ -66,12 +67,14 @@ await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const { port } = server.address();
 
 const home = path.join(root, "home");
+const binDir = path.join(root, "bin");
 const installDir = path.join(root, process.platform === "darwin" ? "Applications" : "prefix");
 await fs.mkdir(home, { recursive: true });
 const env = {
   ...process.env,
   OOP_VERSION: version,
   OOP_RELEASE_BASE_URL: `http://127.0.0.1:${port}`,
+  OOP_BIN_DIR: binDir,
   ...(process.platform === "win32" ? {} : { HOME: home, OOP_INSTALL_DIR: installDir }),
 };
 
@@ -114,6 +117,22 @@ async function installedExecutable() {
   return (await windowsInstall()).executable;
 }
 
+// The installer's "oop" command runs the terminal app bundled in the app with the app's own runtime.
+// Linux AppImages do not carry it.
+async function verifyTerminalCommand(label) {
+  if (process.platform === "linux") return;
+  const windows = process.platform === "win32";
+  const command = path.join(binDir, windows ? "oop.cmd" : "oop");
+  const { output } = await must(
+    label,
+    windows
+      ? run("cmd.exe", ["/d", "/c", command, "--version"], env)
+      : run(command, ["--version"], env),
+  );
+  const printed = output.trim().split(/\r?\n/).at(-1);
+  if (printed !== version) throw new Error(`${label}: oop printed "${printed}", expected ${version}.`);
+}
+
 async function launch(label) {
   const executable = await installedExecutable();
   if (!(await exists(executable))) throw new Error(`${label}: ${executable} is missing.`);
@@ -128,8 +147,10 @@ let failure;
 try {
   await install("first install");
   const executable = await launch("first launch");
+  await verifyTerminalCommand("oop --version after install");
   await install("reinstall over the existing app");
   await launch("launch after reinstall");
+  await verifyTerminalCommand("oop --version after reinstall");
 
   if (process.platform === "win32") {
     const { installLocation } = await windowsInstall();

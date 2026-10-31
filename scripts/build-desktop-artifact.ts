@@ -48,6 +48,11 @@ import {
   LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
   LINUX_CAPTURE_EXTRA_RESOURCES,
   LINUX_FILE_EXCLUSIONS,
+  TERMINAL_APP_BUNDLE_SOURCE,
+  terminalAppBundleImports,
+  TERMINAL_APP_EXTRA_RESOURCES,
+  TERMINAL_APP_RESOURCE_DIR,
+  TERMINAL_APP_RESOURCE_NAME,
   WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_RESOURCE,
@@ -58,6 +63,7 @@ import {
   WSL_RUNTIME_ARCHIVE_HASH_NAME,
   WSL_RUNTIME_ARCHIVE_NAME,
   WSL_RUNTIME_EXTRA_RESOURCES,
+  bundlesTerminalApp,
   bundlesWslRuntime,
   resolveMacFileExclusions,
   resolveWindowsServerAsarIgnoreGlobs,
@@ -88,6 +94,7 @@ export {
   LINUX_CAPTURE_EXTRA_RESOURCES,
   LINUX_FILE_EXCLUSIONS,
   MAC_FILE_EXCLUSIONS,
+  TERMINAL_APP_EXTRA_RESOURCES,
   WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
@@ -99,6 +106,7 @@ export {
   WSL_RUNTIME_ARCHIVE_HASH_NAME,
   WSL_RUNTIME_ARCHIVE_NAME,
   WSL_RUNTIME_EXTRA_RESOURCES,
+  bundlesTerminalApp,
   bundlesWslRuntime,
   resolveMacFileExclusions,
   resolveWindowsServerAsarIgnoreGlobs,
@@ -316,6 +324,15 @@ export class ClerkPasskeyNativePackageMissingError extends Schema.TaggedError<Cl
 ) {
   override get message(): string {
     return `Clerk passkey native package is missing: ${this.packageName}`;
+  }
+}
+
+export class TerminalAppBundleIncompleteError extends Schema.TaggedError<TerminalAppBundleIncompleteError>()(
+  "TerminalAppBundleIncompleteError",
+  { imports: Schema.Array(Schema.String) },
+) {
+  override get message() {
+    return `The terminal app bundle still imports ${this.imports.join(", ")}. Install the dependencies of oop-tui and build it again.`;
   }
 }
 
@@ -796,6 +813,7 @@ const DesktopBuildInputArtifact = Schema.Literals([
   "desktop-resources",
   "server-dist",
   "bundled-server-client",
+  "terminal-app",
 ]);
 type DesktopBuildInputArtifact = typeof DesktopBuildInputArtifact.Type;
 const desktopBuildInputArtifactNames = {
@@ -803,6 +821,7 @@ const desktopBuildInputArtifactNames = {
   "desktop-resources": "desktopResources",
   "server-dist": "serverDist",
   "bundled-server-client": "bundled server client",
+  "terminal-app": "terminal app bundle",
 } satisfies Record<DesktopBuildInputArtifact, string>;
 
 /**
@@ -2636,6 +2655,27 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   }
 });
 
+/**
+ * Copies the built terminal app (apps/oop-tui) to resources/oop/oop.mjs. The file is a single
+ * bundle with its dependencies inlined, run by the app's own runtime, so nothing else ships.
+ */
+export const stageTerminalApp = Effect.fn("stageTerminalApp")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const sourcePath = path.join(input.repoRoot, TERMINAL_APP_BUNDLE_SOURCE);
+  const imports = terminalAppBundleImports(yield* fs.readFileString(sourcePath));
+  if (imports.length > 0) return yield* new TerminalAppBundleIncompleteError({ imports });
+  const destinationDirectory = path.join(input.stageResourcesDir, TERMINAL_APP_RESOURCE_DIR);
+  yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
+  yield* fs.makeDirectory(destinationDirectory, { recursive: true });
+  const destinationPath = path.join(destinationDirectory, TERMINAL_APP_RESOURCE_NAME);
+  yield* fs.copyFile(sourcePath, destinationPath);
+  yield* fs.chmod(destinationPath, 0o644);
+});
+
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -2957,6 +2997,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       : {}),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      ...(bundlesTerminalApp({ platform, oopBrand }) ? TERMINAL_APP_EXTRA_RESOURCES : []),
       ...(bundleLocalUpdateConfig
         ? [{ from: OOP_LOCAL_UPDATE_CONFIG_SOURCE, to: OOP_LOCAL_UPDATE_CONFIG_NAME }]
         : []),
@@ -3823,11 +3864,21 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     );
   }
 
-  const requiredBuildInputs = [
+  const terminalAppBundled = bundlesTerminalApp({ platform: options.platform, oopBrand });
+  const requiredBuildInputs: Array<{
+    readonly artifact: DesktopBuildInputArtifact;
+    readonly artifactPath: string;
+  }> = [
     { artifact: "desktop-dist", artifactPath: distDirs.desktopDist },
     { artifact: "desktop-resources", artifactPath: distDirs.desktopResources },
     { artifact: "server-dist", artifactPath: distDirs.serverDist },
-  ] as const;
+  ];
+  if (terminalAppBundled) {
+    requiredBuildInputs.push({
+      artifact: "terminal-app",
+      artifactPath: path.join(repoRoot, TERMINAL_APP_BUNDLE_SOURCE),
+    });
+  }
   for (const input of requiredBuildInputs) {
     if (!(yield* fs.exists(input.artifactPath))) {
       return yield* new MissingDesktopBuildInputError({
@@ -3955,6 +4006,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     arch: options.arch,
     verbose: options.verbose,
   });
+  if (terminalAppBundled) {
+    yield* stageTerminalApp({ repoRoot, stageResourcesDir });
+  }
   if (options.platform === "linux") {
     for (const backend of ["kde", "hyprland"] as const)
       yield* stageLinuxCaptureHelper({

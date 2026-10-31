@@ -81,6 +81,58 @@ describe("serverRuntimeState", () => {
     }),
   );
 
+  it.effect("records a terminal daemon, and omits the field for every other server", () =>
+    Effect.gen(function* () {
+      const daemon = yield* ServerRuntimeState.makePersistedServerRuntimeState({
+        config: { host: "127.0.0.1", devUrl: undefined, daemon: true },
+        port: 13_773,
+      });
+      const regular = yield* ServerRuntimeState.makePersistedServerRuntimeState({
+        config: { host: undefined, devUrl: undefined },
+        port: 13_773,
+      });
+
+      assert.isTrue(daemon.daemon);
+      assert.isFalse("daemon" in regular);
+    }),
+  );
+
+  it.effect("clears the runtime state only for the pid that wrote it when asked to", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-runtime-state-test-",
+      });
+      const statePath = path.join(root, "server-runtime.json");
+      const state: ServerRuntimeState.PersistedServerRuntimeState = {
+        version: 1,
+        pid: 4_242,
+        port: 4_971,
+        origin: "http://127.0.0.1:4971",
+        startedAt: "2026-06-20T00:00:00.000Z",
+      };
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+
+      // A previous server shutting down late must leave its successor's file alone.
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, { ownerPid: 1_111 });
+      assert.isTrue(yield* fileSystem.exists(statePath));
+
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, { ownerPid: 4_242 });
+      assert.isFalse(yield* fileSystem.exists(statePath));
+
+      // Without an owner the file goes regardless of its pid (CLI cleanup of a dead server).
+      yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state });
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath);
+      assert.isFalse(yield* fileSystem.exists(statePath));
+
+      // An unreadable file has no pid to protect, so an owner clears it too.
+      yield* fileSystem.writeFileString(statePath, "{not json");
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, { ownerPid: 4_242 });
+      assert.isFalse(yield* fileSystem.exists(statePath));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("treats a missing runtime state file as absent", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

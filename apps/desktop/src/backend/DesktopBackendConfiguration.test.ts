@@ -285,6 +285,19 @@ describe("DesktopBackendConfiguration", () => {
     ),
   );
 
+  it.effect("asks only the host-side primary backend to hold the single-instance lock", () =>
+    withHarness(
+      Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        const primary = yield* configuration.resolvePrimary;
+        const wsl = yield* configuration.resolveWsl({ port: 5000, distro: null });
+
+        assert.isTrue(primary.bootstrap.instanceLock);
+        assert.notProperty(wsl.bootstrap, "instanceLock");
+      }),
+    ),
+  );
+
   it.effect("resolvePrimary starts from server.asar without materializing the WSL tree", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

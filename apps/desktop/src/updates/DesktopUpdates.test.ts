@@ -2,7 +2,10 @@
 import { assert, describe, it } from "@effect/vitest";
 import { afterEach, vi } from "vite-plus/test";
 import * as NodeCrypto from "node:crypto";
-import { DESKTOP_UPDATE_RESTART_MARKER_FILE } from "@t3tools/contracts";
+import {
+  DESKTOP_UPDATE_INSTALLING_MARKER_FILE,
+  DESKTOP_UPDATE_RESTART_MARKER_FILE,
+} from "@t3tools/contracts";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
@@ -601,9 +604,11 @@ describe("DesktopUpdates", () => {
 
   it.effect("marks the backend stop for an install as an update restart", () => {
     let markersAtStop: ReadonlyArray<string> = [];
+    let installingAtStop: ReadonlyArray<string> = [];
     const harness = makeHarness({
       stopBackend: Effect.sync(() => {
         markersAtStop = [...harness.updateRestartMarkers];
+        installingAtStop = [...harness.updateInstallingMarkers];
       }),
     });
 
@@ -619,6 +624,14 @@ describe("DesktopUpdates", () => {
         assert.deepEqual(markersAtStop, [
           environment.path.join(environment.baseDir, "runtime", DESKTOP_UPDATE_RESTART_MARKER_FILE),
         ]);
+        // The installing marker exists before any backend stops and stays for the next start.
+        const installingPath = environment.path.join(
+          environment.baseDir,
+          "runtime",
+          DESKTOP_UPDATE_INSTALLING_MARKER_FILE,
+        );
+        assert.deepEqual(installingAtStop, [installingPath]);
+        assert.deepEqual([...harness.updateInstallingMarkers], [installingPath]);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -640,9 +653,11 @@ describe("DesktopUpdates", () => {
           const installFiber = yield* updates.install.pipe(Effect.forkScoped);
           yield* Deferred.await(stopping);
           assert.equal(harness.updateRestartMarkers.size, 1);
+          assert.equal(harness.updateInstallingMarkers.size, 1);
 
           yield* Fiber.interrupt(installFiber);
           assert.equal(harness.updateRestartMarkers.size, 0);
+          assert.equal(harness.updateInstallingMarkers.size, 0);
         }),
       ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     }),
@@ -674,6 +689,29 @@ describe("DesktopUpdates", () => {
         assert.deepEqual(harness.installSteps, ["quitAndInstall", "startBackend"]);
         // The restarted old backend must release its tunnel on a later quit.
         assert.equal(harness.updateRestartMarkers.size, 0);
+        assert.equal(harness.updateInstallingMarkers.size, 0);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("clears a leftover installing marker when the app starts again", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        harness.updateInstallingMarkers.add(
+          environment.path.join(
+            environment.baseDir,
+            "runtime",
+            DESKTOP_UPDATE_INSTALLING_MARKER_FILE,
+          ),
+        );
+
+        yield* updates.configure;
+
+        assert.equal(harness.updateInstallingMarkers.size, 0);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
@@ -1211,6 +1249,8 @@ describe("DesktopUpdates local package mode", () => {
         assert.isTrue(yield* Ref.get(desktopState.quitting));
         assert.equal(harness.quitAndInstalls(), 0);
         assert.equal(harness.updateRestartMarkers.size, 0);
+        // The Installer path skips the restart marker but still announces the install.
+        assert.equal(harness.updateInstallingMarkers.size, 1);
         assert.deepEqual(harness.installSteps, []);
       }),
     ),
@@ -1719,6 +1759,7 @@ describe("DesktopUpdates local package mode", () => {
           assert.equal(harness.appQuits(), 0);
           assert.isFalse(yield* Ref.get(desktopState.quitting));
           assert.equal(harness.updateRestartMarkers.size, 0);
+          assert.equal(harness.updateInstallingMarkers.size, 0);
 
           assert.equal(result.state.status, "downloaded");
           assert.equal(result.state.errorContext, "install");

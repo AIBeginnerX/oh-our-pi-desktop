@@ -32,6 +32,8 @@ import {
   LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
   LINUX_FILE_EXCLUSIONS,
   MAC_FILE_EXCLUSIONS,
+  TERMINAL_APP_EXTRA_RESOURCES,
+  bundlesTerminalApp,
   InvalidBuildSigningError,
   InvalidOopLocalUpdateDirectoryError,
   InvalidOopLocalUpdateCandidatesError,
@@ -80,6 +82,8 @@ import {
   stageLinuxIconSize,
   stageDesktopDmgBackground,
   stageResourceMonitor,
+  stageTerminalApp,
+  TerminalAppBundleIncompleteError,
   stageLinuxCaptureHelper,
   stageWslRuntimeArchive,
   bundlesWslRuntime,
@@ -573,6 +577,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     for (const resource of [
       ...WSL_RUNTIME_EXTRA_RESOURCES,
       ...LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
+      ...TERMINAL_APP_EXTRA_RESOURCES,
     ]) {
       assert.include(
         DESKTOP_FILE_EXCLUSIONS,
@@ -589,6 +594,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "!apps/desktop/resources/browser-secret/**/*",
       "!apps/desktop/prod-resources/browser-secret",
       "!apps/desktop/prod-resources/browser-secret/**/*",
+      "!apps/desktop/resources/oop",
+      "!apps/desktop/resources/oop/**/*",
+      "!apps/desktop/prod-resources/oop",
+      "!apps/desktop/prod-resources/oop/**/*",
       "!apps/desktop/prod-resources/windows-server",
       "!apps/desktop/prod-resources/windows-server/**/*",
       "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
@@ -896,7 +905,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         from: "apps/desktop/prod-resources/oop-local-update.json",
         to: "oop-local-update.json",
       };
-      assert.deepStrictEqual(configuration.extraResources, [...DESKTOP_EXTRA_RESOURCES, resource]);
+      assert.deepStrictEqual(configuration.extraResources, [
+        ...DESKTOP_EXTRA_RESOURCES,
+        ...TERMINAL_APP_EXTRA_RESOURCES,
+        resource,
+      ]);
       assert.include(
         configuration.files as string[],
         "!apps/desktop/prod-resources/oop-local-update.json",
@@ -1095,6 +1108,69 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
             path.join(stageResourcesDir, "resource-monitor/t3-resource-monitor"),
           ),
           "cached monitor",
+        );
+      }),
+    ),
+  );
+
+  it("bundles the terminal app only into OOP macOS and Windows builds", () => {
+    assert.isTrue(bundlesTerminalApp({ platform: "mac", oopBrand: true }));
+    assert.isTrue(bundlesTerminalApp({ platform: "win", oopBrand: true }));
+    assert.isFalse(bundlesTerminalApp({ platform: "linux", oopBrand: true }));
+    assert.isFalse(bundlesTerminalApp({ platform: "mac", oopBrand: false }));
+    assert.deepStrictEqual(TERMINAL_APP_EXTRA_RESOURCES, [
+      { from: "apps/desktop/prod-resources/oop", to: "oop" },
+    ]);
+  });
+
+  it.effect("stages the terminal app bundle as resources/oop/oop.mjs", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-stage-test-" });
+        const stageResourcesDir = path.join(repoRoot, "stage");
+        yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
+        yield* fs.writeFileString(path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"), "bundle");
+        yield* fs.makeDirectory(path.join(stageResourcesDir, "oop"), { recursive: true });
+        yield* fs.writeFileString(path.join(stageResourcesDir, "oop/stale.txt"), "stale");
+
+        yield* stageTerminalApp({ repoRoot, stageResourcesDir });
+
+        assert.deepStrictEqual(yield* fs.readDirectory(path.join(stageResourcesDir, "oop")), [
+          "oop.mjs",
+        ]);
+        assert.equal(
+          yield* fs.readFileString(path.join(stageResourcesDir, "oop/oop.mjs")),
+          "bundle",
+        );
+      }),
+    ),
+  );
+
+  it.effect("refuses a terminal app bundle that left a dependency out", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-stage-test-" });
+        const stageResourcesDir = path.join(repoRoot, "stage");
+        yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
+        yield* fs.writeFileString(
+          path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"),
+          [
+            'import fs from "node:fs";',
+            'import { ThreadId } from "@t3tools/contracts";',
+            'import "ws";',
+          ].join("\n"),
+        );
+
+        const failure = yield* Effect.flip(stageTerminalApp({ repoRoot, stageResourcesDir }));
+
+        assert.instanceOf(failure, TerminalAppBundleIncompleteError);
+        assert.includeMembers(
+          [...(failure as TerminalAppBundleIncompleteError).imports],
+          ["@t3tools/contracts", "ws"],
         );
       }),
     ),

@@ -1,6 +1,50 @@
 {
   "versions": [
     {
+      "version": "0.0.129",
+      "date": "2026-11-01",
+      "highlights": [
+        {
+          "en": "The terminal app `oop` now installs with the desktop app on macOS and Windows, and it works with the app closed: it starts its own server in the background, the app takes over when you open it, and `oop` reconnects on its own.",
+          "ko": "터미널 앱 `oop`이 macOS와 Windows에서 데스크톱 앱과 함께 설치됩니다. 앱이 꺼져 있어도 터미널이 서버를 띄워 혼자 동작하고, 앱을 켜면 앱이 서버를 이어받으며 `oop`은 자동으로 다시 연결됩니다."
+        },
+        {
+          "en": "In the terminal, `/tasks` splits the left pane to show the agent's task list under the conversation, and `/dag-agents` shows the agents of the current turn in the right pane.",
+          "ko": "터미널에서 `/tasks`로 좌측창을 나눠 대화 아래에 에이전트의 작업 목록을 보고, `/dag-agents`로 현재 턴의 에이전트를 우측창에서 볼 수 있습니다."
+        },
+        {
+          "en": "Messages you send while a turn runs now wait in a queue, proposed plans appear in the conversation with `/implement`, and the terminal rings when the agent needs an approval or an answer.",
+          "ko": "턴이 도는 동안 보낸 메시지는 대기열에서 차례를 기다리고, 제안된 계획이 대화에 표시되어 `/implement`로 구현할 수 있으며, 승인이나 답이 필요하면 터미널 벨이 울립니다."
+        },
+        {
+          "en": "New terminal commands: `/diff` shows what a turn changed, `/undo` rewinds the last turn, `/history` reads older messages, and `oop \"message\"` starts a thread from the shell.",
+          "ko": "터미널 명령이 늘었습니다. `/diff`는 턴의 변경을, `/undo`는 마지막 턴 되돌리기를, `/history`는 이전 대화를 보여 주며, `oop \"메시지\"`로 셸에서 바로 스레드를 시작합니다."
+        },
+        {
+          "en": "Terminal lists can be searched and threads pinned with Ctrl+P, the slash menu includes provider commands and skills, and long pastes no longer slow the composer.",
+          "ko": "터미널 목록을 검색하고 Ctrl+P로 스레드를 고정할 수 있으며, 슬래시 메뉴에 provider 명령과 스킬이 나오고, 긴 붙여넣기도 입력칸을 느리게 하지 않습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.128",
+      "date": "2026-10-31",
+      "highlights": [
+        {
+          "en": "When Cursor reports a model provider error, the turn now fails instead of ending as a normal reply, so Crew can switch to its fallback model.",
+          "ko": "Cursor가 모델 제공자 오류를 보내면 정상 답변으로 끝나지 않고 턴이 실패로 처리되어, Crew가 대체 모델로 넘어갈 수 있습니다."
+        },
+        {
+          "en": "Turn usage details now show the cache hit rate when the provider reported enough to calculate it.",
+          "ko": "제공자가 충분히 보고한 턴은 사용량 상세에 캐시 적중률이 표시됩니다."
+        },
+        {
+          "en": "New optional settings, both off by default: Continue unfinished plans sends up to two follow-ups when an agent stops with its plan unfinished, and Quiet turn notice tells you when a running turn has been silent for ten minutes.",
+          "ko": "기본 꺼짐인 설정 2개가 추가됐습니다. 끝나지 않은 계획 이어가기는 에이전트가 계획을 남기고 멈추면 최대 두 번 후속 메시지를 보내고, 조용한 턴 알림은 실행 중인 턴이 10분간 조용하면 알려 줍니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.127",
       "date": "2026-10-31",
       "highlights": [

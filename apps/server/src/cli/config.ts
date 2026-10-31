@@ -1,4 +1,5 @@
 import * as NetService from "@t3tools/shared/Net";
+import { isLocalLoopbackHost } from "@t3tools/shared/hostClassification";
 import {
   OtlpHeadersFromString,
   OtlpProtocol,
@@ -73,6 +74,24 @@ const logWebSocketEventsFlag = Flag.Boolean("log-websocket-events").pipe(
 const tailscaleServeFlag = Flag.Boolean("tailscale-serve").pipe(
   Flag.withDescription(
     "Configure Tailscale Serve to expose this backend over HTTPS on the Tailnet.",
+  ),
+  Flag.optional,
+);
+/** `--daemon` is the terminal's private background server, so it never listens beyond loopback. */
+export class DaemonHostNotLoopbackError extends Schema.TaggedError<DaemonHostNotLoopbackError>()(
+  "DaemonHostNotLoopbackError",
+  {
+    host: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `--daemon only binds loopback, but the host resolved to "${this.host}". Remove --host/T3CODE_HOST or use 127.0.0.1.`;
+  }
+}
+
+export const daemonFlag = Flag.Boolean("daemon").pipe(
+  Flag.withDescription(
+    "Run as the terminal's background server: loopback only, one instance per data directory (exit code 75 when another holds it).",
   ),
   Flag.optional,
 );
@@ -196,6 +215,7 @@ export interface CliServerFlags {
   readonly logWebSocketEvents: Option.Option<boolean>;
   readonly tailscaleServeEnabled: Option.Option<boolean>;
   readonly tailscaleServePort: Option.Option<number>;
+  readonly daemon?: Option.Option<boolean>;
 }
 
 export interface CliAuthLocationFlags {
@@ -273,6 +293,7 @@ export const resolveServerConfig = (
       logWebSocketEvents: flags.logWebSocketEvents ?? Option.none(),
       tailscaleServeEnabled: flags.tailscaleServeEnabled ?? Option.none(),
       tailscaleServePort: flags.tailscaleServePort ?? Option.none(),
+      daemon: flags.daemon ?? Option.none(),
     } satisfies CliServerFlags;
     const bootstrapFd = Option.getOrUndefined(normalizedFlags.bootstrapFd) ?? env.bootstrapFd;
     const bootstrapEnvelope =
@@ -382,14 +403,20 @@ export const resolveServerConfig = (
       () => 443,
     );
     const staticDir = devUrl ? undefined : yield* ServerConfig.resolveStaticDir();
+    const daemon = Option.getOrElse(normalizedFlags.daemon, () => false);
+    const instanceLock = daemon || bootstrap?.instanceLock === true;
     const host = Option.getOrElse(
       resolveOptionPrecedence(
         normalizedFlags.host,
         Option.fromUndefinedOr(env.host),
         Option.fromUndefinedOr(bootstrap?.host),
       ),
-      () => (mode === "desktop" ? "127.0.0.1" : undefined),
+      () => (mode === "desktop" || daemon ? "127.0.0.1" : undefined),
     );
+    // The host may come from the flag, T3CODE_HOST, or the bootstrap; all are refused alike.
+    if (daemon && host !== undefined && !isLocalLoopbackHost(host)) {
+      return yield* new DaemonHostNotLoopbackError({ host });
+    }
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
     const otel = yield* OtelEnvironment.load;
@@ -459,6 +486,8 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      ...(daemon ? { daemon } : {}),
+      ...(instanceLock ? { instanceLock } : {}),
     };
 
     return config;

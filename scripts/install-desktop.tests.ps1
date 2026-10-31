@@ -12,9 +12,14 @@ $oldArch = $env:PROCESSOR_ARCHITECTURE
 $oldWowArch = $env:PROCESSOR_ARCHITEW6432
 $oldVersion = $env:OOP_VERSION
 $oldBase = $env:OOP_RELEASE_BASE_URL
+$oldBinDir = $env:OOP_BIN_DIR
+$oldLocalAppData = $env:LOCALAPPDATA
 $oldSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
 $root = Join-Path ([IO.Path]::GetTempPath()) ("oop-powershell-test-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $root | Out-Null
+# The terminal command is written outside any real profile, whatever this machine has installed.
+$env:LOCALAPPDATA = Join-Path $root "local"
+$env:OOP_BIN_DIR = Join-Path $root "bin with spaces"
 $fixture = Join-Path $root "setup.exe"
 [IO.File]::WriteAllText($fixture, "fixture NSIS payload")
 $digest = (Get-FileHash $fixture -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -42,6 +47,9 @@ function Invoke-RestMethod {
     if ($Uri.EndsWith("/install-desktop.ps1")) { return $installer }
     return [PSCustomObject]@{ tag_name = "v1.2.3" }
 }
+# The registry is a boundary: no per-user uninstall entry unless a scenario sets one.
+$script:uninstallEntries = @()
+function Get-ItemProperty { $script:uninstallEntries }
 function Start-Process {
     param($FilePath, $ArgumentList, [switch]$Wait, [switch]$PassThru)
     if (-not $Wait -or -not $PassThru) { throw "Installer must await and inspect NSIS exit." }
@@ -101,6 +109,89 @@ try {
         if (Test-Path -LiteralPath $downloadPath) { throw "Installer left temporary downloads behind." }
     }
     Write-Host "PASS temporary downloads are cleaned after success and failures"
+
+    # The terminal command.
+    $env:OOP_VERSION = "1.2.3"
+    $env:PROCESSOR_ARCHITECTURE = "AMD64"
+    $binDir = $env:OOP_BIN_DIR
+    $command = Join-Path $binDir "oop.cmd"
+    $appDir = Join-Path $root "OOP app (x86)"
+    $appExe = Join-Path $appDir "OOP.exe"
+    $bundle = Join-Path $appDir "resources\oop\oop.mjs"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $bundle) -Force | Out-Null
+    [IO.File]::WriteAllText($appExe, "fixture app")
+    # Plain ASCII paths are written as they are, with any % doubled (the test folder is ASCII).
+    $appExeText = $appExe.Replace("%", "%%")
+    $bundleText = $bundle.Replace("%", "%%")
+    $script:uninstallEntries = @([PSCustomObject]@{ DisplayName = "OOP"; DisplayIcon = "`"$appExe`",0" })
+
+    # An app older than the terminal app has nothing to run.
+    & $script
+    if (Test-Path -LiteralPath $command) { throw "A terminal command was written for an app without the terminal app." }
+    Write-Host "PASS no terminal command for an app without the terminal app"
+
+    [IO.File]::WriteAllText($bundle, "// fixture terminal app")
+    & $script
+    $launcher = Get-Content -LiteralPath $command -Raw
+    foreach ($expected in @(
+        "rem oop-desktop-terminal-launcher",
+        "setlocal",
+        "set ELECTRON_RUN_AS_NODE=1",
+        "`"$appExeText`" `"$bundleText`" %*",
+        "exit /b %ERRORLEVEL%"
+    )) {
+        if (-not $launcher.Contains($expected)) { throw "The terminal command lacks: $expected" }
+    }
+    if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set ELECTRON_RUN_AS_NODE=1")) { throw "ELECTRON_RUN_AS_NODE is set outside setlocal." }
+    Write-Host "PASS terminal command runs the app's runtime on the bundled terminal app, scoped to that process"
+
+    & $script
+    Write-Host "PASS reinstalling replaces our own terminal command"
+
+    $foreign = "@echo off`r`necho someone else's oop`r`n"
+    [IO.File]::WriteAllText($command, $foreign)
+    & $script
+    if ([IO.File]::ReadAllText($command) -ne $foreign) { throw "An oop.cmd that is not ours was overwritten." }
+    Write-Host "PASS an oop that is not ours is left alone"
+
+    # What the repository's own terminal installer writes is ours to replace.
+    [IO.File]::WriteAllText($command, "@echo off`r`nsetlocal`r`nnode `"%~dp0oop.mjs`" %*`r`n")
+    & $script
+    if (-not (Get-Content -LiteralPath $command -Raw).Contains("rem oop-desktop-terminal-launcher")) { throw "The repository terminal command was not replaced." }
+    Write-Host "PASS the repository's own terminal command is replaced"
+
+    # cmd.exe reads a batch file in the console's code page, so a non-ASCII user folder must reach
+    # it as %LOCALAPPDATA%, never as text. The characters are built here to keep this file ASCII.
+    $hangul = [string][char]0xD55C + [char]0xAE00
+    $userHome = Join-Path $root ("user-" + $hangul)
+    $env:LOCALAPPDATA = $userHome
+    $homeApp = Join-Path $userHome "Programs\OOP"
+    $homeExe = Join-Path $homeApp "OOP.exe"
+    New-Item -ItemType Directory -Path (Join-Path $homeApp "resources\oop") -Force | Out-Null
+    [IO.File]::WriteAllText($homeExe, "fixture app")
+    [IO.File]::WriteAllText((Join-Path $homeApp "resources\oop\oop.mjs"), "// fixture terminal app")
+    $script:uninstallEntries = @([PSCustomObject]@{ DisplayName = "OOP"; DisplayIcon = "`"$homeExe`",0" })
+    Remove-Item -LiteralPath $command -Force
+    & $script
+    $bytes = [IO.File]::ReadAllBytes($command)
+    if (@($bytes | Where-Object { $_ -gt 127 }).Count -ne 0) { throw "The terminal command holds a non-ASCII byte." }
+    $homeLauncher = [Text.Encoding]::ASCII.GetString($bytes)
+    $homeExpected = '"%LOCALAPPDATA%\Programs\OOP\OOP.exe" "%LOCALAPPDATA%\Programs\OOP\resources\oop\oop.mjs" %*'
+    if (-not $homeLauncher.Contains($homeExpected)) { throw "The terminal command does not name the app through %LOCALAPPDATA%." }
+    if (-not $homeLauncher.Contains('if not exist "%LOCALAPPDATA%\Programs\OOP\OOP.exe" (')) { throw "The existence check does not use %LOCALAPPDATA%." }
+    Write-Host "PASS an app under a non-ASCII user folder is named through %LOCALAPPDATA%, with an ASCII-only file"
+
+    # Outside both variables there is nothing ASCII to write, so no command is made.
+    $strayApp = Join-Path $root ("app-" + $hangul)
+    $strayExe = Join-Path $strayApp "OOP.exe"
+    New-Item -ItemType Directory -Path (Join-Path $strayApp "resources\oop") -Force | Out-Null
+    [IO.File]::WriteAllText($strayExe, "fixture app")
+    [IO.File]::WriteAllText((Join-Path $strayApp "resources\oop\oop.mjs"), "// fixture terminal app")
+    $script:uninstallEntries = @([PSCustomObject]@{ DisplayName = "OOP"; DisplayIcon = "`"$strayExe`",0" })
+    Remove-Item -LiteralPath $command -Force
+    & $script
+    if (Test-Path -LiteralPath $command) { throw "A terminal command was written for a non-ASCII path outside the known folders." }
+    Write-Host "PASS a non-ASCII path outside %LOCALAPPDATA% and %ProgramFiles% gets no terminal command"
 }
 finally {
     $env:OS = $oldOS
@@ -108,6 +199,8 @@ finally {
     $env:PROCESSOR_ARCHITEW6432 = $oldWowArch
     $env:OOP_VERSION = $oldVersion
     $env:OOP_RELEASE_BASE_URL = $oldBase
+    $env:OOP_BIN_DIR = $oldBinDir
+    $env:LOCALAPPDATA = $oldLocalAppData
     [Net.ServicePointManager]::SecurityProtocol = $oldSecurityProtocol
     Remove-Item -LiteralPath $root -Recurse -Force
 }

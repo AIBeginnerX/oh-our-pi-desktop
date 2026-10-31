@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The local-package fixture writes real update folders so symlink, permission and hash behavior is exercised.
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import type { DesktopUpdateState } from "@t3tools/contracts";
+import { DESKTOP_UPDATE_INSTALLING_MARKER_FILE, type DesktopUpdateState } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -362,6 +362,11 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
   // Tracks the restart markers installs leave, so installs stay free of real
   // disk I/O that would outrun the tests' settle loops.
   const updateRestartMarkers = new Set<string>();
+  const updateInstallingMarkers = new Set<string>();
+  const markerSetFor = (path: string) =>
+    path.endsWith(DESKTOP_UPDATE_INSTALLING_MARKER_FILE)
+      ? updateInstallingMarkers
+      : updateRestartMarkers;
   const fileSystemLayer = FileSystem.layerNoop({
     readFileString: (path) =>
       path === "/missing/resources/package-type" && options.packageType !== undefined
@@ -377,11 +382,11 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     makeDirectory: () => Effect.void,
     writeFileString: (path) =>
       Effect.sync(() => {
-        updateRestartMarkers.add(path);
+        markerSetFor(path).add(path);
       }),
     remove: (path) =>
       Effect.sync(() => {
-        updateRestartMarkers.delete(path);
+        markerSetFor(path).delete(path);
       }),
   });
 
@@ -437,6 +442,7 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     commands,
     appQuits: () => appQuitCount,
     updateRestartMarkers,
+    updateInstallingMarkers,
     downloadCount: () => downloadCount,
     feedUrls: (): ElectronUpdater.ElectronUpdaterFeedUrl[] => feedUrls,
     fullChangelog: () => fullChangelog,

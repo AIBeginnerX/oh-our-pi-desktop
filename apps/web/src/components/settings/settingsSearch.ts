@@ -388,6 +388,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["automatically open diff pull request pr right panel agent completion"],
   },
   {
+    id: "turn-stall-notice",
+    title: "Quiet turn notice",
+    to: "/settings/general",
+    searchTerms: ["stalled stuck silent inactive hung no activity running agent warning"],
+  },
+  {
     id: "skills-in-slash-menu",
     title: "Show skills in slash menu",
     to: "/settings/general",
@@ -432,6 +438,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [
       "resume running active interrupted work restart reboot machine crash desktop update automatically",
     ],
+  },
+  {
+    id: "continue-unfinished-plans",
+    title: "Continue unfinished plans",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["todo list steps remaining automatic follow-up finish agent plan"],
   },
   {
     id: "background-activity",

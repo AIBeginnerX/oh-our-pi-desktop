@@ -220,6 +220,18 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "重启后继续会话",
     es: "Continuar hilos tras reiniciar",
   },
+  "Continue unfinished plans": {
+    ko: "끝나지 않은 계획 이어가기",
+    ja: "未完了のプランを続行",
+    "zh-CN": "继续未完成的计划",
+    es: "Continuar planes sin terminar",
+  },
+  "Quiet turn notice": {
+    ko: "조용한 턴 알림",
+    ja: "応答のないターンの通知",
+    "zh-CN": "长时间无响应提示",
+    es: "Aviso de turno en silencio",
+  },
   "Background activity": {
     ko: "백그라운드 활동",
     ja: "バックグラウンド処理",
@@ -790,6 +802,22 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "检查提供商版本",
     es: "Buscar versiones de proveedores",
   },
+  "Show a notice when a running turn has had no activity for 10 minutes and is not waiting on you, a tool, or background agents. It never stops anything.":
+    {
+      ko: "실행 중인 턴이 10분 동안 아무 활동이 없고 사용자 응답, 도구, 백그라운드 에이전트를 기다리는 중도 아니면 알림을 보여 줍니다. 아무것도 중단하지 않습니다.",
+      ja: "実行中のターンが10分間何も動かず、ユーザー・ツール・バックグラウンドエージェントの待ちでもないときに通知を表示します。何も停止しません。",
+      "zh-CN":
+        "当运行中的一轮已有 10 分钟没有任何活动，且不在等待你、工具或后台智能体时显示提示。它不会停止任何内容。",
+      es: "Muestra un aviso cuando un turno en curso lleva 10 minutos sin actividad y no espera por ti, una herramienta ni agentes en segundo plano. Nunca detiene nada.",
+    },
+  "When a turn ends with the agent's own plan or todo list unfinished, send up to two automatic follow-ups asking it to finish or say what blocks it.":
+    {
+      ko: "턴이 끝났는데 에이전트 자신의 계획이나 할 일 목록이 남아 있으면, 마저 끝내거나 막힌 이유를 말하라는 자동 후속 요청을 최대 두 번 보냅니다.",
+      ja: "エージェント自身のプランやToDoリストが未完了のままターンが終わったとき、完了するか止まっている理由を述べるよう求める自動フォローアップを最大2回送ります。",
+      "zh-CN":
+        "当一轮结束时智能体自己的计划或待办列表仍未完成，最多自动追加两次请求，让它完成剩余步骤或说明受阻原因。",
+      es: "Cuando un turno termina con el plan o la lista de tareas del agente sin completar, envía hasta dos seguimientos automáticos pidiéndole que lo termine o explique qué lo bloquea.",
+    },
   "Automatically resume interrupted threads after an update, crash, or machine restart on the selected environments. Update older servers first.":
     {
       ko: "선택한 환경에서 업데이트, 충돌 또는 시스템 재시작 후 중단된 스레드를 자동으로 재개합니다. 먼저 이전 서버를 업데이트하세요.",
@@ -1245,6 +1273,18 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     ja: "再起動後もスレッドを続行",
     "zh-CN": "重启后继续会话",
     es: "continuar hilos tras reiniciar",
+  },
+  "continue unfinished plans": {
+    ko: "끝나지 않은 계획 이어가기",
+    ja: "未完了のプランを続行",
+    "zh-CN": "继续未完成的计划",
+    es: "continuar planes sin terminar",
+  },
+  "quiet turn notice": {
+    ko: "조용한 턴 알림",
+    ja: "応答のないターンの通知",
+    "zh-CN": "长时间无响应提示",
+    es: "aviso de turno en silencio",
   },
   "background activity": {
     ko: "백그라운드 활동",

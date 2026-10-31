@@ -3,7 +3,12 @@ import { Command, GlobalFlag } from "effect/unstable/cli";
 
 import { ServerConfig, type StartupPresentation } from "../config.ts";
 import { runServer } from "../server.ts";
-import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
+import {
+  type CliServerFlags,
+  daemonFlag,
+  resolveServerConfig,
+  sharedServerCommandFlags,
+} from "./config.ts";
 
 export const runServerCommand = (
   flags: CliServerFlags,
@@ -23,7 +28,10 @@ export const startCommand = Command.make("start", { ...sharedServerCommandFlags 
   Command.withHandler((flags) => runServerCommand(flags)),
 );
 
-export const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
+export const serveCommand = Command.make("serve", {
+  ...sharedServerCommandFlags,
+  daemon: daemonFlag,
+}).pipe(
   Command.withDescription(
     "Run the OOP server without opening a browser and print headless pairing details.",
   ),

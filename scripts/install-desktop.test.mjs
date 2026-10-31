@@ -26,7 +26,10 @@ const run = (command, args, env = process.env) =>
     child.once("close", (code) => resolve({ code, output }));
   });
 
-async function fixture(t, { platform = "Linux", checksum = "valid", missing = false } = {}) {
+async function fixture(
+  t,
+  { platform = "Linux", checksum = "valid", missing = false, terminal = false } = {},
+) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "oop-desktop-install-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const bin = path.join(root, "tools");
@@ -47,6 +50,19 @@ async function fixture(t, { platform = "Linux", checksum = "valid", missing = fa
     const source = path.join(root, "image");
     await fs.mkdir(path.join(source, "OOP.app", "Contents"), { recursive: true });
     await fs.writeFile(path.join(source, "OOP.app", "Contents", "fixture"), "new app");
+    if (terminal) {
+      // Stands in for the app's Electron executable: shows what the launcher passed to it.
+      const executable = path.join(source, "OOP.app", "Contents", "MacOS", "OOP");
+      await fs.mkdir(path.dirname(executable), { recursive: true });
+      await fs.writeFile(
+        executable,
+        '#!/bin/sh\nprintf "run-as-node=%s\\n" "${ELECTRON_RUN_AS_NODE-unset}"\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n',
+        { mode: 0o755 },
+      );
+      const bundle = path.join(source, "OOP.app", "Contents", "Resources", "oop", "oop.mjs");
+      await fs.mkdir(path.dirname(bundle), { recursive: true });
+      await fs.writeFile(bundle, "// fixture terminal app\n");
+    }
     const image = path.join(root, "fixture.dmg");
     const created = await run("hdiutil", [
       "create",
@@ -169,6 +185,140 @@ test(
     await assert.rejects(fs.stat(path.join(previous, "stale")), { code: "ENOENT" });
   },
 );
+
+const ownedTerminalFiles = [
+  ["a launcher from an earlier install", "#!/bin/sh\n# oop-desktop-terminal-launcher (old)\nexit 1\n"],
+  ["the repository's own terminal install", '#!/usr/bin/env node\nconst dir = ".config/oop-tui";\n'],
+];
+
+test(
+  "macOS installer adds an oop command that runs the app's runtime on the bundled terminal app",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin", terminal: true });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    const command = path.join(setup.home, ".local", "bin", "oop");
+    assert.match(result.output, /Installed the terminal command/);
+    assert.match(result.output, /not on PATH/);
+    assert.equal((await fs.stat(command)).mode & 0o777, 0o755);
+    // The launcher keeps each argument whole, and the variable reaches only the app's process.
+    const { ELECTRON_RUN_AS_NODE: _inherited, ...clean } = process.env;
+    const launch = await run(command, ["--version", "two words", "it's", "$HOME", "*"], clean);
+    assert.equal(launch.code, 0, launch.output);
+    const app = path.join(setup.env.OOP_INSTALL_DIR, "OOP.app", "Contents");
+    assert.equal(
+      launch.output,
+      [
+        "run-as-node=1",
+        `[${path.join(app, "Resources", "oop", "oop.mjs")}]`,
+        "[--version]",
+        "[two words]",
+        "[it's]",
+        "[$HOME]",
+        "[*]",
+        "",
+      ].join("\n"),
+    );
+    const after = await run(
+      "sh",
+      ["-c", '"$0" --version > /dev/null; echo "after=${ELECTRON_RUN_AS_NODE-unset}"', command],
+      clean,
+    );
+    assert.equal(after.output, "after=unset\n");
+    // Reinstalling replaces our own launcher in place.
+    const again = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(again.code, 0, again.output);
+    assert.match(again.output, /Installed the terminal command/);
+  },
+);
+
+test(
+  "macOS installer finds the app again after OOP.app moves, and says so when it is gone",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin", terminal: true });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    const command = path.join(setup.home, ".local", "bin", "oop");
+    await fs.rm(path.join(setup.env.OOP_INSTALL_DIR, "OOP.app"), { recursive: true });
+    const gone = await run(command, ["--version"], { ...process.env, HOME: setup.home });
+    assert.equal(gone.code, 127);
+    assert.match(gone.output, /OOP\.app was not found/);
+    const moved = path.join(setup.home, "Applications");
+    await fs.mkdir(moved, { recursive: true });
+    await fs.cp(path.join(setup.root, "image", "OOP.app"), path.join(moved, "OOP.app"), {
+      recursive: true,
+    });
+    const found = await run(command, ["--version"], { ...process.env, HOME: setup.home });
+    assert.equal(found.code, 0, found.output);
+    assert.match(found.output, /\[--version\]/);
+  },
+);
+
+for (const [name, content] of ownedTerminalFiles) {
+  test(
+    `macOS installer replaces an existing oop that is ours: ${name}`,
+    { skip: process.platform !== "darwin", timeout: 60_000 },
+    async (t) => {
+      const setup = await fixture(t, { platform: "Darwin", terminal: true });
+      const command = path.join(setup.home, ".local", "bin", "oop");
+      await fs.mkdir(path.dirname(command), { recursive: true });
+      await fs.writeFile(command, content, { mode: 0o755 });
+      const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+      assert.equal(result.code, 0, result.output);
+      assert.match(await fs.readFile(command, "utf8"), /^# oop-desktop-terminal-launcher/m);
+    },
+  );
+}
+
+test(
+  "macOS installer leaves an oop that is not ours alone and still installs the app",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin", terminal: true });
+    const bin = path.join(setup.home, ".local", "bin");
+    await fs.mkdir(bin, { recursive: true });
+    const foreign = path.join(bin, "oop");
+    await fs.writeFile(foreign, "#!/bin/sh\necho someone else's oop\n", { mode: 0o755 });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    assert.equal(await fs.readFile(foreign, "utf8"), "#!/bin/sh\necho someone else's oop\n");
+    assert.match(result.output, /already exists and was not made by OOP/);
+    assert.equal(
+      await fs.readFile(path.join(setup.env.OOP_INSTALL_DIR, "OOP.app", "Contents", "fixture"), "utf8"),
+      "new app",
+    );
+    // A symlink is never ours, whatever it points at.
+    await fs.rm(foreign);
+    const elsewhere = path.join(setup.root, "elsewhere");
+    await fs.writeFile(elsewhere, "# oop-desktop-terminal-launcher\n");
+    await fs.symlink(elsewhere, foreign);
+    const linked = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(linked.code, 0, linked.output);
+    assert.equal(await fs.readlink(foreign), elsewhere);
+    assert.match(linked.output, /already exists and was not made by OOP/);
+  },
+);
+
+test(
+  "macOS installer makes no oop command for an app without the terminal app",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin" });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    await assert.rejects(fs.stat(path.join(setup.home, ".local", "bin", "oop")), { code: "ENOENT" });
+    assert.doesNotMatch(result.output, /terminal command/);
+  },
+);
+
+test("Linux installer adds no oop command", async (t) => {
+  const setup = await fixture(t);
+  const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+  assert.equal(result.code, 0, result.output);
+  await assert.rejects(fs.stat(path.join(setup.home, ".local", "bin", "oop")), { code: "ENOENT" });
+});
 
 for (const approved of [true, false]) {
   test(

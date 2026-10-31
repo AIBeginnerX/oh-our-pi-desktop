@@ -437,6 +437,8 @@ async function packageInstaller(
       "@t3tools/scripts...",
       "--filter",
       "t3...",
+      "--filter",
+      "oop-tui...",
     ],
     { cwd: checkout, env },
   );

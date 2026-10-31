@@ -8,6 +8,7 @@ import {
   isUsageLimitsCommand,
 } from "@t3tools/shared/usageLimits";
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
+import { selectTurnStallNoticeEnabled, useTurnStallNotice } from "./chat/useTurnStallNotice";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import {
@@ -554,6 +555,7 @@ import {
 } from "./chat/composerPromptHistory";
 
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
+const EMPTY_MESSAGES: readonly never[] = [];
 const EMPTY_QUEUED_MESSAGES: QueuedComposerMessage[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
@@ -6359,6 +6361,21 @@ export default function ChatView(props: ChatViewProps) {
       }
     }
   }, [activeThread, environmentId, interruptThreadTurn, setThreadError]);
+  // Off by default; see useTurnStallNotice. Passive: it never interrupts or retries a turn.
+  const turnStallNoticeEnabled = useClientSettings(selectTurnStallNoticeEnabled);
+  const turnStallNoticeItem = useTurnStallNotice({
+    enabled: turnStallNoticeEnabled,
+    runningTurnId: phase === "running" ? activeRunningTurnId : null,
+    waitingOnUser: needsInput,
+    backgroundWorkLive:
+      (activeThreadShell?.backgroundLiveness ?? null) !== null || agentPanelModel.liveCount > 0,
+    workLogEntries,
+    activities: threadActivities,
+    messages: activeThread?.messages ?? EMPTY_MESSAGES,
+    turnStartedAt: activeLatestTurn?.startedAt ?? null,
+    sessionUpdatedAt: activeThread?.session?.updatedAt ?? null,
+    onStop: canInterruptRunningThread ? () => void onInterrupt() : null,
+  });
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (activeBackgroundLiveness === null || !activeThread) {
       return null;
@@ -6603,6 +6620,7 @@ export default function ChatView(props: ChatViewProps) {
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
     const backgroundLivenessItems =
       backgroundLivenessBannerItem === null ? [] : [backgroundLivenessBannerItem];
+    const turnStallItems = turnStallNoticeItem === null ? [] : [turnStallNoticeItem];
     const resumeCompactionItems =
       resumeCompactionBannerItem === null ? [] : [resumeCompactionBannerItem];
     const wokeThreadItems = wokeThreadBannerItem === null ? [] : [wokeThreadBannerItem];
@@ -6620,6 +6638,7 @@ export default function ChatView(props: ChatViewProps) {
         ...projectMemoryRecoveryItems,
         ...systemComposerBannerItems,
         ...backgroundLivenessItems,
+        ...turnStallItems,
         ...resumeCompactionItems,
         ...wokeThreadItems,
         ...parkedThreadItems,
@@ -6632,6 +6651,7 @@ export default function ChatView(props: ChatViewProps) {
       ...projectMemoryRecoveryItems,
       ...systemComposerBannerItems,
       ...backgroundLivenessItems,
+      ...turnStallItems,
       ...resumeCompactionItems,
       ...wokeThreadItems,
       {
@@ -6687,6 +6707,7 @@ export default function ChatView(props: ChatViewProps) {
     resumeCompactionBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    turnStallNoticeItem,
     usageLimitsBanner,
     wokeThreadBannerItem,
   ]);

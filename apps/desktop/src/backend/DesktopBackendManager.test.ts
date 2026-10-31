@@ -1204,6 +1204,58 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
+  it.effect("treats exit code 75 as a plain restart that re-runs the config pre-check", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const starts = yield* Queue.unbounded<number>();
+        const preflightFailures: Array<unknown> = [];
+        let resolveCount = 0;
+        let startCount = 0;
+
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.sync(() => {
+              startCount += 1;
+              return makeProcess({
+                exitCode: Queue.offer(starts, startCount).pipe(
+                  Effect.as(ChildProcessSpawner.ExitCode(75)),
+                ),
+              });
+            }),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          httpClientLayer: httpClientLayer(() => Effect.never),
+          // resolvePrimary is where the lock pre-check runs, once per start.
+          configResolve: Effect.sync(() => {
+            resolveCount += 1;
+            return baseConfig;
+          }),
+          onPreflightFailed: (failure) =>
+            Effect.sync(() => {
+              preflightFailures.push(failure);
+              return false;
+            }),
+        });
+
+        yield* instance.start;
+        assert.equal(yield* Queue.take(starts), 1);
+        yield* TestClock.adjust(Duration.millis(500));
+        assert.equal(yield* Queue.take(starts), 2);
+        // Repeated 75s keep backing off and never surface a fatal failure.
+        yield* TestClock.adjust(Duration.seconds(1));
+        assert.equal(yield* Queue.take(starts), 3);
+
+        assert.equal(resolveCount, 3);
+        assert.deepEqual(preflightFailures, []);
+        assert.equal((yield* instance.snapshot).desiredRunning, true);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
   it.effect("does not notify shutdown when a scheduled restart starts from non-ready state", () =>
     Effect.scoped(
       Effect.gen(function* () {
