@@ -1,4 +1,5 @@
 import { normalizeSearchQuery, scoreQueryMatch } from "@t3tools/shared/searchRanking";
+import { t } from "../i18n/index.ts";
 
 /** A command the composer runs itself, instead of sending it to the agent. */
 export interface SlashCommand {
@@ -11,96 +12,224 @@ export interface SlashCommand {
   readonly takesArgument?: true;
   /** The argument is a sentence, not one word (`/goal <text>`). */
   readonly freeText?: true;
-  /** How `/help` writes the argument, such as `[값]`. */
+  /** How `/help` writes the argument, such as `[value]`. */
   readonly usage?: string;
 }
 
 /** In the order the menu lists them when nothing narrows them down. */
 export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
-  { name: "model", note: "모델 선택", aliases: ["models"] },
+  {
+    name: "model",
+    get note() {
+      return t("session.slash.model.note");
+    },
+    aliases: ["models"],
+  },
   {
     name: "mode",
-    note: "권한 모드 보기·바꾸기",
+    get note() {
+      return t("session.slash.mode.note");
+    },
     aliases: [],
     takesArgument: true,
-    // The labels in the help have spaces in them (`/mode 전체 접근`).
+    // The labels in the help have spaces in them (`/mode Full access`).
     freeText: true,
-    usage: "[승인 필요|편집 자동 승인|자동|전체 접근]",
+    get usage() {
+      return t("session.slash.mode.usage");
+    },
   },
   {
     name: "effort",
-    note: "리저닝 강도 보기·바꾸기",
+    get note() {
+      return t("session.slash.effort.note");
+    },
     aliases: [],
     takesArgument: true,
-    usage: "[값]",
+    get usage() {
+      return t("session.slash.effort.usage");
+    },
   },
-  { name: "plan", note: "계획 모드로 전환", aliases: [] },
-  { name: "default", note: "기본 모드로 전환", aliases: [] },
-  { name: "implement", note: "제안된 계획을 구현", aliases: [] },
+  {
+    name: "plan",
+    get note() {
+      return t("session.slash.plan.note");
+    },
+    aliases: [],
+  },
+  {
+    name: "default",
+    get note() {
+      return t("session.slash.default.note");
+    },
+    aliases: [],
+  },
+  {
+    name: "implement",
+    get note() {
+      return t("session.slash.implement.note");
+    },
+    aliases: [],
+  },
   {
     name: "goal",
-    note: "스레드 목표 설정·확인",
+    get note() {
+      return t("session.slash.goal.note");
+    },
     aliases: [],
     takesArgument: true,
     freeText: true,
-    usage: "[내용|clear|max 횟수]",
+    get usage() {
+      return t("session.slash.goal.usage");
+    },
   },
   {
     name: "crew",
-    note: "Crew 켜고 끄기·역할 모델·작업 보드",
+    get note() {
+      return t("session.slash.crew.note");
+    },
     aliases: [],
     takesArgument: true,
     freeText: true,
-    usage: "[on|off|preset|model|default|back]",
+    get usage() {
+      return t("session.slash.crew.usage");
+    },
   },
   {
     name: "provider",
-    note: "Provider 목록·추가·삭제",
+    get note() {
+      return t("session.slash.provider.note");
+    },
     aliases: [],
     takesArgument: true,
     freeText: true,
-    usage: "[list|add|remove]",
+    get usage() {
+      return t("session.slash.provider.usage");
+    },
   },
   {
     name: "dag-workflow",
-    note: "오른쪽에 workflow 창 열기·닫기",
+    get note() {
+      return t("session.slash.dag-workflow.note");
+    },
     aliases: ["workflow"],
     takesArgument: true,
-    usage: "[on|off|번호|next|prev|live]",
+    get usage() {
+      return t("session.slash.dag-workflow.usage");
+    },
   },
   {
     name: "dag-agents",
-    note: "오른쪽에 에이전트 창 열기·닫기",
+    get note() {
+      return t("session.slash.dag-agents.note");
+    },
     aliases: [],
     takesArgument: true,
-    usage: "[on|off|live]",
+    get usage() {
+      return t("session.slash.dag-agents.usage");
+    },
   },
-  { name: "new", note: "새 스레드", aliases: [] },
-  { name: "threads", note: "스레드 목록", aliases: ["t"] },
-  { name: "projects", note: "프로젝트 목록", aliases: ["p"] },
-  { name: "stats", note: "이 스레드의 도구 사용 통계", aliases: [] },
+  {
+    name: "new",
+    get note() {
+      return t("session.slash.new.note");
+    },
+    aliases: [],
+  },
+  {
+    name: "threads",
+    get note() {
+      return t("session.slash.threads.note");
+    },
+    aliases: ["t"],
+  },
+  {
+    name: "projects",
+    get note() {
+      return t("session.slash.projects.note");
+    },
+    aliases: ["p"],
+  },
+  {
+    name: "stats",
+    get note() {
+      return t("session.slash.stats.note");
+    },
+    aliases: [],
+  },
   {
     name: "tasks",
-    note: "왼쪽 아래에 작업 목록 열기·닫기",
+    get note() {
+      return t("session.slash.tasks.note");
+    },
     aliases: [],
     takesArgument: true,
-    usage: "[on|off]",
+    get usage() {
+      return t("session.slash.tasks.usage");
+    },
   },
-  { name: "history", note: "이전 대화 더 보기", aliases: [], takesArgument: true, usage: "[개수]" },
+  {
+    name: "history",
+    get note() {
+      return t("session.slash.history.note");
+    },
+    aliases: [],
+    takesArgument: true,
+    get usage() {
+      return t("session.slash.history.usage");
+    },
+  },
   {
     name: "diff",
-    note: "턴이 바꾼 파일과 diff 보기",
+    get note() {
+      return t("session.slash.diff.note");
+    },
     aliases: [],
     takesArgument: true,
     // A file name may have spaces in it.
     freeText: true,
-    usage: "[턴번호] [파일]",
+    get usage() {
+      return t("session.slash.diff.usage");
+    },
   },
-  { name: "undo", note: "마지막 턴 되돌리기", aliases: [] },
-  { name: "theme", note: "색 테마 보기·바꾸기", aliases: [], takesArgument: true, usage: "[이름]" },
-  { name: "update", note: "새 릴리스와 업데이트 방법 보기", aliases: [] },
-  { name: "help", note: "도움말", aliases: ["?"] },
-  { name: "exit", note: "종료", aliases: ["quit", "q"] },
+  {
+    name: "undo",
+    get note() {
+      return t("session.slash.undo.note");
+    },
+    aliases: [],
+  },
+  {
+    name: "theme",
+    get note() {
+      return t("session.slash.theme.note");
+    },
+    aliases: [],
+    takesArgument: true,
+    get usage() {
+      return t("session.slash.theme.usage");
+    },
+  },
+  {
+    name: "update",
+    get note() {
+      return t("session.slash.update.note");
+    },
+    aliases: [],
+  },
+  {
+    name: "help",
+    get note() {
+      return t("session.slash.help.note");
+    },
+    aliases: ["?"],
+  },
+  {
+    name: "exit",
+    get note() {
+      return t("session.slash.exit.note");
+    },
+    aliases: ["quit", "q"],
+  },
 ];
 
 /**

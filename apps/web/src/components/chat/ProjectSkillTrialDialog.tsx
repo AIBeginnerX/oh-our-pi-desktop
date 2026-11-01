@@ -1,3 +1,4 @@
+import { useT } from "../../i18n";
 import {
   AuthOrchestrationOperateScope,
   ComposerContextId,
@@ -258,6 +259,7 @@ function ProjectSkillTrialInner({
   readonly mode: ProjectSkillSendMode;
   readonly onClose: () => void;
 }) {
+  const t = useT();
   const registry = useContext(RegistryContext);
   const startTurn = useAtomCommand(threadEnvironment.startTurn, {
     reportFailure: false,
@@ -389,10 +391,10 @@ function ProjectSkillTrialInner({
   /** The reactive display gate; the submit path re-reads everything fresh. */
   const unsupportedCopy = mode === "use" ? USE_UNSUPPORTED_COPY : TRIAL_UNSUPPORTED_COPY;
   const authorizationCopy = mode === "use" ? USE_AUTHORIZATION_COPY : TRIAL_AUTHORIZATION_COPY;
-  const dialogTitle = mode === "use" ? USE_DIALOG_TITLE : TRIAL_DIALOG_TITLE;
-  const dialogNotice = mode === "use" ? USE_DIALOG_NOTICE : TRIAL_DIALOG_NOTICE;
-  const submitLabel = mode === "use" ? USE_SUBMIT_LABEL : TRIAL_SUBMIT_LABEL;
-  const acceptedToast = mode === "use" ? USE_ACCEPTED_TOAST : TRIAL_ACCEPTED_TOAST;
+  const dialogTitle = t(mode === "use" ? USE_DIALOG_TITLE : TRIAL_DIALOG_TITLE);
+  const dialogNotice = t(mode === "use" ? USE_DIALOG_NOTICE : TRIAL_DIALOG_NOTICE);
+  const submitLabel = t(mode === "use" ? USE_SUBMIT_LABEL : TRIAL_SUBMIT_LABEL);
+  const acceptedToast = t(mode === "use" ? USE_ACCEPTED_TOAST : TRIAL_ACCEPTED_TOAST);
   const gate = (): string | null => {
     if (!projectSkillSendCapabilityOf(configValue, mode)) return unsupportedCopy;
     if (operateAccess === "pending") return TRIAL_ACCESS_PENDING_COPY;
@@ -647,9 +649,9 @@ function ProjectSkillTrialInner({
       </DialogHeader>
       <div className="grid gap-3">
         <label className="grid gap-1 text-sm">
-          {TRIAL_SKILL_LABEL}
+          {t(TRIAL_SKILL_LABEL)}
           <select
-            aria-label={TRIAL_SKILL_LABEL}
+            aria-label={t(TRIAL_SKILL_LABEL)}
             className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
             value={skillId ?? ""}
             disabled={submitting}
@@ -663,9 +665,9 @@ function ProjectSkillTrialInner({
           </select>
         </label>
         <label className="grid gap-1 text-sm">
-          {TRIAL_VERSION_LABEL}
+          {t(TRIAL_VERSION_LABEL)}
           <select
-            aria-label={TRIAL_VERSION_LABEL}
+            aria-label={t(TRIAL_VERSION_LABEL)}
             className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm"
             value={versionValue}
             disabled={submitting || detail.data === null}
@@ -681,9 +683,9 @@ function ProjectSkillTrialInner({
         </label>
         {mode === "use" ? (
           <div className="grid gap-2 text-sm">
-            <p>{USE_SCRIPTS_LABEL}</p>
+            <p>{t(USE_SCRIPTS_LABEL)}</p>
             {resolvedScripts.length === 0 ? (
-              <p className="text-xs text-muted-foreground">이 프로젝트에 스크립트가 없습니다.</p>
+              <p className="text-xs text-muted-foreground">{t("This project has no scripts.")}</p>
             ) : (
               resolvedScripts.map((script) => {
                 const checked = selectedScriptIds.includes(script.id);
@@ -704,13 +706,16 @@ function ProjectSkillTrialInner({
         ) : null}
         {frozenRef !== null ? (
           <p className="text-xs text-muted-foreground">
-            선택한 버전: v{frozenRef.version} · {frozenRef.contentSha256.slice(0, 16)}…
+            {t("Selected version: v{version} · {hash}…", {
+              version: frozenRef.version,
+              hash: frozenRef.contentSha256.slice(0, 16),
+            })}
           </p>
         ) : null}
         <label className="grid gap-1 text-sm">
-          {TRIAL_TASK_LABEL}
+          {t(TRIAL_TASK_LABEL)}
           <Textarea
-            aria-label={TRIAL_TASK_LABEL}
+            aria-label={t(TRIAL_TASK_LABEL)}
             rows={4}
             value={task}
             disabled={submitting}
@@ -719,19 +724,19 @@ function ProjectSkillTrialInner({
         </label>
         {problem !== null ? (
           <p className="text-sm text-muted-foreground" role="status">
-            {problem}
+            {t(problem)}
           </p>
         ) : null}
-        {error !== null ? <p className="text-sm text-destructive">{error}</p> : null}
+        {error !== null ? <p className="text-sm text-destructive">{t(error)}</p> : null}
         {showRefresh ? (
           <Button size="sm" variant="outline" disabled={submitting} onClick={refreshTrialData}>
-            {TRIAL_REFRESH_DATA_LABEL}
+            {t(TRIAL_REFRESH_DATA_LABEL)}
           </Button>
         ) : null}
       </div>
       <DialogFooter>
         <Button variant="ghost" size="sm" disabled={submitting} onClick={onClose}>
-          {TRIAL_CANCEL_LABEL}
+          {t(TRIAL_CANCEL_LABEL)}
         </Button>
         <Button
           size="sm"

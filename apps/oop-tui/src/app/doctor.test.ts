@@ -4,6 +4,8 @@ import * as NodePath from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { setLanguage } from "../i18n/index.ts";
+
 import type { DiscoveryResult } from "../link/discovery.ts";
 import type { PathEnv } from "../link/paths.ts";
 import { stripAnsi, visibleWidth } from "../text/width.ts";
@@ -194,5 +196,19 @@ describe("runDoctor", () => {
     const { plain, lines } = await run();
     expect(plain.trimEnd().split("\n").at(-1)).toBe("└  1건 확인 필요 ▲");
     expect(lines.at(-1)).toContain("\u001b[");
+  });
+});
+
+describe("runDoctor in English", () => {
+  afterEach(() => setLanguage("ko"));
+
+  it("prints the checks and the summary in English", async () => {
+    setLanguage("en");
+    const { plain } = await run();
+    expect(plain).toContain("Terminal check");
+    expect(plain).toContain("Color: true color (COLORTERM)");
+    expect(plain).toContain("No settings file (using defaults)");
+    expect(plain).toMatch(/\d+\/\d+ checks passed|need attention/u);
+    expect(plain).not.toMatch(/[가-힣]/u);
   });
 });

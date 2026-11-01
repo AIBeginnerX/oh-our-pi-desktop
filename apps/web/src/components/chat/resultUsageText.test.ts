@@ -9,6 +9,9 @@ import {
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { t } from "../../i18n";
+import { changeLanguage } from "../../state/menuLanguage";
+
 import {
   formatResultUsageBucketLine,
   formatResultUsageCoverageLine,
@@ -115,11 +118,14 @@ const ALL_ROWS: ReadonlyArray<OwnedResultUsageV1> = [
   unmeasurableRow("unresolved-ownership-or-history"),
 ];
 
+// The copy asserted here is the Korean table; the formatters translate in the language chosen now.
+changeLanguage("ko");
+
 describe("result usage disclosure copy", () => {
   it("labels the recorded snapshot scope without provider-account claims", () => {
-    expect(RESULT_USAGE_HEADLINE).toBe("이 스레드 · 이 서버가 기록한 값");
-    expect(RESULT_USAGE_SCOPE_NOTE).toContain("제공자 계정 사용량과 범위가 다릅니다");
-    expect(RESULT_USAGE_SNAPSHOT_NOTE).toContain("읽은 시점까지의 기록 기준");
+    expect(t(RESULT_USAGE_HEADLINE)).toBe("이 스레드 · 이 서버가 기록한 값");
+    expect(t(RESULT_USAGE_SCOPE_NOTE)).toContain("제공자 계정 사용량과 범위가 다릅니다");
+    expect(t(RESULT_USAGE_SNAPSHOT_NOTE)).toContain("읽은 시점까지의 기록 기준");
   });
 
   it("renders measured numbers with per-bucket in/out and cache k/n reporting", () => {
@@ -264,9 +270,10 @@ describe("result usage disclosure copy", () => {
       expect(forbidden.test(text)).toBe(false);
     }
     expect(forbidden.test(formatResultUsageCoverageLine(zeroCoverage()))).toBe(false);
-    const fixedCopy = RESULT_USAGE_HEADLINE + RESULT_USAGE_SCOPE_NOTE + RESULT_USAGE_SNAPSHOT_NOTE;
+    const fixedCopy =
+      t(RESULT_USAGE_HEADLINE) + t(RESULT_USAGE_SCOPE_NOTE) + t(RESULT_USAGE_SNAPSHOT_NOTE);
     expect(forbidden.test(fixedCopy)).toBe(false);
-    for (const copy of Object.values(RESULT_USAGE_STATE_COPY)) {
+    for (const copy of Object.values(RESULT_USAGE_STATE_COPY).map((text) => t(text))) {
       expect(forbidden.test(copy)).toBe(false);
     }
   });

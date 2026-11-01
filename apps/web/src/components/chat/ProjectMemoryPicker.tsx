@@ -1,3 +1,4 @@
+import { t as tr, useT } from "../../i18n";
 import {
   DEFAULT_SERVER_SETTINGS,
   PROJECT_MEMORY_MAX_LIMIT,
@@ -50,16 +51,16 @@ import { suggestProjectMemories } from "./projectMemorySuggestions";
  */
 
 const MEMORY_KIND_LABELS: Record<string, string> = {
-  fact: "사실",
-  procedure: "절차",
-  "work-log": "작업 기록",
+  fact: "Fact",
+  procedure: "Procedure",
+  "work-log": "Work log",
 };
 
-export const PROJECT_MEMORY_PICKER_LABEL = "프로젝트 기억";
+export const PROJECT_MEMORY_PICKER_LABEL = "Project memory";
 export const PROJECT_MEMORY_UNSUPPORTED_PROVIDER_MESSAGE =
-  "이 공급자는 기억 전송을 지원하지 않습니다";
+  "This provider does not support sending memories";
 export const PROJECT_MEMORY_REFERENCE_HOLD_WARNING =
-  "이 공급자는 기억 참조를 지원하지 않습니다. 전송 시 보류됩니다.";
+  "This provider does not support memory references. They are held on send.";
 
 /** What the footer button may do, derived from capability plus resolved driver. */
 export interface ProjectMemoryComposerGate {
@@ -92,8 +93,8 @@ export function deriveProjectMemoryComposerGate(input: {
     disabledReason:
       pickerVisible && !pickerEnabled
         ? input.providerCatalogPending
-          ? "공급자를 확인하는 중입니다"
-          : PROJECT_MEMORY_UNSUPPORTED_PROVIDER_MESSAGE
+          ? tr("Checking the provider…")
+          : tr(PROJECT_MEMORY_UNSUPPORTED_PROVIDER_MESSAGE)
         : null,
     warnExistingReferences: input.hasReferences && !(input.send && driverSupported),
   };
@@ -435,6 +436,7 @@ export function ProjectMemoryPicker(props: {
   onToggle: (memoryId: string, selectedVersion: number, scope: ProjectMemoryPickerScope) => void;
   onRemove: (contextId: string, scope: ProjectMemoryPickerScope) => void;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const trimmedQuery = query.trim().slice(0, PROJECT_MEMORY_QUERY_MAX_LENGTH);
   const result = useEnvironmentQuery(
@@ -462,21 +464,21 @@ export function ProjectMemoryPicker(props: {
       <Input
         value={query}
         onChange={(event) => setQuery(event.currentTarget.value)}
-        placeholder="기억 검색"
-        aria-label="기억 검색"
+        placeholder={t("Search memories")}
+        aria-label={t("Search memories")}
       />
       {result.isPending && result.data === null ? (
-        <div className="px-2 py-3 text-secondary-label text-xs">기억 목록을 읽는 중…</div>
+        <div className="px-2 py-3 text-secondary-label text-xs">{t("Reading memories…")}</div>
       ) : result.error !== null && result.data === null ? (
         <div className="flex flex-col gap-1 px-2 py-3">
-          <div className="text-secondary-label text-xs">기억 목록을 읽을 수 없습니다.</div>
+          <div className="text-secondary-label text-xs">{t("Couldn't read the memories.")}</div>
           <Button variant="outline" size="xs" className="w-fit" onClick={result.refresh}>
-            다시 시도
+            {t("Try again")}
           </Button>
         </div>
       ) : items.length === 0 ? (
         <div className="px-2 py-3 text-secondary-label text-xs">
-          {trimmedQuery.length > 0 ? "검색 결과가 없습니다." : "저장된 기억이 없습니다."}
+          {trimmedQuery.length > 0 ? t("No results.") : t("No memories saved yet.")}
         </div>
       ) : (
         <div className="flex flex-col overflow-y-auto">
@@ -500,7 +502,7 @@ export function ProjectMemoryPicker(props: {
               >
                 <span className="min-w-0 flex-1 truncate text-start">{item.title}</span>
                 <span className="shrink-0 text-secondary-label text-2xs">
-                  {MEMORY_KIND_LABELS[item.kind] ?? item.kind} · v{item.version}
+                  {t(MEMORY_KIND_LABELS[item.kind] ?? item.kind)} · v{item.version}
                 </span>
                 {isSelected ? <CheckIcon className="size-3.5 shrink-0" /> : null}
               </Button>
@@ -510,7 +512,7 @@ export function ProjectMemoryPicker(props: {
       )}
       {result.data?.truncated ? (
         <div className="px-2 py-1 text-secondary-label text-2xs">
-          결과가 잘렸습니다. 검색어로 좁혀 보세요.
+          {t("Results were cut off. Narrow it down with a search.")}
         </div>
       ) : null}
     </div>
@@ -546,6 +548,7 @@ function ProjectMemoryComposerControlBody(props: {
   readServerThreadInsertionInstanceId: () => ProviderInstanceId | null;
   readServerThreadProjectId: () => ProjectId | null;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const link = useProjectMemoryDraftLink({
     environmentId: props.environmentId,
@@ -591,7 +594,7 @@ function ProjectMemoryComposerControlBody(props: {
           size="xs"
           className="max-w-48"
           data-memory-suggestion={suggestion.memoryId}
-          title={`관련 기억 추가: ${suggestion.title}`}
+          title={t("Add related memory: {title}", { title: suggestion.title })}
           onPointerDown={(event) => event.preventDefault()}
           onClick={() => link.toggle(suggestion.memoryId, suggestion.version, scope)}
         >
@@ -609,9 +612,9 @@ function ProjectMemoryComposerControlBody(props: {
               variant="ghost"
               size="icon-sm"
               disabled={!props.gate.pickerEnabled}
-              aria-label={PROJECT_MEMORY_PICKER_LABEL}
+              aria-label={t(PROJECT_MEMORY_PICKER_LABEL)}
               data-chat-memory-picker-trigger="true"
-              title={props.gate.disabledReason ?? PROJECT_MEMORY_PICKER_LABEL}
+              title={props.gate.disabledReason ?? t(PROJECT_MEMORY_PICKER_LABEL)}
               onPointerDown={(event) => event.preventDefault()}
             />
           }
@@ -635,12 +638,13 @@ function ProjectMemoryComposerControlBody(props: {
 
 /** Inline warning shown when existing references ride to an unsupported target. */
 export function ProjectMemoryUnsupportedWarning() {
+  const t = useT();
   return (
     <div
       data-memory-unsupported-warning="true"
       className={cn("px-3 text-secondary-label text-xs sm:px-4")}
     >
-      {PROJECT_MEMORY_REFERENCE_HOLD_WARNING}
+      {t(PROJECT_MEMORY_REFERENCE_HOLD_WARNING)}
     </div>
   );
 }

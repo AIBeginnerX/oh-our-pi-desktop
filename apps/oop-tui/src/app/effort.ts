@@ -10,6 +10,7 @@ import {
   getProviderOptionCurrentValue,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
+import { t } from "../i18n/index.ts";
 
 type SelectDescriptor = Extract<ProviderOptionDescriptor, { type: "select" }>;
 
@@ -156,12 +157,12 @@ export const noEffortReason = (
 ): string => {
   const found = modelOf(config, selection);
   if (found === null || found.model === undefined) {
-    return "서버 목록에 없는 모델이라 리저닝 강도를 알 수 없습니다.";
+    return t("session.effort.unknownModel");
   }
   if (found.driver === "antigravity") {
-    return "Antigravity는 모델 이름이 곧 강도입니다. /model 에서 고르세요.";
+    return t("session.effort.antigravity");
   }
-  return "이 모델은 리저닝 강도를 바꿀 수 없습니다.";
+  return t("session.effort.fixed");
 };
 
 /** The message text with the effort the agent reads from its prompt (`Ultrathink:`), when one was picked. */

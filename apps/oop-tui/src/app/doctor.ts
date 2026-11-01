@@ -2,7 +2,8 @@ import * as NodeFS from "node:fs";
 
 import type { DiscoveryResult } from "../link/discovery.ts";
 import { configDirectory, credentialsFilePath, type PathEnv } from "../link/paths.ts";
-import { detectColorLevel, type ColorLevel } from "../render/color.ts";
+import { t } from "../i18n/index.ts";
+import { detectColorLevel } from "../render/color.ts";
 import { railEnd, railGap, railNote, railStart, type Rail } from "../render/rail.ts";
 import { makeStyle } from "../render/style.ts";
 import { ASCII_SYMBOLS, resolveSymbols, UNICODE_SYMBOLS } from "../render/symbols.ts";
@@ -40,24 +41,17 @@ export interface DoctorDeps {
   readonly out: (line: string) => void;
 }
 
-const COLOR_NAMES: Record<ColorLevel, string> = {
-  0: "없음",
-  1: "16색",
-  2: "256색",
-  3: "트루컬러",
-};
-
 /** Which variable decided the colour level, in the order `detectColorLevel` looks at them. */
 const colorReason = (env: NodeJS.ProcessEnv, isTty: boolean): string => {
   if (["0", "1", "2", "3"].includes(env.FORCE_COLOR?.trim() ?? "")) return "FORCE_COLOR";
   if (env.NO_COLOR !== undefined && env.NO_COLOR !== "") return "NO_COLOR";
   if (env.TERM === "dumb") return "TERM=dumb";
-  if (!isTty) return "터미널이 아님";
+  if (!isTty) return t("doctor.reason.notTty");
   const colorTerm = env.COLORTERM?.toLowerCase();
   if (colorTerm === "truecolor" || colorTerm === "24bit") return "COLORTERM";
   if (env.WT_SESSION !== undefined && env.WT_SESSION !== "") return "Windows Terminal";
   if (env.TERM?.includes("-256color") === true) return "TERM";
-  return "기본값";
+  return t("doctor.reason.default");
 };
 
 const defaultStat = (path: string): { readonly mode: number } | null => {
@@ -100,13 +94,19 @@ export const collectChecks = async (
   const terminal: Check[] = [
     {
       verdict: "ok",
-      text: `색: ${COLOR_NAMES[level]} (${colorReason(paths.env, deps.isTty)})`,
+      text: t("doctor.color", {
+        name: t(`doctor.color.${level}`),
+        reason: colorReason(paths.env, deps.isTty),
+      }),
     },
     {
       verdict: "ok",
-      text: `심볼: ${symbols === ASCII_SYMBOLS ? "ascii" : "unicode"} (${settings.symbols})`,
+      text: t("doctor.symbols", {
+        kind: symbols === ASCII_SYMBOLS ? "ascii" : "unicode",
+        setting: settings.symbols,
+      }),
     },
-    { verdict: "ok", text: `테마: ${startup.theme.name}` },
+    { verdict: "ok", text: t("doctor.theme", { name: startup.theme.name }) },
     ...startup.warnings.map((warning): Check => ({ verdict: "warn", text: oneLine(warning) })),
   ];
 
@@ -114,12 +114,12 @@ export const collectChecks = async (
   if (file.damaged) {
     settingsChecks.push({
       verdict: "fail",
-      text: file.warnings[0] ?? `설정 파일을 읽을 수 없어 기본값을 씁니다: ${settingsFile}`,
+      text: file.warnings[0] ?? t("doctor.settings.unreadable", { file: settingsFile }),
     });
   } else if (stat(settingsFile) === null) {
-    settingsChecks.push({ verdict: "ok", text: "설정 파일 없음 (기본값 사용)" });
+    settingsChecks.push({ verdict: "ok", text: t("doctor.settings.none") });
   } else {
-    settingsChecks.push({ verdict: "ok", text: `설정 파일 정상: ${settingsFile}` });
+    settingsChecks.push({ verdict: "ok", text: t("doctor.settings.ok", { file: settingsFile }) });
   }
   for (const warning of file.warnings.filter(() => !file.damaged)) {
     settingsChecks.push({ verdict: "warn", text: oneLine(warning) });
@@ -130,13 +130,16 @@ export const collectChecks = async (
     found?.kind === "found"
       ? {
           verdict: "ok",
-          text: `이 컴퓨터의 OOP 서버: 있음 (포트 ${portOf(found.origin)}) — ${
-            found.daemon === true ? "터미널 단독 서버" : "앱이 쓰는 서버"
-          }`,
+          text: t("doctor.server.found", {
+            port: portOf(found.origin),
+            kind: t(found.daemon === true ? "doctor.server.standalone" : "doctor.server.app"),
+          }),
         }
       : {
           verdict: "warn",
-          text: `이 컴퓨터의 OOP 서버: 없음${found === null ? "" : ` — ${oneLine(found.detail)}`}`,
+          text: t("doctor.server.none", {
+            detail: found === null ? "" : ` — ${oneLine(found.detail)}`,
+          }),
         };
 
   const credentialsFile = credentialsFilePath(paths);
@@ -146,38 +149,38 @@ export const collectChecks = async (
     credentials === null
       ? {
           verdict: "warn",
-          text: "자격증명 파일 없음 — 이 컴퓨터는 'oop' 이 자동 연결하고, 다른 컴퓨터는 'oop pair' 로 연결합니다",
+          text: t("doctor.credentials.none"),
         }
       : paths.platform !== "win32" && loose
         ? {
             verdict: "fail",
-            text: `자격증명 파일 권한이 넓습니다 (${(credentials.mode & 0o777).toString(8)}): chmod 600 으로 줄이세요`,
+            text: t("doctor.credentials.wide", { mode: (credentials.mode & 0o777).toString(8) }),
           }
-        : { verdict: "ok", text: "자격증명 파일 있음 (내용은 읽지 않음)" };
+        : { verdict: "ok", text: t("doctor.credentials.ok") };
 
   const standalone: Check[] =
     deps.standalone === undefined
       ? []
       : [
           deps.standalone.script !== null
-            ? { verdict: "ok", text: `터미널 단독 실행: 가능 (${deps.standalone.script})` }
+            ? { verdict: "ok", text: t("doctor.standalone.ok", { script: deps.standalone.script }) }
             : paths.platform === "darwin" || paths.platform === "win32"
               ? {
                   verdict: "warn",
-                  text: "터미널 단독 실행: 불가 — 설치된 OOP 앱을 찾지 못했습니다 (앱이 꺼지면 연결이 끊어집니다)",
+                  text: t("doctor.standalone.noApp"),
                 }
               : {
                   verdict: "ok",
-                  text: "터미널 단독 실행: 이 운영체제에서는 지원하지 않습니다 (앱이 꺼지면 연결이 끊어집니다)",
+                  text: t("doctor.standalone.unsupported"),
                 },
         ];
 
   return {
     symbolsAscii: symbols === ASCII_SYMBOLS,
     sections: [
-      { title: "터미널", checks: terminal },
-      { title: "설정", checks: settingsChecks },
-      { title: "연결", checks: [server, ...standalone, credentialCheck] },
+      { title: t("doctor.section.terminal"), checks: terminal },
+      { title: t("doctor.section.settings"), checks: settingsChecks },
+      { title: t("doctor.section.connection"), checks: [server, ...standalone, credentialCheck] },
     ],
   };
 };
@@ -210,7 +213,7 @@ export const runDoctor = async (deps: DoctorDeps): Promise<number> => {
   const room = width - 6;
 
   const { out } = deps;
-  out(railStart(rail, "oop doctor", "터미널 점검"));
+  out(railStart(rail, "oop doctor", t("doctor.title")));
   for (const section of sections) {
     out(railGap(rail));
     const body = section.checks.flatMap((check) =>
@@ -227,9 +230,11 @@ export const runDoctor = async (deps: DoctorDeps): Promise<number> => {
     railEnd(
       rail,
       attention === 0
-        ? theme.success(`${passed}/${all.length} 점검 통과 ${rail.symbols.check}`)
+        ? theme.success(
+            `${t("doctor.passed", { passed, total: all.length })} ${rail.symbols.check}`,
+          )
         : (failed > 0 ? theme.error : theme.warning)(
-            `${attention}건 확인 필요 ${rail.symbols.warning}`,
+            `${t("doctor.attention", { count: attention })} ${rail.symbols.warning}`,
           ),
     ),
   );

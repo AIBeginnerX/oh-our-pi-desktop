@@ -7,10 +7,11 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { TurnId } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import type { KeyEvent, KeyName } from "../input/keys.ts";
 import type { LinkStatus } from "../link/client.ts";
+import { setLanguage } from "../i18n/index.ts";
 import { emptyThreadMirror, type ThreadMirrorState } from "../link/threadMirror.ts";
 import { LiveRegion } from "../render/liveRegion.ts";
 import { makeStyle, type Style } from "../render/style.ts";
@@ -10169,5 +10170,74 @@ describe("/diff and /undo", () => {
       expect(help).toContain("/diff <턴번호> 로 다른 턴");
       expect(help).toContain("/undo 는 마지막 턴을 대화에서 지웁니다");
     });
+  });
+});
+
+describe("in English", () => {
+  /** The screen with the rail glyphs and line folds read as single spaces. */
+  const flat = (h: ReturnType<typeof harness>) =>
+    h
+      .screen()
+      .replace(/내 프로젝트/gu, "Project")
+      .replace(/[│▲◆└┌\s]+/gu, " ");
+
+  beforeEach(() => setLanguage("en"));
+  afterEach(() => setLanguage("ko"));
+
+  it("writes /help in English and mentions the language setting", () => {
+    const h = harness();
+    h.start();
+    h.press(key("enter"));
+    h.typeText("/help");
+    h.press(key("enter"));
+    const help = h.commits.join("\n");
+    expect(help).toContain("Commands");
+    expect(help).toContain("Pick a model");
+    expect(help).toContain("Undo the last turn");
+    expect(help).toContain("oop config set language en|ko");
+    expect(help.replace(/내 프로젝트/gu, "")).not.toMatch(/[가-힣]/u);
+  });
+
+  it("labels the composer in English", () => {
+    const h = harness();
+    h.start();
+    h.press(key("enter"));
+    expect(flat(h)).toContain("Message");
+    expect(flat(h)).toContain("e.g. add a function to hello.ts · / for commands");
+    expect(flat(h)).not.toMatch(/[가-힣]/u);
+  });
+
+  it("says why a command cannot run, in English", () => {
+    const h = harness();
+    h.start();
+    h.press(key("enter"));
+    h.typeText("/mode bogus");
+    h.press(key("enter"));
+    expect(flat(h)).toContain("Unknown permission mode: bogus");
+    h.press(key("escape"));
+    h.typeText("/undo");
+    h.press(key("enter"));
+    expect(flat(h)).toContain("has not started yet");
+  });
+
+  it("opens the permission mode list with English labels", () => {
+    const h = harness();
+    h.start();
+    h.press(key("enter"));
+    h.typeText("/mode");
+    h.press(key("enter"));
+    expect(flat(h)).toContain("Permission mode");
+    expect(flat(h)).toContain("Auto-accept edits");
+    expect(flat(h)).toContain("Allows commands and edits without asking.");
+  });
+
+  it("holds an unknown slash message with the way to send it anyway", () => {
+    const h = harness();
+    h.start();
+    h.press(key("enter"));
+    h.typeText("/nosuchthing");
+    h.press(key("enter"));
+    expect(flat(h)).toContain("Unknown command: /nosuchthing");
+    expect(flat(h)).toContain("start with a space");
   });
 });

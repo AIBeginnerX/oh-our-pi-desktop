@@ -22,7 +22,7 @@ import type { ReviewCommentContext } from "./reviewCommentContext";
  * and report a memory send that never happened, so the send holds instead.
  */
 export const PROJECT_MEMORY_INLINE_UNSUPPORTED_MESSAGE =
-  "기억 참조는 이 서버 버전에서 전송할 수 없습니다.";
+  "Memory references can't be sent on this server version.";
 
 /**
  * The composer's model and modes when the message was queued. The send uses

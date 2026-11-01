@@ -5,6 +5,7 @@ import { wrapStyled } from "../text/wrap.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
 import type { Theme } from "../render/theme.ts";
 import { promptPreview, turnCountOf, type UndoPlan } from "./checkpoints.ts";
+import { t } from "../i18n/index.ts";
 
 /** A request that has not been answered by now is no longer waited for. */
 const PENDING_LIMIT_MS = 60_000;
@@ -19,18 +20,22 @@ export const undoChoices = (plan: UndoPlan): ReadonlyArray<UndoChoice> =>
 export const undoItems = (plan: UndoPlan): PickerItem[] =>
   undoChoices(plan).map((choice) =>
     choice === "cancel"
-      ? { label: "취소", note: "아무것도 바꾸지 않습니다" }
+      ? { label: t("session.undo.cancel"), note: t("session.undo.cancelNote") }
       : choice === "files"
-        ? { label: "파일과 대화 되돌리기", note: `턴 ${plan.target} 끝 상태로` }
+        ? {
+            label: t("session.undo.filesLabel"),
+            note: t("session.undo.filesNote", { target: plan.target }),
+          }
         : {
-            label: plan.restore === "possible" ? "대화만 되돌리기" : "대화 되돌리기",
-            note: "파일은 그대로 둡니다",
+            label:
+              plan.restore === "possible" ? t("session.undo.convPossible") : t("session.undo.conv"),
+            note: t("session.undo.convNote"),
           },
   );
 
 /** The state a restore goes back to, in the words of the turn it follows. */
 const stateAfter = (target: number): string =>
-  target === 0 ? "이 스레드를 시작하기 전" : `턴 ${target} 이 끝난`;
+  target === 0 ? t("session.undo.stateStart") : t("session.undo.stateTurn", { target });
 
 /**
  * What the confirmation says before anything is deleted: which turn goes, what happens to the
@@ -39,32 +44,30 @@ const stateAfter = (target: number): string =>
  */
 export const undoSummary = (plan: UndoPlan, theme: Theme, room: number, queued = 0): string[] => {
   const { files } = plan;
-  const counts = `파일 ${files.count}개 (+${files.additions} -${files.deletions})`;
+  const counts = t("session.undo.counts", {
+    count: files.count,
+    additions: files.additions,
+    deletions: files.deletions,
+  });
   const rows: string[] = [
     theme.text.bold(
-      plan.prompt === null ? `턴 ${plan.turn}` : `턴 ${plan.turn}: ${promptPreview(plan.prompt)}`,
+      plan.prompt === null
+        ? t("session.undo.turn", { turn: plan.turn })
+        : t("session.undo.turnPrompt", { turn: plan.turn, prompt: promptPreview(plan.prompt) }),
     ),
-    `대화: 이 턴의 질문과 답변이 대화에서 지워집니다.${
-      plan.prompt === null ? "" : " 질문은 입력창으로 돌아옵니다."
-    }`,
+    `${t("session.undo.convRow")}${plan.prompt === null ? "" : t("session.undo.convRowPrompt")}`,
   ];
   if (queued > 0) {
-    rows.push(
-      `대기 중인 메시지 ${queued}건은 입력창으로 돌아옵니다 (지워진 턴을 전제로 했을 수 있어 자동으로 보내지 않습니다).`,
-    );
+    rows.push(t("session.undo.queued", { queued }));
   }
   if (plan.restore === "possible") {
-    rows.push(
-      `파일: "파일과 대화"를 고르면 ${counts} 를 포함해 폴더 전체가 ${stateAfter(plan.target)} 상태로 돌아가고, 그 사이 직접 고친 내용도 사라집니다. "대화만"을 고르면 파일은 그대로입니다.`,
-    );
+    rows.push(t("session.undo.filesRowPossible", { counts, state: stateAfter(plan.target) }));
   } else if (plan.restore === "shared-folder") {
-    rows.push(
-      `파일: 그대로 둡니다. 이 스레드는 프로젝트 폴더를 다른 스레드와 함께 쓰므로 파일 복원은 지원되지 않습니다 (데스크톱 앱도 같습니다). 이 턴이 바꾼 ${counts} 는 /diff ${plan.turn} 으로 보고 직접 되돌리세요.`,
-    );
+    rows.push(t("session.undo.filesRowShared", { counts, turn: plan.turn }));
   } else {
-    rows.push("파일: 그대로 둡니다. 되돌아갈 체크포인트를 쓸 수 없습니다.");
+    rows.push(t("session.undo.filesRowNone"));
   }
-  rows.push(theme.warning("되돌린 것을 다시 되돌리는 기능은 데스크톱 앱에도 없습니다."));
+  rows.push(theme.warning(t("session.undo.irreversible")));
   return rows.flatMap((row) => wrapStyled(row, Math.max(8, room)));
 };
 

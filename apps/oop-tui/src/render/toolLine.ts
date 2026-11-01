@@ -5,6 +5,7 @@ import { truncateStyled } from "../text/wrap.ts";
 import { RAIL_COLUMNS, railDone, railRow } from "./rail.ts";
 import type { Style } from "./style.ts";
 import type { Symbols } from "./symbols.ts";
+import { t } from "../i18n/index.ts";
 
 export interface ToolLineOptions {
   readonly width: number;
@@ -94,7 +95,9 @@ const changedFiles = (data: Record<string, unknown>): string[] => {
 
 const filesSummary = (files: ReadonlyArray<string>): string => {
   const listed = files.slice(0, FILES_LISTED).join(", ");
-  return files.length > FILES_LISTED ? `${listed} 외 ${files.length - FILES_LISTED}개` : listed;
+  return files.length > FILES_LISTED
+    ? t("render.toolLine.moreFiles", { listed, count: files.length - FILES_LISTED })
+    : listed;
 };
 
 /**

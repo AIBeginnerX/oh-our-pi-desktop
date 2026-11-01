@@ -14,6 +14,7 @@ import type { WorkflowNode } from "@t3tools/client-runtime/workflow-graph";
 import { isCrewThreadTitle } from "@t3tools/shared/crew";
 import { CREW_AUDIT_SKIPPED_ACTIVITY } from "@t3tools/shared/threadGoal";
 
+import { t } from "../i18n/index.ts";
 import { auditSkippedText, followUpText } from "../render/crewBoard.ts";
 import { asRecord, firstLine } from "../render/toolLine.ts";
 
@@ -198,14 +199,18 @@ export const waitingCrewThreads = (
     return [{ thread, kind: thread.hasPendingApprovals ? "approval" : "input" }];
   });
 
-/** `crew 작업이 승인을 기다립니다 — /crew`, with a count when several wait. */
+/** `Crew work is waiting for approval — /crew`, with a count when several wait. */
 export const waitingText = (waiting: ReadonlyArray<WaitingCrewThread>): string | null => {
   if (waiting.length === 0) return null;
   const approvals = waiting.filter((entry) => entry.kind === "approval").length;
-  const what = approvals > 0 ? "승인을" : "질문을";
   return waiting.length === 1
-    ? `crew 작업이 ${what} 기다립니다 — /crew`
-    : `crew 작업 ${waiting.length}개가 ${approvals === waiting.length ? "승인을" : "승인·질문을"} 기다립니다 — /crew`;
+    ? t(approvals > 0 ? "providers.crew.waitOneApproval" : "providers.crew.waitOneInput")
+    : t(
+        approvals === waiting.length
+          ? "providers.crew.waitManyApproval"
+          : "providers.crew.waitManyMixed",
+        { count: waiting.length },
+      );
 };
 
 export interface ListedThreads {

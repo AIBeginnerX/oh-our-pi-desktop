@@ -2,6 +2,7 @@ import { sanitizeForTerminal } from "../text/width.ts";
 import { truncateStyled } from "../text/wrap.ts";
 import { type Piece, wrapPieces } from "./highlight.ts";
 import type { Style } from "./style.ts";
+import { t } from "../i18n/index.ts";
 
 export interface DiffOptions {
   readonly width: number;
@@ -133,7 +134,7 @@ export class DiffStream {
   finish(): string[] {
     const out = this.flushChange();
     if (this.hidden > 0) {
-      out.push(this.options.style.theme.dim(`... ${this.hidden}줄 더`));
+      out.push(this.options.style.theme.dim(t("render.moreLinesDots", { count: this.hidden })));
       this.hidden = 0;
     }
     return out;

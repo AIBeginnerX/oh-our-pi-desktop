@@ -1,4 +1,5 @@
 import type { CredentialStore, StoredCredential } from "./credentials.ts";
+import { t } from "../i18n/index.ts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
@@ -21,7 +22,7 @@ export const isLoopbackOrigin = (origin: string): boolean => {
 export const plainHttpWarning = (origin: string): string | null => {
   const url = parse(origin);
   if (url === null || url.protocol !== "http:" || isLoopback(url)) return null;
-  return `주의: ${url.host} 에 암호화 없는 http 로 연결합니다. 토큰과 대화 내용이 네트워크에 그대로 보입니다.`;
+  return t("link.plainHttp", { host: url.host });
 };
 
 /**
@@ -75,12 +76,12 @@ export const selectCredential = async (
   if (credential !== null) return { credential };
   if (elsewhere === null) {
     return {
-      error: `${server.label} 와(과) 아직 연결되지 않았습니다.\n데스크톱 앱에서 페어링 링크를 만든 뒤 'oop pair <링크>' 를 한 번 실행하세요.`,
+      error: t("link.notPaired", { label: server.label }),
       replaceable: true,
     };
   }
   return {
-    error: `${server.origin} 은(는) 연결할 때 저장한 서버(${elsewhere})가 아니므로 저장된 토큰을 보내지 않습니다.\n저장한 서버를 쓰려면 'oop --server ${elsewhere}' 를, 이 서버를 쓰려면 이 서버에서 만든 페어링 링크로 'oop pair <링크>' 를 실행하세요.`,
+    error: t("link.otherServer", { origin: server.origin, elsewhere }),
     replaceable: true,
   };
 };

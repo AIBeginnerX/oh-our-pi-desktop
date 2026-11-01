@@ -3,6 +3,7 @@ import { graphemesOf, sanitizeForTerminal, stringWidth } from "../text/width.ts"
 import { truncateStyled } from "../text/wrap.ts";
 import { ASCII_SYMBOLS, type Symbols } from "./symbols.ts";
 import type { ForegroundToken, Theme } from "./theme.ts";
+import { t } from "../i18n/index.ts";
 
 /** What the bar can say. Anything absent is left out of the line, not filled with a placeholder. */
 export interface StatusBarInput {
@@ -181,7 +182,7 @@ const segmentsOf = ({ input, theme, symbols, level }: Context) => {
     fixed("cost", seg(formatCost(input.costUsd, input.costPartial), theme.muted));
   }
   if (level !== "minimal" && input.agents > 0) {
-    fixed("agents", seg(`에이전트 ${input.agents}`, theme.agent(0)));
+    fixed("agents", seg(t("render.status.agents", { count: input.agents }), theme.agent(0)));
   }
   if (level === "full" && input.hint !== null && oneLine(input.hint) !== "") {
     fixed("hint", seg(oneLine(input.hint), theme.dim));

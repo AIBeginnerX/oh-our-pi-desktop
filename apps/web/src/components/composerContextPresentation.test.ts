@@ -182,7 +182,7 @@ describe("composer memory chips", () => {
       { terminalContexts: [], projectMemoryReferences: [reference] },
       () => ({ status: "stale", title: "API conventions", currentVersion: 5 }),
     );
-    expect(chipText(stale)).toBe("API conventions · 이전 버전");
+    expect(chipText(stale)).toBe("API conventions · older version");
   });
 
   it("renders unknown for pending or truncated reads and unavailable only for a complete loaded list", () => {
@@ -197,7 +197,7 @@ describe("composer memory chips", () => {
       { terminalContexts: [], projectMemoryReferences: [reference] },
       () => ({ status: "missing" }),
     );
-    expect(chipText(missing)).toBe("Project memory · 사용 불가");
+    expect(chipText(missing)).toBe("Project memory · unavailable");
     const unresolved = missing.root
       .findAllByType("span")
       .find((node: ReactTestInstance) => node.props["data-context-unresolved"] === "true");

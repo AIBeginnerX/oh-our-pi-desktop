@@ -7,6 +7,7 @@ import {
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
 
+import { t } from "../i18n/index.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
 import { isThreadRunning } from "./projects.ts";
 import {
@@ -30,7 +31,7 @@ export interface ProviderRow {
   readonly name: string;
   readonly driver: string;
   readonly enabled: boolean;
-  /** One word: 준비됨, 경고, 오류, 꺼짐, 미설치 or 사용 불가. */
+  /** One word: ready, warning, error, off, not installed or unavailable. */
   readonly status: string;
   readonly tone: RowTone;
   /** How many models the server reports; null when the server has not reported the instance. */
@@ -44,12 +45,14 @@ export interface ProviderRow {
 type ProviderState = ServerConfig["providers"][number];
 
 const stateOf = (provider: ProviderState): Pick<ProviderRow, "status" | "tone"> => {
-  if (provider.availability === "unavailable") return { status: "사용 불가", tone: "bad" };
-  if (!provider.enabled || provider.status === "disabled") return { status: "꺼짐", tone: "dim" };
-  if (!provider.installed) return { status: "미설치", tone: "bad" };
-  if (provider.status === "error") return { status: "오류", tone: "bad" };
-  if (provider.status === "warning") return { status: "경고", tone: "warn" };
-  return { status: "준비됨", tone: "ok" };
+  if (provider.availability === "unavailable")
+    return { status: t("providers.plan.unavailable"), tone: "bad" };
+  if (!provider.enabled || provider.status === "disabled")
+    return { status: t("providers.cmd.off"), tone: "dim" };
+  if (!provider.installed) return { status: t("providers.plan.notInstalled"), tone: "bad" };
+  if (provider.status === "error") return { status: t("providers.plan.error"), tone: "bad" };
+  if (provider.status === "warning") return { status: t("providers.plan.warning"), tone: "warn" };
+  return { status: t("providers.plan.ready"), tone: "ok" };
 };
 
 const oneLine = (text: string): string => sanitizeForTerminal(text).replace(/\s+/gu, " ").trim();
@@ -87,7 +90,7 @@ export const providerRows = (
       name: oneLine(instance.displayName ?? driverLabel(instance.driver)),
       driver: instance.driver,
       enabled: instance.enabled !== false,
-      status: instance.enabled === false ? "꺼짐" : "확인 중",
+      status: instance.enabled === false ? t("providers.cmd.off") : t("providers.plan.checking"),
       tone: "dim",
       models: null,
       message: null,
@@ -222,7 +225,7 @@ export const planRemove = (input: {
   if (isDefaultInstanceId(id)) {
     return {
       ok: false,
-      reason: `'${id}' 는 ${driverLabel(id)} 의 기본 인스턴스라 지울 수 없습니다. 쓰지 않으려면 앱의 설정 > Providers 에서 끄세요.`,
+      reason: t("providers.plan.builtIn", { id, driver: driverLabel(id) }),
     };
   }
   const instance = Object.hasOwn(settings.providerInstances, id)
@@ -233,8 +236,8 @@ export const planRemove = (input: {
     return {
       ok: false,
       reason: isInstanceIdShape(id)
-        ? `'${id}' 라는 Provider 가 없습니다.`
-        : "ID 형식이 잘못됐습니다. 영문자로 시작하고 영문자, 숫자, '-', '_' 만 쓸 수 있습니다.",
+        ? t("providers.plan.noSuchProvider", { id })
+        : t("providers.plan.badId"),
     };
   }
   const uses = (selection: { readonly instanceId: string } | null | undefined): boolean =>
@@ -270,30 +273,33 @@ export const planRemove = (input: {
 /** The plan as plain sentences, one per line. */
 export const planLines = (plan: RemovePlan): string[] => {
   const lines = [
-    `삭제: ${plan.id} (${plan.name}, ${driverLabel(plan.driver)})`,
+    t("providers.plan.remove", { id: plan.id, name: plan.name, driver: driverLabel(plan.driver) }),
     plan.secrets > 0
-      ? `서버에 저장된 비밀값 ${plan.secrets}개도 함께 지워집니다.`
-      : "저장된 비밀값은 없습니다.",
+      ? t("providers.plan.secrets", { count: plan.secrets })
+      : t("providers.plan.noSecrets"),
   ];
   if (!plan.threadsKnown) {
-    lines.push("스레드 목록을 아직 받지 못해 영향을 알 수 없습니다.");
+    lines.push(t("providers.plan.threadsUnknown"));
   } else if (plan.threads.total > 0) {
-    const running = plan.threads.running > 0 ? ` (실행 중 ${plan.threads.running}개)` : "";
-    lines.push(
-      `이 Provider 의 모델을 쓰는 스레드 ${plan.threads.total}개${running}는 그대로 남습니다.`,
-    );
+    const running =
+      plan.threads.running > 0
+        ? ` ${t("providers.plan.running", { count: plan.threads.running })}`
+        : "";
+    lines.push(t("providers.plan.threadsKept", { count: plan.threads.total, running }));
     for (const title of plan.threads.titles) lines.push(`  - ${title}`);
     if (plan.threads.total > plan.threads.titles.length) {
-      lines.push(`  … 외 ${plan.threads.total - plan.threads.titles.length}개`);
+      lines.push(
+        t("providers.plan.more", { count: plan.threads.total - plan.threads.titles.length }),
+      );
     }
   } else {
-    lines.push("이 Provider 를 쓰는 스레드는 없습니다.");
+    lines.push(t("providers.plan.noThreads"));
   }
-  if (plan.crewPins > 0) lines.push(`Crew 에 이 Provider 의 모델로 고정된 역할 ${plan.crewPins}개`);
-  if (plan.textGeneration) lines.push("제목·커밋 메시지 생성 모델이 이 Provider 를 가리킵니다.");
-  if (plan.projects > 0) lines.push(`기본 모델이 이 Provider 인 프로젝트 ${plan.projects}개`);
+  if (plan.crewPins > 0) lines.push(t("providers.plan.crewPins", { count: plan.crewPins }));
+  if (plan.textGeneration) lines.push(t("providers.plan.textGeneration"));
+  if (plan.projects > 0) lines.push(t("providers.plan.projects", { count: plan.projects }));
   if (plan.threads.total + plan.crewPins + plan.projects > 0 || plan.textGeneration) {
-    lines.push("위 선택은 자동으로 바뀌지 않습니다. 삭제 뒤 다른 모델로 바꾸세요.");
+    lines.push(t("providers.plan.notAutomatic"));
   }
   return lines;
 };

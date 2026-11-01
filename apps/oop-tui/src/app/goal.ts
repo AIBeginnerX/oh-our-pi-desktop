@@ -6,6 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { threadGoalProgress } from "@t3tools/shared/threadGoal";
+import { t } from "../i18n/index.ts";
 
 export const GOAL_MAX_CONTINUES_RANGE = { min: 1, max: 20 } as const;
 
@@ -23,14 +24,18 @@ export interface GoalView {
   readonly reason?: string;
 }
 
-const STATE_WORD: Record<GoalState, string> = {
-  working: "진행 중",
-  met: "완료",
-  blocked: "차단",
-  stopped: "중지",
+export const goalStateWord = (state: GoalState): string => {
+  switch (state) {
+    case "working":
+      return t("session.goal.working");
+    case "met":
+      return t("session.goal.met");
+    case "blocked":
+      return t("session.goal.blocked");
+    case "stopped":
+      return t("session.goal.stopped");
+  }
 };
-
-export const goalStateWord = (state: GoalState): string => STATE_WORD[state];
 
 /** The goal as it is saved: new id (so earlier progress never counts), active, set now. */
 export const makeGoal = (input: {
@@ -107,13 +112,17 @@ export const goalViewOf = (
 };
 
 /**
- * The few words the status bar keeps: `목표 2/5`, `목표 2+/5`, `목표 완료`. A null view is a thread
+ * The few words the status bar keeps: `Goal 2/5`, `Goal 2+/5`, `Goal met`. A null view is a thread
  * that is not loaded yet, whose progress is not known, so the count is a `?`.
  */
 export const goalBarText = (goal: ThreadGoal, view: GoalView | null): string => {
-  if (view === null) return `목표 ?/${goal.maxContinues}`;
+  if (view === null) return t("session.goal.barUnknown", { max: goal.maxContinues });
   if (view.state === "working") {
-    return `목표 ${view.continues}${view.partial ? "+" : ""}/${goal.maxContinues}`;
+    return t("session.goal.barCount", {
+      n: view.continues,
+      plus: view.partial ? "+" : "",
+      max: goal.maxContinues,
+    });
   }
-  return `목표 ${goalStateWord(view.state)}`;
+  return t("session.goal.barState", { state: goalStateWord(view.state) });
 };

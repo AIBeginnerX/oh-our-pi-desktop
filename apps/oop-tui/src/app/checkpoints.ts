@@ -1,6 +1,7 @@
 import type { OrchestrationCheckpointSummary, OrchestrationThread } from "@t3tools/contracts";
 
 import { sanitizeForTerminal } from "../text/width.ts";
+import { t } from "../i18n/index.ts";
 
 /**
  * A turn that ended less than this long ago may still be having its checkpoint made: the server
@@ -30,19 +31,19 @@ export type CheckpointGap =
 export const checkpointGapText = (gap: CheckpointGap): string => {
   switch (gap.kind) {
     case "no-turn":
-      return "아직 끝난 턴이 없습니다.";
+      return t("session.cp.noTurn");
     case "none":
-      return "이 스레드에는 체크포인트가 없습니다. 체크포인트는 git 저장소에서 턴이 끝날 때 만들어지므로, git 이 아닌 폴더에서 한 대화에는 없습니다.";
+      return t("session.cp.none");
     case "processing":
-      return "방금 끝난 턴의 체크포인트를 만드는 중입니다. 잠시 뒤 다시 시도하세요.";
+      return t("session.cp.processing");
     case "capture-failed":
-      return `마지막 턴의 체크포인트를 만들지 못했습니다${gap.detail === null ? "" : `: ${gap.detail}`}`;
+      return `${t("session.cp.captureFailed")}${gap.detail === null ? "" : `: ${gap.detail}`}`;
     case "unusable":
-      return `턴 ${gap.turn} 의 체크포인트를 쓸 수 없습니다 (상태: ${gap.status}).`;
+      return t("session.cp.unusable", { turn: gap.turn, status: gap.status });
     case "no-such-turn":
       return gap.first === gap.last
-        ? `턴 ${gap.turn} 의 체크포인트가 없습니다. 있는 턴은 ${gap.last} 뿐입니다.`
-        : `턴 ${gap.turn} 의 체크포인트가 없습니다. 있는 턴은 ${gap.first}~${gap.last} 입니다.`;
+        ? t("session.cp.noSuchOne", { turn: gap.turn, last: gap.last })
+        : t("session.cp.noSuchRange", { turn: gap.turn, first: gap.first, last: gap.last });
   }
 };
 
@@ -154,7 +155,7 @@ export const parseDiffArgs = (
   const numbered = first !== undefined && /^\d+$/u.test(first);
   const turn = numbered ? Number(first) : null;
   if (turn !== null && (turn < 1 || !Number.isSafeInteger(turn))) {
-    return { error: "턴 번호는 1 이상의 숫자입니다. 예: /diff 2" };
+    return { error: t("session.cp.badTurn") };
   }
   const file = (numbered ? others : args).join(" ").trim();
   return { turn, file: file === "" ? null : file };

@@ -20,6 +20,7 @@ import {
 } from "./transport.ts";
 import { applyServerConfigProjection, type ServerConfigProjection } from "./configFold.ts";
 import { applyThreadItem, emptyThreadMirror, type ThreadMirrorState } from "./threadMirror.ts";
+import { t } from "../i18n/index.ts";
 
 export type LinkPhase = "connecting" | "online" | "reconnecting" | "blocked" | "stopped";
 
@@ -151,7 +152,7 @@ export class LinkClient {
 
   async dispatch(command: ClientOrchestrationCommand): Promise<void> {
     const session = this.current;
-    if (session === null) throw new Error("서버와 연결되어 있지 않습니다.");
+    if (session === null) throw new Error(t("link.notConnected"));
     await session.dispatch(command);
   }
 
@@ -209,7 +210,7 @@ export class LinkClient {
   }
 
   private session(): TransportSession {
-    if (this.current === null) throw new Error("서버와 연결되어 있지 않습니다.");
+    if (this.current === null) throw new Error(t("link.notConnected"));
     return this.current;
   }
 
@@ -242,7 +243,7 @@ export class LinkClient {
       onItem: (event) => {
         if (this.current === session) this.foldConfig(event);
       },
-      onEnd: (error) => lose?.(error ?? "서버가 설정 구독을 종료했습니다."),
+      onEnd: (error) => lose?.(error ?? t("link.configEnded")),
     });
   }
 
@@ -271,7 +272,7 @@ export class LinkClient {
           else this.shellSnapshot = applyShellStreamEvent(this.shellSnapshot, item);
           this.events.shell(this.shellSnapshot);
         },
-        onEnd: (error) => lose?.(error ?? "서버가 목록 구독을 종료했습니다."),
+        onEnd: (error) => lose?.(error ?? t("link.listEnded")),
       },
     );
   }
@@ -303,10 +304,10 @@ export class LinkClient {
           if (this.activeThread !== threadId) return;
           if (rejected === true) {
             this.closeThread();
-            this.events.threadFailed(threadId, error ?? "스레드를 열 수 없습니다.");
+            this.events.threadFailed(threadId, error ?? t("link.threadOpenFailed"));
             return;
           }
-          lose?.(error ?? "서버가 스레드 구독을 종료했습니다.");
+          lose?.(error ?? t("link.threadEnded"));
         },
       },
     );
@@ -372,7 +373,7 @@ export class LinkClient {
       if (this.stopped) return;
 
       attempt = this.now() - startedAt >= STABLE_SESSION_MS ? 1 : attempt + 1;
-      if (!(await this.waitBeforeRetry(attempt, reason ?? "연결이 끊어졌습니다."))) return;
+      if (!(await this.waitBeforeRetry(attempt, reason ?? t("link.connectionLost")))) return;
     }
   }
 

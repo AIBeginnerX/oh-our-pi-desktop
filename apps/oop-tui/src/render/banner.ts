@@ -2,6 +2,7 @@ import { sanitizeForTerminal } from "../text/width.ts";
 import { truncateStyled } from "../text/wrap.ts";
 import { ASCII_SYMBOLS, type Symbols } from "./symbols.ts";
 import type { Theme } from "./theme.ts";
+import { t } from "../i18n/index.ts";
 
 /** Below this many columns the wordmark and its notes do not fit side by side. */
 const WORDMARK_MIN_COLUMNS = 80;
@@ -59,9 +60,11 @@ export const renderBanner = (input: BannerInput): string[] => {
   }
   const notes: ReadonlyArray<string> = [
     "",
-    `${theme.brand.bold("OOP 터미널")}  ${theme.muted(`v${version}`)}`,
-    ...(input.server === null ? [] : [`${theme.dim("서버  ")}${oneLine(input.server)}`]),
-    `${theme.dim("폴더  ")}${homeRelative(oneLine(input.cwd), input.home)}`,
+    `${theme.brand.bold(t("render.banner.title"))}  ${theme.muted(`v${version}`)}`,
+    ...(input.server === null
+      ? []
+      : [`${theme.dim(t("render.banner.server"))}${oneLine(input.server)}`]),
+    `${theme.dim(t("render.banner.folder"))}${homeRelative(oneLine(input.cwd), input.home)}`,
   ];
   const lines = WORDMARK.map((row, index) => {
     const art = symbols === ASCII_SYMBOLS ? row.replace(/[▄▀█]/gu, "#") : row;

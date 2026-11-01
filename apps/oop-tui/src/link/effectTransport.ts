@@ -44,6 +44,7 @@ import {
   type TransportSession,
   TransportError,
 } from "./transport.ts";
+import { t } from "../i18n/index.ts";
 
 const fetchFn: typeof globalThis.fetch = (input, init) => globalThis.fetch(input, init);
 
@@ -52,7 +53,11 @@ const socketLayer = Layer.mergeAll(httpLayer, Socket.layerWebSocketConstructorGl
 const sessionLayer = layerWithOptions({}).pipe(Layer.provide(socketLayer));
 
 const describeCause = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "알 수 없는 오류";
+  cause instanceof Error
+    ? cause.message
+    : typeof cause === "string"
+      ? cause
+      : t("link.unknownError");
 
 const toTransportError = (error: ConnectionAttemptError): TransportError =>
   new TransportError(
@@ -165,10 +170,13 @@ export const makeEffectTransport = (input: {
 
     const closed = Effect.runPromise(
       session.closed.pipe(
-        Effect.match({ onFailure: (error) => error.detail, onSuccess: () => "연결이 닫혔습니다." }),
+        Effect.match({
+          onFailure: (error) => error.detail,
+          onSuccess: () => t("link.connectionClosed"),
+        }),
       ),
       { signal: abort.signal },
-    ).catch(() => "연결이 닫혔습니다.");
+    ).catch(() => t("link.connectionClosed"));
 
     const subscribe = <Item, E>(stream: Stream.Stream<Item, E>, handlers: StreamHandlers<Item>) => {
       const cancelled = new AbortController();

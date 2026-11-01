@@ -60,7 +60,7 @@ const nearest = (word: string, known: ReadonlyArray<string>): string | null => {
   return best === null ? null : best.name;
 };
 
-/** Top-level folders of a computer: `/tmp 안에 뭐 있어?` is a question about a path, not a command. */
+/** Top-level folders of a computer: `/tmp what is in here?` is a question about a path, not a command. */
 const FOLDER_NAMES: ReadonlySet<string> = new Set([
   "applications",
   "bin",

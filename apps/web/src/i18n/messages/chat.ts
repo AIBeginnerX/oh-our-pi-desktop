@@ -57,6 +57,39 @@ export const CHAT_MESSAGES: MessageCatalog = {
     "zh-CN": "智能体工作期间，消息将加入队列（{shortcut} 立即发送下一条）",
     es: "Tu mensaje se pondrá en cola mientras el agente trabaja ({shortcut} envía el siguiente ahora)",
   },
+  "Your message will be delivered when the background agents finish. Stop ends them too.": {
+    ko: "메시지는 백그라운드 에이전트가 끝나면 전달됩니다. 중지하면 에이전트도 함께 종료됩니다.",
+    ja: "メッセージはバックグラウンドエージェントの完了後に送信されます。停止するとエージェントも終了します。",
+    "zh-CN": "消息将在后台智能体完成后送达。停止会同时结束它们。",
+    es: "Tu mensaje se entregará cuando terminen los agentes en segundo plano. Detener también los termina.",
+  },
+  "Stop background agents too?": {
+    ko: "백그라운드 에이전트도 중지할까요?",
+    ja: "バックグラウンドエージェントも停止しますか?",
+    "zh-CN": "要同时停止后台智能体吗?",
+    es: "¿Detener también los agentes en segundo plano?",
+  },
+  "1 background agent is still running. Stopping ends it and its work. Queued messages return to the composer.":
+    {
+      ko: "백그라운드 에이전트 1개가 아직 실행 중입니다. 중지하면 에이전트와 작업이 종료됩니다. 대기 중인 메시지는 입력창으로 돌아옵니다.",
+      ja: "バックグラウンドエージェントが1件まだ実行中です。停止するとエージェントとその作業が終了します。キュー内のメッセージは入力欄に戻ります。",
+      "zh-CN": "仍有 1 个后台智能体在运行。停止会结束它及其工作。排队的消息将回到输入框。",
+      es: "Aún hay 1 agente en segundo plano en ejecución. Detener lo termina junto con su trabajo. Los mensajes en cola vuelven al cuadro de texto.",
+    },
+  "{count} background agents are still running. Stopping ends them and their work. Queued messages return to the composer.":
+    {
+      ko: "백그라운드 에이전트 {count}개가 아직 실행 중입니다. 중지하면 에이전트와 작업이 종료됩니다. 대기 중인 메시지는 입력창으로 돌아옵니다.",
+      ja: "バックグラウンドエージェントが{count}件まだ実行中です。停止するとエージェントとその作業が終了します。キュー内のメッセージは入力欄に戻ります。",
+      "zh-CN": "仍有 {count} 个后台智能体在运行。停止会结束它们及其工作。排队的消息将回到输入框。",
+      es: "Aún hay {count} agentes en segundo plano en ejecución. Detener los termina junto con su trabajo. Los mensajes en cola vuelven al cuadro de texto.",
+    },
+  "Keep running": {
+    ko: "계속 실행",
+    ja: "実行を続ける",
+    "zh-CN": "继续运行",
+    es: "Seguir ejecutando",
+  },
+  "Stop all": { ko: "모두 중지", ja: "すべて停止", "zh-CN": "全部停止", es: "Detener todo" },
   Total: { ko: "합계", ja: "合計", "zh-CN": "总计", es: "Total" },
   Less: { ko: "적음", ja: "少", "zh-CN": "少", es: "Menos" },
   More: { ko: "많음", ja: "多", "zh-CN": "多", es: "Más" },

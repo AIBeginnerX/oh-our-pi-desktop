@@ -1,5 +1,6 @@
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
+import { isQueuedBehindBackgroundAgents } from "./stopBackgroundAgents.logic";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { CrewChip } from "./CrewChip";
 import { GoalChip } from "./GoalChip";
@@ -1362,6 +1363,8 @@ export interface ChatComposerProps {
 
   // Session phase
   phase: SessionPhase;
+  /** Background agents of the lead still running; a queued message waits for them. */
+  liveBackgroundAgentCount?: number;
   isConnecting: boolean;
   isSendBusy: boolean;
   isRevertingCheckpoint?: boolean;
@@ -1529,6 +1532,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
+    liveBackgroundAgentCount = 0,
     isConnecting,
     isSendBusy,
     isRevertingCheckpoint = false,
@@ -1947,17 +1951,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           context: { terminalFocus: false },
         })
       : null;
+  const queuedBehindBackgroundAgents = isQueuedBehindBackgroundAgents({
+    running: phase === "running",
+    liveAgentCount: liveBackgroundAgentCount,
+  });
   const runningComposerPlaceholder =
     phase !== "running" || followUpBehavior !== "queue"
       ? null
-      : sendNowShortcutLabel
-        ? t(
-            "Your message will be queued while the agent works ({shortcut} sends the next one now)",
-            {
-              shortcut: sendNowShortcutLabel,
-            },
-          )
-        : t("Your message will be queued while the agent works");
+      : queuedBehindBackgroundAgents
+        ? t("Your message will be delivered when the background agents finish. Stop ends them too.")
+        : sendNowShortcutLabel
+          ? t(
+              "Your message will be queued while the agent works ({shortcut} sends the next one now)",
+              {
+                shortcut: sendNowShortcutLabel,
+              },
+            )
+          : t("Your message will be queued while the agent works");
   // Memory picker gating combines the server capability with the driver kind of
   // the instance that will actually run the turn; unresolved states only ever
   // disable or hide, never imply support.

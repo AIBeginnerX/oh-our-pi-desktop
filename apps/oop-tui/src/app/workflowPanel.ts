@@ -25,6 +25,7 @@ import {
   type WorkflowNodeState,
 } from "@t3tools/client-runtime/workflow-graph";
 
+import { t } from "../i18n/index.ts";
 import { formatCost, formatTokenCount, roleName } from "../render/crewBoard.ts";
 import { formatElapsed } from "../render/spinner.ts";
 import type { Style } from "../render/style.ts";
@@ -38,7 +39,7 @@ export type FlowAction =
   | { readonly kind: "toggle" | "on" | "off" | "live" | "next" | "prev" }
   | { readonly kind: "pick"; readonly number: number };
 
-export const WORKFLOW_USAGE = "/dag-workflow [on|off|번호|next|prev|live]";
+export const WORKFLOW_USAGE = "/dag-workflow [on|off|N|next|prev|live]";
 
 /** The two things the side panel can show; each has a command that opens, switches to, and closes it. */
 export type PanelView = "workflow" | "agents";
@@ -127,93 +128,143 @@ export const flat = (value: string): string =>
   sanitizeForTerminal(value).replace(/\s+/gu, " ").trim();
 
 const ROLE_WORDS: Readonly<Record<WorkflowActorRole, string>> = {
-  main: "메인 에이전트",
-  worker: roleName("worker"),
-  expert: roleName("expert"),
-  auditor: roleName("auditor"),
-  crew: "Crew 멤버",
-  subagent: "서브에이전트",
-  workflow: "워크플로",
+  get main() {
+    return t("providers.wf.role.main");
+  },
+  get worker() {
+    return roleName("worker");
+  },
+  get expert() {
+    return roleName("expert");
+  },
+  get auditor() {
+    return roleName("auditor");
+  },
+  get crew() {
+    return t("providers.wf.role.crew");
+  },
+  get subagent() {
+    return t("providers.wf.role.subagent");
+  },
+  get workflow() {
+    return t("providers.wf.role.workflow");
+  },
 };
 
 export const STATE_WORDS: Readonly<Record<WorkflowNodeState, string>> = {
-  pending: "시작 전",
-  blocked: "대기 중",
-  running: "작업 중",
-  paused: "일시 중지",
-  completed: "완료",
-  failed: "실패",
-  cancelled: "중단됨",
-  skipped: "건너뜀",
+  get pending() {
+    return t("providers.wf.state.pending");
+  },
+  get blocked() {
+    return t("providers.wf.state.blocked");
+  },
+  get running() {
+    return t("providers.wf.state.running");
+  },
+  get paused() {
+    return t("providers.wf.state.paused");
+  },
+  get completed() {
+    return t("providers.wf.state.completed");
+  },
+  get failed() {
+    return t("providers.wf.state.failed");
+  },
+  get cancelled() {
+    return t("providers.wf.state.cancelled");
+  },
+  get skipped() {
+    return t("providers.wf.state.skipped");
+  },
 };
 
 /** Where a node stands; a crew task that stopped partway says how. */
 const stateWord = (node: Pick<WorkflowNode, "state" | "info">): string => {
   if (node.state === "failed") {
     const outcome = node.info.crew?.outcome;
-    if (outcome === "blocked") return "차단됨";
-    if (outcome === "partial") return "일부 완료";
+    if (outcome === "blocked") return t("providers.wf.blocked");
+    if (outcome === "partial") return t("providers.wf.partial");
   }
   return STATE_WORDS[node.state];
 };
 
 export const DOING_WORDS: Readonly<Record<WorkflowDoing, string>> = {
-  read: "파일 읽는 중…",
-  edit: "파일 수정 중…",
-  run: "명령 실행 중…",
-  search: "검색 중…",
-  web: "웹 검색 중…",
-  other: "도구 사용 중…",
-  thinking: "생각하는 중…",
-  waiting: "팀 작업을 기다리는 중…",
+  get read() {
+    return t("providers.wf.doing.read");
+  },
+  get edit() {
+    return t("providers.wf.doing.edit");
+  },
+  get run() {
+    return t("providers.wf.doing.run");
+  },
+  get search() {
+    return t("providers.wf.doing.search");
+  },
+  get web() {
+    return t("providers.wf.doing.web");
+  },
+  get other() {
+    return t("providers.wf.doing.other");
+  },
+  get thinking() {
+    return t("providers.wf.doing.thinking");
+  },
+  get waiting() {
+    return t("providers.wf.doing.waiting");
+  },
 };
 
 export const toolWord = ({ category, count }: ToolCount): string => {
   switch (category) {
     case "read":
-      return `파일 ${count}개 읽음`;
+      return t("providers.wf.tool.read", { count });
     case "edit":
-      return `파일 ${count}개 수정`;
+      return t("providers.wf.tool.edit", { count });
     case "run":
-      return `명령 ${count}번 실행`;
+      return t("providers.wf.tool.run", { count });
     case "search":
-      return `검색 ${count}번`;
+      return t("providers.wf.tool.search", { count });
     case "web":
-      return `웹 검색 ${count}번`;
+      return t("providers.wf.tool.web", { count });
     case "other":
-      return `기타 도구 ${count}번`;
+      return t("providers.wf.tool.other", { count });
   }
 };
 
 const countsWord = (counts: WorkflowCounts): string =>
   [
-    counts.completed > 0 ? `완료 ${counts.completed}` : null,
-    counts.failed > 0 ? `실패 ${counts.failed}` : null,
-    counts.stopped > 0 ? `중단 ${counts.stopped}` : null,
-    counts.running > 0 ? `진행 ${counts.running}` : null,
+    counts.completed > 0 ? t("providers.wf.counts.completed", { count: counts.completed }) : null,
+    counts.failed > 0 ? t("providers.wf.counts.failed", { count: counts.failed }) : null,
+    counts.stopped > 0 ? t("providers.wf.counts.stopped", { count: counts.stopped }) : null,
+    counts.running > 0 ? t("providers.wf.counts.running", { count: counts.running }) : null,
   ]
     .filter((part) => part !== null)
     .join(" · ");
 
 const flowName = (flow: WorkflowGraph): string => {
   if (flow.turnIndex === undefined) return flat(flow.name);
-  return flow.kind === "crew" ? `턴 ${flow.turnIndex} · Crew` : `턴 ${flow.turnIndex}`;
+  const turn = t("providers.wf.turn", { index: flow.turnIndex });
+  return flow.kind === "crew" ? `${turn} · Crew` : turn;
 };
 
 /** Column titles the shared code builds in English; a workflow's own phase titles pass through. */
 const waveTitle = (title: string | undefined, index: number): string => {
-  if (title === undefined || title === "") return `웨이브 ${index + 1}`;
+  if (title === undefined || title === "") return t("providers.wf.wave", { index: index + 1 });
   if (title === "Main agent") return ROLE_WORDS.main;
-  if (title === "Delegated work") return "위임된 작업";
-  if (title === "Review") return "검토";
-  if (title === "Next") return "다음";
+  if (title === "Delegated work") return t("providers.wf.delegated");
+  if (title === "Review") return t("providers.wf.review");
+  if (title === "Next") return t("providers.wf.next");
   const numbered = /^(Step|Wave) (\d+)$/u.exec(title);
-  if (numbered !== null) return `${numbered[1] === "Step" ? "단계" : "웨이브"} ${numbered[2]}`;
+  if (numbered !== null)
+    return t(numbered[1] === "Step" ? "providers.wf.step" : "providers.wf.wave", {
+      index: numbered[2] ?? "",
+    });
   return flat(title);
 };
 
 const nodeName = (node: WorkflowNode): string => {
-  if (node.id.startsWith(THINKING_NODE_PREFIX)) return "생각하는 중";
+  if (node.id.startsWith(THINKING_NODE_PREFIX)) return t("providers.wf.thinking");
   const { actor } = node.info;
   if (actor === undefined) return flat(node.label);
   return [ROLE_WORDS[actor.role], actor.task === undefined ? "" : flat(actor.task)]
@@ -300,12 +351,14 @@ const nodeBlock = (
   if (model !== null && model !== "") facts.push(flat(model));
   const elapsed = nodeElapsedMs(info, now);
   if (elapsed !== undefined) facts.push(formatElapsed(elapsed));
-  if (info.tokens !== undefined) facts.push(`${formatTokenCount(info.tokens)} 토큰`);
+  if (info.tokens !== undefined)
+    facts.push(t("providers.wf.tokens", { count: formatTokenCount(info.tokens) }));
   if (info.costUsd !== undefined) facts.push(formatCost(info.costUsd));
   lines.push(...wrapWithPrefix(theme.dim(facts.join(" · ")), room, indent, indent));
   const { actor } = info;
   const work: string[] = [];
-  if (actor?.delegated !== undefined) work.push(`Crew 에 작업 ${actor.delegated}개 위임`);
+  if (actor?.delegated !== undefined)
+    work.push(t("providers.wf.delegatedToCrew", { count: actor.delegated }));
   for (const tool of actor?.tools ?? []) work.push(toolWord(tool));
   if (work.length > 0)
     lines.push(...wrapWithPrefix(theme.dim(work.join(" · ")), room, indent, indent));
@@ -317,16 +370,32 @@ const nodeBlock = (
           ? ""
           : flat(info.progress)
       : "";
-  if (now_ !== "") lines.push(...wrapWithPrefix(theme.dim(`지금: ${now_}`), room, indent, indent));
+  if (now_ !== "")
+    lines.push(
+      ...wrapWithPrefix(theme.dim(t("providers.wf.now", { text: now_ })), room, indent, indent),
+    );
   if (upstream.length > 0) {
     const names = upstream.slice(0, 3).map(nodeName);
-    const more = upstream.length > 3 ? ` 외 ${upstream.length - 3}` : "";
+    const more =
+      upstream.length > 3 ? t("providers.wf.andMore", { count: upstream.length - 3 }) : "";
     lines.push(
-      ...wrapWithPrefix(theme.dim(`선행: ${names.join(", ")}${more}`), room, indent, indent),
+      ...wrapWithPrefix(
+        theme.dim(t("providers.wf.upstream", { names: names.join(", "), more })),
+        room,
+        indent,
+        indent,
+      ),
     );
   }
   if (info.error !== undefined) {
-    lines.push(...wrapWithPrefix(theme.error(`오류: ${flat(info.error)}`), room, indent, indent));
+    lines.push(
+      ...wrapWithPrefix(
+        theme.error(t("providers.wf.error", { text: flat(info.error) })),
+        room,
+        indent,
+        indent,
+      ),
+    );
   }
   return lines;
 };
@@ -376,9 +445,9 @@ export const windowOf = (block: Block, rows: number, dim: (text: string) => stri
   const start = Math.min(Math.max(0, block.focus - 1), block.lines.length - rows);
   const end = start + rows;
   const shown = block.lines.slice(start, end);
-  if (start > 0) shown[0] = dim(`↑ 위에 ${start}줄`);
+  if (start > 0) shown[0] = dim(t("providers.wf.above", { count: start }));
   if (end < block.lines.length)
-    shown[shown.length - 1] = dim(`↓ 아래에 ${block.lines.length - end}줄`);
+    shown[shown.length - 1] = dim(t("providers.wf.below", { count: block.lines.length - end }));
   return shown;
 };
 
@@ -397,7 +466,7 @@ export const panelHead = (
   const out: string[] = [
     margin(
       truncateStyled(
-        `${theme.accent.bold(PANEL_TITLE[view])}${theme.dim(`  ${PANEL_COMMAND[view]} 로 닫기`)}`,
+        `${theme.accent.bold(PANEL_TITLE[view])}${theme.dim(`  ${t("providers.wf.closeWith", { command: PANEL_COMMAND[view] })}`)}`,
         room,
       ),
     ),
@@ -409,8 +478,7 @@ export const panelHead = (
     out,
     say: (text: string) => out.push(...wrapStyled(theme.dim(text), room).map(margin)),
     /** While the server cannot be reached what is drawn is the last that arrived; the panel says so. */
-    offline: () =>
-      out.push(margin(truncateStyled(theme.warning("연결 끊김 · 마지막으로 받은 내용"), room))),
+    offline: () => out.push(margin(truncateStyled(theme.warning(t("providers.wf.offline")), room))),
   };
 };
 
@@ -421,12 +489,12 @@ export const renderFlowPanel = (input: PanelInput): string[] => {
   const { room, margin, out, say, offline } = panelHead("workflow", input);
   const { flows } = input;
   if (flows === null) {
-    say("스레드를 열면 그 스레드의 작업 흐름이 여기에 보입니다.");
+    say(t("providers.wf.openThread"));
     return out.slice(0, rows);
   }
   if (!input.online) offline();
   if (flows.length === 0) {
-    say("에이전트가 도구를 쓰거나 서브에이전트·workflow 를 시작하면 단계가 여기에 나타납니다.");
+    say(t("providers.wf.empty"));
     return out.slice(0, rows);
   }
 
@@ -437,7 +505,7 @@ export const renderFlowPanel = (input: PanelInput): string[] => {
   if (flows.length > 1) {
     const { visible, earlier } = boundFlows(flows, focusedId, Math.max(1, Math.min(4, rows - 10)));
     out.push(
-      margin(truncateStyled(theme.dim(`흐름 ${flows.length}개 · /dag-workflow <번호>`), room)),
+      margin(truncateStyled(theme.dim(t("providers.wf.flowCount", { count: flows.length })), room)),
     );
     for (const chip of visible) {
       const picked = chip.id === focusedId;
@@ -448,12 +516,13 @@ export const renderFlowPanel = (input: PanelInput): string[] => {
       }`;
       out.push(margin(truncateStyled(text, room)));
     }
-    if (earlier.length > 0) out.push(margin(theme.dim(`이전 ${earlier.length}개 (번호로 고르기)`)));
+    if (earlier.length > 0)
+      out.push(margin(theme.dim(t("providers.wf.earlier", { count: earlier.length }))));
   }
 
   const counts = workflowCounts(membersOf(flow));
   const mark = paintFor(style, flow.status)(symbols.flow[flow.status]);
-  const kind = flow.kind === "workflow" ? theme.dim(" · 워크플로") : "";
+  const kind = flow.kind === "workflow" ? theme.dim(` · ${t("providers.wf.role.workflow")}`) : "";
   out.push(
     margin(
       truncateStyled(
@@ -547,11 +616,11 @@ export class WorkflowPanel {
       return null;
     }
     if (action.kind !== "pick" && action.kind !== "next" && action.kind !== "prev") return null;
-    if (flows === null || flows.length === 0) return "고를 흐름이 없습니다.";
+    if (flows === null || flows.length === 0) return t("providers.wf.noFlows");
     let index: number;
     if (action.kind === "pick") {
       if (action.number < 1 || action.number > flows.length) {
-        return `흐름 번호는 1~${flows.length} 입니다.`;
+        return t("providers.wf.flowRange", { max: flows.length });
       }
       index = action.number - 1;
     } else {

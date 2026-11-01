@@ -318,44 +318,46 @@ export function trialSendStillCurrent(input: {
   return true;
 }
 
-export const TRIAL_DIALOG_TITLE = "스킬 시험";
+export const TRIAL_DIALOG_TITLE = "Skill trial";
 export const TRIAL_DIALOG_NOTICE =
-  "선택한 버전의 절차 블록과 과제를 이 스레드에 한 메시지로 보냅니다. 접수는 전달 확인이 아니며, 시험 결과는 기록에서 확인하세요.";
-export const TRIAL_UNSUPPORTED_COPY = "이 서버는 스킬 시험을 지원하지 않습니다.";
-export const TRIAL_ACCESS_PENDING_COPY = "이 환경에 대한 권한을 확인하는 중입니다.";
-export const TRIAL_AUTHORIZATION_COPY = "이 세션은 스킬 시험을 보낼 수 없습니다.";
-export const TRIAL_CONFIRM_FAILED_COPY = "연결 상태를 지금 확인할 수 없습니다. 다시 시도해 주세요.";
+  "Sends the selected version's procedure block and the task to this thread as one message. Acceptance is not delivery confirmation; check the trial history for results.";
+export const TRIAL_UNSUPPORTED_COPY = "This server does not support skill trials.";
+export const TRIAL_ACCESS_PENDING_COPY = "Checking permissions for this environment…";
+export const TRIAL_AUTHORIZATION_COPY = "This session can't send skill trials.";
+export const TRIAL_CONFIRM_FAILED_COPY =
+  "The connection state can't be confirmed right now. Try again.";
 export const TRIAL_THREAD_UNAVAILABLE_COPY =
-  "이 스레드에서 시험을 보낼 수 없습니다. 스레드를 다시 열어 주세요.";
-export const TRIAL_VERSION_GONE_COPY = "선택한 버전이 서버에서 변경되었습니다. 다시 선택해 주세요.";
-export const TRIAL_TASK_INVALID_COPY = "시험 과제를 입력해 주세요.";
-export const TRIAL_SEND_REJECTED_COPY = "서버가 이 시험 전송을 거절했습니다.";
+  "A trial can't be sent from this thread. Reopen the thread.";
+export const TRIAL_VERSION_GONE_COPY =
+  "The selected version changed on the server. Select it again.";
+export const TRIAL_TASK_INVALID_COPY = "Enter a trial task.";
+export const TRIAL_SEND_REJECTED_COPY = "The server rejected this trial.";
 export const TRIAL_SEND_UNCONFIRMED_COPY =
-  "전송 결과를 확인할 수 없습니다. 스레드와 시험 기록을 확인한 뒤, 필요하면 새 시험을 시작하세요. 같은 시험은 여기서 다시 보낼 수 없습니다.";
+  "The send result can't be confirmed. Check the thread and the trial history, and start a new trial if needed. The same trial can't be resent from here.";
 /** @deprecated Prefer trialSendFailureCopy */
 export const TRIAL_SEND_FAILED_COPY = TRIAL_SEND_REJECTED_COPY;
-export const TRIAL_REFRESH_DATA_LABEL = "다시 불러오기";
-export const TRIAL_ACCEPTED_TOAST = "시험 전송이 접수되었습니다";
-export const TRIAL_LIST_EMPTY_COPY = "저장된 스킬 후보가 없습니다. 먼저 후보를 저장하세요.";
-export const TRIAL_LIST_FAILED_COPY = "스킬 목록을 불러오지 못했습니다. 다시 시도해 주세요.";
-export const TRIAL_DETAIL_PENDING_COPY = "버전 정보를 불러오는 중…";
-export const TRIAL_DETAIL_FAILED_COPY = "버전 정보를 불러오지 못했습니다. 다시 시도해 주세요.";
-export const TRIAL_SKILL_LABEL = "스킬";
-export const TRIAL_VERSION_LABEL = "버전";
-export const TRIAL_TASK_LABEL = "시험 과제";
-export const TRIAL_SUBMIT_LABEL = "시험 보내기";
-export const TRIAL_CANCEL_LABEL = "취소";
+export const TRIAL_REFRESH_DATA_LABEL = "Reload";
+export const TRIAL_ACCEPTED_TOAST = "Trial sent";
+export const TRIAL_LIST_EMPTY_COPY = "No saved skill candidates. Save a candidate first.";
+export const TRIAL_LIST_FAILED_COPY = "Couldn't load the skill list. Try again.";
+export const TRIAL_DETAIL_PENDING_COPY = "Loading version details…";
+export const TRIAL_DETAIL_FAILED_COPY = "Couldn't load the version details. Try again.";
+export const TRIAL_SKILL_LABEL = "Skill";
+export const TRIAL_VERSION_LABEL = "Version";
+export const TRIAL_TASK_LABEL = "Trial task";
+export const TRIAL_SUBMIT_LABEL = "Send trial";
+export const TRIAL_CANCEL_LABEL = "Cancel";
 
-export const USE_DIALOG_TITLE = "이번 요청에 사용";
+export const USE_DIALOG_TITLE = "Use for this request";
 export const USE_DIALOG_NOTICE =
-  "활성 버전의 절차 블록과 과제를 이 스레드에 한 메시지로 보냅니다. 접수는 전달 확인이 아니며, 서버가 경로와 적격성을 확인합니다.";
-export const USE_UNSUPPORTED_COPY = "이 서버는 스킬 사용 전송을 지원하지 않습니다.";
-export const USE_AUTHORIZATION_COPY = "이 세션은 스킬 사용을 보낼 수 없습니다.";
+  "Sends the active version's procedure block and the task to this thread as one message. Acceptance is not delivery confirmation; the server checks the path and eligibility.";
+export const USE_UNSUPPORTED_COPY = "This server does not support sending skill use.";
+export const USE_AUTHORIZATION_COPY = "This session can't send skill use.";
 export const USE_VERSION_GONE_COPY =
-  "선택한 활성 버전이 서버에서 변경되었습니다. 다시 선택해 주세요.";
-export const USE_SCRIPTS_LABEL = "프로젝트 스크립트";
-export const USE_SCRIPTS_INVALID_COPY = "실행할 스크립트를 하나 이상 선택해 주세요.";
+  "The selected active version changed on the server. Select it again.";
+export const USE_SCRIPTS_LABEL = "Project scripts";
+export const USE_SCRIPTS_INVALID_COPY = "Select at least one script to run.";
 export const USE_SCRIPTS_CHANGED_COPY =
-  "선택한 스크립트가 프로젝트에서 변경되었습니다. 다시 선택해 주세요.";
-export const USE_SUBMIT_LABEL = "보내기";
-export const USE_ACCEPTED_TOAST = "사용 전송이 접수되었습니다";
+  "The selected scripts changed in the project. Select them again.";
+export const USE_SUBMIT_LABEL = "Send";
+export const USE_ACCEPTED_TOAST = "Use sent";

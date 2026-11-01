@@ -5,6 +5,7 @@ import { graphemesOf, sanitizeForTerminal, visibleWidth } from "../text/width.ts
 import { padEndVisible, truncateStyled } from "../text/wrap.ts";
 import { DiffStream } from "./diff.ts";
 import { RAIL_COLUMNS, railDone, railGap, railRow, type Rail } from "./rail.ts";
+import { t } from "../i18n/index.ts";
 
 /** Diff lines the whole turn shows; the terminal's scrollback is the only place they go. */
 export const OVERVIEW_LINES = 300;
@@ -132,8 +133,11 @@ export const diffReportRows = (input: DiffReportInput): string[] => {
   const rows: string[] = [railGap(rail)];
   const heading =
     input.file === undefined
-      ? `턴 ${turn} 변경 · 파일 ${totals.count}개`
-      : `턴 ${turn} · ${sanitizeForTerminal(listed[0]?.path ?? input.file)}`;
+      ? t("render.diff.heading", { turn, count: totals.count })
+      : t("render.diff.headingFile", {
+          turn,
+          path: sanitizeForTerminal(listed[0]?.path ?? input.file),
+        });
   rows.push(
     railDone(
       rail,
@@ -162,7 +166,12 @@ export const diffReportRows = (input: DiffReportInput): string[] => {
       );
     });
     if (files.length > FILES_LISTED) {
-      rows.push(railRow(rail, theme.dim(`… 외 파일 ${files.length - FILES_LISTED}개`)));
+      rows.push(
+        railRow(
+          rail,
+          theme.dim(t("render.diff.moreFiles", { count: files.length - FILES_LISTED })),
+        ),
+      );
     }
   }
 
@@ -172,10 +181,10 @@ export const diffReportRows = (input: DiffReportInput): string[] => {
         rail,
         theme.dim(
           input.file !== undefined
-            ? "diff 에서 이 파일을 찾지 못했습니다. 서버가 너무 큰 diff 를 잘랐을 수 있습니다."
+            ? t("render.diff.notFound")
             : files.length > 0
-              ? "표시할 diff 가 없습니다 (공백 변경만 있거나 이진 파일입니다)."
-              : "이 턴에서 바뀐 파일이 없습니다.",
+              ? t("render.diff.nothingToShow")
+              : t("render.diff.noFiles"),
         ),
       ),
     );
@@ -210,8 +219,8 @@ export const diffReportRows = (input: DiffReportInput): string[] => {
         rail,
         theme.warning(
           input.file === undefined
-            ? `diff ${hiddenLines}줄 (파일 ${hiddenFiles}개) 는 생략했습니다. 한 파일 전체: /diff ${turn} <파일>`
-            : `diff 앞 ${FILE_LINES}줄만 보였고 ${hiddenLines}줄은 생략했습니다. 나머지는 데스크톱 앱의 diff 보기에서 확인하세요.`,
+            ? t("render.diff.hiddenAll", { lines: hiddenLines, files: hiddenFiles, turn })
+            : t("render.diff.hiddenFile", { shown: FILE_LINES, lines: hiddenLines }),
         ),
       ),
     );

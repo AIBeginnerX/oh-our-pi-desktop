@@ -1,6 +1,7 @@
 import { getPairingTokenFromUrl, resolveRemotePairingTarget } from "@t3tools/shared/remote";
 
 import { TransportError } from "./transport.ts";
+import { t } from "../i18n/index.ts";
 
 export interface PairTarget {
   readonly credential: string;
@@ -22,15 +23,13 @@ export const carriesServerAddress = (input: string): boolean => {
  */
 export const resolvePairTarget = (input: string, serverOrigin: string | null): PairTarget => {
   const value = input.trim();
-  if (value.length === 0) throw new Error("페어링 링크 또는 토큰을 입력하세요.");
+  if (value.length === 0) throw new Error(t("link.pair.empty"));
   if (carriesServerAddress(value)) {
     const target = resolveRemotePairingTarget({ pairingUrl: value });
     return { credential: target.credential, httpBaseUrl: target.httpBaseUrl };
   }
   if (serverOrigin === null) {
-    throw new Error(
-      "토큰만으로는 서버를 알 수 없습니다. 페어링 링크 전체를 쓰거나 --server 주소를 지정하세요.",
-    );
+    throw new Error(t("link.pair.tokenOnly"));
   }
   const pairingCode = APP_WINDOW_LINK.test(value)
     ? (getPairingTokenFromUrl(new URL(value)) ?? "")
@@ -48,16 +47,16 @@ export const resolvePairTarget = (input: string, serverOrigin: string | null): P
  */
 export const pairFailureMessage = (cause: unknown): string => {
   const message = cause instanceof Error ? cause.message : String(cause);
-  const failure = `페어링에 실패했습니다: ${message}`;
+  const failure = t("link.pair.failed", { message });
   if (!(cause instanceof TransportError) || cause.kind !== "blocked") return failure;
   if (cause.reason === "authentication") {
-    return `${failure}\n링크는 한 번만 쓸 수 있고 곧 만료됩니다. 새 링크를 만들어 다시 시도하세요.`;
+    return t("link.pair.authentication", { failure });
   }
   if (cause.reason === "unsupported") {
-    return `${failure}\n프로토콜 불일치: 앱이나 oop 을 업데이트하세요.`;
+    return t("link.pair.unsupported", { failure });
   }
   if (cause.reason === "configuration") {
-    return `${failure}\n이 링크의 권한으로는 oop 을 연결할 수 없고 링크는 이미 쓰였습니다. 읽기 전용이 아닌 새 링크를 만들어 다시 시도하세요.`;
+    return t("link.pair.configuration", { failure });
   }
   return failure;
 };

@@ -8,27 +8,28 @@ import { formatElapsed } from "./spinner.ts";
 import type { Symbols } from "./symbols.ts";
 import type { Theme } from "./theme.ts";
 import { shellCommand } from "./toolLine.ts";
+import { t, type MessageKey } from "../i18n/index.ts";
 
 /** Cleaned text on a single row: a field that must not span lines never carries a line feed. */
 const oneLine = (value: string): string => sanitizeForTerminal(value).replace(/\n/gu, " ");
 
-const REQUEST_KIND_LABEL: Record<string, string> = {
-  command: "명령 실행",
-  "file-read": "파일 읽기",
-  "file-change": "파일 변경",
-  "mcp-elicitation": "MCP 요청",
-  permission: "권한 요청",
+const REQUEST_KIND_LABEL: Record<string, MessageKey> = {
+  command: "render.panels.kind.command",
+  "file-read": "render.panels.kind.file-read",
+  "file-change": "render.panels.kind.file-change",
+  "mcp-elicitation": "render.panels.kind.mcp-elicitation",
+  permission: "render.panels.kind.permission",
 };
 
-/** What the request was about, in words: `명령 실행`. */
+/** What the request was about, in words: `Run command`. */
 export const requestKindLabel = (requestKind: string): string =>
-  REQUEST_KIND_LABEL[requestKind] ?? "승인 요청";
+  t(REQUEST_KIND_LABEL[requestKind] ?? "render.panels.kind.other");
 
-export const DEFAULT_APPROVAL_OPTIONS: ReadonlyArray<ProviderApprovalOption> = [
-  { decision: "accept", label: "허용" },
-  { decision: "acceptForSession", label: "이 세션 동안 허용" },
-  { decision: "decline", label: "거부" },
-  { decision: "cancel", label: "턴 취소" },
+export const defaultApprovalOptions = (): ReadonlyArray<ProviderApprovalOption> => [
+  { decision: "accept", label: t("render.panels.option.accept") },
+  { decision: "acceptForSession", label: t("render.panels.option.session") },
+  { decision: "decline", label: t("render.panels.option.decline") },
+  { decision: "cancel", label: t("render.panels.option.cancel") },
 ];
 
 export interface ApprovalView {
@@ -46,13 +47,13 @@ const DETAIL_ROWS = 6;
 
 /** Where to look to see how a numbered choice is made: the keys that move, and the ones that leave. */
 const approvalHint = (view: ApprovalView): string => {
-  const leave = "Ctrl-T 나중에 • Esc 턴 중단";
+  const leave = t("render.panels.leave");
   const chosen = view.selected === null ? undefined : view.options[view.selected];
   if (chosen) {
-    return `Enter 로 '${oneLine(chosen.label)}' 확정 • ↑/↓ 번호 바꾸기 • ${leave}`;
+    return t("render.panels.confirmChosen", { label: oneLine(chosen.label), leave });
   }
-  if (view.locked) return `번호 잠김 • ↑/↓ 를 누르면 풀립니다 • Enter 확정 • ${leave}`;
-  return `↑/↓ 이동 • 번호 • Enter 확정 • ${leave}`;
+  if (view.locked) return t("render.panels.locked", { leave });
+  return t("render.panels.move", { leave });
 };
 
 /**
@@ -94,10 +95,18 @@ export const renderApprovalPanel = (
   let shown = detail;
   if (detail.length > Math.min(DETAIL_ROWS, room)) {
     const keep = Math.max(0, Math.min(DETAIL_ROWS, room - 1));
-    shown = room < 1 ? [] : [...detail.slice(0, keep), theme.dim(`… ${detail.length - keep}줄 더`)];
+    shown =
+      room < 1
+        ? []
+        : [
+            ...detail.slice(0, keep),
+            theme.dim(t("render.panels.moreLines", { count: detail.length - keep })),
+          ];
   }
   const rows = railChoice(rail, {
-    question: theme.warning.bold(`승인 필요: ${requestKindLabel(view.requestKind)}${app}`),
+    question: theme.warning.bold(
+      t("render.panels.approvalTitle", { kind: requestKindLabel(view.requestKind), app }),
+    ),
     before: shown,
     options,
     selected: view.selected,
@@ -138,7 +147,10 @@ export const renderQuestionPanel = (
   const progress = view.total > 1 ? ` (${view.index + 1}/${view.total})` : "";
   const title = railActive(
     rail,
-    truncateStyled(theme.text.bold(`질문${progress}: ${oneLine(view.header)}`), room),
+    truncateStyled(
+      theme.text.bold(t("render.panels.questionTitle", { progress, header: oneLine(view.header) })),
+      room,
+    ),
   );
   const body = wrapStyled(sanitizeForTerminal(view.question), room);
   const lines: string[] = [];
@@ -156,11 +168,14 @@ export const renderQuestionPanel = (
   });
   const how: string[] = [];
   if (view.options.length > 0) {
-    how.push(view.multiSelect ? "번호를 쉼표로 구분해 입력" : "번호 입력");
+    how.push(view.multiSelect ? t("render.panels.howNumbersCsv") : t("render.panels.howNumber"));
   }
-  if (view.allowCustom) how.push(view.options.length > 0 ? "또는 직접 답변" : "답변 입력");
-  if (view.dismissible) how.push("Esc 건너뛰기");
-  how.push("Ctrl-T 나중에");
+  if (view.allowCustom)
+    how.push(
+      view.options.length > 0 ? t("render.panels.howOrCustom") : t("render.panels.howAnswer"),
+    );
+  if (view.dismissible) how.push(t("render.panels.howSkip"));
+  how.push(t("render.panels.howLater"));
   for (const row of packHint(how.join(" • "), room))
     lines.push(railRow(rail, theme.dim(row), "active"));
   // What is left of the room goes to the question, which is cut from its end.
@@ -170,7 +185,10 @@ export const renderQuestionPanel = (
       ? body
       : spare < 1
         ? []
-        : [...body.slice(0, spare - 1), theme.dim(`… ${body.length - spare + 1}줄 더`)];
+        : [
+            ...body.slice(0, spare - 1),
+            theme.dim(t("render.panels.moreLines", { count: body.length - spare + 1 })),
+          ];
   return [title, ...shown.map((row) => railRow(rail, row, "active")), ...lines];
 };
 
@@ -200,10 +218,10 @@ export const renderPlan = (
   const done = steps.filter((step) => step.status === "completed").length;
   const filled = Math.round((done / steps.length) * PLAN_BAR_CELLS);
   const bar = `${theme.brand(symbols.progress.full.repeat(filled))}${theme.border(symbols.progress.empty.repeat(PLAN_BAR_CELLS - filled))}`;
-  const hint = options.collapsed ? "Ctrl-T 펼치기" : "Ctrl-T 접기";
+  const hint = options.collapsed ? t("render.panels.expand") : t("render.panels.collapse");
   const lines = [
     truncateStyled(
-      `${theme.brand.bold("계획")} ${theme.text(`${done}/${steps.length}`)} ${bar}${options.foldable ? `  ${theme.dim(hint)}` : ""}`,
+      `${theme.brand.bold(t("render.panels.plan"))} ${theme.text(`${done}/${steps.length}`)} ${bar}${options.foldable ? `  ${theme.dim(hint)}` : ""}`,
       width,
     ),
   ];
@@ -266,7 +284,9 @@ export const renderAgents = (
     );
   });
   if (hidden > 0) {
-    lines.push(theme.dim(`${symbols.tree.last} … 외 ${hidden}개`));
+    lines.push(
+      theme.dim(`${symbols.tree.last} ${t("render.panels.agentsMore", { count: hidden })}`),
+    );
   }
   return lines;
 };

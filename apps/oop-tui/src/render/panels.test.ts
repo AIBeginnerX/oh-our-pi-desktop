@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import type { AgentRow, PlanStep } from "../state/threadStatus.ts";
 import { stripAnsi, visibleWidth } from "../text/width.ts";
 import {
-  DEFAULT_APPROVAL_OPTIONS,
+  defaultApprovalOptions,
   renderAgents,
   renderApprovalPanel,
   renderPlan,
@@ -22,7 +22,7 @@ const approval = (extra: Partial<ApprovalView> = {}): ApprovalView => ({
   requestKind: "command",
   detail: "pnpm install --frozen-lockfile",
   appName: undefined,
-  options: DEFAULT_APPROVAL_OPTIONS,
+  options: defaultApprovalOptions(),
   selected: null,
   locked: false,
   ...extra,
@@ -93,7 +93,7 @@ describe("approval and question panels", () => {
     const text = approvalText({ appName: "Codex" });
     expect(text).toContain("승인 필요: 명령 실행 · Codex");
     expect(text).toContain("pnpm install --frozen-lockfile");
-    for (const [index, option] of DEFAULT_APPROVAL_OPTIONS.entries()) {
+    for (const [index, option] of defaultApprovalOptions().entries()) {
       expect(text).toContain(`${index + 1} ${option.label}`);
     }
   });
@@ -104,7 +104,7 @@ describe("approval and question panels", () => {
       const lines = renderApprovalPanel(approval({ detail }), 80, railOf(), maxRows).map(stripAnsi);
       expect(lines.length, `@ ${maxRows} rows`).toBeLessThanOrEqual(maxRows);
       expect(lines[0]).toContain("승인 필요");
-      for (const [index, option] of DEFAULT_APPROVAL_OPTIONS.entries()) {
+      for (const [index, option] of defaultApprovalOptions().entries()) {
         expect(lines.join("\n")).toContain(`${index + 1} ${option.label}`);
       }
       if (maxRows >= 10) expect(lines.at(-1)).toContain("Esc");

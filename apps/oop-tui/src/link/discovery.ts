@@ -1,4 +1,5 @@
 import * as NodeFSP from "node:fs/promises";
+import { t } from "../i18n/index.ts";
 
 export interface RuntimeAnnouncement {
   readonly pid: number;
@@ -76,25 +77,24 @@ export const discoverServer = async (
   } catch {
     return {
       kind: "missing",
-      detail:
-        "실행 중인 OOP 서버를 찾지 못했습니다. 데스크톱 앱을 켜거나 --server 주소를 지정하세요.",
+      detail: t("link.discovery.missing"),
     };
   }
   const announcement = parseRuntimeAnnouncement(text);
   if (announcement === null) {
     return {
       kind: "missing",
-      detail: "서버 실행 정보를 읽을 수 없습니다. --server 주소를 지정하세요.",
+      detail: t("link.discovery.unreadable"),
     };
   }
   if (!isAlive(announcement.pid)) {
-    return { kind: "stale", detail: "마지막으로 실행된 OOP 서버가 이미 종료되었습니다." };
+    return { kind: "stale", detail: t("link.discovery.stale") };
   }
   const environment = await deps.probe(announcement.origin).catch(() => null);
   if (environment === null) {
     return {
       kind: "unreachable",
-      detail: "OOP 서버가 응답하지 않습니다. 잠시 후 다시 시도하세요.",
+      detail: t("link.discovery.unreachable"),
     };
   }
   return {

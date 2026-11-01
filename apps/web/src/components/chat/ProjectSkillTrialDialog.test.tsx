@@ -262,7 +262,7 @@ const hasText = (text: string) =>
 const editTask = (value: string) =>
   act(() =>
     renderer!.root
-      .findByProps({ "aria-label": "시험 과제" })
+      .findByProps({ "aria-label": "Trial task" })
       .props.onChange({ currentTarget: { value } }),
   );
 
@@ -391,20 +391,20 @@ const toggleScript = (name: string) => {
 };
 
 const submitUseAndDrain = async () => {
-  await act(async () => button("보내기").props.onClick());
+  await act(async () => button("Send").props.onClick());
   await act(async () => {});
 };
 
 const submitAndDrain = async () => {
-  await act(async () => button("시험 보내기").props.onClick());
+  await act(async () => button("Send trial").props.onClick());
   await act(async () => {});
 };
 
 it("sends the exact block, task, and one stampless managed record through startTurn", async () => {
   openDialog();
   await act(async () => {});
-  expect(renderer!.root.findByProps({ "aria-label": "버전" }).props.value).toBe("1");
-  expect(renderer!.root.findByProps({ "aria-label": "스킬" }).props.value).toBe(refV1.skillId);
+  expect(renderer!.root.findByProps({ "aria-label": "Version" }).props.value).toBe("1");
+  expect(renderer!.root.findByProps({ "aria-label": "Skill" }).props.value).toBe(refV1.skillId);
   expect(hasText(TRIAL_TASK_INVALID_COPY)).toBe(true);
   editTask("스테이징 배포를 시험해 주세요");
   expect(hasText(TRIAL_TASK_INVALID_COPY)).toBe(false);
@@ -446,7 +446,7 @@ it("sends nothing when the capability drops during the held confirmation", async
   openDialog();
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
 
@@ -462,7 +462,7 @@ it("sends nothing when detail is waiting during held confirmation", async () => 
   openDialog();
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
 
   harness.registryDetail = AsyncResult.success(detailV1, { waiting: true });
@@ -477,7 +477,7 @@ it("sends nothing when the thread is recreated under the same id during held con
   openDialog();
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   expect(harness.startTurn).not.toHaveBeenCalled();
@@ -488,14 +488,14 @@ it("sends nothing when the thread is recreated under the same id during held con
 
   expect(harness.startTurn).not.toHaveBeenCalled();
   expect(hasText(TRIAL_THREAD_UNAVAILABLE_COPY)).toBe(true);
-  expect(renderer!.root.findByProps({ "aria-label": "시험 과제" }).props.value).toBe("과제");
+  expect(renderer!.root.findByProps({ "aria-label": "Trial task" }).props.value).toBe("과제");
 });
 
 it("sends nothing when the frozen version is gone during the held confirmation", async () => {
   openDialog();
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
 
   harness.registryDetail = AsyncResult.success(detailV1Rehashed);
@@ -517,7 +517,7 @@ it("keeps the draft on known authorization rejection and allows a new attempt", 
 
   expect(harness.startTurn).toHaveBeenCalledTimes(1);
   expect(hasText(TRIAL_AUTHORIZATION_COPY)).toBe(true);
-  expect(button("시험 보내기").props.disabled).toBe(false);
+  expect(button("Send trial").props.disabled).toBe(false);
 
   harness.startTurn.mockResolvedValueOnce(
     AsyncResult.failure(Cause.fail(new Error("SENTINEL-SERVER-DETAIL-LEAK boom"))),
@@ -526,8 +526,8 @@ it("keeps the draft on known authorization rejection and allows a new attempt", 
   expect(harness.startTurn).toHaveBeenCalledTimes(2);
   expect(hasText("SENTINEL-SERVER-DETAIL-LEAK")).toBe(false);
   expect(hasText(TRIAL_SEND_UNCONFIRMED_COPY)).toBe(true);
-  expect(button("시험 보내기").props.disabled).toBe(true);
-  act(() => button("시험 보내기").props.onClick());
+  expect(button("Send trial").props.disabled).toBe(true);
+  act(() => button("Send trial").props.onClick());
   expect(harness.startTurn).toHaveBeenCalledTimes(2);
 });
 
@@ -543,8 +543,8 @@ it("coalesces a double click into exactly one send", async () => {
       }),
   );
 
-  act(() => button("시험 보내기").props.onClick());
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   expect(harness.startTurn).toHaveBeenCalledTimes(1);
@@ -565,7 +565,7 @@ it("ignores a late success after the dialog switched scope", async () => {
         resolveSend = resolve;
       }),
   );
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
   expect(harness.startTurn).toHaveBeenCalledTimes(1);
 
@@ -593,7 +593,7 @@ it("does not toast success when the connection generation changes during send", 
         resolveSend = resolve;
       }),
   );
-  act(() => button("시험 보내기").props.onClick());
+  act(() => button("Send trial").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   expect(harness.startTurn).toHaveBeenCalledTimes(1);
@@ -604,9 +604,9 @@ it("does not toast success when the connection generation changes during send", 
 
   expect(harness.toast).not.toHaveBeenCalled();
   expect(onClose).not.toHaveBeenCalled();
-  expect(renderer!.root.findByProps({ "aria-label": "시험 과제" }).props.value).toBe("과제");
+  expect(renderer!.root.findByProps({ "aria-label": "Trial task" }).props.value).toBe("과제");
   expect(hasText(TRIAL_SEND_UNCONFIRMED_COPY)).toBe(true);
-  expect(button("시험 보내기").props.disabled).toBe(true);
+  expect(button("Send trial").props.disabled).toBe(true);
 });
 
 it("treats an interrupted send as unconfirmed, not never-sent", async () => {
@@ -618,7 +618,7 @@ it("treats an interrupted send as unconfirmed, not never-sent", async () => {
 
   expect(harness.startTurn).toHaveBeenCalledTimes(1);
   expect(hasText(TRIAL_SEND_UNCONFIRMED_COPY)).toBe(true);
-  expect(button("시험 보내기").props.disabled).toBe(true);
+  expect(button("Send trial").props.disabled).toBe(true);
 });
 
 it("gates everything while the trial capability is absent", () => {
@@ -629,7 +629,7 @@ it("gates everything while the trial capability is absent", () => {
   openDialog();
 
   expect(hasText(TRIAL_UNSUPPORTED_COPY)).toBe(true);
-  expect(button("시험 보내기").props.disabled).toBe(true);
+  expect(button("Send trial").props.disabled).toBe(true);
 });
 
 it("in use mode sends the active older ref, mode use, and frozen script ids", async () => {
@@ -663,7 +663,7 @@ it("in use mode sends the active older ref, mode use, and frozen script ids", as
 
   openUseDialog();
   await act(async () => {});
-  expect(renderer!.root.findByProps({ "aria-label": "버전" }).props.value).toBe("1");
+  expect(renderer!.root.findByProps({ "aria-label": "Version" }).props.value).toBe("1");
   toggleScript("Lint");
   editTask("이번 요청 과제");
   await submitUseAndDrain();
@@ -692,7 +692,7 @@ it("keeps trial unchanged when use capability is absent and blocks use sends", a
   openUseDialog();
   await act(async () => {});
   expect(hasText(USE_UNSUPPORTED_COPY)).toBe(true);
-  expect(button("보내기").props.disabled).toBe(true);
+  expect(button("Send").props.disabled).toBe(true);
 
   harness.registryUse = false;
   harness.registryTrial = true;
@@ -725,7 +725,7 @@ it("refuses submit without confirm when the selected script is gone from the reg
   expect(harness.confirmSession).not.toHaveBeenCalled();
   expect(harness.startTurn).not.toHaveBeenCalled();
   expect(hasText(USE_SCRIPTS_INVALID_COPY)).toBe(true);
-  expect(button("보내기").props.disabled).toBe(false);
+  expect(button("Send").props.disabled).toBe(false);
 
   harness.projectScripts = [{ id: "lint", name: "Lint", command: "pnpm lint" }];
   syncResolvedScripts();
@@ -751,7 +751,7 @@ it("sends nothing when project scripts change during held confirmation in use mo
   toggleScript("Lint");
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("보내기").props.onClick());
+  act(() => button("Send").props.onClick());
   await act(async () => {});
 
   harness.projectScripts = [{ id: "test", name: "Test", command: "pnpm test" }];
@@ -761,7 +761,7 @@ it("sends nothing when project scripts change during held confirmation in use mo
 
   expect(harness.startTurn).not.toHaveBeenCalled();
   expect(hasText(USE_SCRIPTS_CHANGED_COPY)).toBe(true);
-  expect(renderer!.root.findByProps({ "aria-label": "시험 과제" }).props.value).toBe("과제");
+  expect(renderer!.root.findByProps({ "aria-label": "Trial task" }).props.value).toBe("과제");
 });
 
 it("sends nothing when a selected script command changes in settings during held confirmation", async () => {
@@ -780,7 +780,7 @@ it("sends nothing when a selected script command changes in settings during held
   toggleScript("Lint");
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("보내기").props.onClick());
+  act(() => button("Send").props.onClick());
   await act(async () => {});
 
   harness.projectScripts = [{ id: "lint", name: "Lint", command: "pnpm lint --fix" }];
@@ -808,7 +808,7 @@ it("sends nothing when the active ref retires during held confirmation in use mo
   toggleScript("Lint");
   editTask("과제");
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("보내기").props.onClick());
+  act(() => button("Send").props.onClick());
   await act(async () => {});
 
   harness.registryDetail = AsyncResult.success({
@@ -851,7 +851,7 @@ it("freezes script selection at submit so mid-await toggles cannot swap the oper
       }),
   );
   const resolveConfirm = beginHeldConfirmation();
-  act(() => button("보내기").props.onClick());
+  act(() => button("Send").props.onClick());
   await act(async () => {});
   await act(async () => resolveConfirm(AsyncResult.success(confirmedSession)));
   await act(async () => {});

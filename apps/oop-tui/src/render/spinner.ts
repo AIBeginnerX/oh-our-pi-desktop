@@ -2,6 +2,7 @@ import type { Theme } from "./theme.ts";
 import type { Symbols } from "./symbols.ts";
 import { sanitizeForTerminal, stringWidth } from "../text/width.ts";
 import { truncateStyled } from "../text/wrap.ts";
+import { t } from "../i18n/index.ts";
 
 /** Calls `run` every `intervalMs` until the returned function is called. */
 export type Ticker = (run: () => void, intervalMs: number) => () => void;
@@ -74,9 +75,14 @@ export const renderWorkRow = (input: WorkRowInput, width: number): string => {
   const parts = [
     { text: formatElapsed(input.elapsedMs), paint: theme.dim },
     ...(input.silentMs >= SILENT_AFTER_MS
-      ? [{ text: `응답 없음 ${formatElapsed(input.silentMs)}`, paint: theme.warning }]
+      ? [
+          {
+            text: t("render.spinner.silent", { elapsed: formatElapsed(input.silentMs) }),
+            paint: theme.warning,
+          },
+        ]
       : []),
-    ...(input.interruptible ? [{ text: "Esc 중단", paint: theme.dim }] : []),
+    ...(input.interruptible ? [{ text: t("render.spinner.interrupt"), paint: theme.dim }] : []),
   ];
   const tail = parts.map((part) => part.paint(part.text)).join(theme.dim(` ${TAIL_SEPARATOR} `));
   const tailWidth = stringWidth(parts.map((part) => part.text).join(` ${TAIL_SEPARATOR} `));
@@ -85,7 +91,7 @@ export const renderWorkRow = (input: WorkRowInput, width: number): string => {
   const room = Math.max(4, width - stringWidth(frames[0] ?? symbols.bullet) - 2 - 2 - tailWidth);
   const label =
     tool === ""
-      ? theme.muted("응답 생성 중")
+      ? theme.muted(t("render.spinner.generating"))
       : `${theme.tool(tool)}${detail === "" ? "" : theme.muted(` · ${detail}`)}`;
   return truncateStyled(`${glyph}  ${truncateStyled(label, room)}  ${tail}`, width);
 };

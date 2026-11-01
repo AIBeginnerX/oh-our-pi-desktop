@@ -5,11 +5,12 @@ import { makeHighlighter, type Segment, wrapPieces } from "./highlight.ts";
 import { RAIL_COLUMNS, railGap, railRow, type Rail } from "./rail.ts";
 import type { Style } from "./style.ts";
 import { type Symbols, UNICODE_SYMBOLS } from "./symbols.ts";
+import { t, type MessageKey } from "../i18n/index.ts";
 
 /** Blocks the desktop app draws as graphics. A terminal shows a short marker, never the source. */
-const VISUAL_BLOCKS: ReadonlyMap<string, string> = new Map([
-  ["chart", "차트"],
-  ["mermaid", "mermaid 다이어그램"],
+const VISUAL_BLOCKS: ReadonlyMap<string, MessageKey> = new Map([
+  ["chart", "render.markdown.chart"],
+  ["mermaid", "render.markdown.mermaid"],
 ]);
 
 const FENCE = /^(\s*)(`{3,}|~{3,})\s*([^\s`]*)/u;
@@ -266,10 +267,10 @@ export class MarkdownStream {
 
   private closeFence(fence: OpenFence): string[] {
     const { theme } = this.options.style;
-    const label = VISUAL_BLOCKS.get(fence.lang);
-    if (label !== undefined) {
+    const labelKey = VISUAL_BLOCKS.get(fence.lang);
+    if (labelKey !== undefined) {
       const note = theme.dim(
-        `[${label} ${fence.lines}줄 - 데스크톱 앱에서 볼 수 있으며 터미널에는 그리지 않습니다]`,
+        t("render.markdown.visualBlock", { label: t(labelKey), lines: fence.lines }),
       );
       return this.options.railed === true ? this.textRows([note]) : [`  ${note}`];
     }

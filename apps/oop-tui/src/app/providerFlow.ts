@@ -3,6 +3,7 @@ import type { OrchestrationShellSnapshot, ServerConfig, ServerSettings } from "@
 import type { KeyEvent } from "../input/keys.ts";
 import type { RegionFrame } from "../render/liveRegion.ts";
 import { railNote, railRow, type Rail } from "../render/rail.ts";
+import { t } from "../i18n/index.ts";
 import { truncateStyled } from "../text/wrap.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
 import type { PatchBuilder, PatchResult } from "./settingsPatch.ts";
@@ -51,7 +52,7 @@ export interface ProviderFlowDeps {
   readonly width: () => number;
   /** Lines into the scrollback. */
   readonly say: (lines: ReadonlyArray<string>) => void;
-  /** A finished step into the scrollback: `Provider  codex_work 추가됨`. */
+  /** A finished step into the scrollback: `Provider  codex_work added`. */
   readonly record: (label: string, value: string) => void;
   /** A failure into the scrollback. */
   readonly error: (text: string) => void;
@@ -74,10 +75,14 @@ const listBody = (rows: ReadonlyArray<ProviderRow>, rail: Rail, width: number): 
           : row.tone === "bad"
             ? theme.error
             : theme.dim;
-    const models = row.models === null ? "" : ` · 모델 ${row.models}`;
-    const details = [row.name, row.driver, row.isDefault ? "기본" : "", row.message ?? ""].filter(
-      (part) => part !== "",
-    );
+    const models =
+      row.models === null ? "" : ` · ${t("providers.flow.modelsShort", { count: row.models })}`;
+    const details = [
+      row.name,
+      row.driver,
+      row.isDefault ? t("providers.cmd.default") : "",
+      row.message ?? "",
+    ].filter((part) => part !== "");
     return [
       truncateStyled(`${theme.text(row.id)}  ${paint(row.status)}${theme.dim(models)}`, inner),
       truncateStyled(`  ${theme.dim(details.join(" · "))}`, inner),
@@ -129,7 +134,7 @@ export class ProviderFlow {
       rows: providerRows(config, settings),
       checkRemove: (id) =>
         settings === null
-          ? { ok: false, reason: "서버 설정을 아직 받지 못했습니다." }
+          ? { ok: false, reason: t("providers.flow.noSettings") }
           : planRemove({ id, settings, shell: this.deps.shell() }),
     };
   }
@@ -145,7 +150,7 @@ export class ProviderFlow {
     }
     const request = parsed.value;
     if (this.deps.config() === null) {
-      this.deps.notify("서버에 연결된 뒤에 쓸 수 있습니다.");
+      this.deps.notify(t("providers.flow.needsServer"));
       return;
     }
     this.banner = null;
@@ -169,11 +174,8 @@ export class ProviderFlow {
         rail,
         "Provider",
         rows.length === 0
-          ? [rail.style.theme.dim("등록된 Provider 가 없습니다.")]
-          : [
-              ...listBody(rows, rail, width),
-              rail.style.theme.dim("/provider add 추가 • /provider remove <id> 삭제"),
-            ],
+          ? [rail.style.theme.dim(t("providers.cmd.none"))]
+          : [...listBody(rows, rail, width), rail.style.theme.dim(t("providers.flow.listHint"))],
         width,
       ),
     );
@@ -209,7 +211,7 @@ export class ProviderFlow {
       this.deps.say(
         railNote(
           rail,
-          "추가하지 않음 (--dry-run)",
+          t("providers.flow.notAdded"),
           previewPayload(draft.value, built.instance)
             .split("\n")
             .map((line) => rail.style.theme.dim(sanitizeForTerminal(line))),
@@ -225,7 +227,7 @@ export class ProviderFlow {
     const context = this.context();
     if (id === null) {
       if (context.rows.every((row) => row.isDefault)) {
-        this.deps.notify("지울 수 있는 Provider 가 없습니다. 기본 인스턴스는 지울 수 없습니다.");
+        this.deps.notify(t("providers.flow.nothingRemovable"));
         return;
       }
       this.view = openRemovePick();
@@ -237,7 +239,7 @@ export class ProviderFlow {
       return;
     }
     if (dryRun) {
-      this.sayPlan(check.plan, "삭제하지 않음 (--dry-run)");
+      this.sayPlan(check.plan, t("providers.flow.notRemoved"));
       return;
     }
     this.view = openRemoveView(check.plan);
@@ -295,29 +297,32 @@ export class ProviderFlow {
       return;
     }
     if (!this.deps.online()) {
-      this.failed("서버와 연결이 끊겨 있습니다. 연결된 뒤 다시 시도하세요.");
+      this.failed(t("providers.flow.offline"));
       return;
     }
     this.busy = true;
-    this.banner = "추가하는 중…";
+    this.banner = t("providers.flow.adding");
     this.deps.changed();
     const result = await this.deps.patch((current) => addPatch(current, draft.id, built.instance));
     this.busy = false;
     this.banner = null;
     if (!result.ok) {
       this.failed(
-        `추가 실패: ${redactSecrets(result.message, secrets)}${result.rejected ? "" : " (서버에 닿았는지 확실하지 않습니다. /provider 로 확인하세요)"}`,
+        `${t("providers.flow.addFailed", { reason: redactSecrets(result.message, secrets) })}${result.rejected ? "" : ` ${t("providers.flow.unsure")}`}`,
       );
       this.deps.changed();
       return;
     }
     if (!result.changed) {
-      this.failed(`'${draft.id}' 는 방금 다른 곳에서 만들어졌습니다. 다른 ID 를 쓰세요.`);
+      this.failed(t("providers.flow.idRace", { id: draft.id }));
       this.deps.changed();
       return;
     }
     this.view = null;
-    this.deps.record("Provider", `${draft.id} 추가됨 (${targetLabel(draft.target)})`);
+    this.deps.record(
+      "Provider",
+      t("providers.flow.added", { id: draft.id, kind: targetLabel(draft.target) }),
+    );
     const advice = afterAddAdvice(draft);
     if (advice !== null) {
       const rail = this.deps.rail();
@@ -329,29 +334,29 @@ export class ProviderFlow {
 
   private async remove(id: string): Promise<void> {
     if (!this.deps.online()) {
-      this.failed("서버와 연결이 끊겨 있습니다. 연결된 뒤 다시 시도하세요.");
+      this.failed(t("providers.flow.offline"));
       return;
     }
     // The plan was made before the confirmation; the impact line below is read again from the
     // settings and threads as they are now.
     this.busy = true;
-    this.banner = "삭제하는 중…";
+    this.banner = t("providers.flow.removing");
     this.deps.changed();
     const result = await this.deps.patch((current) => removePatch(current, id));
     this.busy = false;
     this.banner = null;
     if (!result.ok) {
       this.failed(
-        `삭제 실패: ${result.message}${result.rejected ? "" : " (서버에 닿았는지 확실하지 않습니다. /provider 로 확인하세요)"}`,
+        `${t("providers.flow.removeFailed", { reason: result.message })}${result.rejected ? "" : ` ${t("providers.flow.unsure")}`}`,
       );
       this.deps.changed();
       return;
     }
     this.view = null;
     if (!result.changed) {
-      this.deps.notify(`'${id}' 는 이미 없습니다.`);
+      this.deps.notify(t("providers.cmd.alreadyGone", { id }));
     } else {
-      this.deps.record("Provider", `${id} 삭제됨`);
+      this.deps.record("Provider", t("providers.flow.removed", { id }));
       const check = planRemove({
         id,
         settings: result.before,
@@ -362,13 +367,7 @@ export class ProviderFlow {
         const left =
           plan.threads.total + plan.crewPins + plan.projects + (plan.textGeneration ? 1 : 0);
         if (left > 0) {
-          this.deps.say([
-            this.deps
-              .rail()
-              .style.theme.dim(
-                "  이 Provider 의 모델을 가리키던 선택이 남아 있습니다. /model 에서 다른 모델로 바꾸세요.",
-              ),
-          ]);
+          this.deps.say([this.deps.rail().style.theme.dim(t("providers.flow.staleSelections"))]);
         }
       }
     }
@@ -381,11 +380,7 @@ export class ProviderFlow {
     try {
       await this.deps.refresh(input);
     } catch {
-      this.deps.say([
-        this.deps
-          .rail()
-          .style.theme.dim("  상태를 새로 읽지 못했습니다. 잠시 뒤 /provider 로 확인하세요."),
-      ]);
+      this.deps.say([this.deps.rail().style.theme.dim(t("providers.flow.refreshFailed"))]);
     }
   }
 }

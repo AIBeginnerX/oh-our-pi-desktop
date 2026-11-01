@@ -1,6 +1,7 @@
 import * as NodeFS from "node:fs";
 
 import type { OrchestrationProjectShell, OrchestrationThreadShell } from "@t3tools/contracts";
+import { t } from "../i18n/index.ts";
 
 const normalizeDirectory = (value: string, platform: NodeJS.Platform): string => {
   let normalized = value.replace(/\\/gu, "/").replace(/\/+$/u, "");
@@ -75,18 +76,18 @@ export const isThreadRunning = (thread: OrchestrationThreadShell): boolean =>
   thread.session?.status === "starting" ||
   thread.latestTurn?.state === "running";
 
-/** Korean relative time for picker rows. */
+/** Relative time for picker rows. */
 export const relativeTime = (iso: string, now: Date): string => {
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const seconds = Math.max(0, Math.round((now.getTime() - then) / 1000));
-  if (seconds < 45) return "방금";
+  if (seconds < 45) return t("session.time.now");
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}분 전`;
+  if (minutes < 60) return t("session.time.min", { n: minutes });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
+  if (hours < 24) return t("session.time.hour", { n: hours });
   const days = Math.round(hours / 24);
-  if (days < 30) return `${days}일 전`;
+  if (days < 30) return t("session.time.day", { n: days });
   return iso.slice(0, 10);
 };
 

@@ -1,6 +1,6 @@
 # OOP promo site
 
-A self-contained static site (plain HTML, CSS and a small amount of JS) that presents OOP, shows how to install it, and links to the public GitHub repository. English and Korean are both in `index.html`; the header toggle switches them (`?lang=ko` also works). There is no build step and no dependency.
+A self-contained static site (plain HTML, CSS and a small amount of JS) that presents OOP, shows how to install it, and links to the public GitHub repository. English and Korean are both in `index.html`; the header toggle switches them (`?lang=ko` also works). **English is the default**: with no `?lang=` and no saved choice the page is English, whatever the browser language is. There is no build step and no dependency.
 
 This is separate from `apps/marketing`, which is the upstream T3 Code site (Astro, deployed to Vercel, serves upstream install scripts).
 
@@ -16,7 +16,11 @@ or `python3 -m http.server 4173 --directory apps/oop-site`, then open <http://lo
 
 ## Content sources
 
-Copy and numbers come from the public README, `INSTALL.md` and `docs/screenshots` in `tools/public-export/overlay/`. Most screenshots in `assets/shots/` are those PNGs re-encoded as WebP. `report-charts`, `report-flow` and `mobile-chat` were taken from a fake demo project in the purple `iris` theme. The logo and favicons are copied from `assets/oop/`. When the install docs or supported platforms change, update `index.html` to match.
+Copy and numbers come from the public README, `INSTALL.md` and `docs/screenshots` in `tools/public-export/overlay/`. The screenshots in `assets/shots/` are real captures of the app (and `oop` for the videos) on a fake demo project in the purple `iris` theme, re-encoded as WebP; `tools/public-export/capture/` re-creates them. The logo and favicons are copied from `assets/oop/`. When the install docs or supported platforms change, update `index.html` to match.
+
+## Recordings and motion
+
+The hero and the Terminal section play `assets/video/desktop-demo.mp4` and `assets/video/terminal-demo.mp4` (each with a `.webp` poster of the same name). They are produced separately and are not part of this folder's source; until they exist the poster or a still image is shown. The "Watch the 30-second tour" reel below the hero uses `assets/video/promo-reel.mp4` + `promo-reel.webp` (also produced separately); if it fails to load the whole figure is hidden. The look is a single lavender/violet palette (`:root` tokens in `styles.css`, `theme-color` in `index.html`). Videos play only while on screen and have a play/pause button. The diagrams, sample chart and count-ups are plain HTML, inline SVG and `app.js`; with `prefers-reduced-motion` or without JS they show their final state.
 
 ## Deploy to GitHub Pages
 

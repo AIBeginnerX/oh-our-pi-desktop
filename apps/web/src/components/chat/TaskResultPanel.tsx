@@ -1,3 +1,4 @@
+import { useT } from "../../i18n";
 import {
   validateTaskResultItems,
   type EnvironmentId,
@@ -13,7 +14,8 @@ import { Input } from "../ui/input";
 import type { SelectedChecksCurrentSource } from "../../state/selectedChecks";
 import { serverRequirementItems, useTaskResult } from "../../state/taskResult";
 
-const SCOPE_NOTE = "이 Git 작업 트리(추적·비무시 파일)와 최신 검사 시도 1개만 봅니다.";
+const SCOPE_NOTE =
+  "Looks only at this Git working tree (tracked, non-ignored files) and the latest check attempt.";
 
 const STATE_BADGE: Record<string, string> = {
   loading: "Loading task result",
@@ -82,6 +84,7 @@ export function TaskResultPanel({
   candidates,
   recordKey,
 }: TaskResultPanelProps) {
+  const t = useT();
   const task = useTaskResult({ environmentId, threadId, readCurrentSource, recordKey });
   const {
     state,
@@ -157,7 +160,7 @@ export function TaskResultPanel({
         <Badge variant="outline">{headlineBadge}</Badge>
         {acceptanceBadge !== null ? <Badge variant="outline">{acceptanceBadge}</Badge> : null}
       </div>
-      <p className="text-muted-foreground text-sm">{SCOPE_NOTE}</p>
+      <p className="text-muted-foreground text-sm">{t(SCOPE_NOTE)}</p>
       {notice !== null ? <p className="text-destructive text-sm">{notice.message}</p> : null}
       {draftUnsaved ? (
         <p className="text-muted-foreground text-sm">Unsaved requirement edits.</p>

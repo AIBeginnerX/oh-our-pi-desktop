@@ -24,6 +24,7 @@ import { formatElapsed } from "../render/spinner.ts";
 import type { Style } from "../render/style.ts";
 import type { Symbols } from "../render/symbols.ts";
 import { visibleWidth } from "../text/width.ts";
+import { t } from "../i18n/index.ts";
 import { truncateStyled } from "../text/wrap.ts";
 import type { CrewBoard, CrewTask, CrewTaskPhase, WaitingCrewThread } from "./crewBoard.ts";
 import {
@@ -95,7 +96,7 @@ interface LaneItem {
 interface PhaseData {
   readonly title: string;
   readonly running: boolean;
-  /** What the phase says about itself, e.g. `진행 1 · 완료 2`. */
+  /** What the phase says about itself, e.g. `1 active · 2 done`. */
   readonly summary: string;
   readonly members: ReadonlyArray<AgentRow>;
 }
@@ -218,26 +219,29 @@ const modelLabelOf = (agent: RuntimeSubagent): string | null => {
 };
 
 const stateWordOf = (agent: RuntimeSubagent, mark: WorkflowNodeState): string =>
-  agent.status === "idle" ? "유휴 · 재개 가능" : STATE_WORDS[mark];
+  agent.status === "idle" ? t("providers.agents.idle") : STATE_WORDS[mark];
 
 /**
  * What an agent that is not the lead says it is doing: the live line leads with the work in
  * progress, a settled one with how it ended, as the desktop app's agent row does.
  */
 const noteOf = (agent: RuntimeSubagent): AgentRow["note"] => {
-  const last = agent.lastToolName === null ? null : `도구 ${flat(agent.lastToolName)}`;
+  const last =
+    agent.lastToolName === null
+      ? null
+      : t("providers.agents.tool", { name: flat(agent.lastToolName) });
   const pick = (value: string | null) =>
     value === null || flat(value) === "" ? null : flat(value);
   if (isLiveStatus(agent.status)) {
     const text = pick(agent.progress) ?? last ?? pick(agent.result) ?? pick(agent.error);
-    return text === null ? null : { text: `지금: ${text}`, tone: "dim" };
+    return text === null ? null : { text: t("providers.wf.now", { text }), tone: "dim" };
   }
   const error = pick(agent.error);
-  if (error !== null) return { text: `오류: ${error}`, tone: "error" };
+  if (error !== null) return { text: t("providers.wf.error", { text: error }), tone: "error" };
   const result = pick(agent.result);
-  if (result !== null) return { text: `결과: ${result}`, tone: "dim" };
+  if (result !== null) return { text: t("providers.agents.result", { text: result }), tone: "dim" };
   const text = pick(agent.progress) ?? last;
-  return text === null ? null : { text: `마지막: ${text}`, tone: "dim" };
+  return text === null ? null : { text: t("providers.agents.last", { text }), tone: "dim" };
 };
 
 const toolsText = (tools: ReadonlyArray<ToolCount> | undefined): string =>
@@ -252,11 +256,13 @@ const factsOf = (agent: RuntimeSubagent, task: CrewTask | undefined): ReadonlyAr
   const tokens = agent.usage?.totalTokens ?? task?.tokens ?? null;
   const toolUses = agent.usage?.toolUses;
   return [
-    tokens === null ? null : `${formatTokenCount(tokens)} 토큰`,
+    tokens === null ? null : t("providers.wf.tokens", { count: formatTokenCount(tokens) }),
     task?.costUsd == null ? null : formatCost(task.costUsd),
-    toolUses === undefined ? null : `도구 ${toolUses}회`,
-    agent.activationCount > 1 ? `실행 ${agent.activationCount}회` : null,
-    task?.evidence == null ? null : `근거: ${evidenceWord(task.evidence)}`,
+    toolUses === undefined ? null : t("providers.agents.toolUses", { count: toolUses }),
+    agent.activationCount > 1 ? t("providers.agents.runs", { count: agent.activationCount }) : null,
+    task?.evidence == null
+      ? null
+      : t("providers.agents.evidence", { text: evidenceWord(task.evidence) }),
   ].filter((part): part is string => part !== null);
 };
 
@@ -268,7 +274,7 @@ const rowOfAgent = (
   waiting: Waiting | null,
 ): AgentRow => {
   // A pending agent is counted as working by the header and drawn as working in the lane; its row
-  // says the same instead of "시작 전".
+  // says the same instead of "not started".
   const sub = agent.status === "pending" ? "running" : subagentNodeState(agent.status);
   const mark = task !== undefined ? PHASE_MARK[task.phase] : sub;
   // A crew task the board has settled with its turn is over, whatever the session still says.
@@ -289,11 +295,13 @@ const rowOfAgent = (
   };
 };
 
-// A Map: the name is the agent's role, which can be any word, `constructor` and `toString` included.
-const NAME_OF_KIND: ReadonlyMap<string, string> = new Map([
-  ["Subagent", "서브에이전트"],
-  ["Workflow", "워크플로"],
-]);
+// Compared by value: the name is the agent's role, which can be any word, `constructor` and `toString` included.
+const nameOfKind = (name: string): string | undefined =>
+  name === "Subagent"
+    ? t("providers.wf.role.subagent")
+    : name === "Workflow"
+      ? t("providers.wf.role.workflow")
+      : undefined;
 
 const withRole = (agent: RuntimeSubagent): string => {
   const title = flat(agent.title);
@@ -309,16 +317,20 @@ const leadRow = (entry: AgentFlowEntry, source: AgentsSource): AgentRow => {
   const text = working
     ? doing === ""
       ? null
-      : `지금: ${doing}`
+      : t("providers.wf.now", { text: doing })
     : doing === ""
-      ? "다음 요청을 기다립니다"
-      : `턴을 마침 · ${doing}`;
+      ? t("providers.agents.awaiting")
+      : t("providers.agents.turnDone", { text: doing });
   const waiting = source.leadWaiting;
   return {
     id: entry.id,
     name: "Lead",
     mark: waiting === null ? NODE_OF_FLOW[entry.state] : "blocked",
-    state: working ? (entry.state === "thinking" ? "생각하는 중" : STATE_WORDS.running) : "완료",
+    state: working
+      ? entry.state === "thinking"
+        ? t("providers.wf.thinking")
+        : STATE_WORDS.running
+      : STATE_WORDS.completed,
     waiting,
     task: null,
     model: source.leadModel === null ? null : flat(source.leadModel),
@@ -357,7 +369,7 @@ const laneOf = (flow: ReturnType<typeof agentFlow>, rows: ReadonlyArray<AgentRow
     return {
       id: box.id,
       mark,
-      title: where || tools || "메인 에이전트",
+      title: where || tools || t("providers.wf.role.main"),
       detail: where !== "" && tools !== "" ? tools : null,
       state: STATE_WORDS[mark],
       live,
@@ -366,12 +378,12 @@ const laneOf = (flow: ReturnType<typeof agentFlow>, rows: ReadonlyArray<AgentRow
 };
 
 const phaseSummary = (phase: AgentPanelWorkflowGroup["phases"][number]): string => {
-  if (phase.state === "pending" && phase.members.length === 0) return "시작 전";
+  if (phase.state === "pending" && phase.members.length === 0) return STATE_WORDS.pending;
   const failed = phase.members.filter((member) => member.status === "failed").length;
   return [
-    phase.state === "done" ? null : `진행 ${phase.activeCount}`,
-    `완료 ${phase.settledCount - failed}`,
-    failed > 0 ? `실패 ${failed}` : null,
+    phase.state === "done" ? null : t("providers.wf.counts.running", { count: phase.activeCount }),
+    t("providers.wf.counts.completed", { count: phase.settledCount - failed }),
+    failed > 0 ? t("providers.wf.counts.failed", { count: failed }) : null,
   ]
     .filter((part): part is string => part !== null)
     .join(" · ");
@@ -502,7 +514,7 @@ export const deriveAgentsView = (source: AgentsSource): AgentsView => {
     const agent = agents.get(entry.id);
     if (agent === undefined) continue;
     const task = entry.kind === "crew" ? tasks.get(entry.id) : undefined;
-    const label = NAME_OF_KIND.get(entry.name) ?? flat(entry.name);
+    const label = nameOfKind(entry.name) ?? flat(entry.name);
     const title = flat(entry.task ?? "");
     listed.push(
       rowOfAgent(
@@ -589,7 +601,11 @@ const rowBlock = (
   const ask =
     row.waiting === null
       ? ""
-      : `  ${theme.warning(row.waiting === "approval" ? "승인 대기" : "질문 대기")}`;
+      : `  ${theme.warning(
+          row.waiting === "approval"
+            ? t("providers.crewScreen.waitApproval")
+            : t("providers.crewScreen.waitInput"),
+        )}`;
   const lines = [
     truncateStyled(`${first}${theme.text.bold(row.name)}  ${theme.dim(row.state)}${ask}`, room),
   ];
@@ -622,10 +638,17 @@ const groupBlock = (group: GroupData, input: AgentsPanelInput, room: number): st
   const { style, symbols, now } = input;
   const { theme } = style;
   const mark = paintFor(style, group.mark)(symbols.flow[group.mark]);
-  const failed = group.failed > 0 ? theme.error(` · 실패 ${group.failed}`) : "";
+  const failed =
+    group.failed > 0
+      ? theme.error(` · ${t("providers.wf.counts.failed", { count: group.failed })}`)
+      : "";
   if (!group.live) {
     const elapsed = elapsedOf(group.span, now);
-    const facts = [`에이전트 ${group.total}개`, `${formatTokenCount(group.tokens)} 토큰`, elapsed]
+    const facts = [
+      t("providers.agents.agentCount", { count: group.total }),
+      t("providers.wf.tokens", { count: formatTokenCount(group.tokens) }),
+      elapsed,
+    ]
       .filter((part): part is string => part !== null)
       .join(" · ");
     return [
@@ -634,7 +657,7 @@ const groupBlock = (group: GroupData, input: AgentsPanelInput, room: number): st
   }
   const lines = [
     truncateStyled(
-      `  ${mark} ${theme.text.bold(group.name)}  ${theme.dim(`${group.settled}/${group.total} 완료`)}${failed}`,
+      `  ${mark} ${theme.text.bold(group.name)}  ${theme.dim(t("providers.agents.settled", { settled: group.settled, total: group.total }))}${failed}`,
       room,
     ),
   ];
@@ -645,7 +668,7 @@ const groupBlock = (group: GroupData, input: AgentsPanelInput, room: number): st
     const paint = phase.running ? theme.accent : theme.dim;
     lines.push(
       truncateStyled(
-        `    ${paint(`단계 ${phase.title}`)}  ${theme.dim(phase.summary)}${marks}`,
+        `    ${paint(t("providers.wf.step", { index: phase.title }))}  ${theme.dim(phase.summary)}${marks}`,
         room,
       ),
     );
@@ -662,30 +685,30 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
   const { theme } = style;
   const { room, margin, out, say, offline } = panelHead("agents", input);
   if (view === null) {
-    say("스레드를 열면 그 스레드의 에이전트가 여기에 보입니다.");
+    say(t("providers.agents.openThread"));
     return out.slice(0, rows);
   }
   if (!input.online) offline();
   if (view.loading || view.empty) {
     // What an empty thread will show is not promised while the link is down, nor before it is read.
     if (view.loading) {
-      say(input.online ? "에이전트를 불러오는 중…" : "연결되면 이 스레드의 에이전트를 불러옵니다.");
+      say(input.online ? t("providers.agents.loading") : t("providers.agents.loadingOffline"));
     } else if (input.online) {
-      say(
-        "이 스레드가 실행되면 에이전트와 서브에이전트·workflow 가 상태, 하는 일, 토큰 사용량과 함께 여기에 나타납니다.",
-      );
+      say(t("providers.agents.empty"));
     }
     return out.slice(0, rows);
   }
 
   const { counts } = view;
   const summary = [
-    counts.working > 0 ? `작업 중 ${counts.working}` : null,
-    counts.idle > 0 ? `유휴 ${counts.idle}` : null,
-    counts.done > 0 ? `완료 ${counts.done}` : null,
-    counts.failed > 0 ? `실패 ${counts.failed}` : null,
-    counts.stopped > 0 ? `중단 ${counts.stopped}` : null,
-    counts.tokens > 0 ? `합계 ${formatTokenCount(counts.tokens)} 토큰` : null,
+    counts.working > 0 ? t("providers.agents.sumWorking", { count: counts.working }) : null,
+    counts.idle > 0 ? t("providers.agents.sumIdle", { count: counts.idle }) : null,
+    counts.done > 0 ? t("providers.wf.counts.completed", { count: counts.done }) : null,
+    counts.failed > 0 ? t("providers.wf.counts.failed", { count: counts.failed }) : null,
+    counts.stopped > 0 ? t("providers.wf.counts.stopped", { count: counts.stopped }) : null,
+    counts.tokens > 0
+      ? t("providers.agents.sumTokens", { count: formatTokenCount(counts.tokens) })
+      : null,
   ].filter((part): part is string => part !== null);
   if (summary.length > 0) out.push(margin(truncateStyled(theme.dim(summary.join(" · ")), room)));
   if (view.board !== null) out.push(margin(truncateStyled(theme.dim(`Crew ${view.board}`), room)));
@@ -696,7 +719,7 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
   let focus = -1;
   let focusWaiting = false;
   const heading = (text: string) => body.push(theme.text.bold(text));
-  heading("에이전트");
+  heading(t("providers.agents.headingAgents"));
   for (const row of view.rows) {
     if (row.waiting !== null && !focusWaiting) {
       focus = body.length;
@@ -706,16 +729,17 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
     }
     body.push(...rowBlock(row, input, room - 1, 0));
   }
-  if (view.folded > 0) body.push(theme.dim(`  이전 ${view.folded}개 생략`));
+  if (view.folded > 0) body.push(theme.dim(t("providers.agents.folded", { count: view.folded })));
   body.push("");
-  heading("흐름 · 이번 턴");
-  if (view.lane.length === 0) body.push(theme.dim("  이번 턴에는 아직 작업이 없습니다."));
+  heading(t("providers.agents.headingFlow"));
+  if (view.lane.length === 0) body.push(theme.dim(t("providers.agents.noLane")));
   view.lane.forEach((item, index) => body.push(laneBlock(item, index + 1, input, room - 1)));
   if (view.groups.length > 0) {
     body.push("");
-    heading("워크플로");
+    heading(t("providers.wf.role.workflow"));
     for (const group of view.groups) body.push(...groupBlock(group, input, room - 1));
-    if (view.groupsFolded > 0) body.push(theme.dim(`  이전 ${view.groupsFolded}개 생략`));
+    if (view.groupsFolded > 0)
+      body.push(theme.dim(t("providers.agents.folded", { count: view.groupsFolded })));
   }
   const shown = windowOf(
     { lines: body.map(margin), focus: Math.max(0, focus) },

@@ -6,42 +6,50 @@ import type {
   OwnedResultUsageV1,
 } from "@t3tools/contracts";
 import { formatPercent } from "@t3tools/shared/usageFormat";
+import { t } from "../../i18n";
 import type { ResultUsageDisclosureState } from "../../state/resultUsage";
 
 /**
- * Fixed Korean copy for the passed-record usage disclosure (U-OWN-2 web
+ * Fixed copy for the passed-record usage disclosure (U-OWN-2 web
  * slice). Honest labels only: recorded snapshot of this thread on this
  * server, recorded timestamp spans are not execution time, cost is unknown,
  * child frames are excluded with unknown overlap, and nothing is ever summed
  * across buckets or results.
+ *
+ * The exported constants are English catalog keys; the display layer passes them through `t`.
+ * The line formatters translate themselves, in the language chosen right now.
  */
 
-export const RESULT_USAGE_HEADLINE = "이 스레드 · 이 서버가 기록한 값";
-export const RESULT_USAGE_SCOPE_NOTE = "사용량 화면의 제공자 계정 사용량과 범위가 다릅니다.";
-export const RESULT_USAGE_SNAPSHOT_NOTE = "이 패널을 열어 읽은 시점까지의 기록 기준입니다.";
+export const RESULT_USAGE_HEADLINE = "This thread · values recorded by this server";
+export const RESULT_USAGE_SCOPE_NOTE =
+  "The scope differs from the provider account usage on the Usage screen.";
+export const RESULT_USAGE_SNAPSHOT_NOTE =
+  "Based on records up to the moment this panel was opened.";
 
 /** Fixed copy for every non-row disclosure state; never zero as a stand-in. */
 export const RESULT_USAGE_STATE_COPY: Record<
   Exclude<ResultUsageDisclosureState["phase"], "row" | "hidden">,
   string
 > = {
-  loading: "사용량 기록을 읽는 중…",
-  unsupported: "이 서버 버전은 결과별 사용량 읽기를 지원하지 않습니다.",
-  "read-failed": "사용량 기록을 읽을 수 없습니다.",
-  "row-missing": "이 기록의 사용량을 가져올 수 없습니다. 새로고침해 주세요.",
-  "missing-create": "스레드 생성 기록을 찾을 수 없어 사용량을 읽을 수 없습니다.",
-  "too-large": "스레드 기록이 너무 커서 사용량을 읽을 수 없습니다.",
+  loading: "Reading usage records…",
+  unsupported: "This server version does not support per-result usage.",
+  "read-failed": "Couldn't read the usage records.",
+  "row-missing": "Couldn't get usage for this record. Refresh.",
+  "missing-create": "The thread creation record can't be found, so usage can't be read.",
+  "too-large": "The thread history is too large to read usage.",
 };
 
 const UNMEASURABLE_COPY: Record<OwnedResultUnmeasurableReason, string> = {
-  "activity-during-attempt": "이 시도 동안 다른 활동이 있어 사용량을 나눌 수 없습니다.",
+  "activity-during-attempt":
+    "Usage can't be split because there was other activity during this attempt.",
   "turn-active-at-attempt":
-    "이 시도가 시작될 때 다른 작업이 진행 중이라 사용량을 나눌 수 없습니다.",
-  "revision-conflict": "같은 기록의 서로 다른 내용이 남아 있어 사용량을 확정할 수 없습니다.",
+    "Usage can't be split because other work was in progress when this attempt started.",
+  "revision-conflict":
+    "Usage can't be finalized because differing contents remain for the same record.",
   "invalid-receipt-or-window":
-    "기록이 손상되었거나 구간을 확정할 수 없어 사용량을 나눌 수 없습니다.",
+    "Usage can't be split because the record is damaged or its window can't be determined.",
   "unresolved-ownership-or-history":
-    "실행 주체나 이력을 확정할 수 없어 사용량을 확정할 수 없습니다.",
+    "Usage can't be finalized because the owner or history can't be determined.",
 };
 
 /** Days/hours/minutes/seconds from a nonnegative millisecond value. */
@@ -50,9 +58,9 @@ function formatDurationMs(ms: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}시간 ${minutes}분`;
-  if (minutes > 0) return `${minutes}분 ${seconds}초`;
-  return `${seconds}초`;
+  if (hours > 0) return t("{hours}h {minutes}m", { hours, minutes });
+  if (minutes > 0) return t("{minutes}m {seconds}s", { minutes, seconds });
+  return t("{seconds}s", { seconds });
 }
 
 /**
@@ -65,8 +73,13 @@ function formatCachePart(
   cache: { readonly sum: number; readonly reportedTurns: number },
   completeTurns: number,
 ): string {
-  if (cache.reportedTurns === 0) return `${label} 미보고`;
-  return `${label} ${cache.sum}(${cache.reportedTurns}/${completeTurns}턴 보고)`;
+  if (cache.reportedTurns === 0) return t("{label} not reported", { label });
+  return t("{label} {sum} ({reported}/{turns} turns reported)", {
+    label,
+    sum: cache.sum,
+    reported: cache.reportedTurns,
+    turns: completeTurns,
+  });
 }
 
 /**
@@ -93,35 +106,37 @@ export function formatResultUsageBucketLine(bucket: OwnedMainUsageBucketV1): str
   const scope = bucket.scope;
   const subtotal = bucket.reportedCompleteSubtotal;
   const conversation =
-    scope.nativeConversationId === null ? "대화 미확인" : `대화 ${scope.nativeConversationId}`;
+    scope.nativeConversationId === null
+      ? t("conversation unknown")
+      : t("conversation {id}", { id: scope.nativeConversationId });
   const hitRate = cacheHitRate(subtotal);
   return [
     `${scope.driver} · ${scope.instanceId} · ${conversation}`,
-    `입력 ${subtotal.inputTokens}`,
-    `출력 ${subtotal.outputTokens}`,
-    formatCachePart("캐시 입력", subtotal.cachedInputTokens, subtotal.completeTurns),
-    ...(hitRate === null ? [] : [`캐시 적중률 ${formatPercent(hitRate)}`]),
-    formatCachePart("캐시 생성", subtotal.cacheCreationTokens, subtotal.completeTurns),
-    formatCachePart("추론", subtotal.reasoningTokens, subtotal.completeTurns),
-    `완전 턴 ${subtotal.completeTurns}`,
+    t("Input {count}", { count: subtotal.inputTokens }),
+    t("Output {count}", { count: subtotal.outputTokens }),
+    formatCachePart(t("Cache input"), subtotal.cachedInputTokens, subtotal.completeTurns),
+    ...(hitRate === null ? [] : [t("Cache hit rate {rate}", { rate: formatPercent(hitRate) })]),
+    formatCachePart(t("Cache creation"), subtotal.cacheCreationTokens, subtotal.completeTurns),
+    formatCachePart(t("Reasoning"), subtotal.reasoningTokens, subtotal.completeTurns),
+    t("Complete turns {count}", { count: subtotal.completeTurns }),
   ].join(" · ");
 }
 
 function formatCoverageCounts(coverage: OwnedResultCoverageV1): string {
   return [
-    `완전 ${coverage.complete}`,
-    `부분 ${coverage.partial}`,
-    `불가 ${coverage.unavailable}`,
-    `모호 ${coverage.ambiguous}`,
-    `오염 ${coverage.conflictTainted}`,
-    `범위 밖 ${coverage.unscoped}`,
-    `미기록 ${coverage.unrecorded}`,
-    `늦은 관측(제외) ${coverage.lateUnattributed}`,
+    t("Complete {count}", { count: coverage.complete }),
+    t("Partial {count}", { count: coverage.partial }),
+    t("Unavailable {count}", { count: coverage.unavailable }),
+    t("Ambiguous {count}", { count: coverage.ambiguous }),
+    t("Tainted {count}", { count: coverage.conflictTainted }),
+    t("Out of scope {count}", { count: coverage.unscoped }),
+    t("Unrecorded {count}", { count: coverage.unrecorded }),
+    t("Late observations (excluded) {count}", { count: coverage.lateUnattributed }),
   ].join(" · ");
 }
 
 export function formatResultUsageCoverageLine(coverage: OwnedResultCoverageV1): string {
-  return `턴 범위 · ${formatCoverageCounts(coverage)}`;
+  return t("Turn coverage · {counts}", { counts: formatCoverageCounts(coverage) });
 }
 
 /** Counts only, shown when anything after the last result was observed. */
@@ -137,36 +152,52 @@ export function formatResultUsageTrailingLine(trailing: OwnedResultUsageTrailing
     coverage.unrecorded > 0 ||
     coverage.lateUnattributed > 0;
   if (trailing.inputs === 0 && trailing.otherAttempts === 0 && !hasCoverage) return null;
-  return `마지막 결과 이후 · 입력 ${trailing.inputs}회 · 다른 시도 ${trailing.otherAttempts}회 · ${formatCoverageCounts(coverage)}`;
+  return t("After the last result · {inputs} inputs · {others} other attempts · {counts}", {
+    inputs: trailing.inputs,
+    others: trailing.otherAttempts,
+    counts: formatCoverageCounts(coverage),
+  });
 }
 
 /**
  * All lines for one exact result row. `checksMs` covers only the recorded
  * runner interval; `recordedSpanMs` is the difference of recorded event
- * timestamps and is labeled as such — null stays "측정 없음", never zero.
+ * timestamps and is labeled as such — null stays "not measured", never zero.
  */
 export function formatResultUsageRowLines(row: OwnedResultUsageV1): ReadonlyArray<string> {
   const lines: string[] = [
-    `입력 ${row.inputs}회 · 다른 시도 ${row.otherAttempts}회`,
+    t("{inputs} inputs · {others} other attempts", {
+      inputs: row.inputs,
+      others: row.otherAttempts,
+    }),
     row.checksMs === null
-      ? "검사 실행 시간: 측정 없음"
-      : `검사 실행 시간: ${formatDurationMs(row.checksMs)}`,
+      ? t("Check run time: not measured")
+      : t("Check run time: {duration}", { duration: formatDurationMs(row.checksMs) }),
     row.recordedSpan.recordedSpanMs === null
-      ? "기록 시각 차이: 측정 없음"
-      : `기록 시각 차이: ${formatDurationMs(row.recordedSpan.recordedSpanMs)}(기록된 시각의 차이이며 실제 실행 시간이 아님)`,
+      ? t("Recorded time gap: not measured")
+      : t(
+          "Recorded time gap: {duration} (difference of recorded timestamps, not actual run time)",
+          {
+            duration: formatDurationMs(row.recordedSpan.recordedSpanMs),
+          },
+        ),
   ];
   if (row.usage.status === "measured") {
     lines.push(formatResultUsageCoverageLine(row.usage.coverage));
     for (const bucket of row.usage.buckets) lines.push(formatResultUsageBucketLine(bucket));
     lines.push(
-      `하위 작업 ${row.usage.childFrames} frame · 미포함(중복 여부 불명)` +
+      t("Sub-tasks {count} frames · not included (overlap unknown)", {
+        count: row.usage.childFrames,
+      }) +
         (row.usage.legacyChildFrames > 0
-          ? ` · 이전 방식 ${row.usage.legacyChildFrames} frame`
+          ? t(" · legacy {count} frames", { count: row.usage.legacyChildFrames })
           : ""),
     );
-    lines.push("비용: 알 수 없음(청구액 기록 없음)");
+    lines.push(t("Cost: unknown (no billing record)"));
   } else {
-    lines.push(`사용량 확정 불가 · ${UNMEASURABLE_COPY[row.usage.reason]}`);
+    lines.push(
+      t("Usage can't be determined · {reason}", { reason: t(UNMEASURABLE_COPY[row.usage.reason]) }),
+    );
   }
   return lines;
 }

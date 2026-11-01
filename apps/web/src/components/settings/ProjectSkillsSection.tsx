@@ -1,3 +1,4 @@
+import { useT } from "../../i18n";
 import type {
   AuthSessionState,
   EnvironmentId,
@@ -1012,6 +1013,7 @@ function VersionLifecycleControls({
   ) => void;
   readonly onRetire: (ref: ProjectSkillVersionRef) => void;
 }) {
+  const t = useT();
   const { version } = view;
   const needsTarget = version.state === "candidate" || version.state === "retired";
   const [threadId, setThreadId, threadIdRef] = useMirrored<ThreadId | "">("");
@@ -1097,7 +1099,7 @@ function VersionLifecycleControls({
             disabled={disabled || activateRestoreBlocked || !targetReady}
             onClick={() => runApply("activate")}
           >
-            활성화
+            {t("Activate")}
           </Button>
         ) : null}
         {version.state === "retired" ? (
@@ -1107,7 +1109,7 @@ function VersionLifecycleControls({
             disabled={disabled || activateRestoreBlocked || !targetReady}
             onClick={() => runApply("restore")}
           >
-            이전 버전 복원
+            {t("Restore previous version")}
           </Button>
         ) : null}
         {version.state === "active" ? (
@@ -1117,7 +1119,7 @@ function VersionLifecycleControls({
             disabled={disabled}
             onClick={() => onRetire(version.ref)}
           >
-            사용 중지
+            {t("Disable")}
           </Button>
         ) : null}
       </div>
@@ -1314,6 +1316,7 @@ function VersionSection({
   ) => void;
   readonly onRetire: (ref: ProjectSkillVersionRef) => void;
 }) {
+  const t = useT();
   const { version, judgments, rightsRecorded, reviewRecorded } = view;
   return (
     <section className="grid gap-2 rounded-md border border-border p-3">
@@ -1417,7 +1420,7 @@ function VersionSection({
         <>
           <details>
             <summary className="cursor-pointer text-sm text-muted-foreground">
-              재현 판단 기록 · v{version.ref.version}
+              {t("Reproduction judgment record · v{version}", { version: version.ref.version })}
             </summary>
             <div className="mt-2">
               <VersionReproductionJudgmentForm
@@ -1431,7 +1434,7 @@ function VersionSection({
           </details>
           <details>
             <summary className="cursor-pointer text-sm text-muted-foreground">
-              비적용 판단 기록 · v{version.ref.version}
+              {t("Non-application judgment record · v{version}", { version: version.ref.version })}
             </summary>
             <div className="mt-2">
               <VersionNonApplicationJudgmentForm

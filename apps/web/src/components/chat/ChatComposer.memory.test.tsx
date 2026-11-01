@@ -149,7 +149,7 @@ describe("deriveProjectMemoryComposerGate", () => {
       selectedDriverKind: CODEX,
     });
     expect(gate.pickerEnabled).toBe(false);
-    expect(gate.disabledReason).toContain("지원하지 않습니다");
+    expect(gate.disabledReason).toContain("does not support");
   });
 
   it("disables while the provider catalog is pending instead of guessing support", () => {
@@ -159,7 +159,7 @@ describe("deriveProjectMemoryComposerGate", () => {
       providerCatalogPending: true,
     });
     expect(gate.pickerEnabled).toBe(false);
-    expect(gate.disabledReason).toContain("확인하는 중");
+    expect(gate.disabledReason).toContain("Checking the provider");
   });
 
   it("treats an unresolved driver as unsupported and warns for existing references", () => {
@@ -290,7 +290,7 @@ describe("ProjectMemoryComposerControl", () => {
     });
     const trigger = renderer.root.findByProps({ "data-chat-memory-picker-trigger": "true" });
     expect(trigger.props.disabled).toBe(true);
-    expect(trigger.props.title).toContain("지원하지 않습니다");
+    expect(trigger.props.title).toContain("does not support");
   });
 
   it("keeps a picked selection in the draft as identifiers only through the real store", () => {
@@ -446,7 +446,7 @@ describe("ProjectMemoryUnsupportedWarning", () => {
     if (renderer === null) {
       throw new Error("warning did not render");
     }
-    expect(JSON.stringify(renderer.toJSON())).toContain("보류됩니다");
+    expect(JSON.stringify(renderer.toJSON())).toContain("held on send");
     renderer.unmount();
   });
 });

@@ -1,5 +1,6 @@
 import type { LiveRegion, RegionFrame, TerminalOutput } from "./liveRegion.ts";
 import { splitUnavailable, type SplitParts, type SplitRegion } from "./splitRegion.ts";
+import { t } from "../i18n/index.ts";
 
 /** What the controller can do with the side-by-side layout. */
 export interface SplitControl {
@@ -116,11 +117,11 @@ export class RegionSwitch implements SplitControl {
     if (reason === null) return true;
     if (parts.tasks && this.unavailable({ ...parts, tasks: false }) === null && parts.panel) {
       this.split.setTasks([]);
-      this.onClosed(`작업 목록을 닫았습니다: ${reason}`, "tasks");
+      this.onClosed(t("render.region.tasksClosed", { reason }), "tasks");
       return true;
     }
     this.leave();
-    this.onClosed(`분리 창을 닫았습니다: ${reason}`, "all");
+    this.onClosed(t("render.region.splitClosed", { reason }), "all");
     return false;
   }
 

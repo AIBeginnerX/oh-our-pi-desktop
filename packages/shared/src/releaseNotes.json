@@ -1,6 +1,24 @@
 {
   "versions": [
     {
+      "version": "0.0.130",
+      "date": "2026-11-01",
+      "highlights": [
+        {
+          "en": "Stop now checks before it ends background agents that are still running. The desktop app asks first, and the terminal asks you to press Stop twice within four seconds.",
+          "ko": "Stop이 실행 중인 백그라운드 에이전트를 끝내기 전에 먼저 확인합니다. 데스크톱 앱은 확인을 묻고, 터미널은 4초 안에 두 번 눌러야 멈춥니다."
+        },
+        {
+          "en": "The terminal app speaks English and Korean. It follows the `language` setting, or your system locale when the setting is empty.",
+          "ko": "터미널 앱이 영어와 한국어를 지원합니다. `language` 설정을 따르고, 설정이 없으면 시스템 언어를 따릅니다."
+        },
+        {
+          "en": "The Iris theme is now lavender in light and dark, on the desktop and on phones, and its usage charts match.",
+          "ko": "Iris 테마가 라이트와 다크 모두 라벤더로 바뀌었고, 데스크톱과 휴대폰에 함께 적용되며 사용량 차트 색도 맞췄습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.129",
       "date": "2026-11-01",
       "highlights": [

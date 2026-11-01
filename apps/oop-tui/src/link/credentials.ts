@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 
 import { hostPlatform } from "../host.ts";
 import { originsMatch } from "./selectCredential.ts";
+import { t } from "../i18n/index.ts";
 
 export interface StoredCredential {
   readonly environmentId: string;
@@ -48,9 +49,7 @@ const newest = (entries: readonly StoredCredential[]): StoredCredential | null =
 /** The file exists but cannot be read as credentials; it is left alone so nothing in it is lost. */
 export class CredentialFileError extends Error {
   constructor(filePath: string, reason: string) {
-    super(
-      `자격증명 파일이 손상되었습니다 (${reason}): ${filePath}\n파일을 확인하거나 지운 뒤 'oop pair <링크>' 로 다시 연결하세요.`,
-    );
+    super(t("link.credentialsDamaged", { reason, filePath }));
     this.name = "CredentialFileError";
   }
 }
@@ -64,14 +63,14 @@ export const parseCredentialFile = (
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new CredentialFileError(filePath, "JSON이 아님");
+    throw new CredentialFileError(filePath, t("link.reason.notJson"));
   }
   const environments =
     parsed !== null && typeof parsed === "object"
       ? (parsed as Record<string, unknown>).environments
       : undefined;
   if (environments === null || typeof environments !== "object") {
-    throw new CredentialFileError(filePath, "형식이 다름");
+    throw new CredentialFileError(filePath, t("link.reason.wrongFormat"));
   }
   const kept: Record<string, StoredCredential> = {};
   for (const [key, value] of Object.entries(environments)) {

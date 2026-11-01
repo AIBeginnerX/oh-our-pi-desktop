@@ -2,6 +2,7 @@ import { stripControlSequences, visibleWidth } from "../text/width.ts";
 import { truncateStyled, wrapStyled } from "../text/wrap.ts";
 import type { RegionFrame, Scheduler, TerminalOutput } from "./liveRegion.ts";
 import { tasksUnavailable } from "./tasksPane.ts";
+import { t } from "../i18n/index.ts";
 
 /** Narrowest and shortest terminal the side-by-side layout is offered in. */
 export const MIN_SPLIT_COLUMNS = 100;
@@ -67,10 +68,10 @@ export const splitUnavailable = (
 ): string | null => {
   if (parts.panel) {
     if (columns < MIN_SPLIT_COLUMNS) {
-      return `터미널 폭이 ${MIN_SPLIT_COLUMNS}칸 미만이라 분리 창을 쓸 수 없습니다 (지금 ${columns}칸)`;
+      return t("render.split.tooNarrow", { min: MIN_SPLIT_COLUMNS, now: columns });
     }
     if (rows < MIN_SPLIT_ROWS) {
-      return `터미널 높이가 ${MIN_SPLIT_ROWS}줄 미만이라 분리 창을 쓸 수 없습니다 (지금 ${rows}줄)`;
+      return t("render.split.tooShort", { min: MIN_SPLIT_ROWS, now: rows });
     }
   }
   return parts.tasks ? tasksUnavailable(columns, rows) : null;
@@ -196,7 +197,7 @@ export class SplitRegion {
     this.cancelScheduled();
     if (this.mode === "on") this.out.write(ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
     const lines = this.history.map((entry) => entry.raw);
-    if (this.omitted > 0) lines.unshift(`… 분할 중 ${this.omitted}줄 생략`);
+    if (this.omitted > 0) lines.unshift(t("render.split.omitted", { count: this.omitted }));
     this.mode = "off";
     this.history = [];
     this.omitted = 0;
@@ -384,10 +385,7 @@ export class SplitRegion {
     this.scroll = Math.min(this.scroll, Math.max(0, newestFirst.length - count));
     const rows = newestFirst.slice(this.scroll, this.scroll + count).toReversed();
     if (this.scroll > 0 && rows.length > 0) {
-      rows[rows.length - 1] = truncateStyled(
-        "↑ 스크롤 중 · PageDown 또는 Shift+PageDown 으로 아래로",
-        width,
-      );
+      rows[rows.length - 1] = truncateStyled(t("render.split.scrolling"), width);
     }
     return [...Array.from({ length: count - rows.length }, () => ""), ...rows];
   }

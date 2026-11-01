@@ -1,3 +1,4 @@
+import { t } from "../../i18n";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { StartThreadTurnInput } from "@t3tools/client-runtime/operations";
 import {
@@ -66,10 +67,11 @@ async function run<W, A, E>(command: AtomCommand<W, A, E>, input: W): Promise<A>
   return result.value;
 }
 
-export const PROJECT_MEMORY_SEND_DISABLED_MESSAGE = "이 서버는 기억 전송을 지원하지 않습니다.";
+export const PROJECT_MEMORY_SEND_DISABLED_MESSAGE =
+  "This server does not support sending memories.";
 export const PROJECT_MEMORY_PROVIDER_UNAVAILABLE_MESSAGE =
-  "선택한 공급자를 지금 사용할 수 없습니다.";
-export const PROJECT_MEMORY_SERVER_UNRESOLVED_MESSAGE = "서버 상태를 확인할 수 없습니다.";
+  "The selected provider is unavailable right now.";
+export const PROJECT_MEMORY_SERVER_UNRESOLVED_MESSAGE = "Can't determine the server state.";
 
 /**
  * The one send-boundary decision for memory references, shared by the direct,
@@ -87,17 +89,17 @@ export function readProjectMemorySendHold(input: {
 }): string | null {
   const config = appAtomRegistry.get(environmentServerConfigsAtom).get(input.environmentId);
   if (config === undefined) {
-    return PROJECT_MEMORY_SERVER_UNRESOLVED_MESSAGE;
+    return t(PROJECT_MEMORY_SERVER_UNRESOLVED_MESSAGE);
   }
   const capability = config.environment.capabilities.projectMemory;
   if (capability?.send !== true) {
-    return PROJECT_MEMORY_SEND_DISABLED_MESSAGE;
+    return t(PROJECT_MEMORY_SEND_DISABLED_MESSAGE);
   }
   if (config.environment.capabilities.inlineMessageContext !== true) {
-    return PROJECT_MEMORY_INLINE_UNSUPPORTED_MESSAGE;
+    return t(PROJECT_MEMORY_INLINE_UNSUPPORTED_MESSAGE);
   }
   if (input.instanceId === null || input.instanceId === undefined) {
-    return PROJECT_MEMORY_PROVIDER_UNAVAILABLE_MESSAGE;
+    return t(PROJECT_MEMORY_PROVIDER_UNAVAILABLE_MESSAGE);
   }
   const snapshot = config.providers.find((provider) => provider.instanceId === input.instanceId);
   if (
@@ -107,11 +109,11 @@ export function readProjectMemorySendHold(input: {
     snapshot.status !== "ready" ||
     snapshot.availability === "unavailable"
   ) {
-    return PROJECT_MEMORY_PROVIDER_UNAVAILABLE_MESSAGE;
+    return t(PROJECT_MEMORY_PROVIDER_UNAVAILABLE_MESSAGE);
   }
   const advertised = capability.sendDriverKinds;
   if (!advertised?.includes(snapshot.driver)) {
-    return PROJECT_MEMORY_SEND_DISABLED_MESSAGE;
+    return t(PROJECT_MEMORY_SEND_DISABLED_MESSAGE);
   }
   return null;
 }

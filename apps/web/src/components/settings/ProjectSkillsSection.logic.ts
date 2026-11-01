@@ -118,27 +118,28 @@ const STORE_REJECT_COPY: Record<ProjectSkillStoreRejectReason, string> = {
   "judgment-kind-unavailable": "This judgment kind is not available for that version.",
   "ref-mismatch": "That version changed on the server. Review the refreshed version and try again.",
   "duplicate-content": "Same content as an existing version.",
-  "not-ready":
-    "이 버전은 아직 활성화할 준비가 되지 않았습니다. 아래 항목을 확인한 뒤 다시 시도해 주세요.",
-  "state-changed": "프로젝트 스킬 상태가 서버에서 변경되었습니다. 다시 불러온 뒤 확인해 주세요.",
-  "state-invalid": "이 버전 상태로는 요청할 수 없습니다. 화면을 갱신해 주세요.",
-  "evidence-mismatch": "선택한 관측 기록이 더 이상 유효하지 않습니다. 다시 선택해 주세요.",
-  "target-unconfirmed": "선택한 스레드·스크립트를 서버가 확인하지 못했습니다. 다시 선택해 주세요.",
+  "not-ready": "This version isn't ready to activate yet. Check the items below and try again.",
+  "state-changed": "The project skill state changed on the server. Reload and check again.",
+  "state-invalid":
+    "This request isn't possible in the version's current state. Refresh the screen.",
+  "evidence-mismatch": "The selected observation record is no longer valid. Select it again.",
+  "target-unconfirmed":
+    "The server couldn't confirm the selected thread or scripts. Select them again.",
 };
 
 export const READINESS_GAP_COPY: Record<ProjectSkillReadinessGap, string> = {
-  state: "버전 상태가 활성화에 맞지 않습니다.",
-  screen: "내용 검토에서 차단되었습니다.",
-  "rights-unreviewed": "권리 판단이 필요합니다.",
-  "review-missing": "검토 판단이 필요합니다.",
-  "reproduction-missing": "재현 판단이 필요합니다.",
-  "non-application-missing": "비적용 판단이 필요합니다.",
-  "non-application-harmful": "해로운 비적용 사례를 해소해야 합니다.",
-  "interference-missing": "간섭 판단이 필요합니다.",
-  "interference-observed": "공존 간섭이 관측되었습니다.",
-  "open-hold": "열린 보류가 있습니다.",
-  "unsupported-provider": "지원되지 않는 제공자 환경입니다.",
-  "environment-changed": "관측 환경이 현재와 일치하지 않습니다.",
+  state: "The version state doesn't allow activation.",
+  screen: "Blocked by content review.",
+  "rights-unreviewed": "A rights judgment is needed.",
+  "review-missing": "A review judgment is needed.",
+  "reproduction-missing": "A reproduction judgment is needed.",
+  "non-application-missing": "A non-application judgment is needed.",
+  "non-application-harmful": "A harmful non-application case must be resolved.",
+  "interference-missing": "An interference judgment is needed.",
+  "interference-observed": "Coexistence interference was observed.",
+  "open-hold": "There is an open hold.",
+  "unsupported-provider": "The provider environment isn't supported.",
+  "environment-changed": "The observed environment doesn't match the current one.",
 };
 
 const LIFECYCLE_REFETCH_REASONS = new Set<ProjectSkillStoreRejectReason>([
@@ -457,7 +458,7 @@ export function projectSkillUseCapabilityOf(
 }
 
 export const LIFECYCLE_USE_UNAVAILABLE_COPY =
-  "이 환경에서는 스킬 활성화·복원을 사용할 수 없습니다.";
+  "Activating or restoring skills isn't available in this environment.";
 
 const decodeSelectedScriptIds = Schema.decodeUnknownOption(SelectedChecksRunInput.fields.scriptIds);
 
@@ -805,19 +806,20 @@ export function lifecycleRetireOperationStillValid(input: {
   });
 }
 
-export const LIFECYCLE_UNSUPPORTED_COPY = "이 서버는 스킬 활성화·중지를 지원하지 않습니다.";
+export const LIFECYCLE_UNSUPPORTED_COPY =
+  "This server does not support activating or disabling skills.";
 export const LIFECYCLE_STATE_UNKNOWN_COPY =
-  "프로젝트 스킬 상태를 알 수 없습니다. 서버가 수명주기를 지원할 때만 활성화할 수 있습니다.";
+  "The project skill state is unknown. A skill can be activated only when the server supports the lifecycle.";
 export const LIFECYCLE_SCOPE_DRIFT_COPY =
-  "선택이나 버전 정보가 바뀌었습니다. 다시 확인한 뒤 시도해 주세요.";
-export const LIFECYCLE_SCRIPTS_INVALID_COPY = "실행할 스크립트를 하나 이상 선택해 주세요.";
-export const LIFECYCLE_THREAD_REQUIRED_COPY = "스레드를 선택해 주세요.";
-export const LIFECYCLE_JUDGMENT_INVALID_COPY = "필수 항목을 모두 입력·선택해 주세요.";
-export const LIFECYCLE_ACTIVATE_SUCCESS = "버전이 활성화되었습니다";
-export const LIFECYCLE_RESTORE_SUCCESS = "이전 버전이 복원되었습니다";
-export const LIFECYCLE_RETIRE_SUCCESS = "사용이 중지되었습니다";
-export const LIFECYCLE_REPRODUCTION_RECORDED = "재현 판단이 기록되었습니다";
-export const LIFECYCLE_NON_APPLICATION_RECORDED = "비적용 판단이 기록되었습니다";
+  "The selection or version info changed. Check again and retry.";
+export const LIFECYCLE_SCRIPTS_INVALID_COPY = "Select at least one script to run.";
+export const LIFECYCLE_THREAD_REQUIRED_COPY = "Select a thread.";
+export const LIFECYCLE_JUDGMENT_INVALID_COPY = "Fill in or select every required field.";
+export const LIFECYCLE_ACTIVATE_SUCCESS = "Version activated";
+export const LIFECYCLE_RESTORE_SUCCESS = "Previous version restored";
+export const LIFECYCLE_RETIRE_SUCCESS = "Skill disabled";
+export const LIFECYCLE_REPRODUCTION_RECORDED = "Reproduction judgment recorded";
+export const LIFECYCLE_NON_APPLICATION_RECORDED = "Non-application judgment recorded";
 
 export const VERSION_TRIAL_HISTORY_TITLE = "Trials";
 export const VERSION_TRIAL_HISTORY_UNAVAILABLE_COPY =

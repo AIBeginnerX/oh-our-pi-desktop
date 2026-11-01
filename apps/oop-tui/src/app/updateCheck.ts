@@ -5,11 +5,13 @@ import {
   compareReleaseVersions,
   localizedHighlight,
   releaseNotes,
+  type ReleaseNoteHighlight,
   type ReleaseNoteVersion,
 } from "@t3tools/shared/releaseNotes";
 
 import { configDirectory, type PathEnv } from "../link/paths.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
+import { getLanguage, t, type Language } from "../i18n/index.ts";
 
 /** The newest release's update feed, as the desktop app reads it. Only `version` is used. */
 export const RELEASE_FEED_URL =
@@ -32,8 +34,7 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/u;
 export const isReleaseVersion = (value: string): boolean => VERSION.test(value);
 
 /** How to update the desktop app, in the words of its own menu and buttons. */
-export const UPDATE_HOW_TO =
-  "업데이트 방법: 앱 메뉴 '업데이트 확인...' → '업데이트 준비' → '설치 프로그램 열기'";
+export const updateHowTo = (): string => t("cli.update.howTo");
 /** What to run, in a source checkout, to bring the terminal app up to the version of the desktop app. */
 export const REINSTALL_COMMAND = "sh apps/oop-tui/install.sh";
 
@@ -83,7 +84,8 @@ const cleanEntry = (raw: unknown): ReleaseNoteVersion | null => {
     const ko = typeof item.ko === "string" ? oneLine(item.ko) : "";
     const en = typeof item.en === "string" ? oneLine(item.en) : "";
     if (en === "" && ko === "") continue;
-    highlights.push({ en: en === "" ? ko : en, ...(ko === "" ? {} : { ko }) });
+    // `en` stays empty when the note has no English text: an English reader gets no body, not Korean.
+    highlights.push({ en, ...(ko === "" ? {} : { ko }) });
   }
   const date = typeof raw.date === "string" && DATE.test(raw.date.trim()) ? raw.date.trim() : "";
   return { version, date, highlights };
@@ -110,7 +112,7 @@ export const parseNotes = (text: string): ReleaseNoteVersion[] | null => {
 const readCapped = async (response: Response, limit: number): Promise<string> => {
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > limit) throw new Error("응답이 너무 큽니다");
+  if (Number.isFinite(declared) && declared > limit) throw new Error(t("cli.update.tooLarge"));
   if (response.body === null) return "";
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -121,7 +123,7 @@ const readCapped = async (response: Response, limit: number): Promise<string> =>
     total += value.byteLength;
     if (total > limit) {
       await reader.cancel().catch(() => undefined);
-      throw new Error("응답이 너무 큽니다");
+      throw new Error(t("cli.update.tooLarge"));
     }
     chunks.push(value);
   }
@@ -147,8 +149,8 @@ const getText = async (
       controller.abort();
       reject(new Error(reason));
     };
-    timer = setTimeout(stop("시간 초과"), timeoutMs);
-    onCancel = stop("취소됨");
+    timer = setTimeout(stop(t("cli.update.timeout")), timeoutMs);
+    onCancel = stop(t("cli.update.cancelled"));
     cancelled.addEventListener("abort", onCancel, { once: true });
   });
   try {
@@ -254,7 +256,7 @@ export const lookupLatestRelease = async (
         .catch(() => null),
     ]);
     const latest = parseFeedVersion(feed);
-    if (latest === null) throw new Error("버전을 읽을 수 없습니다");
+    if (latest === null) throw new Error(t("cli.update.noVersion"));
     const info: LatestRelease = { latest, releases: notes ?? cleanEntries(releaseNotes) };
     if (deps.cacheFile !== null) writeCache(deps.cacheFile, { checkedAt: deps.now(), info });
     return info;
@@ -281,8 +283,20 @@ export interface UpdateReport {
   readonly releases: ReadonlyArray<ReleaseView>;
 }
 
-/** Compares `current` with the newest release; the notes of the releases in between are Korean where they have it. */
-export const buildUpdateReport = (current: string, info: LatestRelease): UpdateReport => {
+/** A highlight in `language`; empty when it has no text in a language the reader can use (English never falls back to Korean). */
+const highlightText = (highlight: ReleaseNoteHighlight, language: Language): string =>
+  language === "ko" ? localizedHighlight(highlight, "ko") : highlight.en;
+
+/**
+ * Compares `current` with the newest release; the notes of the releases in between are in
+ * `language` (Korean where there is Korean, otherwise English), and a highlight with no usable
+ * text is left out.
+ */
+export const buildUpdateReport = (
+  current: string,
+  info: LatestRelease,
+  language: Language = getLanguage(),
+): UpdateReport => {
   if (compareReleaseVersions(info.latest, current) <= 0) {
     return { status: "current", current, latest: info.latest, releases: [] };
   }
@@ -296,7 +310,9 @@ export const buildUpdateReport = (current: string, info: LatestRelease): UpdateR
     .map((entry) => ({
       version: entry.version,
       date: entry.date,
-      highlights: entry.highlights.map((highlight) => localizedHighlight(highlight, "ko")),
+      highlights: entry.highlights
+        .map((highlight) => highlightText(highlight, language))
+        .filter((text) => text !== ""),
     }));
   return { status: "update", current, latest: info.latest, releases };
 };
@@ -314,9 +330,13 @@ export const terminalBehindText = (
   app: string,
   inDesktopApp: boolean = runsInDesktopApp(),
 ): string =>
-  `터미널 앱 ${terminal} 이 앱 ${app} 보다 오래되었습니다 — ${
-    inDesktopApp ? "앱을 업데이트하면 함께 갱신됩니다" : `다시 설치: ${REINSTALL_COMMAND}`
-  }`;
+  t("cli.update.behind", {
+    terminal,
+    app,
+    fix: inDesktopApp
+      ? t("cli.update.behindInApp")
+      : t("cli.update.behindReinstall", { command: REINSTALL_COMMAND }),
+  });
 
 /** Most releases the full listings (`/update`, `oop update`) spell out. */
 export const LISTED_RELEASES = 10;

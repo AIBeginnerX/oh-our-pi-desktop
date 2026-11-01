@@ -5,12 +5,13 @@ import { RAIL_COLUMNS, type RailTone } from "../render/rail.ts";
 import type { Style } from "../render/style.ts";
 import type { Symbols } from "../render/symbols.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
+import { t } from "../i18n/index.ts";
 import { wrapStyled } from "../text/wrap.ts";
 import { planLines, type ProviderRow, type RemoveCheck, type RemovePlan } from "./providerPlan.ts";
 import {
   draftProblem,
   newDraft,
-  SECRET_SET,
+  secretSet,
   summarize,
   TARGETS,
   targetFields,
@@ -394,7 +395,7 @@ const removeKey = (
   }
   if (isEnter(event)) {
     if (isYes(editorText(view.editor))) return stay(view, { kind: "remove", id: view.plan.id });
-    return warn(view, "삭제하려면 yes 를 입력하세요. 취소는 Esc 입니다.");
+    return warn(view, t("providers.screen.typeYesWarn"));
   }
   return stay({ ...view, editor: editPromptText(view.editor, event) });
 };
@@ -421,19 +422,25 @@ const REMOVE_ROWS = 12;
 const valueText = (draft: AddDraft, field: FieldModel): string => {
   const value = draft.values[field.key];
   if (field.control === "password") {
-    return typeof value === "string" && value.trim() !== "" ? SECRET_SET : "(없음)";
+    return typeof value === "string" && value.trim() !== ""
+      ? secretSet()
+      : t("providers.screen.none");
   }
   if (field.control === "switch") {
-    return (typeof value === "boolean" ? value : (field.defaultBoolean ?? false)) ? "켜짐" : "꺼짐";
+    return (typeof value === "boolean" ? value : (field.defaultBoolean ?? false))
+      ? t("providers.cmd.on")
+      : t("providers.cmd.off");
   }
   if (typeof value !== "string" || value.trim() === "") {
-    return field.placeholder === undefined ? "(기본값)" : `(${field.placeholder})`;
+    return field.placeholder === undefined
+      ? t("providers.screen.defaultValue")
+      : `(${field.placeholder})`;
   }
   return field.options?.find((option) => option.value === value)?.label ?? value;
 };
 
 const targetNote = (target: Target): string => {
-  if (target.kind === "preset") return "OpenCode 로 실행";
+  if (target.kind === "preset") return t("providers.screen.runsOnOpenCode");
   return target.driver.earlyAccess ? "Early Access" : "";
 };
 
@@ -453,12 +460,12 @@ export const providerFrame = (
   switch (view.kind) {
     case "pick":
       return picker({
-        title: "추가할 Provider 를 고르세요",
+        title: t("providers.screen.pickAdd"),
         items: numbered(
           TARGETS.map((target) => ({ label: targetLabel(target), note: targetNote(target) })),
         ),
         selected: view.selected,
-        hint: "↑/↓ 이동 • 1-9 선택 • Enter 다음 • Esc 닫기",
+        hint: t("providers.screen.hintPick"),
         empty: "",
       });
     case "form": {
@@ -467,32 +474,36 @@ export const providerFrame = (
         switch (row.kind) {
           case "name":
             return {
-              label: `이름  ${view.draft.name.trim() === "" ? `(기본: ${targetLabel(view.draft.target)})` : view.draft.name}`,
-              note: "선택",
+              label: `${t("providers.cmd.colName")}  ${view.draft.name.trim() === "" ? t("providers.spec.defaultName", { name: targetLabel(view.draft.target) }) : view.draft.name}`,
+              note: t("providers.screen.optional"),
             };
           case "id":
             return {
-              label: `ID  ${view.draft.id === "" ? "(필요)" : view.draft.id}`,
-              note: view.draft.idTouched || view.draft.id === "" ? "필수" : "이름에서 자동",
+              label: `ID  ${view.draft.id === "" ? t("providers.screen.needed") : view.draft.id}`,
+              note:
+                view.draft.idTouched || view.draft.id === ""
+                  ? t("providers.screen.required")
+                  : t("providers.screen.autoFromName"),
             };
           case "field":
             return {
               label: `${row.field.label}  ${valueText(view.draft, row.field)}`,
-              note: row.field.required === true ? "필수" : "",
+              note: row.field.required === true ? t("providers.screen.required") : "",
             };
           case "next":
-            return { label: "다음: 확인", note: "요약을 보고 추가합니다" };
+            return {
+              label: t("providers.screen.next"),
+              note: t("providers.screen.nextNote"),
+            };
         }
       });
       return picker({
-        title: `${targetLabel(view.draft.target)} 추가`,
+        title: t("providers.screen.formTitle", { kind: targetLabel(view.draft.target) }),
         items: numbered(items),
         selected: view.selected,
-        hint: "↑/↓ 이동 • Enter 편집 • Esc 뒤로",
+        hint: t("providers.screen.hintForm"),
         empty: "",
-        before: [
-          dim(`종류 ${targetDriver(view.draft.target)} · 비밀값은 입력해도 화면에 나오지 않습니다`),
-        ],
+        before: [dim(t("providers.screen.formNote", { driver: targetDriver(view.draft.target) }))],
       });
     }
     case "choose":
@@ -501,19 +512,25 @@ export const providerFrame = (
         items: numbered(
           (view.field.options ?? []).map((option) => ({
             label: option.label,
-            note: option.value === view.draft.values[view.field.key] ? "현재" : "",
+            note:
+              option.value === view.draft.values[view.field.key]
+                ? t("providers.screen.current")
+                : "",
           })),
         ),
         selected: view.selected,
-        hint: "↑/↓ 이동 • Enter 선택 • Esc 뒤로",
+        hint: t("providers.screen.hintChoose"),
         empty: "",
       });
     case "review":
       return picker({
-        title: `${targetLabel(view.draft.target)} 추가할까요?`,
-        items: numbered([{ label: "추가" }, { label: "돌아가기" }]),
+        title: t("providers.screen.reviewTitle", { kind: targetLabel(view.draft.target) }),
+        items: numbered([
+          { label: t("providers.screen.add") },
+          { label: t("providers.screen.back") },
+        ]),
         selected: view.selected,
-        hint: "↑/↓ 이동 • Enter 실행 • Esc 뒤로",
+        hint: t("providers.screen.hintReview"),
         empty: "",
         before: summarize(view.draft).flatMap((row) =>
           wrapStyled(
@@ -524,13 +541,13 @@ export const providerFrame = (
       });
     case "pickRemove":
       return picker({
-        title: "삭제할 Provider 를 고르세요",
+        title: t("providers.screen.pickRemove"),
         items: numbered(
           removable(context).map((row) => ({ label: `${row.id}  ${row.name}`, note: row.status })),
         ),
         selected: view.selected,
-        hint: "↑/↓ 이동 • 1-9 선택 • Enter 다음 • Esc 닫기",
-        empty: "지울 수 있는 Provider 가 없습니다. 기본 인스턴스는 지울 수 없습니다.",
+        hint: t("providers.screen.hintPick"),
+        empty: t("providers.flow.nothingRemovable"),
       });
     case "remove": {
       const lines = planLines(view.plan).flatMap((line) =>
@@ -539,10 +556,10 @@ export const providerFrame = (
       const shown =
         lines.length > REMOVE_ROWS ? [...lines.slice(0, REMOVE_ROWS - 1), dim("…")] : lines;
       return prompt({
-        title: "삭제하려면 yes 를 입력하세요",
+        title: t("providers.cmd.askRemove").replace(/[:：]\s*$/u, ""),
         editor: view.editor,
         placeholder: "yes",
-        hint: "Enter 삭제 • Esc 취소",
+        hint: t("providers.screen.hintRemove"),
         before: shown,
       });
     }
@@ -550,22 +567,25 @@ export const providerFrame = (
       const { target } = view;
       const secret = target.kind === "field" && target.field.control === "password";
       const label =
-        target.kind === "name" ? "이름" : target.kind === "id" ? "ID" : target.field.label;
+        target.kind === "name"
+          ? t("providers.cmd.colName")
+          : target.kind === "id"
+            ? "ID"
+            : target.field.label;
       const hints: string[] = [];
-      if (target.kind === "id")
-        hints.push("영문자로 시작, 영문자·숫자·-·_ 만, 64자까지. 비우면 이름에서 만듭니다");
-      if (target.kind === "name") hints.push("비우면 종류 이름을 씁니다");
-      if (secret) hints.push("입력한 값은 화면에 나오지 않습니다. 비우고 Enter 면 그대로 둡니다");
+      if (target.kind === "id") hints.push(t("providers.screen.hintId"));
+      if (target.kind === "name") hints.push(t("providers.screen.hintName"));
+      if (secret) hints.push(t("providers.screen.hintSecret"));
       return prompt({
-        title: `${label} 입력`,
+        title: t("providers.screen.editTitle", { label }),
         editor: view.editor,
         placeholder:
           target.kind === "field"
             ? (target.field.placeholder ?? "")
             : target.kind === "id"
-              ? "예: codex_work"
+              ? t("providers.screen.idExample")
               : "",
-        hint: "Enter 확인 • Esc 취소",
+        hint: t("providers.screen.hintEdit"),
         before: hints.flatMap((hint) => wrapStyled(dim(hint), room)),
         ...(secret ? { mask: env.symbols.mask } : {}),
       });

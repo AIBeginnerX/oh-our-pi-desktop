@@ -800,7 +800,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --stage-art-bottom: oklch(0.37147 0.133317 289.999);
     --stage-art-highlight: oklch(0.949472 0.029204 303.081);
     --stage-art-secondary: oklch(0.745085 0.125892 298.647);
-    --stage-art-tertiary: oklch(0.73066 0.167815 340.964);
+    --stage-art-tertiary: oklch(0.74 0.115 280);
     --stage-art-line: oklch(0.960278 0.024064 306.969);
 
     @variant dark {
@@ -809,7 +809,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       --stage-art-bottom: oklch(0.274235 0.095798 286.608);
       --stage-art-highlight: oklch(0.916698 0.047206 300.224);
       --stage-art-secondary: oklch(0.670994 0.13095 296.689);
-      --stage-art-tertiary: oklch(0.679357 0.165376 340.439);
+      --stage-art-tertiary: oklch(0.68 0.125 280);
       --stage-art-line: oklch(0.940582 0.032921 299.076);
     }
   }
@@ -2435,6 +2435,32 @@ code {
   --report-4: oklch(0.78 0.15 75);
   --report-5: oklch(0.66 0.19 15);
   --report-6: oklch(0.64 0.18 295);
+}
+
+:root {
+  --provider-claude: #d97757;
+}
+
+/* The Claude series (usage limit bars, cost chart) follows the iris accent instead of the brand orange. */
+html[data-theme-id="iris"] {
+  --provider-claude: var(--primary);
+}
+
+/* Iris charts stay in one violet to periwinkle family (hue 255-305), alternating lightness. */
+html[data-theme-id="iris"] {
+  --report-2: oklch(0.72 0.12 265);
+  --report-3: oklch(0.82 0.08 300);
+  --report-4: oklch(0.42 0.16 280);
+  --report-5: oklch(0.62 0.15 255);
+  --report-6: oklch(0.9 0.05 292);
+
+  @variant dark {
+    --report-2: oklch(0.74 0.12 265);
+    --report-3: oklch(0.58 0.15 300);
+    --report-4: oklch(0.86 0.07 285);
+    --report-5: oklch(0.66 0.15 255);
+    --report-6: oklch(0.48 0.16 280);
+  }
 }
 
 @utility rpt-enter {

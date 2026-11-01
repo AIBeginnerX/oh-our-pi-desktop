@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { HELP_TEXT, parseArgs } from "./cli.ts";
+import { setLanguage } from "./i18n/index.ts";
+
+import { helpText, parseArgs } from "./cli.ts";
 import { SECRET } from "./testing/providerFixtures.ts";
 
 describe("parseArgs", () => {
@@ -97,8 +99,8 @@ describe("parseArgs", () => {
     });
 
     it("is in the help text", () => {
-      expect(HELP_TEXT).toContain('oop "프롬프트"');
-      expect(HELP_TEXT).toContain("oop -- stop");
+      expect(helpText()).toContain('oop "프롬프트"');
+      expect(helpText()).toContain("oop -- stop");
     });
   });
 
@@ -179,11 +181,11 @@ describe("parseArgs", () => {
   it("answers help and version before anything else", () => {
     expect(parseArgs(["--continue", "-h"]).kind).toBe("help");
     expect(parseArgs(["-v"]).kind).toBe("version");
-    expect(HELP_TEXT).toContain("oop pair");
-    expect(HELP_TEXT).toContain("oop config set");
-    expect(HELP_TEXT).toContain("oop update");
+    expect(helpText()).toContain("oop pair");
+    expect(helpText()).toContain("oop config set");
+    expect(helpText()).toContain("oop update");
     for (const command of ["/theme", "/stats", "/update", "/help"])
-      expect(HELP_TEXT).toContain(command);
+      expect(helpText()).toContain(command);
   });
 
   it("explains mistakes in Korean", () => {
@@ -322,8 +324,34 @@ describe("parseArgs", () => {
         "--secret",
         "-y, --yes",
       ]) {
-        expect(HELP_TEXT).toContain(word);
+        expect(helpText()).toContain(word);
       }
     });
+  });
+});
+
+describe("English", () => {
+  afterEach(() => setLanguage("ko"));
+
+  it("prints the help and parse errors in English", () => {
+    setLanguage("en");
+    const help = helpText();
+    expect(help).toContain("the OOP terminal coding assistant");
+    expect(help).toContain("oop config set language en|ko");
+    expect(help).toContain("LC_ALL");
+    expect(parseArgs(["--server"])).toEqual({
+      kind: "error",
+      message: "--server needs an address.",
+    });
+    expect(parseArgs(["config", "x", "y", "z", "w"])).toEqual({
+      kind: "error",
+      message: "Usage: oop config [get <key> | set <key> <value> | path]",
+    });
+  });
+
+  it("keeps Korean help when the language is Korean", () => {
+    setLanguage("ko");
+    expect(helpText()).toContain("터미널 코딩 어시스턴트");
+    expect(helpText()).toContain("oop config set language en|ko");
   });
 });

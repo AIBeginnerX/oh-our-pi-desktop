@@ -5,6 +5,7 @@ import * as NodeNet from "node:net";
 import * as NodePath from "node:path";
 
 import { DESKTOP_UPDATE_INSTALLING_MARKER_FILE } from "@t3tools/contracts";
+import { t } from "../i18n/index.ts";
 
 /**
  * The terminal's own server. When the desktop app is not running, `oop` starts the server that is
@@ -317,7 +318,7 @@ export const createDaemonLauncher = (deps: DaemonDeps): DaemonLauncher => {
     discover: () => Promise<{ readonly kind: string }>,
   ): Promise<DaemonOutcome> => {
     const port = await deps.pickPort();
-    if (port === null) return { kind: "unusable", detail: "빈 포트를 찾지 못했습니다." };
+    if (port === null) return { kind: "unusable", detail: t("link.daemon.noPort") };
     const exit: { ended: boolean; code: number | null } = { ended: false, code: null };
     try {
       const { file, args } = daemonCommand(deps.program, deps.home, port);
@@ -326,7 +327,7 @@ export const createDaemonLauncher = (deps: DaemonDeps): DaemonLauncher => {
         exit.code = code;
       });
     } catch {
-      return { kind: "unusable", detail: "서버 프로그램을 실행하지 못했습니다." };
+      return { kind: "unusable", detail: t("link.daemon.spawnFailed") };
     }
     const deadline = deps.now() + (deps.timeoutMs ?? STARTUP_TIMEOUT_MS);
     for (;;) {
@@ -336,7 +337,10 @@ export const createDaemonLauncher = (deps: DaemonDeps): DaemonLauncher => {
       if (exit.ended) {
         return exit.code === LOCK_HELD_EXIT_CODE
           ? { kind: "occupied" }
-          : { kind: "unusable", detail: `서버가 코드 ${exit.code ?? "없음"} 으로 끝났습니다.` };
+          : {
+              kind: "unusable",
+              detail: t("link.daemon.exited", { code: exit.code ?? t("link.daemon.noCode") }),
+            };
       }
       if (deps.now() >= deadline) return { kind: "slow" };
       await deps.sleep(POLL_MS);

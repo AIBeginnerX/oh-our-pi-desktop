@@ -58,7 +58,7 @@ import type { RegionFrame, Scheduler } from "../render/liveRegion.ts";
 import type { SplitControl } from "../render/regionSwitch.ts";
 import { renderTasksPane, tasksPaneRows, type TasksContent } from "../render/tasksPane.ts";
 import {
-  DEFAULT_APPROVAL_OPTIONS,
+  defaultApprovalOptions,
   renderApprovalPanel,
   renderQuestionPanel,
   requestKindLabel,
@@ -229,7 +229,8 @@ import { ProviderFlow } from "./providerFlow.ts";
 import { undoChoices, undoItems, undoSummary, UndoTracker, type UndoOutcome } from "./undoFlow.ts";
 import { EMPTY_AGENTS_VIEW, LOADING_AGENTS_VIEW, type AgentsView } from "./agentsPanel.ts";
 import { offElsewhereNotice, PANEL_USAGE, planPanelMove, SidePanel } from "./sidePanel.ts";
-import { parseFlowAction, type PanelView } from "./workflowPanel.ts";
+import { nextStopStep } from "./stopConfirm.ts";
+import { agentModelOf, parseFlowAction, type PanelView } from "./workflowPanel.ts";
 import { editPromptText } from "./textPrompt.ts";
 import {
   buildUpdateReport,
@@ -239,7 +240,7 @@ import {
   releaseTitle,
   terminalBehindText,
   terminalIsBehind,
-  UPDATE_HOW_TO,
+  updateHowTo,
   type CheckUpdate,
   type LatestRelease,
 } from "./updateCheck.ts";
@@ -264,6 +265,7 @@ import {
   type ProviderSlashEntry,
 } from "./providerSlash.ts";
 import { WorkspaceLists } from "./workspaceLists.ts";
+import { t } from "../i18n/index.ts";
 
 /** The slice of the link the controller needs; a fake stands in for it in tests. */
 export interface ControllerLink {
@@ -422,20 +424,20 @@ const FAILED_REPLY_KINDS = new Set([
 ]);
 const HISTORY_LIMIT = 100;
 /** What the empty composer suggests: a thing to ask, and that `/` lists the commands. */
-const COMPOSER_PLACEHOLDER = "예: hello.ts에 add 함수를 만들어줘 · / 로 명령 보기";
+const composerPlaceholder = (): string => t("session.c.placeholder");
 const TITLE_LIMIT = 80;
 /** Rows a project or thread list keeps for itself under the start screen, when the terminal has them. */
 const MIN_LIST_ROWS = 12;
 /** The notice `/update` leaves until the lookup answers. */
-const CHECKING_NOTICE = "업데이트 확인 중…";
-const HISTORY_LOADING_NOTICE = "이전 대화 불러오는 중…";
-/** The notice an interrupt leaves until the turn it stopped is gone; the `■ 작업 중단` line replaces it. */
-const INTERRUPT_NOTICE = "중단을 요청했습니다…";
+const checkingNotice = (): string => t("session.c.checkingUpdate");
+const historyLoadingNotice = (): string => t("session.c.historyLoading");
+/** The notice an interrupt leaves until the turn it stopped is gone; the `■ Interrupted` line replaces it. */
+const interruptNotice = (): string => t("session.c.interruptRequested");
 /** How long a start sent from the queue is waited for to show in the thread, before the next may go. */
 const TURN_START_WAIT_MS = 15_000;
-const START_WAIT_NOTICE = "서버가 모델을 준비하는 중입니다. 준비되면 메시지를 보냅니다.";
+const startWaitNotice = (): string => t("session.c.startWait");
 /** The composer of a crew task's own thread: messages are not sent from here. */
-const CREW_SUB_PLACEHOLDER = "crew 작업 스레드 · /crew back 으로 lead 에게 돌아가기";
+const crewSubPlaceholder = (): string => t("session.c.crewSubPlaceholder");
 
 /**
  * The list `/model`, `/theme`, `/mode` or `/effort` opened over the chat; the themes and the effort
@@ -556,9 +558,9 @@ export class AppController {
   /** Which command the slash menu has under the arrow, and the text Esc closed the menu for. */
   private menuIndex = 0;
   private menuClosedFor: string | null = null;
-  /** The setup rail (`┌ OOP 터미널`) has been drawn, so leaving closes it. */
+  /** The setup rail (`┌ OOP Terminal`) has been drawn, so leaving closes it. */
   private railOpen = false;
-  /** `■ 작업 중단` is already in the scrollback for the turn that is running. */
+  /** `■ Interrupted` is already in the scrollback for the turn that is running. */
   private interruptShown = false;
   /** Esc or Ctrl-C asked to stop the turn that runs: its end is the user's own doing, not news. */
   /** The thread whose turn the user stopped with Esc and that has not come to rest yet. */
@@ -568,6 +570,8 @@ export class AppController {
   /** Failed-reply activities that already existed when the current reply was sent. */
   private respondingBaseline: ReadonlySet<string> = new Set();
   private lastCtrlC: number | null = null;
+  /** When Stop last warned that background agents would end with it; the next press inside the window confirms. */
+  private stopWarnedAt: number | null = null;
   private lastPhase: LinkStatus["phase"] | null = null;
   /**
    * What the keys have picked in the approval panel. Only Enter sends it, and it belongs to one
@@ -720,7 +724,7 @@ export class AppController {
     const waiting = this.waitingStart;
     if (waiting !== null && this.screen === waiting.screen && !this.startMustWait(waiting.screen)) {
       this.waitingStart = null;
-      if (this.notice === START_WAIT_NOTICE) this.notice = null;
+      if (this.notice === startWaitNotice()) this.notice = null;
       this.sendStartPrompt(waiting.text);
     }
     this.render();
@@ -747,7 +751,8 @@ export class AppController {
     this.emit([
       noticeLine(
         this.rail,
-        `스레드를 열 수 없습니다: ${reason}${start === null ? "" : " · 보내려던 메시지는 다음에 연 대화의 입력창에 둡니다"}`,
+        t("session.c.cannotOpenThread", { reason }) +
+          (start === null ? "" : t("session.c.cannotOpenThreadKept")),
       ),
     ]);
     this.leaveChat("threads");
@@ -782,7 +787,7 @@ export class AppController {
     }
     if (mirror.deleted) {
       this.queue.drop(screen.threadId);
-      this.emit([noticeLine(this.rail, "이 스레드는 삭제되었습니다.")]);
+      this.emit([noticeLine(this.rail, t("session.c.threadDeleted"))]);
       this.leaveChat("threads");
       return;
     }
@@ -805,7 +810,7 @@ export class AppController {
   }
 
   /**
-   * The last row of the rail, written into the scrollback as the app leaves: `└  다음에 또 봐요`, or
+   * The last row of the rail, written into the scrollback as the app leaves: `└  See you next time`, or
    * `■` when something other than the user ended it. Nothing is said if the rail never began.
    */
   farewell(code: number): void {
@@ -815,8 +820,8 @@ export class AppController {
     this.emit([
       railGap(this.rail),
       code === 0
-        ? railEnd(this.rail, theme.text("다음에 또 봐요"))
-        : railCancelled(this.rail, theme.error(`종료합니다 (코드 ${code})`)),
+        ? railEnd(this.rail, theme.text(t("session.c.bye")))
+        : railCancelled(this.rail, theme.error(t("session.c.exiting", { code }))),
     ]);
   }
 
@@ -876,8 +881,8 @@ export class AppController {
       if (matched) this.openWithPrompt(matched.id);
       else {
         this.notice = this.deps.continueLast
-          ? "이 폴더에는 프로젝트가 없습니다. 프로젝트를 고르면 최근 스레드로 메시지를 보냅니다."
-          : "이 폴더에는 프로젝트가 없습니다. 프로젝트를 고르면 새 스레드로 메시지를 보냅니다.";
+          ? t("session.c.noProjectContinue")
+          : t("session.c.noProjectNew");
         this.showProjects();
       }
       return;
@@ -896,9 +901,7 @@ export class AppController {
         this.openChat(latest.projectId, latest.id, false);
         return;
       }
-      this.notice = matched
-        ? "이어갈 스레드가 없어 새 대화를 엽니다."
-        : "이어갈 스레드가 없어 목록을 엽니다.";
+      this.notice = matched ? t("session.c.noThreadNew") : t("session.c.noThreadList");
     }
     if (matched) {
       // The folder says which project this is, so the composer is ready; /threads has the rest.
@@ -926,7 +929,7 @@ export class AppController {
       this.startPrompt = { text: prompt.text, threadId: latest.id };
       return;
     }
-    if (this.deps.continueLast) this.notice = "이어갈 스레드가 없어 새 대화를 엽니다.";
+    if (this.deps.continueLast) this.notice = t("session.c.noThreadNew");
     this.openChat(projectId, null, true);
     this.sendStartPrompt(prompt.text);
   }
@@ -956,7 +959,7 @@ export class AppController {
     if (screen.kind !== "chat") return;
     if (this.startMustWait(screen)) {
       this.waitingStart = { text, screen };
-      this.notice = START_WAIT_NOTICE;
+      this.notice = startWaitNotice();
       return;
     }
     const typed = editorText(this.editor);
@@ -980,12 +983,12 @@ export class AppController {
     this.hold([
       ...railStartRows(
         this.rail,
-        "OOP 터미널",
-        project === null ? "터미널 코딩 어시스턴트" : flatten(project),
+        t("session.c.startTitle"),
+        project === null ? t("session.c.startTagline") : flatten(project),
         this.width,
       ),
       railGap(this.rail),
-      railDone(this.rail, "서버 연결됨"),
+      railDone(this.rail, t("session.c.serverConnected")),
       ...(server ? [railRow(this.rail, style.theme.dim(sanitizeForTerminal(server)))] : []),
     ]);
   }
@@ -1056,7 +1059,7 @@ export class AppController {
     const waiting = this.waitingStart;
     if (waiting === null) return;
     this.waitingStart = null;
-    if (this.notice === START_WAIT_NOTICE) this.notice = null;
+    if (this.notice === startWaitNotice()) this.notice = null;
     this.rescuedStart = waiting.text;
   }
 
@@ -1096,7 +1099,7 @@ export class AppController {
     this.resetThreadChoices();
     this.failedSend = null;
     const title = draft
-      ? "새 스레드"
+      ? t("session.c.newThread")
       : (shell?.threads.find((thread) => thread.id === id)?.title ?? "");
     const header = [
       "",
@@ -1223,7 +1226,7 @@ export class AppController {
     screen.status = deriveThreadStatus(thread);
     if (!screen.status.interruptible) {
       this.interruptShown = false;
-      if (this.notice?.startsWith(INTERRUPT_NOTICE)) this.notice = null;
+      if (this.notice?.startsWith(interruptNotice())) this.notice = null;
     }
     const wasLoaded = screen.loaded;
     screen.loaded = true;
@@ -1409,8 +1412,9 @@ export class AppController {
     const key = this.pendingKey(screen);
     if (key === null) return null;
     if (!this.screenOverlayOpen() && key === this.panelKey) return null;
-    const what = key.startsWith("approval:") ? "승인이" : "질문이";
-    return this.deps.style.theme.warning(`${what} 기다립니다 · Esc로 닫으면 표시됩니다`);
+    return this.deps.style.theme.warning(
+      t(key.startsWith("approval:") ? "session.c.approvalWaiting" : "session.c.questionWaiting"),
+    );
   }
 
   /**
@@ -1488,7 +1492,7 @@ export class AppController {
     if (draft?.requestId === requestId && editorText(this.editor) === "") {
       this.editor = editorFromText(draft.sent);
     }
-    this.notice = "응답이 처리되지 않았습니다. 다시 시도하세요.";
+    this.notice = t("session.c.replyNotProcessed");
   }
 
   // ---- rendering ---------------------------------------------------------------------------
@@ -1636,7 +1640,7 @@ export class AppController {
         mirror?.id === screen.threadId
           ? mirror.title
           : this.deps.link.shell?.threads.find((thread) => thread.id === screen.threadId)?.title;
-      const name = sanitizeForTerminal(screen.isDraft ? "새 스레드" : (known ?? ""))
+      const name = sanitizeForTerminal(screen.isDraft ? t("session.c.newThread") : (known ?? ""))
         .replace(/\s+/gu, " ")
         .trim();
       const cut = graphemesOf(name);
@@ -1715,7 +1719,7 @@ export class AppController {
         lines:
           banner !== null
             ? noticeRows(this.rail, banner, bannerTone, this.width)
-            : [railActive(this.rail, style.theme.dim("서버에서 프로젝트를 불러오는 중…"))],
+            : [railActive(this.rail, style.theme.dim(t("session.c.loadingProjects")))],
         cursor: null,
       };
     }
@@ -1727,14 +1731,18 @@ export class AppController {
       }));
       return renderPicker(
         {
-          title: "프로젝트를 고르세요",
+          title: t("session.c.pickProject"),
           items,
           selected: Math.min(screen.selected, Math.max(0, items.length - 1)),
-          hint: `↑/↓ 이동 • Enter 열기 • 글자 입력 검색 • ${screen.query === "" ? (this.listedFrom ? "Esc 닫기" : "Ctrl+C 종료") : "Esc 검색어 지우기"}`,
-          empty:
-            screen.query === ""
-              ? "프로젝트가 없습니다. 데스크톱 앱에서 프로젝트를 추가하세요."
-              : "일치하는 프로젝트가 없습니다. Esc로 검색어를 지우세요.",
+          hint: t("session.c.projectsHint", {
+            end:
+              screen.query === ""
+                ? this.listedFrom
+                  ? t("session.c.escClose")
+                  : t("session.c.ctrlCQuit")
+                : t("session.c.escClearSearch"),
+          }),
+          empty: screen.query === "" ? t("session.c.noProjects") : t("session.c.noProjectMatch"),
           before: [this.searchLine(screen.query)],
         },
         columns,
@@ -1751,12 +1759,14 @@ export class AppController {
       const nowDate = new Date(now);
       const items: PickerItem[] = [
         // Words typed are looking for a thread: starting a new one is not among the matches.
-        ...(screen.query === "" ? [{ label: "새 스레드" }] : []),
+        ...(screen.query === "" ? [{ label: t("session.c.newThread") }] : []),
         ...(found?.rows ?? []).map((thread) => {
           const when = relativeTime(thread.updatedAt, nowDate);
           if (listed?.waiting.has(thread.id) === true) {
             // A crew task that waits for the user is never folded away.
-            const what = thread.hasPendingApprovals ? "승인 대기" : "질문 대기";
+            const what = thread.hasPendingApprovals
+              ? t("session.c.approvalPending")
+              : t("session.c.questionPending");
             return {
               label: threadRowLabel(thread, listed),
               note: when ? `${what} · ${when}` : what,
@@ -1767,9 +1777,13 @@ export class AppController {
           return {
             label: thread.title,
             note: [
-              isPinned(thread) ? "고정" : "",
-              isThreadRunning(thread) ? (when ? `실행 중 · ${when}` : "실행 중") : when,
-              crew > 0 ? `crew 작업 ${crew}` : "",
+              isPinned(thread) ? t("session.c.pinned") : "",
+              isThreadRunning(thread)
+                ? when
+                  ? t("session.c.runningWhen", { when })
+                  : t("session.c.running")
+                : when,
+              crew > 0 ? t("session.c.crewTasks", { count: crew }) : "",
             ]
               .filter((part) => part !== "")
               .join(" · "),
@@ -1778,11 +1792,14 @@ export class AppController {
       ];
       return renderPicker(
         {
-          title: "스레드를 고르세요",
+          title: t("session.c.pickThread"),
           items,
           selected: Math.min(screen.selected, items.length - 1),
-          hint: `↑/↓ 이동 • Enter 열기 • 글자 입력 검색 • Ctrl+P 고정/해제 • Esc ${screen.query === "" ? "프로젝트 목록" : "검색어 지우기"}`,
-          empty: "일치하는 스레드가 없습니다. Esc로 검색어를 지우세요.",
+          hint: t("session.c.threadsHint", {
+            end:
+              screen.query === "" ? t("session.c.projectList") : t("session.c.escClearSearchWord"),
+          }),
+          empty: t("session.c.noThreadMatch"),
           before: [this.searchLine(screen.query)],
         },
         columns,
@@ -1800,8 +1817,8 @@ export class AppController {
   private searchLine(query: string): string {
     const { theme } = this.deps.style;
     return query === ""
-      ? theme.dim("검색: 글자를 치면 걸러집니다")
-      : `${theme.dim("검색:")} ${theme.text(query)}`;
+      ? theme.dim(t("session.c.searchEmpty"))
+      : `${theme.dim(t("session.c.searchLabel"))} ${theme.text(query)}`;
   }
 
   private visibleProjects(
@@ -1811,7 +1828,7 @@ export class AppController {
     return shell ? filterProjects(sortedProjects(shell.projects, shell.threads), screen.query) : [];
   }
 
-  /** The thread shells the list shows, in row order; the "새 스레드" row ahead of them is not one. */
+  /** The thread shells the list shows, in row order; the "New thread" row ahead of them is not one. */
   private visibleThreads(
     screen: Extract<Screen, { kind: "threads" }>,
   ): ReadonlyArray<OrchestrationThreadShell> {
@@ -1839,7 +1856,7 @@ export class AppController {
       ...provided.map((entry) => ({
         label: entry.label,
         note: entry.note,
-        tag: entry.kind === "skill" ? "스킬" : "provider",
+        tag: entry.kind === "skill" ? t("session.c.skillTag") : "provider",
         fill: entry.fill,
       })),
     ];
@@ -1849,11 +1866,10 @@ export class AppController {
       selected: Math.min(this.menuIndex, Math.max(0, items.length - 1)),
       // Enter sends nothing while the panel on screen is not the request there is.
       ...(deferred
-        ? { noMatch: "일치하는 명령이 없습니다. Esc로 닫기" }
+        ? { noMatch: t("session.c.noCmdEsc") }
         : loading
           ? {
-              noMatch:
-                "일치하는 명령이 없습니다. 그대로 보내려면 앞에 공백 · provider 명령을 불러오는 중…",
+              noMatch: t("session.c.noCmdLoading"),
             }
           : {}),
     };
@@ -1976,10 +1992,10 @@ export class AppController {
       const notice = this.overlayNotice(screen, now);
       return renderTextPrompt(
         {
-          title: "이 스레드의 목표를 입력하세요",
+          title: t("session.c.goalPromptTitle"),
           editor: this.prompt.editor,
-          placeholder: "예: 모든 테스트가 통과할 때까지 고치기",
-          hint: "Enter 저장 • Ctrl-J / Alt-Enter 줄바꿈 • Esc 취소",
+          placeholder: t("session.c.goalPlaceholder"),
+          hint: t("session.c.goalHint"),
         },
         columns,
         this.deps.style,
@@ -1991,7 +2007,7 @@ export class AppController {
     }
     const status = screen.status;
     const panel: string[] = [];
-    let placeholder = this.crewSub(screen) === null ? COMPOSER_PLACEHOLDER : CREW_SUB_PLACEHOLDER;
+    let placeholder = this.crewSub(screen) === null ? composerPlaceholder() : crewSubPlaceholder();
     let composerEnabled = true;
     // A request whose panel an open menu is holding back is neither drawn nor answered from here.
     const held = this.requestHeld(screen);
@@ -2049,7 +2065,8 @@ export class AppController {
             ),
           ),
         );
-        placeholder = current.options.length > 0 ? "번호나 답을 입력하세요" : "답을 입력하세요";
+        placeholder =
+          current.options.length > 0 ? t("session.c.answerOrNumber") : t("session.c.typeAnswer");
       }
     }
     // A server clock ahead of this one would put the turn's start in the future; then the time
@@ -2096,16 +2113,16 @@ export class AppController {
     const held = this.queue.held(screen.threadId);
     const reason =
       held === "error"
-        ? "오류로 끝나 멈춤"
+        ? t("session.c.heldError")
         : held === "failed"
-          ? "전송하지 못해 멈춤"
+          ? t("session.c.heldFailed")
           : held === "left"
-            ? "스레드를 떠나 멈춤"
+            ? t("session.c.heldLeft")
             : null;
     return { items, held: reason };
   }
 
-  /** `/model`, `/theme`, `/mode` and `/effort`: the choices on the rail, the one in use noted `현재`. */
+  /** `/model`, `/theme`, `/mode` and `/effort`: the choices on the rail, the one in use noted `current`. */
   private buildPickerFrame(
     screen: ChatScreen,
     picker: ListPicker,
@@ -2118,45 +2135,49 @@ export class AppController {
     const notice = this.overlayNotice(screen, now);
     const items: PickerItem[] = [];
     const current = (isCurrent: boolean, extra = ""): { note?: string } => {
-      const note = [isCurrent ? "현재" : "", extra].filter((part) => part !== "").join(" · ");
+      const note = [isCurrent ? t("session.c.current") : "", extra]
+        .filter((part) => part !== "")
+        .join(" · ");
       return note === "" ? {} : { note };
     };
-    let title = "테마 선택";
-    let empty = "테마가 없습니다.";
-    let hint = "↑/↓ 이동 • Enter 적용 • Esc 닫기";
+    let title = t("session.c.pickTheme");
+    let empty = t("session.c.noThemes");
+    let hint = t("session.c.hintApply");
     let before: string[] | undefined;
     if (picker.kind === "model") {
       const inUse = this.currentModel(screen);
       for (const model of this.visibleModels(screen, picker.query)) {
         items.push({ label: model.label, ...current(inUse !== null && sameModel(inUse, model)) });
       }
-      title = "모델 선택";
+      title = t("session.c.pickModel");
       // Nothing on the server can run (not just nothing this thread may switch to): the way on is a provider.
       const none =
         picker.query === "" &&
         items.length === 0 &&
         availableModels(this.deps.link.config).length === 0;
-      empty =
-        picker.query === ""
-          ? "사용 가능한 모델이 없습니다."
-          : "일치하는 모델이 없습니다. Esc로 검색어를 지우세요.";
+      empty = picker.query === "" ? t("session.c.noModels") : t("session.c.noModelMatch");
       hint = none
-        ? "Enter Provider 추가 • Esc 닫기"
-        : `↑/↓ 이동 • Enter 선택 • Esc ${picker.query === "" ? "닫기" : "검색어 지우기"}`;
+        ? t("session.c.hintAddProvider")
+        : t("session.c.hintSelectEsc", {
+            end: picker.query === "" ? t("session.c.close") : t("session.c.escClearSearchWord"),
+          });
       before = none
-        ? [theme.warning(noModelCause(this.deps.link.config)), theme.dim("/provider 로 상태 보기")]
+        ? [
+            theme.warning(noModelCause(this.deps.link.config)),
+            theme.dim(t("session.c.providerStatus")),
+          ]
         : [
             picker.query === ""
-              ? theme.dim("검색: 글자를 치면 걸러집니다")
-              : `${theme.dim("검색:")} ${theme.text(picker.query)}`,
+              ? theme.dim(t("session.c.searchEmpty"))
+              : `${theme.dim(t("session.c.searchLabel"))} ${theme.text(picker.query)}`,
           ];
     } else if (picker.kind === "mode") {
       const mode = this.runtimeModeOf(screen);
       for (const entry of RUNTIME_MODES) {
         items.push({ label: entry.label, ...current(entry.value === mode, entry.description) });
       }
-      title = "권한 모드";
-      hint = "↑/↓ 이동 • Enter 선택 • Esc 닫기";
+      title = t("session.c.permissionMode");
+      hint = t("session.c.hintSelect");
     } else if (picker.kind === "effort") {
       const sel = this.turnSelection(screen);
       const shown =
@@ -2165,12 +2186,12 @@ export class AppController {
         const label = choice.label.toLowerCase() === choice.value.toLowerCase() ? "" : choice.label;
         items.push({ label: choice.value, ...current(choice.value === shown, label) });
       }
-      title = "리저닝 강도";
-      hint = "↑/↓ 이동 • Enter 선택 • Esc 닫기";
+      title = t("session.c.reasoningEffort");
+      hint = t("session.c.hintSelect");
     } else if (picker.kind === "undo") {
       items.push(...undoItems(picker.plan));
-      title = "마지막 턴 되돌리기";
-      hint = "↑/↓ 이동 • Enter 선택 • Esc 취소";
+      title = t("session.c.undoTitle");
+      hint = t("session.c.hintSelectCancel");
       before = undoSummary(
         picker.plan,
         theme,
@@ -2211,7 +2232,9 @@ export class AppController {
       : known
         ? this.labelForModel(known.instanceId, known.model)
         : (this.defaultModelLabel(screen.projectId) ??
-          (link.config !== null && availableModels(link.config).length === 0 ? "모델 없음" : null));
+          (link.config !== null && availableModels(link.config).length === 0
+            ? t("session.c.noModelBar")
+            : null));
     const onScreen = this.turnSelection(screen);
     const effort =
       onScreen === null ? null : resolveEffort(link.config, onScreen, this.effortPick).shown;
@@ -2233,10 +2256,10 @@ export class AppController {
       agents: this.agentsOutsideCrew(screen, status),
       hint:
         this.crewSub(screen) !== null
-          ? "/crew back 으로 lead 복귀"
+          ? t("session.c.hintCrewBack")
           : status?.phase === "working"
             ? null
-            : "/help 도움말",
+            : t("session.c.hintHelp"),
     };
   }
 
@@ -2384,8 +2407,8 @@ export class AppController {
   private planBarText(screen: ChatScreen): string | null {
     const mode = this.interactionModeOf(screen);
     const held = this.interactionIntent?.reserved === true ? ` (${this.heldFor(screen)})` : "";
-    if (mode === "plan") return `계획 모드${held}`;
-    return held === "" ? null : `기본 모드${held}`;
+    if (mode === "plan") return `${t("session.c.planModeLabel")}${held}`;
+    return held === "" ? null : `${t("session.c.defaultModeLabel")}${held}`;
   }
 
   /**
@@ -2393,13 +2416,15 @@ export class AppController {
    * before that, from the mode stored on the thread, so there "next turn" would promise too much.
    */
   private heldFor(screen: ChatScreen): string {
-    return this.goalContinuesByItself(screen) ? "다음 메시지" : "다음 턴";
+    return this.goalContinuesByItself(screen)
+      ? t("session.c.heldMessage")
+      : t("session.c.heldTurn");
   }
 
   /** Why a mode cannot be held for later under a running turn; null when it can. */
   private heldModeRefusal(screen: ChatScreen, what: string): string | null {
     if (!this.goalContinuesByItself(screen)) return null;
-    return `목표가 자동으로 이어지는 중이라 ${what} 지금 바꿀 수 없습니다. /goal clear 로 해제 후 바꾸세요.`;
+    return t("session.c.goalHoldsMode", { what });
   }
 
   /** A step of the user's choice, left in the scrollback as a finished step. */
@@ -2414,14 +2439,14 @@ export class AppController {
   private setRuntimeMode(screen: ChatScreen, mode: RuntimeMode, said: boolean): void {
     const label = runtimeModeLabel(mode);
     if (mode === this.runtimeModeOf(screen)) {
-      if (said) this.notice = `이미 ${label} 모드입니다.`;
+      if (said) this.notice = t("session.c.alreadyMode", { label });
       return;
     }
     // A refused pick changes nothing, so a failed send stays ready to resend; one that is taken
     // differs from what a resend would carry, which makes the resend wrong.
     const refusal =
       !screen.isDraft && mode !== this.serverThread(screen)?.runtimeMode && this.turnRunning(screen)
-        ? this.heldModeRefusal(screen, "권한 모드를")
+        ? this.heldModeRefusal(screen, t("session.c.whatPermission"))
         : null;
     if (refusal !== null) {
       this.notice = refusal;
@@ -2430,12 +2455,12 @@ export class AppController {
     this.failedSend = null;
     if (screen.isDraft) {
       this.runtimeIntent = { value: mode, reserved: false };
-      this.record("권한 모드", label);
+      this.record(t("session.c.permissionMode"), label);
       return;
     }
     if (mode === this.serverThread(screen)?.runtimeMode) {
       this.runtimeIntent = null;
-      this.record("권한 모드", `${label} (예약 취소)`);
+      this.record(t("session.c.permissionMode"), t("session.c.holdCancelled", { label }));
       return;
     }
     if (this.turnRunning(screen)) {
@@ -2444,16 +2469,16 @@ export class AppController {
       // starts its own turns from the thread's stored mode, so a held pick would not reach them
       // (refused above).
       this.runtimeIntent = { value: mode, reserved: true };
-      this.record("권한 모드", `${label} · 다음 메시지부터 적용`);
+      this.record(t("session.c.permissionMode"), t("session.c.appliesNext", { label }));
       return;
     }
     const before = this.runtimeIntent;
     this.runtimeIntent = { value: mode, reserved: false };
     void this.run(
       runtimeModeCommand(this.deps.context, { threadId: screen.threadId, runtimeMode: mode }),
-      "권한 모드 변경 실패",
+      t("session.c.permissionFailed"),
     ).then((outcome) => {
-      if (outcome === "sent") this.record("권한 모드", label);
+      if (outcome === "sent") this.record(t("session.c.permissionMode"), label);
       else if (this.screen === screen && this.runtimeIntent?.value === mode) {
         this.runtimeIntent = before;
       }
@@ -2463,20 +2488,20 @@ export class AppController {
 
   /** `/plan` and `/default`: the same as `/mode`, for the plan mode. */
   private setInteractionMode(screen: ChatScreen, mode: ProviderInteractionMode): void {
-    const label = mode === "plan" ? "계획 모드" : "기본 모드";
+    const label = t(mode === "plan" ? "session.c.planModeLabel" : "session.c.defaultModeLabel");
     if (mode === "plan" && !this.planSupported(screen)) {
-      this.notice = "이 제공자는 계획 모드를 지원하지 않습니다.";
+      this.notice = t("session.c.noPlanSupport");
       return;
     }
     if (mode === this.interactionModeOf(screen)) {
-      this.notice = `이미 ${label}입니다.`;
+      this.notice = t("session.c.alreadyPlan", { label });
       return;
     }
     const refusal =
       !screen.isDraft &&
       mode !== this.serverThread(screen)?.interactionMode &&
       this.turnRunning(screen)
-        ? this.heldModeRefusal(screen, "작업 방식을")
+        ? this.heldModeRefusal(screen, t("session.c.whatWorkMode"))
         : null;
     if (refusal !== null) {
       this.notice = refusal;
@@ -2485,17 +2510,17 @@ export class AppController {
     this.failedSend = null;
     if (screen.isDraft) {
       this.interactionIntent = { value: mode, reserved: false };
-      this.record("작업 방식", label);
+      this.record(t("session.c.workMode"), label);
       return;
     }
     if (mode === this.serverThread(screen)?.interactionMode) {
       this.interactionIntent = null;
-      this.record("작업 방식", `${label} (예약 취소)`);
+      this.record(t("session.c.workMode"), t("session.c.holdCancelled", { label }));
       return;
     }
     if (this.turnRunning(screen)) {
       this.interactionIntent = { value: mode, reserved: true };
-      this.record("작업 방식", `${label} · 다음 메시지부터 적용`);
+      this.record(t("session.c.workMode"), t("session.c.appliesNext", { label }));
       return;
     }
     const before = this.interactionIntent;
@@ -2505,9 +2530,9 @@ export class AppController {
         threadId: screen.threadId,
         interactionMode: mode,
       }),
-      "작업 방식 변경 실패",
+      t("session.c.workModeFailed"),
     ).then((outcome) => {
-      if (outcome === "sent") this.record("작업 방식", label);
+      if (outcome === "sent") this.record(t("session.c.workMode"), label);
       else if (this.screen === screen && this.interactionIntent?.value === mode) {
         this.interactionIntent = before;
       }
@@ -2538,28 +2563,23 @@ export class AppController {
   private async implementPlan(screen: ChatScreen): Promise<void> {
     const plan = this.actionablePlan(screen);
     if (plan === null) {
-      this.notice = this.builtPlan(screen)
-        ? "이미 구현한 계획입니다. 다시 하려면 메시지를 보내세요."
-        : "구현할 계획이 없습니다. /plan 으로 계획 모드를 켜고 요청하면 계획이 나옵니다.";
+      this.notice = this.builtPlan(screen) ? t("session.c.planBuilt") : t("session.c.noPlan");
       return;
     }
     if (screen.status?.pending.approvals[0] || screen.status?.pending.userInputs[0]) {
-      this.notice = "대기 중인 승인이나 질문에 먼저 답하세요.";
+      this.notice = t("session.c.answerPendingFirst");
       return;
     }
     if (this.crewSub(screen) !== null) {
-      this.notice = "crew 작업 스레드입니다. 계획은 lead 에서 구현하세요: /crew back";
+      this.notice = t("session.c.crewPlanBack");
       return;
     }
     if (screen.status?.interruptible === true) {
-      this.notice = "작업 중에는 보낼 수 없습니다. Esc로 중단하세요.";
+      this.notice = t("session.c.busyCannotSend");
       return;
     }
     const refusal =
-      this.startRefusal(screen) ??
-      (this.turnStarting(screen)
-        ? "방금 보낸 메시지의 작업이 시작되기를 기다리는 중입니다. 잠시 뒤에 다시 시도하세요."
-        : null);
+      this.startRefusal(screen) ?? (this.turnStarting(screen) ? t("session.c.waitingStart") : null);
     if (refusal !== null) {
       this.notice = refusal;
       return;
@@ -2604,7 +2624,7 @@ export class AppController {
           threadId: screen.threadId,
           runtimeMode: runtime.value,
         }),
-        failure: "권한 모드 변경 실패",
+        failure: t("session.c.permissionFailed"),
       });
     }
     const interaction = this.interactionIntent;
@@ -2614,7 +2634,7 @@ export class AppController {
           threadId: screen.threadId,
           interactionMode: interaction.value,
         }),
-        failure: "작업 방식 변경 실패",
+        failure: t("session.c.workModeFailed"),
       });
     }
     for (const step of steps) {
@@ -2637,7 +2657,7 @@ export class AppController {
     const { link } = this.deps;
     const selection = this.turnSelection(screen);
     if (selection === null) {
-      this.notice = "사용할 수 있는 모델이 없습니다. /model 로 확인하세요.";
+      this.notice = t("session.c.noModelCheck");
       return;
     }
     const control = effortControl(link.config, selection);
@@ -2654,7 +2674,10 @@ export class AppController {
     const wanted = requested.toLowerCase();
     const choice = control.choices.find((candidate) => candidate.value.toLowerCase() === wanted);
     if (choice === undefined) {
-      this.notice = `알 수 없는 강도입니다: ${flatten(requested)} (${control.choices.map((entry) => entry.value).join(", ")})`;
+      this.notice = t("session.c.unknownEffort", {
+        value: flatten(requested),
+        choices: control.choices.map((entry) => entry.value).join(", "),
+      });
       return;
     }
     this.pickEffort(screen, selection, control, choice.value, true);
@@ -2669,15 +2692,15 @@ export class AppController {
   ): void {
     const shown = resolveEffort(this.deps.link.config, selection, this.effortPick).shown;
     if (value === shown) {
-      if (said) this.notice = `이미 ${value} 입니다.`;
+      if (said) this.notice = t("session.c.alreadyEffort", { value });
       return;
     }
     this.effortPick = value;
     // A resend would carry the old effort.
     this.failedSend = null;
     this.record(
-      "리저닝 강도",
-      control.promptInjected.includes(value) ? `${value} (다음 메시지에만)` : value,
+      t("session.c.reasoningEffort"),
+      control.promptInjected.includes(value) ? t("session.c.effortNextOnly", { value }) : value,
     );
   }
 
@@ -2744,7 +2767,10 @@ export class AppController {
     if (first === "max" && args.length <= 2) {
       const count = args[1] === undefined ? null : parseGoalMax(args[1]);
       if (count === null) {
-        this.notice = `사용법: /goal max <횟수> (${GOAL_MAX_CONTINUES_RANGE.min}~${GOAL_MAX_CONTINUES_RANGE.max})`;
+        this.notice = t("session.c.goalMaxUsage", {
+          min: GOAL_MAX_CONTINUES_RANGE.min,
+          max: GOAL_MAX_CONTINUES_RANGE.max,
+        });
         return;
       }
       void this.saveGoal(screen, null, count);
@@ -2766,20 +2792,25 @@ export class AppController {
     const fold = (text: string) => wrapStyled(text, room);
     const status =
       view === null
-        ? "불러오는 중"
-        : `${goalStateWord(view.state)} · 연속 ${view.continues}${view.partial ? "+" : ""}/${goal.maxContinues}`;
+        ? t("session.c.goalLoading")
+        : t("session.c.goalStatus", {
+            state: goalStateWord(view.state),
+            continues: view.continues,
+            plus: view.partial ? "+" : "",
+            max: goal.maxContinues,
+          });
     const body = [
       ...fold(flatten(goal.text)),
       "",
-      ...fold(`${theme.dim("상태")}  ${status}`),
-      ...(view?.reason === undefined ? [] : fold(`${theme.dim("사유")}  ${flatten(view.reason)}`)),
-      ...(view?.partial === true
-        ? fold(theme.dim("이전 대화가 생략되어 연속 횟수는 이보다 클 수 있습니다."))
-        : []),
+      ...fold(`${theme.dim(t("session.c.goalStatusLabel"))}  ${status}`),
+      ...(view?.reason === undefined
+        ? []
+        : fold(`${theme.dim(t("session.c.goalReasonLabel"))}  ${flatten(view.reason)}`)),
+      ...(view?.partial === true ? fold(theme.dim(t("session.c.goalPartial"))) : []),
       "",
-      ...fold(theme.dim("/goal clear 해제 • /goal max <횟수> 연속 횟수 • /goal <내용> 바꾸기")),
+      ...fold(theme.dim(t("session.c.goalHelp"))),
     ];
-    this.emit([railGap(this.rail), ...railNote(this.rail, "목표", body, this.width)]);
+    this.emit([railGap(this.rail), ...railNote(this.rail, t("session.c.goal"), body, this.width)]);
   }
 
   /** What a failed settings change says, on the rail like a failed command. */
@@ -2815,17 +2846,20 @@ export class AppController {
       return { threadGoals: goalsWith(current.threadGoals, screen.threadId, saved) };
     });
     if (this.screen !== screen) return;
-    if (!result.ok) this.settingsFailed("목표 저장 실패", result.message);
-    else if (saved === null) this.notice = "설정된 목표가 없습니다. /goal <내용> 으로 정하세요.";
+    if (!result.ok) this.settingsFailed(t("session.c.goalSaveFailed"), result.message);
+    else if (saved === null) this.notice = t("session.c.noGoalSet");
     else {
       const goal: ThreadGoal = saved;
-      this.record("목표", `${flatten(goal.text)} (연속 최대 ${goal.maxContinues}회)`);
+      this.record(
+        t("session.c.goal"),
+        t("session.c.goalRecorded", { text: flatten(goal.text), max: goal.maxContinues }),
+      );
       const held = [
-        this.runtimeIntent?.reserved === true ? "권한 모드" : null,
-        this.interactionIntent?.reserved === true ? "작업 방식" : null,
+        this.runtimeIntent?.reserved === true ? t("session.c.permissionMode") : null,
+        this.interactionIntent?.reserved === true ? t("session.c.workMode") : null,
       ].filter((name) => name !== null);
       if (held.length > 0) {
-        this.notice = `${held.join("·")} 예약은 다음 메시지부터입니다. 자동 연속 턴은 그 전까지 지금 모드로 돕니다.`;
+        this.notice = t("session.c.heldFromNext", { held: held.join("·") });
       }
     }
     this.render();
@@ -2839,16 +2873,20 @@ export class AppController {
         : { threadGoals: goalsWithout(current.threadGoals, screen.threadId) },
     );
     if (this.screen !== screen) return;
-    if (!result.ok) this.settingsFailed("목표 해제 실패", result.message);
-    else if (!result.changed) this.notice = "설정된 목표가 없습니다.";
+    if (!result.ok) this.settingsFailed(t("session.c.goalClearFailed"), result.message);
+    else if (!result.changed) this.notice = t("session.c.noGoal");
     else {
       const cleared = result.before.threadGoals[screen.threadId];
       if (cleared !== undefined) {
         const { theme } = this.deps.style;
         const again = `/goal ${flatten(cleared.text)}`;
         this.emit([
-          ...this.answered({ label: "목표 해제", value: flatten(cleared.text) }),
-          ...railWrap(this.rail, theme.dim(`되돌리려면: ${again}`), this.width),
+          ...this.answered({ label: t("session.c.goalCleared"), value: flatten(cleared.text) }),
+          ...railWrap(
+            this.rail,
+            theme.dim(t("session.c.toRestore", { command: again })),
+            this.width,
+          ),
           ...(cleared.maxContinues === DEFAULT_THREAD_GOAL_MAX_CONTINUES
             ? []
             : railWrap(this.rail, theme.dim(`/goal max ${cleared.maxContinues}`), this.width)),
@@ -2925,7 +2963,7 @@ export class AppController {
       const lead = this.crewLead(sub);
       if (lead === undefined) return null;
       return theme.warning(
-        `lead 스레드가 ${lead.hasPendingApprovals ? "승인을" : "질문을"} 기다립니다 — /crew back`,
+        t(lead.hasPendingApprovals ? "session.c.leadApproval" : "session.c.leadQuestion"),
       );
     }
     const text = waitingText(this.crewWaiting(screen));
@@ -2947,7 +2985,8 @@ export class AppController {
   private crewBarInput(screen: ChatScreen): Pick<StatusBarInput, "crew" | "crewAlert"> {
     const { link } = this.deps;
     const sub = this.crewSub(screen);
-    if (sub !== null) return { crew: "crew 작업", crewAlert: this.crewLead(sub) !== undefined };
+    if (sub !== null)
+      return { crew: t("session.c.crewTask"), crewAlert: this.crewLead(sub) !== undefined };
     const settings = crewSettingsOf(link.config?.settings);
     const on = crewEnabledFor(settings, screen.isDraft ? null : screen.threadId);
     const waiting = this.crewWaiting(screen).length;
@@ -2955,7 +2994,7 @@ export class AppController {
     const text = crewBarText({ on, board, waiting });
     const unsupported = on && crewBrainProblem(link.config, this.turnSelection(screen)) !== null;
     return {
-      crew: text === "crew" && unsupported ? "crew 미지원" : text,
+      crew: text === "crew" && unsupported ? t("session.c.crewUnsupported") : text,
       crewAlert: waiting > 0,
     };
   }
@@ -2996,14 +3035,19 @@ export class AppController {
       case "toggle": {
         const enabled = !context.crew.enabled;
         if (enabled && context.problem !== null) this.notice = context.problem;
-        void this.saveCrew(screen, { enabled }, "Crew", enabled ? "켜짐" : "꺼짐");
+        void this.saveCrew(
+          screen,
+          { enabled },
+          "Crew",
+          t(enabled ? "session.c.on" : "session.c.off"),
+        );
         return;
       }
       case "preset":
         void this.saveCrew(
           screen,
           { preset: effect.preset },
-          "Crew 프리셋",
+          t("session.c.crewPreset"),
           presetLabel(effect.preset),
         );
         return;
@@ -3011,7 +3055,7 @@ export class AppController {
         void this.saveCrew(
           screen,
           { pins: { [effect.role]: effect.pick.kind === "auto" ? null : effect.pick.selection } },
-          `${roleName(effect.role)} 모델`,
+          t("session.c.roleModel", { role: roleName(effect.role) }),
           effect.pick.kind === "auto" ? "Auto" : effect.pick.label,
         );
         return;
@@ -3019,16 +3063,16 @@ export class AppController {
         void this.saveCrew(
           screen,
           { pins: { worker: null, expert: null, auditor: null } },
-          "Crew 역할 모델",
-          "모두 Auto",
+          t("session.c.crewRoleModels"),
+          t("session.c.allAuto"),
         );
         return;
       case "default":
         void this.saveCrew(
           screen,
           "default",
-          "Crew 기본값",
-          "이 스레드의 설정을 새 채팅에도 씁니다",
+          t("session.c.crewDefault"),
+          t("session.c.crewDefaultNote"),
         );
         return;
       case "open":
@@ -3074,7 +3118,7 @@ export class AppController {
       return { crew: next };
     });
     if (this.screen !== screen) return;
-    if (!result.ok) this.settingsFailed("Crew 설정 저장 실패", result.message);
+    if (!result.ok) this.settingsFailed(t("session.c.crewSaveFailed"), result.message);
     else this.record(label, value);
     this.render();
   }
@@ -3085,10 +3129,11 @@ export class AppController {
     this.crewBusy = true;
     const outcome = await this.run(
       interruptCommand(this.deps.context, task.threadId),
-      "crew 작업 중단 실패",
+      t("session.c.crewStopFailed"),
     );
     this.crewBusy = false;
-    if (outcome === "sent") this.record("Crew", `${roleName(task.role)} 작업 중단을 요청했습니다`);
+    if (outcome === "sent")
+      this.record("Crew", t("session.c.crewStopRequested", { role: roleName(task.role) }));
     this.render();
   }
 
@@ -3098,13 +3143,15 @@ export class AppController {
     this.crewBusy = true;
     try {
       await this.deps.link.retryCrewTask({ leadThreadId: screen.threadId, taskId: task.taskId });
-      this.record("Crew", `${roleName(task.role)} 작업을 다시 시작했습니다`);
+      this.record("Crew", t("session.c.crewRestarted", { role: roleName(task.role) }));
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       this.emit([
         noticeLine(
           this.rail,
-          `crew 재시도 실패: ${sanitizeForTerminal(detail).split("\n")[0] ?? ""}`,
+          t("session.c.crewRetryFailed", {
+            detail: sanitizeForTerminal(detail).split("\n")[0] ?? "",
+          }),
           "error",
         ),
       ]);
@@ -3117,16 +3164,13 @@ export class AppController {
   private openCrewThread(threadId: ThreadId): void {
     const target = this.deps.link.shell?.threads.find((thread) => thread.id === threadId);
     if (target === undefined) {
-      this.notice = "스레드를 아직 찾을 수 없습니다. 잠시 뒤 다시 시도하세요.";
+      this.notice = t("session.c.threadNotFound");
       return;
     }
     this.deps.link.closeThread();
     this.openChat(target.projectId, target.id, false);
     if (isCrewSubThread(target)) {
-      this.record(
-        "Crew 작업 스레드",
-        "승인·질문에 답한 뒤 /crew back 으로 lead 에게 돌아가세요. 여기서는 메시지를 보내지 않습니다.",
-      );
+      this.record(t("session.c.crewTaskThread"), t("session.c.crewTaskThreadNote"));
     }
   }
 
@@ -3134,11 +3178,11 @@ export class AppController {
   private backToLead(screen: ChatScreen): void {
     const sub = this.crewSub(screen);
     if (sub === null) {
-      this.notice = "crew 작업 스레드에서만 쓸 수 있습니다.";
+      this.notice = t("session.c.crewBackOnlyInTask");
       return;
     }
     if (sub.leadId === null) {
-      this.notice = "lead 스레드를 알 수 없습니다. /threads 로 이동하세요.";
+      this.notice = t("session.c.leadUnknown");
       return;
     }
     this.openCrewThread(sub.leadId);
@@ -3153,7 +3197,7 @@ export class AppController {
     const sub = this.crewSub(screen);
     if (sub !== null) {
       if (word === undefined || word === "back") this.backToLead(screen);
-      else this.notice = "crew 작업 스레드에서는 /crew back 만 쓸 수 있습니다.";
+      else this.notice = t("session.c.crewBackOnly");
       return;
     }
     const context = this.crewContextOf(screen, this.deps.now());
@@ -3167,10 +3211,17 @@ export class AppController {
         const enabled = word === "on";
         if (enabled && context.problem !== null) this.notice = context.problem;
         if (enabled === context.crew.enabled) {
-          this.notice ??= `이미 Crew ${enabled ? "켜짐" : "꺼짐"}입니다.`;
+          this.notice ??= t("session.c.crewAlready", {
+            state: t(enabled ? "session.c.on" : "session.c.off"),
+          });
           return;
         }
-        void this.saveCrew(screen, { enabled }, "Crew", enabled ? "켜짐" : "꺼짐");
+        void this.saveCrew(
+          screen,
+          { enabled },
+          "Crew",
+          t(enabled ? "session.c.on" : "session.c.off"),
+        );
         return;
       }
       case "preset": {
@@ -3186,10 +3237,13 @@ export class AppController {
         }
         const preset = parseCrewPreset(args[1]);
         if (preset === null) {
-          this.notice = `알 수 없는 프리셋입니다: ${flatten(args[1])} (${presetWords()})`;
+          this.notice = t("session.c.unknownPreset", {
+            value: flatten(args[1]),
+            words: presetWords(),
+          });
           return;
         }
-        void this.saveCrew(screen, { preset }, "Crew 프리셋", presetLabel(preset));
+        void this.saveCrew(screen, { preset }, t("session.c.crewPreset"), presetLabel(preset));
         return;
       }
       case "model": {
@@ -3197,8 +3251,8 @@ export class AppController {
         if (role === null) {
           this.notice =
             args[1] === undefined
-              ? "사용법: /crew model <worker|expert|auditor> [모델|auto]"
-              : `알 수 없는 역할입니다: ${flatten(args[1])} (worker|expert|auditor)`;
+              ? t("session.c.crewModelUsage")
+              : t("session.c.unknownRole", { value: flatten(args[1]) });
           return;
         }
         const query = args.slice(2).join(" ");
@@ -3207,7 +3261,12 @@ export class AppController {
           return;
         }
         if (query.toLowerCase() === "auto") {
-          void this.saveCrew(screen, { pins: { [role]: null } }, `${roleName(role)} 모델`, "Auto");
+          void this.saveCrew(
+            screen,
+            { pins: { [role]: null } },
+            t("session.c.roleModel", { role: roleName(role) }),
+            "Auto",
+          );
           return;
         }
         const matches = crewPickItems(context.providers, null, query).filter(
@@ -3218,11 +3277,11 @@ export class AppController {
           void this.saveCrew(
             screen,
             { pins: { [role]: only.selection } },
-            `${roleName(role)} 모델`,
+            t("session.c.roleModel", { role: roleName(role) }),
             only.label,
           );
         } else if (matches.length === 0) {
-          this.notice = `일치하는 모델이 없습니다: ${flatten(query)}`;
+          this.notice = t("session.c.noModelNamed", { query: flatten(query) });
         } else {
           // Several models fit the words: the list, already narrowed, lets the user choose.
           this.crewView = openModelView(context, role, query);
@@ -3231,21 +3290,21 @@ export class AppController {
       }
       case "default":
         if (context.scope !== "thread") {
-          this.notice = "아직 시작하지 않은 대화의 설정은 이미 새 채팅 기본값입니다.";
+          this.notice = t("session.c.crewDefaultAlready");
           return;
         }
         void this.saveCrew(
           screen,
           "default",
-          "Crew 기본값",
-          "이 스레드의 설정을 새 채팅에도 씁니다",
+          t("session.c.crewDefault"),
+          t("session.c.crewDefaultNote"),
         );
         return;
       case "back":
         this.backToLead(screen);
         return;
       default:
-        this.notice = `사용법: /crew [on|off|preset <${presetWords()}>|model <역할> [모델|auto]|default|back]`;
+        this.notice = t("session.c.crewUsage", { words: presetWords() });
     }
   }
 
@@ -3281,7 +3340,7 @@ export class AppController {
   ): void {
     const projects = screen.kind === "projects" ? this.visibleProjects(screen) : [];
     const threads = screen.kind === "threads" ? this.visibleThreads(screen) : [];
-    // The "새 스레드" row leads the thread list until words are typed.
+    // The "New thread" row leads the thread list until words are typed.
     const lead = screen.kind === "threads" && screen.query === "" ? 1 : 0;
     const count = screen.kind === "projects" ? projects.length : lead + threads.length;
     const move = (delta: number) => {
@@ -3362,7 +3421,7 @@ export class AppController {
   private async togglePin(thread: OrchestrationThreadShell): Promise<void> {
     const link = this.deps.link;
     if (link.config?.environment.capabilities.threadPinning !== true) {
-      this.notice = "이 서버는 스레드 고정을 지원하지 않습니다. 앱을 업데이트하세요.";
+      this.notice = t("session.c.pinUnsupported");
       this.render();
       return;
     }
@@ -3380,7 +3439,10 @@ export class AppController {
       : unpinCommand(context, thread.id);
     const screen = this.screen;
     if (screen.kind === "threads") screen.follow = { id: thread.id, pinned: pinning };
-    const outcome = await this.run(command, pinning ? "고정 실패" : "고정 해제 실패");
+    const outcome = await this.run(
+      command,
+      t(pinning ? "session.c.pinFailed" : "session.c.unpinFailed"),
+    );
     if (outcome === "sent") {
       // The shell may have changed before the answer came.
       if (this.screen === screen && screen.kind === "threads") this.followPinned(screen);
@@ -3413,20 +3475,20 @@ export class AppController {
     if (screen.kind === "projects") {
       const project = projects[screen.selected];
       if (project) {
-        this.hold(this.answered({ label: "프로젝트", value: project.title }));
+        this.hold(this.answered({ label: t("session.c.projectLabel"), value: project.title }));
         if (this.startPrompt !== null) this.openWithPrompt(project.id);
         else this.showThreads(project.id);
       }
       return;
     }
     if (screen.query === "" && screen.selected === 0) {
-      this.endSetup({ label: "스레드", value: "새 스레드" });
+      this.endSetup({ label: t("session.c.threadLabel"), value: t("session.c.newThread") });
       this.openChat(screen.projectId, null, true);
       return;
     }
     const thread = threads[screen.selected - (screen.query === "" ? 1 : 0)];
     if (thread) {
-      this.endSetup({ label: "스레드", value: thread.title });
+      this.endSetup({ label: t("session.c.threadLabel"), value: thread.title });
       this.openChat(thread.projectId, thread.id, false);
     }
   }
@@ -3658,10 +3720,7 @@ export class AppController {
       case "enter": {
         const option = chosen === null ? undefined : list[chosen];
         if (option) this.answerApproval(screen, requestId, option);
-        else
-          this.notice = locked
-            ? "↑↓로 선택 후 Enter"
-            : "먼저 항목을 고르세요 (번호 · ↑↓), 그다음 Enter 입니다.";
+        else this.notice = locked ? t("session.c.arrowsThenEnter") : t("session.c.pickFirst");
         return;
       }
       default:
@@ -3777,8 +3836,9 @@ export class AppController {
     }
     this.lastCtrlC = now;
     if (screen.status?.interruptible) {
-      this.interrupt(screen);
-      this.notice = `${INTERRUPT_NOTICE} (Ctrl-C를 한 번 더 누르면 종료)`;
+      if (this.interrupt(screen) === "requested") {
+        this.notice = t("session.c.interruptCtrlC", { notice: interruptNotice() });
+      }
       return;
     }
     const composerShown =
@@ -3789,10 +3849,10 @@ export class AppController {
       this.panelKey?.startsWith("approval:") !== true;
     if (composerShown && editorText(this.editor) !== "") {
       this.editor = emptyEditor;
-      this.notice = "입력을 지웠습니다. 한 번 더 Ctrl-C를 누르면 종료합니다.";
+      this.notice = t("session.c.inputClearedCtrlC");
       return;
     }
-    this.notice = "한 번 더 Ctrl-C를 누르면 종료합니다.";
+    this.notice = t("session.c.ctrlCAgain");
   }
 
   // ---- actions -----------------------------------------------------------------------------
@@ -3810,31 +3870,50 @@ export class AppController {
     }
   }
 
-  private interrupt(screen: ChatScreen): void {
-    if (screen.isDraft) return;
+  /** "warned" when live background agents ask for a second press first; nothing is sent then. */
+  private interrupt(screen: ChatScreen): "requested" | "warned" {
+    if (screen.isDraft) return "requested";
+    // A stop already on its way has nothing left to confirm.
+    if (this.stopRequested !== screen.threadId) {
+      const mirror = this.deps.link.thread.thread;
+      const step = nextStopStep({
+        liveAgentCount:
+          mirror !== null && mirror.id === screen.threadId ? agentModelOf(mirror).liveCount : 0,
+        warnedAt: this.stopWarnedAt,
+        now: this.deps.now(),
+      });
+      if (step.kind === "warn") {
+        this.stopWarnedAt = this.deps.now();
+        this.notice = t("session.c.stopAgentsWarn", { count: step.agentCount });
+        return "warned";
+      }
+    }
+    this.stopWarnedAt = null;
     this.takeBackQueue(screen);
-    this.notice = INTERRUPT_NOTICE;
+    this.notice = interruptNotice();
     this.stopRequested = screen.threadId;
-    void this.run(interruptCommand(this.deps.context, screen.threadId), "중단 요청 실패").then(
-      (outcome) => {
-        if (outcome !== "sent" && this.stopRequested === screen.threadId) this.stopRequested = null;
-        // The request is answered now, by the line below or by the failure `run` printed.
-        if (this.notice?.startsWith(INTERRUPT_NOTICE)) this.notice = null;
-        // Said once for the turn, however many times Esc was pressed; nothing is said when it ends by itself.
-        if (outcome === "sent" && !this.interruptShown) {
-          this.interruptShown = true;
-          this.emit([
-            railGap(this.rail),
-            railCancelled(this.rail, this.deps.style.theme.error("작업 중단")),
-          ]);
-        }
-        this.render();
-      },
-    );
+    void this.run(
+      interruptCommand(this.deps.context, screen.threadId),
+      t("session.c.interruptFailed"),
+    ).then((outcome) => {
+      if (outcome !== "sent" && this.stopRequested === screen.threadId) this.stopRequested = null;
+      // The request is answered now, by the line below or by the failure `run` printed.
+      if (this.notice?.startsWith(interruptNotice())) this.notice = null;
+      // Said once for the turn, however many times Esc was pressed; nothing is said when it ends by itself.
+      if (outcome === "sent" && !this.interruptShown) {
+        this.interruptShown = true;
+        this.emit([
+          railGap(this.rail),
+          railCancelled(this.rail, this.deps.style.theme.error(t("session.c.interrupted"))),
+        ]);
+      }
+      this.render();
+    });
+    return "requested";
   }
 
   private approvalOptions(options: ReadonlyArray<ProviderApprovalOption> | undefined) {
-    return options && options.length > 0 ? options : DEFAULT_APPROVAL_OPTIONS;
+    return options && options.length > 0 ? options : defaultApprovalOptions();
   }
 
   private answerApproval(
@@ -3850,9 +3929,11 @@ export class AppController {
       requestId,
       decision: choice.decision,
     });
-    void this.run(command, "승인 응답 실패").then((outcome) => {
+    void this.run(command, t("session.c.approvalFailed")).then((outcome) => {
       if (outcome === "sent") {
-        this.emit(this.answered({ label: `승인: ${kind}`, value: choice.label }));
+        this.emit(
+          this.answered({ label: t("session.c.approvalLabel", { kind }), value: choice.label }),
+        );
       } else {
         // The request is still open; the next answer is a fresh pick, not this one waiting for Enter.
         this.responding = null;
@@ -3882,7 +3963,7 @@ export class AppController {
     this.questionDraft = null;
     void this.run(
       dismissUserInputCommand(this.deps.context, { threadId: screen.threadId, requestId }),
-      "건너뛰기 실패",
+      t("session.c.skipFailed"),
     ).then(() => this.render());
   }
 
@@ -3908,7 +3989,8 @@ export class AppController {
     }
     if (value === null && question.allowCustomAnswer !== false && text !== "") value = text;
     if (value === null) {
-      this.notice = question.options.length > 0 ? "목록의 번호로 답하세요." : "답변을 입력하세요.";
+      this.notice =
+        question.options.length > 0 ? t("session.c.answerWithNumber") : t("session.c.enterAnswer");
       return;
     }
     draft.answers[question.id] = value;
@@ -3916,8 +3998,8 @@ export class AppController {
     const step = {
       label:
         pending.questions.length > 1
-          ? `질문 (${draft.index + 1}/${pending.questions.length})`
-          : "질문",
+          ? t("session.c.questionN", { n: draft.index + 1, total: pending.questions.length })
+          : t("session.c.question"),
       value: Array.isArray(value) ? value.join(", ") : value,
     };
     if (draft.index + 1 < pending.questions.length) {
@@ -3932,7 +4014,7 @@ export class AppController {
       requestId: pending.requestId,
       answers: draft.answers,
     });
-    void this.run(command, "답변 전송 실패").then((outcome) => {
+    void this.run(command, t("session.c.answerFailed")).then((outcome) => {
       if (outcome === "sent") {
         this.emit(this.answered(step));
       } else {
@@ -3957,17 +4039,21 @@ export class AppController {
   /** Why a message that starts with a slash was not sent, and the way to send it anyway. */
   private heldSlashNotice(screen: ChatScreen, held: HeldSlash): string {
     const word = flatten(held.word);
-    const sendAnyway = "그대로 보내려면 앞에 공백";
+    const sendAnyway = t("session.c.sendAnyway");
     if (held.kind === "arguments") {
       const alias = held.command !== undefined && held.command !== word.toLowerCase();
-      return `/${word}${alias ? ` (/${held.command})` : ""} 명령은 인자를 받지 않습니다 • ${sendAnyway}`;
+      return t("session.c.noArguments", {
+        command: `/${word}${alias ? ` (/${held.command})` : ""}`,
+        sendAnyway,
+      });
     }
-    const near = held.nearest === null ? "" : ` • 가까운 명령 /${held.nearest}`;
+    const near =
+      held.nearest === null ? "" : t("session.c.nearest", { command: `/${held.nearest}` });
     // The folder's own commands come from a separate ask; until it is answered the list may be short.
     const late = this.workspace.pending(this.currentProvider(screen), this.workspaceCwd(screen))
-      ? " • 프로젝트 명령 목록을 받는 중일 수 있습니다"
+      ? t("session.c.projectCmdsLate")
       : "";
-    return `알 수 없는 명령: /${word}${near}${late} • ${sendAnyway}`;
+    return t("session.c.unknownCommand", { word, near, late, sendAnyway });
   }
 
   private async submit(screen: ChatScreen): Promise<void> {
@@ -4001,7 +4087,7 @@ export class AppController {
     }
     if (this.crewSub(screen) !== null) {
       // The lead is the one that is talked to; a message typed here would reach a task, not the lead.
-      this.notice = "crew 작업 스레드입니다. 메시지는 lead 로 보내세요: /crew back";
+      this.notice = t("session.c.crewSendLead");
       this.render();
       return;
     }
@@ -4024,7 +4110,10 @@ export class AppController {
     // The server refuses a longer turn; saying so here keeps the text for the user to cut.
     if (text.length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS) {
       const over = text.length - PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
-      this.notice = `메시지가 상한(${PROVIDER_SEND_TURN_MAX_INPUT_CHARS.toLocaleString("en-US")}자)보다 ${over.toLocaleString("en-US")}자 깁니다. 줄이거나 나눠서 보내세요.`;
+      this.notice = t("session.c.messageTooLong", {
+        limit: PROVIDER_SEND_TURN_MAX_INPUT_CHARS.toLocaleString("en-US"),
+        over: over.toLocaleString("en-US"),
+      });
       this.render();
       return;
     }
@@ -4047,9 +4136,7 @@ export class AppController {
 
   /** An undo of this thread is on its way: no turn starts, and the queue stays where it is, until the server has answered. */
   private undoRefusal(screen: ChatScreen): string | null {
-    return this.undo.active(screen.threadId, this.deps.now())
-      ? "되돌리는 중입니다. 끝난 뒤에 보낼 수 있습니다."
-      : null;
+    return this.undo.active(screen.threadId, this.deps.now()) ? t("session.c.undoingSend") : null;
   }
 
   /** Why no turn can start from here now, as a notice; every way of starting one asks. */
@@ -4057,7 +4144,7 @@ export class AppController {
     const undoing = this.undoRefusal(screen);
     if (undoing !== null) return undoing;
     if (this.deps.link.status.phase !== "online" || this.sending) {
-      return "서버와 연결된 뒤에 보낼 수 있습니다.";
+      return t("session.c.connectToSend");
     }
     return null;
   }
@@ -4142,7 +4229,7 @@ export class AppController {
     this.sending = true;
     this.render();
     const outcome = (await this.applyHeldModes(screen))
-      ? await this.run(command, "전송 실패")
+      ? await this.run(command, t("session.c.sendFailed"))
       : "rejected";
     this.sending = false;
     if (outcome !== "sent") return outcome;
@@ -4184,7 +4271,7 @@ export class AppController {
     ) {
       // Never send a model quietly that this thread cannot run; the text stays in the composer.
       this.modelOverride = null;
-      this.notice = "선택한 모델을 쓸 수 없습니다. /model 로 다시 고르세요.";
+      this.notice = t("session.c.modelUnusable");
       this.render();
       return null;
     }
@@ -4240,7 +4327,10 @@ export class AppController {
         }
         const mode = parseRuntimeMode(rest);
         if (mode === null) {
-          this.notice = `알 수 없는 권한 모드입니다: ${flatten(rest)} (${runtimeModeWords()})`;
+          this.notice = t("session.c.unknownMode", {
+            value: flatten(rest),
+            words: runtimeModeWords(),
+          });
           break;
         }
         this.setRuntimeMode(screen, mode, true);
@@ -4260,8 +4350,7 @@ export class AppController {
         break;
       case "goal":
         if (this.crewSub(screen) !== null) {
-          this.notice =
-            "crew 작업 스레드에는 목표를 둘 수 없습니다. /crew back 으로 lead 로 돌아가세요.";
+          this.notice = t("session.c.crewNoGoal");
           break;
         }
         this.runGoalCommand(screen, args, rest);
@@ -4358,7 +4447,7 @@ export class AppController {
     }
     const thread = this.serverThreadOf(screen);
     if (thread === null) {
-      this.notice = "아직 시작하지 않은 스레드입니다. 대화가 있어야 diff 를 볼 수 있습니다.";
+      this.notice = t("session.c.diffNoThread");
       return;
     }
     const refusal = this.answerRefusal(screen, "/diff");
@@ -4367,11 +4456,11 @@ export class AppController {
       return;
     }
     if (this.diffBusy) {
-      this.notice = "diff 를 불러오는 중입니다.";
+      this.notice = t("session.c.diffBusy");
       return;
     }
     if (this.deps.link.status.phase !== "online") {
-      this.notice = "서버와 연결된 뒤에 볼 수 있습니다.";
+      this.notice = t("session.c.connectToView");
       return;
     }
     const found = diffTurn(thread, request.turn, this.deps.now());
@@ -4385,9 +4474,7 @@ export class AppController {
       const matches = matchFiles(checkpoint.files, request.file);
       const turn = checkpoint.checkpointTurnCount;
       if (matches.length === 0) {
-        this.say(
-          `턴 ${turn} 에서 바뀐 파일 중에 "${flatten(request.file)}" 가 없습니다. /diff ${turn} 으로 목록을 보세요.`,
-        );
+        this.say(t("session.c.diffNoFile", { turn, file: flatten(request.file) }));
         return;
       }
       if (matches.length > 1) {
@@ -4396,14 +4483,17 @@ export class AppController {
           .map((entry) => flatten(entry.path))
           .join(", ");
         this.say(
-          `"${flatten(request.file)}" 에 해당하는 파일이 여럿입니다: ${names}${matches.length > 5 ? " …" : ""}. 경로를 더 길게 쓰세요.`,
+          t("session.c.diffManyFiles", {
+            file: flatten(request.file),
+            names: `${names}${matches.length > 5 ? " …" : ""}`,
+          }),
         );
         return;
       }
       file = matches[0]?.path;
     }
     this.diffBusy = true;
-    this.notice = "diff 불러오는 중…";
+    this.notice = t("session.c.diffLoading");
     void this.showDiff(screen, thread.id, checkpoint.checkpointTurnCount, checkpoint.files, file);
   }
 
@@ -4427,7 +4517,7 @@ export class AppController {
       });
       // The user may have moved to another thread while the server was working.
       if (this.disposed || this.screen !== screen) return;
-      if (this.notice === "diff 불러오는 중…") this.notice = null;
+      if (this.notice === t("session.c.diffLoading")) this.notice = null;
       // A reply began while the server was working: the report would end up in the middle of it.
       const refusal = this.answerRefusal(screen, "/diff");
       if (refusal !== null) {
@@ -4446,10 +4536,10 @@ export class AppController {
       );
     } catch (cause) {
       if (this.disposed || this.screen !== screen) return;
-      if (this.notice === "diff 불러오는 중…") this.notice = null;
+      if (this.notice === t("session.c.diffLoading")) this.notice = null;
       const detail = flatten(cause instanceof Error ? cause.message : String(cause));
       this.say(
-        `diff 를 불러오지 못했습니다: ${detail}${cause instanceof CommandRejectedError ? "" : " · 연결을 확인하고 다시 시도하세요"}`,
+        `${t("session.c.diffFailed", { detail })}${cause instanceof CommandRejectedError ? "" : t("session.c.checkConnection")}`,
         "error",
       );
     } finally {
@@ -4468,26 +4558,28 @@ export class AppController {
     const now = this.deps.now();
     const thread = this.serverThreadOf(screen);
     if (thread === null) {
-      this.notice = "아직 시작하지 않은 스레드입니다. 되돌릴 대화가 없습니다.";
+      this.notice = t("session.c.undoNoThread");
       return;
     }
     if (this.undo.active(thread.id, now)) {
-      this.notice = "되돌리는 중입니다. 끝난 뒤에 다시 시도하세요.";
+      this.notice = t("session.c.undoingRetry");
       return;
     }
     if (link.status.phase !== "online") {
-      this.notice = "서버와 연결된 뒤에 되돌릴 수 있습니다.";
+      this.notice = t("session.c.connectToUndo");
       return;
     }
     if (this.turnRunning(screen) || this.sending || this.turnStarting(screen)) {
-      this.notice = "작업 중에는 되돌릴 수 없습니다. Esc로 중단한 뒤 다시 /undo 하세요.";
+      this.notice = t("session.c.busyCannotUndo");
       return;
     }
     const providerId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
     const provider = link.config?.providers.find((entry) => entry.instanceId === providerId);
     if (provider?.supportsConversationRollback === false) {
       this.say(
-        `${flatten(provider.displayName ?? provider.instanceId)} 는 대화 되돌리기를 지원하지 않습니다. 새 스레드(/new)에서 이어가세요.`,
+        t("session.c.undoUnsupported", {
+          name: flatten(provider.displayName ?? provider.instanceId),
+        }),
       );
       return;
     }
@@ -4517,28 +4609,29 @@ export class AppController {
       this.undo.active(thread.id, now) ||
       this.deps.link.status.phase !== "online"
     ) {
-      this.notice = "대화가 바뀌어 취소했습니다. 다시 /undo 하세요.";
+      this.notice = t("session.c.undoCancelledChanged");
       this.render();
       return;
     }
     // A send that failed belongs to the thread as it was; after the rewind its command would not mean the same.
     this.failedSend = null;
     this.undo.start({ thread, plan: again.plan, restoreFiles, now });
-    this.emit([railGap(this.rail), railRow(this.rail, this.deps.style.theme.dim("되돌리는 중…"))]);
+    this.emit([
+      railGap(this.rail),
+      railRow(this.rail, this.deps.style.theme.dim(t("session.c.undoing"))),
+    ]);
     const outcome = await this.run(
       revertCommand(this.deps.context, {
         threadId: thread.id,
         turnCount: again.plan.target,
         restoreFiles,
       }),
-      "되돌리기 요청 실패",
+      t("session.c.undoRequestFailed"),
     );
     if (outcome !== "sent") {
       this.undo.drop();
       if (outcome === "failed") {
-        this.say(
-          "서버에 닿았는지 확실하지 않습니다. /diff 로 파일을, 대화를 다시 열어 상태를 확인하세요.",
-        );
+        this.say(t("session.c.undoUncertain"));
       }
     }
     this.render();
@@ -4565,15 +4658,9 @@ export class AppController {
       railGap(this.rail),
       railDone(
         this.rail,
-        theme.warning(
-          `턴 ${mine?.plan.turn ?? before ?? now}부터 되돌림 · 대화는 턴 ${now}까지 남았습니다`,
-        ),
+        theme.warning(t("session.c.rewound", { from: mine?.plan.turn ?? before ?? now, now })),
       ),
-      ...railWrap(
-        this.rail,
-        theme.dim("위에 보이는 그 뒤의 질문과 답변은 더 이상 이 대화에 없습니다."),
-        this.width,
-      ),
+      ...railWrap(this.rail, theme.dim(t("session.c.rewoundGone")), this.width),
     ];
     if (mine !== null) {
       rows.push(
@@ -4581,8 +4668,13 @@ export class AppController {
           this.rail,
           theme.dim(
             mine.restoreFiles
-              ? `파일: ${mine.plan.target === 0 ? "스레드를 시작하기 전" : `턴 ${mine.plan.target} 이 끝난`} 상태로 복원했습니다.`
-              : "파일: 그대로 두었습니다.",
+              ? t("session.c.filesRestored", {
+                  state:
+                    mine.plan.target === 0
+                      ? t("session.c.beforeThread")
+                      : t("session.c.endOfTurn", { target: mine.plan.target }),
+                })
+              : t("session.c.filesKept"),
           ),
           this.width,
         ),
@@ -4593,21 +4685,11 @@ export class AppController {
       this.takeBackQueue(screen);
       if (mine.plan.prompt !== null) {
         this.putInComposer(mine.plan.prompt, "before");
-        rows.push(
-          ...railWrap(
-            this.rail,
-            theme.dim("질문을 입력창에 되돌려 놓았습니다. 고쳐서 다시 보내세요."),
-            this.width,
-          ),
-        );
+        rows.push(...railWrap(this.rail, theme.dim(t("session.c.questionBack")), this.width));
       }
       if (queued > 0) {
         rows.push(
-          ...railWrap(
-            this.rail,
-            theme.dim(`대기 중이던 메시지 ${queued}건도 입력창으로 돌아왔습니다.`),
-            this.width,
-          ),
+          ...railWrap(this.rail, theme.dim(t("session.c.queuedBack", { queued })), this.width),
         );
       }
     }
@@ -4616,11 +4698,7 @@ export class AppController {
 
   private undoFailed(outcome: Extract<UndoOutcome, { kind: "failed" }>): void {
     this.say(
-      `되돌리지 못했습니다 (이유는 위의 서버 메시지). ${
-        outcome.restoreFiles
-          ? '대화는 그대로입니다. 파일 상태는 /diff 로 확인하고, 대화만 되돌리려면 /undo 에서 "대화만"을 고르세요.'
-          : "대화는 그대로입니다."
-      }`,
+      outcome.restoreFiles ? t("session.c.undoFailedFiles") : t("session.c.undoFailedPlain"),
       "error",
     );
   }
@@ -4715,7 +4793,7 @@ export class AppController {
     if (split === undefined) return;
     const action = parseFlowAction(args);
     if (action === null) {
-      this.notice = `사용법: ${PANEL_USAGE[view]}`;
+      this.notice = t("session.c.usage", { usage: PANEL_USAGE[view] });
       return;
     }
     const open = this.panelOpen;
@@ -4789,12 +4867,12 @@ export class AppController {
     const word = args[0]?.toLowerCase();
     if (split === undefined) return;
     if (args.length > 1 || (word !== undefined && word !== "on" && word !== "off")) {
-      this.notice = "사용법: /tasks [on|off]";
+      this.notice = t("session.c.tasksUsage");
       return;
     }
     const wanted = word === undefined ? !this.tasksOn : word === "on";
     if (wanted === this.tasksOn) {
-      this.notice = wanted ? "작업 목록이 이미 열려 있습니다." : "작업 목록이 열려 있지 않습니다.";
+      this.notice = wanted ? t("session.c.tasksOpen") : t("session.c.tasksClosed");
       return;
     }
     if (wanted) {
@@ -4856,21 +4934,21 @@ export class AppController {
   private runHistoryCommand(screen: ChatScreen, word: string | undefined): void {
     const count = parseHistoryCount(word);
     if (count === null) {
-      this.notice = `사용법: /history [개수] (1~${HISTORY_MAX})`;
+      this.notice = t("session.c.historyUsage", { max: HISTORY_MAX });
       return;
     }
     if (screen.isDraft) {
-      this.notice = "새 스레드라 이전 대화가 없습니다.";
+      this.notice = t("session.c.historyNew");
       return;
     }
     const { link } = this.deps;
     const thread = link.thread.thread;
     if (!screen.loaded || thread === null || thread.id !== screen.threadId) {
-      this.notice = "스레드를 불러온 뒤에 쓰세요.";
+      this.notice = t("session.c.historyAfterLoad");
       return;
     }
     if (screen.historyBusy) {
-      this.notice = HISTORY_LOADING_NOTICE;
+      this.notice = historyLoadingNotice();
       return;
     }
     const refusal = this.answerRefusal(screen, "/history");
@@ -4885,7 +4963,7 @@ export class AppController {
     );
     const pool = screen.history;
     if (!historyLeft(pool)) {
-      this.notice = "더 이전 대화가 없습니다.";
+      this.notice = t("session.c.historyNone");
       return;
     }
     if (pool.messages.length >= count || pool.cursor === null) {
@@ -4893,15 +4971,13 @@ export class AppController {
       return;
     }
     screen.historyBusy = true;
-    this.notice = HISTORY_LOADING_NOTICE;
+    this.notice = historyLoadingNotice();
     void this.fillHistory(screen, pool, count);
   }
 
   /** Why a report cannot be written now: a reply being written would end up in the middle of it. */
   private answerRefusal(screen: ChatScreen, command: string): string | null {
-    return screen.status?.phase === "working"
-      ? `답변이 진행 중입니다. 끝난 뒤에 ${command} 를 쓰세요.`
-      : null;
+    return screen.status?.phase === "working" ? t("session.c.replyRunning", { command }) : null;
   }
 
   /** Fetches pages of older turns until the pool holds `count` messages or the server has no more. */
@@ -4916,11 +4992,11 @@ export class AppController {
       failure = cause instanceof Error ? cause.message : String(cause);
     }
     screen.historyBusy = false;
-    if (this.notice === HISTORY_LOADING_NOTICE) this.notice = null;
+    if (this.notice === historyLoadingNotice()) this.notice = null;
     if (this.disposed || this.screen !== screen) return;
     // The pool keeps what was loaded, so the same command tries the page again.
     if (failure !== null) {
-      this.notice = `이전 대화를 불러오지 못했습니다: ${flatten(failure)}`;
+      this.notice = t("session.c.historyFailed", { detail: flatten(failure) });
     } else {
       this.printHistory(screen, pool, count);
     }
@@ -4937,7 +5013,7 @@ export class AppController {
     }
     const batch = takeHistoryBatch(pool, count);
     if (batch.messages.length === 0) {
-      this.notice = "더 이전 대화가 없습니다.";
+      this.notice = t("session.c.historyNone");
       return;
     }
     const { theme } = this.deps.style;
@@ -4953,16 +5029,16 @@ export class AppController {
     const more = pool.cursor !== null;
     const remaining =
       left > 0
-        ? `더 이전 메시지 ${left}개${more ? " 이상" : ""} · /history`
+        ? t(more ? "session.c.moreAtLeast" : "session.c.moreExact", { left })
         : more
-          ? "더 이전 메시지 있음 · /history"
-          : "대화의 처음까지 봤습니다";
+          ? t("session.c.moreSome")
+          : t("session.c.reachedStart");
     this.emit([
       railGap(this.rail),
-      railRow(this.rail, theme.dim(`이전 대화 ${batch.messages.length}개`)),
+      railRow(this.rail, theme.dim(t("session.c.earlierCount", { count: batch.messages.length }))),
       ...rows,
       railGap(this.rail),
-      railRow(this.rail, theme.dim(`여기까지 이전 대화 · ${remaining}`)),
+      railRow(this.rail, theme.dim(t("session.c.earlierUpToHere", { remaining }))),
     ]);
   }
 
@@ -4971,11 +5047,11 @@ export class AppController {
     const startup = this.deps.startup;
     if (startup === undefined) return;
     if (this.lookingUp) {
-      this.notice = CHECKING_NOTICE;
+      this.notice = checkingNotice();
       return;
     }
     this.lookingUp = true;
-    this.notice = CHECKING_NOTICE;
+    this.notice = checkingNotice();
     void startup.checkUpdate({ refresh: true }).then(
       (info) => this.finishUpdateCommand(info),
       () => this.finishUpdateCommand(null),
@@ -4985,20 +5061,14 @@ export class AppController {
   private finishUpdateCommand(info: LatestRelease | null): void {
     this.lookingUp = false;
     if (this.disposed) return;
-    if (this.notice === CHECKING_NOTICE) this.notice = null;
+    if (this.notice === checkingNotice()) this.notice = null;
     if (info === null) {
-      this.emit([
-        noticeLine(
-          this.rail,
-          "업데이트를 확인하지 못했습니다. 네트워크 연결을 확인하세요.",
-          "error",
-        ),
-      ]);
+      this.emit([noticeLine(this.rail, t("session.c.updateCheckFailed"), "error")]);
     } else {
       this.latest = info;
       this.emit([
         railGap(this.rail),
-        ...railNote(this.rail, "업데이트", this.updateNote(info), this.width),
+        ...railNote(this.rail, t("session.c.updateTitle"), this.updateNote(info), this.width),
       ]);
     }
     this.render();
@@ -5016,9 +5086,13 @@ export class AppController {
       rows.flatMap((row) => wrapWithPrefix(row, room, "", "  "));
     const body: string[] = [];
     if (report.status === "current") {
-      body.push(...fold([`이미 최신입니다 (${current}).`]));
+      body.push(...fold([t("session.c.upToDate", { current })]));
     } else {
-      body.push(...fold([theme.accent.bold(`업데이트 있음: ${current} → ${report.latest}`)]));
+      body.push(
+        ...fold([
+          theme.accent.bold(t("session.c.updateAvailable", { current, latest: report.latest })),
+        ]),
+      );
       const { shown, omitted } = listedReleases(report);
       for (const release of shown) {
         body.push(...fold([theme.text.bold(releaseTitle(release))]));
@@ -5026,8 +5100,9 @@ export class AppController {
           body.push(...fold([`  ${theme.dim(highlightMark(this.symbols))} ${highlight}`]));
         }
       }
-      if (omitted > 0) body.push(...fold([theme.dim(`외 ${omitted}개 릴리스`)]));
-      body.push("", ...fold([theme.dim(UPDATE_HOW_TO)]));
+      if (omitted > 0)
+        body.push(...fold([theme.dim(t("session.c.moreReleases", { count: omitted }))]));
+      body.push("", ...fold([theme.dim(updateHowTo())]));
     }
     if (app !== null && terminalIsBehind(terminal, app)) {
       body.push("", ...fold([theme.warning(terminalBehindText(terminal, app))]));
@@ -5046,7 +5121,7 @@ export class AppController {
     const fold = (rows: ReadonlyArray<string>) =>
       rows.flatMap((row) => wrapWithPrefix(row, room, "", "  "));
     const body = [
-      heading("명령"),
+      heading(t("session.c.help.commands")),
       ...fold(
         SLASH_COMMANDS.map(
           (command, index) =>
@@ -5056,55 +5131,61 @@ export class AppController {
         ),
       ),
       "",
-      heading("키"),
+      heading(t("session.c.help.keys")),
       ...fold([
-        "Enter 전송 • Ctrl-J / Alt-Enter 줄바꿈",
-        "작업 중 Enter 는 대기열에 쌓여 끝나면 차례로 전송 • 빈 입력에서 ↑ 로 꺼내 고치기·지우기 • Esc 는 대기열을 입력칸으로 돌려놓음",
-        "Esc 작업 중단 • Ctrl-C 중단, 입력 지우기, 두 번 누르면 종료",
-        "빈 입력창에서 Ctrl-D 종료 • Ctrl-T 계획 접기/펼치기",
-        "/ 를 치면 명령 목록 • ↑/↓ 고르기 • Tab 완성 • [provider]·[스킬] 표시는 에이전트의 명령과 스킬 (고르면 입력칸에 채워짐)",
-        "/model 에서 글자를 치면 모델이 걸러집니다 • Esc 검색어 지우기",
-        "/threads, /projects 목록도 글자를 치면 걸러집니다 • 스레드 목록에서 Ctrl-P 로 고정/해제",
-        "분리 창에서 PageUp/PageDown 또는 Shift+PageUp/PageDown 으로 대화 스크롤 (터미널이 Shift 없이는 보내지 않을 때)",
+        t("session.c.help.keySend"),
+        t("session.c.help.keyQueue"),
+        t("session.c.help.keyEsc"),
+        t("session.c.help.keyQuit"),
+        t("session.c.help.keyMenu"),
+        t("session.c.help.keyModel"),
+        t("session.c.help.keyLists"),
+        t("session.c.help.keyScroll"),
       ]),
       "",
       heading("Crew"),
       ...fold([
-        "/crew 로 켜고 끄기, 프리셋, 역할 모델, 이번 턴 작업 보드",
-        "/crew on|off • /crew preset <이름> • /crew model <역할> [모델|auto]",
-        "crew 작업 스레드에서는 /crew back 으로 lead 에게 돌아갑니다",
+        t("session.c.help.crewMain"),
+        t("session.c.help.crewUsage"),
+        t("session.c.help.crewBack"),
       ]),
       "",
       heading("Workflow"),
       ...fold([
-        "/dag-workflow 로 오른쪽에 작업 흐름 창을 열고, 다시 치면 닫습니다 (폭 100칸 이상)",
-        "/dag-workflow <번호>|next|prev 흐름 고르기 • live 최신 흐름 따라가기",
-        "/dag-agents 로 같은 창에 이번 턴의 에이전트(작업·서브에이전트)를 보입니다 • 창이 열려 있으면 닫지 않고 바꿉니다",
-        "/tasks 로 왼쪽 아래에 이 스레드의 작업 목록을 보이고, 다시 치면 닫습니다 (높이 16줄 이상) • 오른쪽 창과 따로 쓸 수 있습니다",
+        t("session.c.help.wfOpen"),
+        t("session.c.help.wfPick"),
+        t("session.c.help.wfAgents"),
+        t("session.c.help.wfTasks"),
       ]),
       "",
       heading("Provider"),
       ...fold([
-        "/provider 로 등록된 Provider 의 상태 보기, add 로 추가, remove <id> 로 삭제",
-        "비밀값(API 키)은 입력 화면에서 가려서 받고, 명령줄에는 쓰지 않습니다",
-        "추가·삭제 뒤 /model 목록이 새로 고쳐집니다",
+        t("session.c.help.providerMain"),
+        t("session.c.help.providerSecret"),
+        t("session.c.help.providerRefresh"),
       ]),
       "",
-      heading("변경 보기·되돌리기"),
+      heading(t("session.c.help.undoHeading")),
       ...fold([
-        "/diff 로 마지막 턴이 바꾼 파일과 diff 를 봅니다 • /diff <턴번호> 로 다른 턴",
-        "/diff <턴번호> <파일> 로 한 파일의 diff 를 길게 봅니다 (전체 diff 는 앞부분만 보입니다)",
-        "/undo 는 마지막 턴을 대화에서 지웁니다 (파일 복원은 전용 worktree 가 있는 스레드만) • 확인을 거치며, 되돌린 것을 다시 되돌릴 수 없습니다",
+        t("session.c.help.diffMain"),
+        t("session.c.help.diffFile"),
+        t("session.c.help.undoMain"),
       ]),
       "",
-      heading("승인"),
+      heading(t("session.c.help.approvals")),
       ...fold([
-        "번호나 ↑/↓ 로 고르고 Enter 로 확정",
-        "다른 글자를 치면 번호가 잠기고, ↑/↓ 로 풉니다",
-        "Ctrl-T 로 답하지 않고 스레드 목록으로 (다시 열면 패널이 다시 뜹니다)",
+        t("session.c.help.apprPick"),
+        t("session.c.help.apprLock"),
+        t("session.c.help.apprLeave"),
       ]),
+      "",
+      heading(t("session.c.helpSettings")),
+      ...fold([t("session.c.helpLanguage")]),
     ];
-    return [railGap(this.rail), ...railNote(this.rail, "도움말", body, this.width)];
+    return [
+      railGap(this.rail),
+      ...railNote(this.rail, t("session.c.help.title"), body, this.width),
+    ];
   }
 
   /** `/theme` opens the list of themes; `/theme <name>` switches to one now and saves the choice. */
@@ -5123,7 +5204,7 @@ export class AppController {
     const result = themes.select(name);
     if (!result.ok || result.notes.length > 0) this.notice = result.message;
     if (result.ok) {
-      this.emit(this.answered({ label: "테마", value: themes.current().name }));
+      this.emit(this.answered({ label: t("session.c.themeLabel"), value: themes.current().name }));
     }
   }
 
@@ -5185,7 +5266,7 @@ export class AppController {
             this.provider.run("add");
             return;
           }
-          this.notice = "일치하는 모델이 없습니다. Esc로 검색어를 지우세요.";
+          this.notice = t("session.c.noModelMatch");
           return;
         }
         this.picker = null;
@@ -5235,7 +5316,7 @@ export class AppController {
           }
           this.emit(
             this.answered({
-              label: "모델",
+              label: t("session.c.modelLabel"),
               value: sanitizeForTerminal(choice.label).split("\n")[0] ?? "",
             }),
           );
@@ -5256,7 +5337,7 @@ export class AppController {
     if (event.type === "key" && event.name === "enter" && !event.shift && !event.alt) {
       const text = editorText(prompt.editor).trim();
       if (text === "") {
-        this.notice = "목표 내용을 입력하세요.";
+        this.notice = t("session.c.enterGoalText");
         return;
       }
       this.prompt = null;

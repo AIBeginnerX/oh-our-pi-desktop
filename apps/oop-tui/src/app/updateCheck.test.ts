@@ -6,6 +6,7 @@ import { releaseNotes } from "@t3tools/shared/releaseNotes";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { hostPlatform } from "../host.ts";
+import { setLanguage } from "../i18n/index.ts";
 import {
   buildUpdateReport,
   CACHE_TTL_MS,
@@ -112,7 +113,7 @@ describe("parsing what the network sends", () => {
       {
         version: "0.0.9",
         date: "2026-01-02",
-        highlights: [{ en: "ok" }, { en: "한글만", ko: "한글만" }],
+        highlights: [{ en: "ok" }, { en: "", ko: "한글만" }],
       },
       { version: "0.0.7", date: "", highlights: [{ en: "no date" }] },
     ]);
@@ -349,12 +350,42 @@ describe("buildUpdateReport", () => {
   };
 
   it("lists the releases after the current one up to the newest, newest first, in Korean where there is Korean", () => {
-    const report = buildUpdateReport("0.0.127", info);
+    const report = buildUpdateReport("0.0.127", info, "ko");
     expect(report.status).toBe("update");
     expect(report.latest).toBe("0.0.129");
     expect(report.releases.map((release) => release.version)).toEqual(["0.0.129", "0.0.128"]);
     expect(report.releases[0]?.highlights).toEqual(["아홉", "Ten"]);
     expect(report.releases[1]?.highlights).toEqual(["Eight"]);
+  });
+
+  it("shows English notes for an English reader, and never Korean", () => {
+    const report = buildUpdateReport("0.0.127", info, "en");
+    expect(report.releases[0]?.highlights).toEqual(["Nine", "Ten"]);
+    expect(report.releases[1]?.highlights).toEqual(["Eight"]);
+    const koreanOnly: LatestRelease = {
+      latest: "0.0.2",
+      releases: [
+        {
+          version: "0.0.2",
+          date: "2026-01-01",
+          highlights: [{ en: "", ko: "한글만" }, { en: "Kept" }],
+        },
+      ],
+    };
+    expect(buildUpdateReport("0.0.1", koreanOnly, "en").releases[0]?.highlights).toEqual(["Kept"]);
+    expect(buildUpdateReport("0.0.1", koreanOnly, "ko").releases[0]?.highlights).toEqual([
+      "한글만",
+      "Kept",
+    ]);
+  });
+
+  it("follows the app language when none is given", () => {
+    setLanguage("en");
+    try {
+      expect(buildUpdateReport("0.0.127", info).releases[0]?.highlights).toEqual(["Nine", "Ten"]);
+    } finally {
+      setLanguage("ko");
+    }
   });
 
   it("is current at the newest version, and when the app is ahead of it", () => {

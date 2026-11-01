@@ -6,8 +6,9 @@ import {
   releaseTitle,
   terminalBehindText,
   terminalIsBehind,
-  UPDATE_HOW_TO,
+  updateHowTo,
 } from "./updateCheck.ts";
+import { t } from "../i18n/index.ts";
 
 export interface UpdateCommandDeps {
   /** Version of the terminal app itself. */
@@ -27,18 +28,18 @@ export interface UpdateCommandDeps {
 export const runUpdateCommand = async (deps: UpdateCommandDeps): Promise<number> => {
   const app = await deps.appVersion();
   const current = app ?? deps.terminalVersion;
-  deps.out(`현재 버전: ${current}`);
-  deps.out("업데이트 확인 중…");
+  deps.out(t("cli.update.current", { version: current }));
+  deps.out(t("cli.update.checking"));
   const info = await deps.check({ refresh: true });
   if (info === null) {
-    deps.err("업데이트를 확인하지 못했습니다. 네트워크 연결을 확인하세요.");
+    deps.err(t("cli.update.checkFailed"));
     return 1;
   }
   const report = buildUpdateReport(current, info);
   if (report.status === "current") {
-    deps.out(`이미 최신입니다 (${current}).`);
+    deps.out(t("cli.update.upToDate", { version: current }));
   } else {
-    deps.out(`업데이트 있음: ${current} → ${report.latest}`);
+    deps.out(t("cli.update.available", { current, latest: report.latest }));
     const { shown, omitted } = listedReleases(report);
     for (const release of shown) {
       deps.out(`  ${releaseTitle(release)}`);
@@ -46,8 +47,8 @@ export const runUpdateCommand = async (deps: UpdateCommandDeps): Promise<number>
         deps.out(`    - ${highlight}`);
       }
     }
-    if (omitted > 0) deps.out(`  외 ${omitted}개 릴리스`);
-    deps.out(UPDATE_HOW_TO);
+    if (omitted > 0) deps.out(t("cli.update.more", { count: omitted }));
+    deps.out(updateHowTo());
   }
   if (app !== null && terminalIsBehind(deps.terminalVersion, app)) {
     deps.out(terminalBehindText(deps.terminalVersion, app));

@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 
 import { type Color, type ColorLevel, colorCodes, parseColor } from "./color.ts";
 import { gradientText } from "./gradient.ts";
+import { t } from "../i18n/index.ts";
 
 export { detectColorLevel } from "./color.ts";
 export type { ColorLevel } from "./color.ts";
@@ -410,14 +411,12 @@ export const applyOverrides = (
   const warnings: string[] = [];
   const next: Record<string, ColorSpec | ReadonlyArray<ColorSpec>> = { ...base };
   if (overrides === null || typeof overrides !== "object" || Array.isArray(overrides)) {
-    return { tokens: base, warnings: ['"overrides" 는 객체여야 해서 무시했습니다.'] };
+    return { tokens: base, warnings: [t("render.theme.overridesNotObject")] };
   }
   for (const [key, value] of Object.entries(overrides)) {
     if (SCALAR_TOKENS.has(key)) {
       if (parseColor(value) === null) {
-        warnings.push(
-          `"${key}" 의 값 ${describeValue(value)} 이(가) 올바른 색이 아니어서 무시했습니다.`,
-        );
+        warnings.push(t("render.theme.badColor", { key, value: describeValue(value) }));
       } else {
         next[key] = value as ColorSpec;
       }
@@ -427,12 +426,12 @@ export const applyOverrides = (
         value.length === 0 ||
         value.some((v) => parseColor(v) === null)
       ) {
-        warnings.push(`"${key}" 는 올바른 색의 목록이 아니어서 무시했습니다.`);
+        warnings.push(t("render.theme.badColorList", { key }));
       } else {
         next[key] = value as ReadonlyArray<ColorSpec>;
       }
     } else {
-      warnings.push(`알 수 없는 키 "${key}" 를 무시했습니다.`);
+      warnings.push(t("render.theme.unknownKey", { key }));
     }
   }
   return { tokens: next as unknown as ThemeTokens, warnings };
@@ -462,7 +461,7 @@ export const loadTheme = (input: {
   if (isBuiltinTheme(name)) {
     return { ok: true, theme: createTheme(name, BUILTIN_THEMES[name], level), warnings: [] };
   }
-  if (!isSafeThemeName(name)) return { ok: false, error: `테마 이름이 올바르지 않습니다: ${name}` };
+  if (!isSafeThemeName(name)) return { ok: false, error: t("render.theme.badName", { name }) };
   const file = NodePath.join(themesDirectory(configDir), `${name}.json`);
   let text: string;
   try {
@@ -471,26 +470,26 @@ export const loadTheme = (input: {
     const missing = (cause as NodeJS.ErrnoException).code === "ENOENT";
     return {
       ok: false,
-      error: missing ? `테마를 찾을 수 없습니다: ${name}` : `테마 파일을 읽을 수 없습니다: ${file}`,
+      error: missing
+        ? t("render.theme.notFound", { name })
+        : t("render.theme.unreadable", { file }),
     };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, error: `테마 파일이 올바른 JSON이 아닙니다: ${file}` };
+    return { ok: false, error: t("render.theme.notJson", { file }) };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, error: `테마 파일은 객체여야 합니다: ${file}` };
+    return { ok: false, error: t("render.theme.notObject", { file }) };
   }
   const { base, overrides, ...rest } = parsed as Record<string, unknown>;
-  const warnings: string[] = Object.keys(rest).map(
-    (key) => `알 수 없는 키 "${key}" 를 무시했습니다.`,
-  );
+  const warnings: string[] = Object.keys(rest).map((key) => t("render.theme.unknownKey", { key }));
   let baseName: BuiltinThemeName = "oop";
   if (base !== undefined) {
     if (typeof base === "string" && isBuiltinTheme(base)) baseName = base;
-    else warnings.push(`"base" ${describeValue(base)} 는 내장 테마가 아니어서 oop 을 씁니다.`);
+    else warnings.push(t("render.theme.badBase", { value: describeValue(base) }));
   }
   const merged =
     overrides === undefined

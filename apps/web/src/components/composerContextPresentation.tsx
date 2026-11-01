@@ -1,3 +1,4 @@
+import { useT } from "../i18n";
 import ChatMarkdown from "./ChatMarkdown";
 import { ReadOnlySourcePreview } from "./files/AttachmentFilePreview";
 import type { PreviewAnnotationPayload } from "@t3tools/contracts";
@@ -353,8 +354,6 @@ function UnresolvedContextChip(props: { label: string }) {
   );
 }
 
-const PROJECT_MEMORY_CHIP_KIND_LABEL = "프로젝트 기억";
-
 /**
  * A project-memory selection chip. The label is the memory's live title; a
  * stale selected version and a missing memory stay visible because the server
@@ -362,6 +361,7 @@ const PROJECT_MEMORY_CHIP_KIND_LABEL = "프로젝트 기억";
  * pending or truncated read never becomes a deleted assertion.
  */
 function MemoryContextChip(props: { record?: ComposerProjectMemoryReference | undefined }) {
+  const t = useT();
   const resolveTitle = use(ComposerMemoryTitleContext);
   const state = props.record
     ? resolveTitle(props.record.memoryId, props.record.selectedVersion)
@@ -370,26 +370,28 @@ function MemoryContextChip(props: { record?: ComposerProjectMemoryReference | un
     state.status === "resolved"
       ? state.title
       : state.status === "stale"
-        ? `${state.title} · 이전 버전`
+        ? t("{title} · older version", { title: state.title })
         : state.status === "missing"
-          ? "Project memory · 사용 불가"
+          ? t("Project memory · unavailable")
           : props.record
-            ? `Project memory v${props.record.selectedVersion}`
-            : "Project memory";
+            ? t("Project memory v{version}", { version: props.record.selectedVersion })
+            : t("Project memory");
   const tooltip =
     state.status === "resolved"
-      ? `프로젝트 기억 · ${state.title}`
+      ? t("Project memory · {title}", { title: state.title })
       : state.status === "stale"
-        ? `이 기억은 v${state.currentVersion}으로 변경되었습니다. 전송 시 보류됩니다.`
+        ? t("This memory changed to v{version}. It is held on send.", {
+            version: state.currentVersion,
+          })
         : state.status === "missing"
-          ? "이 기억을 찾을 수 없습니다. 전송 시 보류됩니다."
-          : "지금은 이 기억의 상태를 확인할 수 없습니다.";
+          ? t("This memory can't be found. It is held on send.")
+          : t("The state of this memory can't be checked right now.");
   return (
     <ContextChipShell
       kind="neutral"
       icon={<BookMarkedIcon />}
       label={label}
-      aria-label={`${PROJECT_MEMORY_CHIP_KIND_LABEL}, ${label}`}
+      aria-label={`${t("Project memory")}, ${label}`}
       {...(state.status === "missing" ? { state: "unresolved" as const } : {})}
       tooltip={tooltip}
     />

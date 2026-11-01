@@ -1,3 +1,4 @@
+import { useT } from "../../i18n";
 import {
   type EnvironmentId,
   type EditorId,
@@ -221,6 +222,7 @@ export function SelectedChecksControl({
   readonly collapsed: boolean;
   readonly onRequestMenuClose: () => void;
 }) {
+  const t = useT();
   const checks = useSelectedChecks({
     environmentId,
     threadId,
@@ -345,19 +347,19 @@ export function SelectedChecksControl({
       ) : null}
       {shouldShowSkillTrialEntry({ trialCapability, projectId: project?.id ?? null }) ? (
         collapsed ? (
-          <MenuItem onClick={openTrialDialog}>스킬 시험</MenuItem>
+          <MenuItem onClick={openTrialDialog}>{t("Skill trial")}</MenuItem>
         ) : (
           <Button size="sm" variant="outline" onClick={openTrialDialog}>
-            스킬 시험
+            {t("Skill trial")}
           </Button>
         )
       ) : null}
       {shouldShowSkillUseEntry({ useCapability, projectId: project?.id ?? null }) ? (
         collapsed ? (
-          <MenuItem onClick={openUseDialog}>이번 요청에 사용</MenuItem>
+          <MenuItem onClick={openUseDialog}>{t("Use for this request")}</MenuItem>
         ) : (
           <Button size="sm" variant="outline" onClick={openUseDialog}>
-            이번 요청에 사용
+            {t("Use for this request")}
           </Button>
         )
       ) : null}

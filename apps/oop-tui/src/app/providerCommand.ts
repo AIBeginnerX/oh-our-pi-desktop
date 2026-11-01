@@ -5,6 +5,7 @@ import type {
   ServerSettings,
 } from "@t3tools/contracts";
 
+import { t } from "../i18n/index.ts";
 import { padEndVisible, truncateStyled } from "../text/wrap.ts";
 import { sanitizeForTerminal, stringWidth } from "../text/width.ts";
 import { resolveAdd, wantsStdin, type ProviderRequest } from "./providerArgs.ts";
@@ -79,13 +80,22 @@ export const listTable = (rows: ReadonlyArray<ProviderRow>): string[] => {
     row.id,
     row.name,
     row.driver,
-    row.enabled ? "켜짐" : "꺼짐",
+    row.enabled ? t("providers.cmd.on") : t("providers.cmd.off"),
     row.status,
     row.models === null ? "-" : String(row.models),
-    row.isDefault ? "기본" : "",
+    row.isDefault ? t("providers.cmd.default") : "",
     row.message === null ? "" : truncateStyled(row.message, MESSAGE_LIMIT),
   ]);
-  const header = ["ID", "이름", "종류", "사용", "상태", "모델", "기본", "메모"];
+  const header = [
+    "ID",
+    t("providers.cmd.colName"),
+    t("providers.cmd.colKind"),
+    t("providers.cmd.colEnabled"),
+    t("providers.cmd.colStatus"),
+    t("providers.cmd.colModels"),
+    t("providers.cmd.colDefault"),
+    t("providers.cmd.colNote"),
+  ];
   const all = [header, ...cells];
   const widths = header.map((_, column) =>
     Math.max(...all.map((row) => stringWidth(row[column] ?? ""))),
@@ -104,7 +114,7 @@ const runList = async (deps: ProviderCommandDeps): Promise<number> => {
   const settings = await deps.link.getSettings().catch(() => null);
   const rows = providerRows(deps.link.config, settings ?? deps.link.config?.settings ?? null);
   if (rows.length === 0) {
-    deps.out("등록된 Provider 가 없습니다.");
+    deps.out(t("providers.cmd.none"));
     return 0;
   }
   for (const line of listTable(rows)) deps.out(line);
@@ -126,11 +136,11 @@ const refreshAndReport = async (
     if (found !== undefined) {
       const row = rowOfProvider(found);
       deps.out(
-        `상태: ${row.status}${row.models === null ? "" : ` · 모델 ${row.models}개`}${row.message === null ? "" : ` · ${row.message}`}`,
+        `${t("providers.cmd.status", { status: row.status })}${row.models === null ? "" : ` · ${t("providers.cmd.modelCount", { count: row.models })}`}${row.message === null ? "" : ` · ${row.message}`}`,
       );
     }
   } catch {
-    deps.err("상태를 새로 읽지 못했습니다. 잠시 뒤 oop provider list 로 확인하세요.");
+    deps.err(t("providers.cmd.refreshFailed"));
   }
 };
 
@@ -150,7 +160,7 @@ const runAdd = async (
 ): Promise<number> => {
   const { options } = request;
   if (request.target === null && !deps.interactive) {
-    return fail(deps, "종류를 지정하세요. 예: oop provider add opencode --id my_opencode", 2);
+    return fail(deps, t("providers.cmd.kindNeeded"), 2);
   }
   const wait = await deps.waitReady({ shell: false });
   if (wait !== null) return fail(deps, wait);
@@ -160,7 +170,9 @@ const runAdd = async (
   } catch (cause) {
     return fail(
       deps,
-      `설정을 읽지 못했습니다: ${cause instanceof Error ? cause.message : String(cause)}`,
+      t("providers.cmd.settingsReadFailed", {
+        reason: cause instanceof Error ? cause.message : String(cause),
+      }),
     );
   }
 
@@ -174,11 +186,7 @@ const runAdd = async (
   } else {
     const fromStdin = wantsStdin(request.target, options);
     if (fromStdin && deps.stdinIsTerminal) {
-      return fail(
-        deps,
-        "표준입력(-)은 파이프로 넘길 때만 쓸 수 있습니다. 예: pbpaste | oop provider add zai --set apiKey=- -y. 환경 변수(--set apiKey=@변수명)를 쓰거나, --set 없이 실행해 입력 화면에서 가려서 입력하세요.",
-        2,
-      );
+      return fail(deps, t("providers.cmd.stdinPipeOnly"), 2);
     }
     const stdin = fromStdin ? await deps.readStdin() : null;
     const resolved = resolveAdd(request.target, options, { env: deps.env, stdin });
@@ -194,7 +202,7 @@ const runAdd = async (
     }
   }
   if (draft === null) {
-    deps.err("취소했습니다.");
+    deps.err(t("providers.cmd.cancelled"));
     return 1;
   }
 
@@ -207,16 +215,15 @@ const runAdd = async (
   for (const row of summarize(draft)) deps.out(`${padEndVisible(row.label, 14)} ${row.value}`);
   if (options.dryRun) {
     deps.out("");
-    deps.out("--dry-run: 아래 내용을 보냅니다. 비밀값은 가려져 있습니다.");
+    deps.out(t("providers.cmd.dryRunAdd"));
     for (const line of previewPayload(draft, built.instance).split("\n")) deps.out(line);
     return 0;
   }
   if (!confirmed && !options.yes) {
-    if (!deps.interactive || stdinConsumed)
-      return fail(deps, "확인이 필요합니다. 터미널에서 실행하거나 -y 를 붙이세요.");
-    const answer = await deps.ask("추가할까요? [y/N] ");
+    if (!deps.interactive || stdinConsumed) return fail(deps, t("providers.cmd.confirmNeeded"));
+    const answer = await deps.ask(t("providers.cmd.askAdd"));
     if (answer === null || !/^y(es)?$/iu.test(answer.trim())) {
-      deps.err("취소했습니다.");
+      deps.err(t("providers.cmd.cancelled"));
       return 1;
     }
   }
@@ -226,11 +233,11 @@ const runAdd = async (
   if (!result.ok) {
     return fail(
       deps,
-      `추가하지 못했습니다: ${redactSecrets(result.message, secrets)}${result.rejected ? "" : " (서버에 닿았는지 확실하지 않습니다. oop provider list 로 확인하세요)"}`,
+      `${t("providers.cmd.addFailed", { reason: redactSecrets(result.message, secrets) })}${result.rejected ? "" : ` ${t("providers.cmd.unsure")}`}`,
     );
   }
-  if (!result.changed) return fail(deps, `'${draft.id}' 는 이미 있는 ID 입니다.`);
-  deps.out(`추가했습니다: ${draft.id} (${targetLabel(draft.target)})`);
+  if (!result.changed) return fail(deps, t("providers.cmd.idTaken", { id: draft.id }));
+  deps.out(t("providers.cmd.added", { id: draft.id, kind: targetLabel(draft.target) }));
   const advice = afterAddAdvice(draft);
   if (advice !== null) deps.out(advice);
   await refreshAndReport(deps, draft.id);
@@ -242,8 +249,7 @@ const runRemove = async (
   request: Extract<ProviderRequest, { kind: "remove" }>,
 ): Promise<number> => {
   const id = request.id;
-  if (id === null)
-    return fail(deps, "삭제할 ID 가 필요합니다. 사용법: oop provider remove <id>", 2);
+  if (id === null) return fail(deps, t("providers.cmd.removeNeedsId"), 2);
   const wait = await deps.waitReady({ shell: true });
   if (wait !== null) return fail(deps, wait);
   let settings: ServerSettings;
@@ -252,22 +258,23 @@ const runRemove = async (
   } catch (cause) {
     return fail(
       deps,
-      `설정을 읽지 못했습니다: ${cause instanceof Error ? cause.message : String(cause)}`,
+      t("providers.cmd.settingsReadFailed", {
+        reason: cause instanceof Error ? cause.message : String(cause),
+      }),
     );
   }
   const check = planRemove({ id, settings, shell: deps.link.shell });
   if (!check.ok) return fail(deps, check.reason);
   for (const line of planLines(check.plan)) deps.out(line);
   if (request.dryRun) {
-    deps.out("--dry-run: 삭제하지 않았습니다.");
+    deps.out(t("providers.cmd.dryRunRemove"));
     return 0;
   }
   if (!request.yes) {
-    if (!deps.interactive)
-      return fail(deps, "확인이 필요합니다. 터미널에서 실행하거나 -y 를 붙이세요.");
-    const answer = await deps.ask("삭제하려면 yes 를 입력하세요: ");
+    if (!deps.interactive) return fail(deps, t("providers.cmd.confirmNeeded"));
+    const answer = await deps.ask(t("providers.cmd.askRemove"));
     if (answer === null || !isYes(answer)) {
-      deps.err("취소했습니다.");
+      deps.err(t("providers.cmd.cancelled"));
       return 1;
     }
   }
@@ -276,11 +283,11 @@ const runRemove = async (
   if (!result.ok) {
     return fail(
       deps,
-      `삭제하지 못했습니다: ${result.message}${result.rejected ? "" : " (서버에 닿았는지 확실하지 않습니다. oop provider list 로 확인하세요)"}`,
+      `${t("providers.cmd.removeFailed", { reason: result.message })}${result.rejected ? "" : ` ${t("providers.cmd.unsure")}`}`,
     );
   }
-  if (!result.changed) return fail(deps, `'${id}' 는 이미 없습니다.`);
-  deps.out(`삭제했습니다: ${id}`);
+  if (!result.changed) return fail(deps, t("providers.cmd.alreadyGone", { id }));
+  deps.out(t("providers.cmd.removed", { id }));
   await refreshAndReport(deps, null);
   return 0;
 };

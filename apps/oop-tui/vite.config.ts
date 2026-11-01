@@ -5,6 +5,7 @@ import baseConfig from "../../vite.config.ts";
 export default mergeConfig(
   baseConfig,
   defineConfig({
+    test: { setupFiles: ["./src/testing/language.ts"] },
     pack: {
       entry: ["src/bin.ts"],
       outDir: "dist",

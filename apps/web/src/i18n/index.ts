@@ -6,6 +6,7 @@ import { CHROME_MESSAGES } from "./messages/chrome";
 import { DIFF_MESSAGES } from "./messages/diff";
 import { ONBOARDING_MESSAGES } from "./messages/onboarding";
 import { PANELS_MESSAGES } from "./messages/panels";
+import { PROJECT_CONTEXT_MESSAGES } from "./messages/projectContext";
 import { SETTINGS_MESSAGES } from "./messages/settings";
 import { SETTINGS_DEFAULTS_MESSAGES } from "./messages/settingsDefaults";
 import { SIDEBAR_MESSAGES } from "./messages/sidebar";
@@ -26,6 +27,7 @@ export const MESSAGES: MessageCatalog = {
   ...WORKFLOWS_MESSAGES,
   ...DIFF_MESSAGES,
   ...PANELS_MESSAGES,
+  ...PROJECT_CONTEXT_MESSAGES,
 };
 
 export type TranslationValues = Readonly<Record<string, string | number>>;

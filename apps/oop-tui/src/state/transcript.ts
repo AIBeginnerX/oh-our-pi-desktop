@@ -20,6 +20,7 @@ import { type Symbols, UNICODE_SYMBOLS } from "../render/symbols.ts";
 import { asRecord, firstLine, toolLines } from "../render/toolLine.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
 import { truncateStyled, wrapStyled } from "../text/wrap.ts";
+import { t } from "../i18n/index.ts";
 
 interface MessageProgress {
   /** Characters of `text` already handed to the Markdown stream (always ends at a line start). */
@@ -123,9 +124,11 @@ export class TranscriptPrinter {
       if (firstMessageIndex > 0 || more) {
         const count =
           firstMessageIndex === 0
-            ? "이전 메시지 있음"
-            : `이전 메시지 ${firstMessageIndex}개${more ? " 이상" : ""}`;
-        const note = style.theme.dim(`... ${count} · /history 로 보기`);
+            ? t("render.transcript.earlierSome")
+            : t(more ? "render.transcript.earlierCountMore" : "render.transcript.earlierCount", {
+                count: firstMessageIndex,
+              });
+        const note = style.theme.dim(t("render.transcript.historyNote", { count }));
         this.take(
           commit,
           "event",
@@ -272,7 +275,7 @@ export class TranscriptPrinter {
       railDone(
         this.rail,
         truncateStyled(
-          `${theme.text.bold("계획")}${title === null ? "" : theme.dim(` · ${sanitizeForTerminal(title)}`)}`,
+          `${theme.text.bold(t("render.transcript.plan"))}${title === null ? "" : theme.dim(` · ${sanitizeForTerminal(title)}`)}`,
           this.textWidth,
         ),
       ),
@@ -297,10 +300,9 @@ export class TranscriptPrinter {
     if (plan.implementedAt === null) {
       rows.push(
         railGap(this.rail),
-        ...wrapStyled(
-          theme.dim("/implement 로 이 계획을 구현합니다 • 바꾸려면 메시지를 보내세요"),
-          this.textWidth,
-        ).map((row) => railRow(this.rail, row)),
+        ...wrapStyled(theme.dim(t("render.transcript.implementHint")), this.textWidth).map((row) =>
+          railRow(this.rail, row),
+        ),
       );
     }
     return { rows, literal };
@@ -315,7 +317,9 @@ export class TranscriptPrinter {
         railDone(
           this.rail,
           truncateStyled(
-            style.bold(`계획 구현${title === null ? "" : ` · ${sanitizeForTerminal(title)}`}`),
+            style.bold(
+              `${t("render.transcript.implementing")}${title === null ? "" : ` · ${sanitizeForTerminal(title)}`}`,
+            ),
             this.textWidth,
           ),
         ),
@@ -456,10 +460,16 @@ export class TranscriptPrinter {
     const model = firstLine(payload.model);
     const subject = `${title === "" ? "" : ` · ${title}`}${model === "" ? "" : ` (${model})`}`;
     if (activity.kind !== "task.completed") {
-      return dim(`${who} ${activity.kind === "task.started" ? "시작" : "모델 전환"}${subject}`);
+      return dim(
+        `${who} ${
+          activity.kind === "task.started"
+            ? t("render.transcript.taskStarted")
+            : t("render.transcript.taskModel")
+        }${subject}`,
+      );
     }
     const status = payload.status;
-    const line = `${who} ${crewStatusWord(status) ?? "끝남"}${subject}`;
+    const line = `${who} ${crewStatusWord(status) ?? t("render.transcript.taskEnded")}${subject}`;
     if (status === "completed") {
       return wrapStyled(theme.success(line), this.textWidth).map((row, index) =>
         index === 0 ? railDone(this.rail, row) : railRow(this.rail, row),
@@ -511,12 +521,21 @@ export class TranscriptPrinter {
       const after = payload.afterTokens;
       const tokens =
         typeof before === "number" && typeof after === "number"
-          ? ` ${formatTokens(before)} -> ${formatTokens(after)} 토큰`
+          ? t("render.transcript.compactionTokens", {
+              before: formatTokens(before),
+              after: formatTokens(after),
+            })
           : "";
       return {
         kind: "event",
         rows: [
-          railDone(this.rail, truncateStyled(theme.info(`맥락 압축${tokens}`), this.textWidth)),
+          railDone(
+            this.rail,
+            truncateStyled(
+              theme.info(t("render.transcript.compaction", { tokens })),
+              this.textWidth,
+            ),
+          ),
         ],
       };
     }
@@ -524,7 +543,12 @@ export class TranscriptPrinter {
     if (activity.kind === THREAD_GOAL_ACTIVITY.met) {
       return {
         kind: "event",
-        rows: [railDone(this.rail, truncateStyled(theme.success("목표 완료"), this.textWidth))],
+        rows: [
+          railDone(
+            this.rail,
+            truncateStyled(theme.success(t("render.transcript.goalMet")), this.textWidth),
+          ),
+        ],
       };
     }
     if (activity.kind === THREAD_GOAL_ACTIVITY.blocked) {
@@ -534,7 +558,7 @@ export class TranscriptPrinter {
         rows: this.noticeRows(
           theme.warning,
           this.symbols.warning,
-          `목표 차단${reason === "" ? "" : `: ${reason}`}`,
+          t("render.transcript.goalBlocked", { reason: reason === "" ? "" : `: ${reason}` }),
         ),
       };
     }
@@ -544,7 +568,7 @@ export class TranscriptPrinter {
         rows: this.noticeRows(
           theme.warning,
           this.symbols.warning,
-          "목표 중지: 자동 연속 횟수를 모두 썼습니다",
+          t("render.transcript.goalExhausted"),
         ),
       };
     }

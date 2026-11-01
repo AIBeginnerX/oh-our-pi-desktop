@@ -8,7 +8,7 @@
       name="description"
       content="OOP is an open source desktop app that wraps the coding-agent CLIs you already use (Codex, Claude Code, Cursor, OpenCode and more) in one local workspace, with an optional multi-model Crew."
     />
-    <meta name="theme-color" content="#fbfaf7" />
+    <meta name="theme-color" content="#f1ecfc" />
     <link rel="canonical" href="https://oop-desktop.github.io/" />
     <meta property="og:url" content="https://oop-desktop.github.io/" />
     <meta
@@ -22,15 +22,15 @@
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
     <link rel="stylesheet" href="styles.css" />
     <script>
-      // Pick the language before first paint: ?lang=, then the saved choice, then the browser.
+      // Pick the language before first paint: ?lang=, then the saved choice, otherwise English.
+      // The browser language is deliberately not used.
       (function () {
         var q = new URLSearchParams(location.search).get("lang");
         var saved = null;
         try {
           saved = localStorage.getItem("oop-site-lang");
         } catch (e) {}
-        var pick = q || saved || (navigator.language || "").slice(0, 2);
-        var lang = pick === "ko" ? "ko" : "en";
+        var lang = (q || saved) === "ko" ? "ko" : "en";
         document.documentElement.lang = lang;
         document.documentElement.dataset.lang = lang;
         document.documentElement.classList.add("js");
@@ -52,6 +52,7 @@
           <a href="#what"><span lang="en">What it is</span><span lang="ko">소개</span></a>
           <a href="#features"><span lang="en">Features</span><span lang="ko">기능</span></a>
           <a href="#crew">Crew</a>
+          <a href="#terminal"><span lang="en">Terminal</span><span lang="ko">터미널</span></a>
           <a href="#charts"><span lang="en">Charts</span><span lang="ko">차트</span></a>
           <a href="#flows"><span lang="en">Workflows</span><span lang="ko">워크플로</span></a>
           <a href="#mobile"><span lang="en">Phone</span><span lang="ko">휴대폰</span></a>
@@ -78,11 +79,13 @@
           </a>
         </div>
       </div>
+      <div class="progress" aria-hidden="true"><i></i></div>
     </header>
 
     <main id="main">
       <!-- Hero -->
       <section class="hero" id="top">
+        <div class="hero-mesh" aria-hidden="true"><i></i><i></i><i></i></div>
         <div class="wrap hero-grid">
           <p class="eyebrow">
             <span lang="en">Open source · MIT · Local-first</span>
@@ -126,22 +129,101 @@
             >
           </p>
         </div>
-        <figure class="wrap shot hero-shot reveal">
-          <img
-            src="assets/shots/report-charts.webp"
-            width="1440"
-            height="900"
-            alt="OOP chat reply with key-figure tiles, a bar chart and a donut chart"
-            data-alt-ko="핵심 수치 타일, 막대 차트, 도넛 차트가 들어 있는 OOP 채팅 답변"
-            fetchpriority="high"
-          />
-        </figure>
+        <div class="wrap hero-media reveal">
+          <figure class="media hero-vid">
+            <div class="vid" data-video>
+              <video
+                muted
+                loop
+                playsinline
+                preload="none"
+                controls
+                poster="assets/video/desktop-demo.webp"
+                aria-label="Screen recording of the OOP desktop app working in a demo project"
+                data-aria-en="Screen recording of the OOP desktop app working in a demo project"
+                data-aria-ko="데모 프로젝트에서 작동하는 OOP 데스크톱 앱의 화면 녹화"
+              >
+                <source src="assets/video/desktop-demo.mp4" type="video/mp4" />
+              </video>
+              <img
+                class="vid-fallback"
+                hidden
+                src="assets/shots/report-charts.webp"
+                width="1440"
+                height="900"
+                alt="OOP chat reply with key-figure tiles, a bar chart and a donut chart"
+                data-alt-ko="핵심 수치 타일, 막대 차트, 도넛 차트가 들어 있는 OOP 채팅 답변"
+              />
+              <span class="rec"
+                ><i aria-hidden="true"></i><span lang="en">Real screen recording</span
+                ><span lang="ko">실제 화면 녹화</span></span
+              >
+              <button type="button" class="vid-btn js-only" data-act="video" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+            </div>
+            <figcaption>
+              <span lang="en"
+                >A screen recording of the desktop app on a demo project, not a mockup. It plays
+                while it is on screen.</span
+              ><span lang="ko"
+                >데모 프로젝트에서 실행한 데스크톱 앱의 화면 녹화이며 목업이 아닙니다. 화면에 보이는
+                동안 재생됩니다.</span
+              >
+            </figcaption>
+          </figure>
+        </div>
       </section>
+
+      <!-- Motion tour -->
+      <figure class="wrap media reel reveal" aria-label="Motion tour">
+        <p class="reel-title">
+          <span lang="en">Watch the 30-second tour</span><span lang="ko">30초 투어 보기</span>
+        </p>
+        <div class="vid" data-video>
+          <video
+            muted
+            loop
+            playsinline
+            preload="none"
+            controls
+            poster="assets/video/promo-reel.webp"
+            aria-label="Motion tour of OOP, built from real recordings"
+            data-aria-en="Motion tour of OOP, built from real recordings"
+            data-aria-ko="실제 녹화 화면으로 만든 OOP 모션 투어"
+          >
+            <source src="assets/video/promo-reel.mp4" type="video/mp4" />
+          </video>
+          <span class="rec rec-motion"
+            ><span lang="en">Motion tour built from real recordings</span
+            ><span lang="ko">실제 녹화 화면으로 만든 모션 투어</span></span
+          >
+          <button type="button" class="vid-btn js-only" data-act="video" data-state="paused">
+            <span class="s-paused"
+              ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+              ><span lang="en">Play</span><span lang="ko">재생</span></span
+            ><span class="s-playing"
+              ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+              ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+            >
+          </button>
+        </div>
+      </figure>
 
       <!-- Facts strip: every number comes from the public README -->
       <section class="wrap facts reveal" aria-label="At a glance">
         <div class="fact">
-          <b>8</b>
+          <b data-count="8">8</b>
           <span
             ><span lang="en"
               >agent providers: Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity,
@@ -153,21 +235,21 @@
           >
         </div>
         <div class="fact">
-          <b>4</b>
+          <b data-count="4">4</b>
           <span
             ><span lang="en">permission modes, from Supervised to Full access</span
             ><span lang="ko">권한 모드: Supervised부터 Full access까지</span></span
           >
         </div>
         <div class="fact">
-          <b>3</b>
+          <b data-count="4">4</b>
           <span
-            ><span lang="en">ways to use it: desktop app, browser, phone</span
-            ><span lang="ko">사용 방법: 데스크톱 앱, 브라우저, 휴대폰</span></span
+            ><span lang="en">ways to use it: desktop app, browser, phone, terminal</span
+            ><span lang="ko">사용 방법: 데스크톱 앱, 브라우저, 휴대폰, 터미널</span></span
           >
         </div>
         <div class="fact">
-          <b>0</b>
+          <b data-count="0">0</b>
           <span
             ><span lang="en">OOP accounts or OOP servers; your code stays on your machine</span
             ><span lang="ko">OOP 계정·OOP 서버; 코드는 내 컴퓨터에만 남습니다</span></span
@@ -205,28 +287,28 @@
           role="img"
           aria-label="Your agent CLIs plus your subscriptions plus OOP equals one workspace"
         >
-          <div class="eq-term">
+          <div class="eq-term" style="--k: 0">
             <small><span lang="en">You bring</span><span lang="ko">내가 준비</span></small>
             <b><span lang="en">Agent CLIs</span><span lang="ko">에이전트 CLI</span></b>
           </div>
-          <span class="eq-op" aria-hidden="true">+</span>
-          <div class="eq-term">
+          <span class="eq-op" aria-hidden="true" style="--k: 1">+</span>
+          <div class="eq-term" style="--k: 2">
             <small><span lang="en">You bring</span><span lang="ko">내가 준비</span></small>
             <b
               ><span lang="en">Subscriptions &amp; keys</span
               ><span lang="ko">구독과 API 키</span></b
             >
           </div>
-          <span class="eq-op" aria-hidden="true">+</span>
-          <div class="eq-term accent">
+          <span class="eq-op" aria-hidden="true" style="--k: 3">+</span>
+          <div class="eq-term accent" style="--k: 4">
             <small>OOP</small>
             <b
-              ><span lang="en">Desktop &middot; browser &middot; phone</span
-              ><span lang="ko">데스크톱 · 브라우저 · 휴대폰</span></b
+              ><span lang="en">Desktop &middot; browser &middot; phone &middot; terminal</span
+              ><span lang="ko">데스크톱 · 브라우저 · 휴대폰 · 터미널</span></b
             >
           </div>
-          <span class="eq-op" aria-hidden="true">=</span>
-          <div class="eq-term result">
+          <span class="eq-op" aria-hidden="true" style="--k: 5">=</span>
+          <div class="eq-term result" style="--k: 6">
             <small><span lang="en">You get</span><span lang="ko">결과</span></small>
             <b><span lang="en">One workspace</span><span lang="ko">하나의 작업 공간</span></b>
           </div>
@@ -434,6 +516,345 @@
             </p>
             <code>Right panel · mod+alt+w</code>
           </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">F9</span
+              ><span class="tag"><span lang="en">Terminal</span><span lang="ko">터미널</span></span>
+            </p>
+            <h3>
+              <span lang="en">The same threads in a terminal</span
+              ><span lang="ko">터미널에서 같은 스레드를</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Run <code>oop</code> in a project folder. It shares threads with the desktop app
+                and also runs without it.</span
+              ><span lang="ko"
+                >프로젝트 폴더에서 <code>oop</code>을 실행하세요. 데스크톱 앱과 스레드를 공유하며,
+                앱 없이도 실행됩니다.</span
+              >
+            </p>
+            <code>$ oop</code>
+          </article>
+        </div>
+        <div class="sub-head reveal">
+          <h3>
+            <span lang="en">How providers connect</span
+            ><span lang="ko">provider가 연결되는 방식</span>
+          </h3>
+        </div>
+        <div class="flow flow-hub reveal" data-flow>
+          <div class="flow-bar">
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 440 350"
+              role="img"
+              aria-label="Eight provider CLIs connect to one OOP workspace"
+              data-aria-en="Eight provider CLIs connect to one OOP workspace"
+              data-aria-ko="여덟 가지 provider CLI가 하나의 OOP 작업 공간에 연결됩니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="p1">
+                <rect class="halo" x="-4" y="16" width="138" height="44" rx="14" />
+                <rect class="box" x="0" y="20" width="130" height="36" rx="10" />
+                <text x="65" y="44" text-anchor="middle" font-size="18" font-weight="600">
+                  Codex
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p2">
+                <rect class="halo" x="-4" y="108" width="138" height="44" rx="14" />
+                <rect class="box" x="0" y="112" width="130" height="36" rx="10" />
+                <text x="65" y="136" text-anchor="middle" font-size="18" font-weight="600">
+                  Claude Code
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p3">
+                <rect class="halo" x="-4" y="200" width="138" height="44" rx="14" />
+                <rect class="box" x="0" y="204" width="130" height="36" rx="10" />
+                <text x="65" y="228" text-anchor="middle" font-size="18" font-weight="600">
+                  Cursor
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p4">
+                <rect class="halo" x="-4" y="292" width="138" height="44" rx="14" />
+                <rect class="box" x="0" y="296" width="130" height="36" rx="10" />
+                <text x="65" y="320" text-anchor="middle" font-size="18" font-weight="600">
+                  Grok Build
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p5">
+                <rect class="halo" x="306" y="16" width="138" height="44" rx="14" />
+                <rect class="box" x="310" y="20" width="130" height="36" rx="10" />
+                <text x="375" y="44" text-anchor="middle" font-size="18" font-weight="600">
+                  OpenCode
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p6">
+                <rect class="halo" x="306" y="108" width="138" height="44" rx="14" />
+                <rect class="box" x="310" y="112" width="130" height="36" rx="10" />
+                <text x="375" y="136" text-anchor="middle" font-size="18" font-weight="600">
+                  Antigravity
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p7">
+                <rect class="halo" x="306" y="200" width="138" height="44" rx="14" />
+                <rect class="box" x="310" y="204" width="130" height="36" rx="10" />
+                <text x="375" y="228" text-anchor="middle" font-size="18" font-weight="600">
+                  ZCode
+                </text>
+              </g>
+              <g class="fl-node on" data-id="p8">
+                <rect class="halo" x="306" y="292" width="138" height="44" rx="14" />
+                <rect class="box" x="310" y="296" width="130" height="36" rx="10" />
+                <text x="375" y="320" text-anchor="middle" font-size="18" font-weight="600">
+                  MiniMax Code
+                </text>
+              </g>
+              <g class="fl-node on" data-id="hub">
+                <rect class="halo" x="161" y="116" width="118" height="118" rx="14" />
+                <rect class="box" x="165" y="120" width="110" height="110" rx="10" />
+                <text x="220" y="173" text-anchor="middle" font-size="18" font-weight="600">
+                  OOP
+                </text>
+                <text
+                  lang="en"
+                  x="220"
+                  y="191"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  one workspace
+                </text>
+                <text
+                  lang="ko"
+                  x="220"
+                  y="191"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  작업 공간
+                </text>
+              </g>
+              <path
+                class="fl-edge on"
+                data-id="e1"
+                pathLength="1"
+                d="M130,38 C148,38 148,140 165,140"
+              />
+              <path class="fl-head on" data-id="e1" d="M156.0,145.0 L165.0,140.0 L156.0,135.0" />
+              <path
+                class="fl-edge on"
+                data-id="e2"
+                pathLength="1"
+                d="M130,130 C148,130 148,163 165,163"
+              />
+              <path class="fl-head on" data-id="e2" d="M156.0,168.0 L165.0,163.0 L156.0,158.0" />
+              <path
+                class="fl-edge on"
+                data-id="e3"
+                pathLength="1"
+                d="M130,222 C148,222 148,186 165,186"
+              />
+              <path class="fl-head on" data-id="e3" d="M156.0,191.0 L165.0,186.0 L156.0,181.0" />
+              <path
+                class="fl-edge on"
+                data-id="e4"
+                pathLength="1"
+                d="M130,314 C148,314 148,209 165,209"
+              />
+              <path class="fl-head on" data-id="e4" d="M156.0,214.0 L165.0,209.0 L156.0,204.0" />
+              <path
+                class="fl-edge on"
+                data-id="e5"
+                pathLength="1"
+                d="M310,38 C292,38 292,140 275,140"
+              />
+              <path class="fl-head on" data-id="e5" d="M284.0,135.0 L275.0,140.0 L284.0,145.0" />
+              <path
+                class="fl-edge on"
+                data-id="e6"
+                pathLength="1"
+                d="M310,130 C292,130 292,163 275,163"
+              />
+              <path class="fl-head on" data-id="e6" d="M284.0,158.0 L275.0,163.0 L284.0,168.0" />
+              <path
+                class="fl-edge on"
+                data-id="e7"
+                pathLength="1"
+                d="M310,222 C292,222 292,186 275,186"
+              />
+              <path class="fl-head on" data-id="e7" d="M284.0,181.0 L275.0,186.0 L284.0,191.0" />
+              <path
+                class="fl-edge on"
+                data-id="e8"
+                pathLength="1"
+                d="M310,314 C292,314 292,209 275,209"
+              />
+              <path class="fl-head on" data-id="e8" d="M284.0,204.0 L275.0,209.0 L284.0,214.0" />
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="">
+                <li data-on="p1,p2,p3,p4,p5,p6,p7,p8" data-off="" data-run="">
+                  <span lang="en"
+                    ><b>Eight agent CLIs</b> you already use: Codex, Claude Code, Cursor, Grok
+                    Build, OpenCode, Antigravity, ZCode and MiniMax Code.</span
+                  ><span lang="ko"
+                    >이미 쓰고 있는 <b>에이전트 CLI 여덟 가지</b>: Codex, Claude Code, Cursor, Grok
+                    Build, OpenCode, Antigravity, ZCode, MiniMax Code.</span
+                  >
+                </li>
+                <li
+                  data-on="hub,e1,e2,e3,e4,e5,e6,e7,e8"
+                  data-off=""
+                  data-run="e1,e2,e3,e4,e5,e6,e7,e8"
+                >
+                  <span lang="en"
+                    ><b>One workspace.</b> They plug into the same thread view, diff and approval
+                    flow.</span
+                  ><span lang="ko"
+                    ><b>하나의 작업 공간.</b> 같은 스레드 화면, diff, 승인 흐름에 연결됩니다.</span
+                  >
+                </li>
+                <li data-on="hub" data-off="" data-run="e2,e5">
+                  <span lang="en"
+                    ><b>Per thread</b> you can switch the provider and model. Here two example
+                    threads use two different providers.</span
+                  ><span lang="ko"
+                    ><b>스레드마다</b> provider와 모델을 바꿀 수 있습니다. 여기서는 두 예시 스레드가
+                    서로 다른 provider를 씁니다.</span
+                  >
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en">Which provider a thread uses is just an example here.</span
+                ><span lang="ko">어느 스레드가 어느 provider를 쓰는지는 예시입니다.</span>
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
+        </div>
+        <div class="sub-head reveal">
+          <h3>
+            <span lang="en">Four permission modes</span><span lang="ko">네 가지 권한 모드</span>
+          </h3>
+        </div>
+        <div class="flow flow-lad reveal" data-flow>
+          <div class="flow-bar">
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <div
+              class="ladder"
+              role="img"
+              aria-label="Four permission modes, from Supervised to Full access"
+              data-aria-en="Four permission modes, from Supervised to Full access"
+              data-aria-ko="Supervised부터 Full access까지 네 가지 권한 모드"
+            >
+              <p class="ladder-axis">
+                <span><span lang="en">asks more</span><span lang="ko">더 많이 묻기</span></span
+                ><span><span lang="en">asks less</span><span lang="ko">덜 묻기</span></span>
+              </p>
+              <div class="rung on" data-id="r1" style="--w: 0.25">
+                <b>Supervised</b><span class="rbar"><i></i></span>
+              </div>
+              <div class="rung on" data-id="r2" style="--w: 0.5">
+                <b>Auto-accept edits</b><span class="rbar"><i></i></span>
+              </div>
+              <div class="rung on" data-id="r3" style="--w: 0.75">
+                <b>Auto</b><span class="rbar"><i></i></span>
+              </div>
+              <div class="rung on" data-id="r4" style="--w: 1">
+                <b>Full access</b><span class="rbar"><i></i></span>
+              </div>
+            </div>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="">
+                <li data-on="r1" data-off="" data-run="">
+                  <span lang="en">
+                    <b>Supervised.</b> Asks for approval for commands and file changes.</span
+                  ><span lang="ko">
+                    <b>Supervised.</b> 명령과 파일 변경마다 승인을 요청합니다.</span
+                  >
+                </li>
+                <li data-on="r2" data-off="" data-run="">
+                  <span lang="en">
+                    <b>Auto-accept edits.</b> Approves file edits automatically; other actions can
+                    still ask.</span
+                  ><span lang="ko">
+                    <b>Auto-accept edits.</b> 파일 수정은 자동 승인하고, 다른 동작은 여전히 물어볼
+                    수 있습니다.</span
+                  >
+                </li>
+                <li data-on="r3" data-off="" data-run="">
+                  <span lang="en">
+                    <b>Auto.</b> Uses the provider's automatic review for routine actions and asks
+                    about the rest (Codex, Claude, Cursor; other providers fall back to
+                    asking).</span
+                  ><span lang="ko">
+                    <b>Auto.</b> routine한 동작은 provider의 자동 검토에 맡기고 나머지는
+                    묻습니다(Codex, Claude, Cursor; 다른 provider는 묻는 쪽으로 대체).</span
+                  >
+                </li>
+                <li data-on="r4" data-off="" data-run="">
+                  <span lang="en">
+                    <b>Full access.</b> Commands and edits run without approval prompts. This is the
+                    default for new threads.</span
+                  ><span lang="ko">
+                    <b>Full access.</b> 명령과 수정이 승인 요청 없이 실행됩니다. 새 스레드의
+                    기본값입니다.</span
+                  >
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en">Use Supervised for repositories you do not trust.</span
+                ><span lang="ko">믿기 어려운 저장소에는 Supervised를 쓰세요.</span>
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
         </div>
       </section>
 
@@ -478,6 +899,173 @@
             <span lang="ko">파일을 바꾼 턴을 검토합니다.</span>
           </div>
         </div>
+        <div class="flow flow-crew reveal" data-flow>
+          <div class="flow-bar">
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 500 340"
+              role="img"
+              aria-label="Crew flow: you talk to the brain, the brain gives work to a worker and an expert, the auditor reviews changed files and the brain answers you"
+              data-aria-en="Crew flow: you talk to the brain, the brain gives work to a worker and an expert, the auditor reviews changed files and the brain answers you"
+              data-aria-ko="Crew 흐름: 사용자가 brain과 대화하고, brain이 worker와 expert에게 일을 나누고, auditor가 바뀐 파일을 검토한 뒤 brain이 사용자에게 답합니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="you">
+                <rect class="halo" x="16" y="152" width="118" height="56" rx="14" />
+                <rect class="box" x="20" y="156" width="110" height="48" rx="10" />
+                <text
+                  lang="en"
+                  x="75"
+                  y="186"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  You
+                </text>
+                <text
+                  lang="ko"
+                  x="75"
+                  y="186"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  나
+                </text>
+              </g>
+              <g class="fl-node on" data-id="brain">
+                <rect class="halo" x="171" y="152" width="118" height="56" rx="14" />
+                <rect class="box" x="175" y="156" width="110" height="48" rx="10" />
+                <text x="230" y="186" text-anchor="middle" font-size="20" font-weight="600">
+                  Brain
+                </text>
+              </g>
+              <g class="fl-node on" data-id="worker">
+                <rect class="halo" x="361" y="36" width="118" height="56" rx="14" />
+                <rect class="box" x="365" y="40" width="110" height="48" rx="10" />
+                <text x="420" y="70" text-anchor="middle" font-size="20" font-weight="600">
+                  Worker
+                </text>
+              </g>
+              <g class="fl-node on" data-id="expert">
+                <rect class="halo" x="361" y="268" width="118" height="56" rx="14" />
+                <rect class="box" x="365" y="272" width="110" height="48" rx="10" />
+                <text x="420" y="302" text-anchor="middle" font-size="20" font-weight="600">
+                  Expert
+                </text>
+              </g>
+              <g class="fl-node on" data-id="auditor">
+                <rect class="halo" x="361" y="152" width="118" height="56" rx="14" />
+                <rect class="box" x="365" y="156" width="110" height="48" rx="10" />
+                <text x="420" y="186" text-anchor="middle" font-size="20" font-weight="600">
+                  Auditor
+                </text>
+              </g>
+              <path class="fl-edge on" data-id="ask" pathLength="1" d="M130,172 L175,172" />
+              <path class="fl-head on" data-id="ask" d="M166.0,177.0 L175.0,172.0 L166.0,167.0" />
+              <path
+                class="fl-edge on"
+                data-id="plan-w"
+                pathLength="1"
+                d="M230,156 C230,64 300,64 365,64"
+              />
+              <path class="fl-head on" data-id="plan-w" d="M356.0,69.0 L365.0,64.0 L356.0,59.0" />
+              <path
+                class="fl-edge on"
+                data-id="plan-x"
+                pathLength="1"
+                d="M230,204 C230,296 300,296 365,296"
+              />
+              <path
+                class="fl-head on"
+                data-id="plan-x"
+                d="M356.0,301.0 L365.0,296.0 L356.0,291.0"
+              />
+              <path class="fl-edge on" data-id="w-a" pathLength="1" d="M420,88 L420,156" />
+              <path class="fl-head on" data-id="w-a" d="M415.0,147.0 L420.0,156.0 L425.0,147.0" />
+              <path class="fl-edge on" data-id="x-a" pathLength="1" d="M420,272 L420,204" />
+              <path class="fl-head on" data-id="x-a" d="M425.0,213.0 L420.0,204.0 L415.0,213.0" />
+              <path class="fl-edge on" data-id="review" pathLength="1" d="M365,180 L285,180" />
+              <path
+                class="fl-head on"
+                data-id="review"
+                d="M294.0,175.0 L285.0,180.0 L294.0,185.0"
+              />
+              <path class="fl-edge on" data-id="answer" pathLength="1" d="M175,190 L130,190" />
+              <path
+                class="fl-head on"
+                data-id="answer"
+                d="M139.0,185.0 L130.0,190.0 L139.0,195.0"
+              />
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="">
+                <li data-on="you,brain,ask" data-off="" data-run="ask">
+                  <span lang="en"
+                    ><b>You ask.</b> The chat's own model is the brain: it plans and talks to
+                    you.</span
+                  ><span lang="ko"
+                    ><b>요청을 보냅니다.</b> 채팅의 모델이 brain이 되어 계획을 세우고 사용자와
+                    대화합니다.</span
+                  >
+                </li>
+                <li data-on="worker,plan-w" data-off="" data-run="plan-w">
+                  <span lang="en"
+                    ><b>Routine work</b> goes to a worker: searches, edits, tests.</span
+                  ><span lang="ko"><b>반복 작업</b>은 worker가 맡습니다: 검색, 수정, 테스트.</span>
+                </li>
+                <li data-on="expert,plan-x" data-off="" data-run="plan-x">
+                  <span lang="en"><b>Hard implementation</b> goes to an expert.</span
+                  ><span lang="ko"><b>어려운 구현</b>은 expert가 맡습니다.</span>
+                </li>
+                <li data-on="auditor,w-a,x-a" data-off="" data-run="w-a,x-a">
+                  <span lang="en"
+                    ><b>A turn that changed files</b> goes to the auditor. Small, test-passing
+                    changes of 20 lines or fewer are skipped.</span
+                  ><span lang="ko"
+                    ><b>파일을 바꾼 턴</b>은 auditor에게 갑니다. 테스트를 통과한 20줄 이하의 작은
+                    변경은 건너뜁니다.</span
+                  >
+                </li>
+                <li data-on="review" data-off="" data-run="review">
+                  <span lang="en"><b>The review</b> comes back to the brain.</span
+                  ><span lang="ko"><b>검토 결과</b>가 brain에게 돌아갑니다.</span>
+                </li>
+                <li data-on="answer" data-off="" data-run="answer">
+                  <span lang="en"><b>The brain answers you.</b></span
+                  ><span lang="ko"><b>brain이 사용자에게 답합니다.</b></span>
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en">A simplified example turn, not a recording.</span
+                ><span lang="ko">단순화한 예시 턴이며 녹화가 아닙니다.</span>
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
+        </div>
         <ul class="notes reveal">
           <li>
             <span lang="en"
@@ -517,10 +1105,741 @@
       </section>
 
       <!-- 04 -->
+      <section class="section wrap" id="terminal">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>04</span> · <span lang="en">Terminal</span><span lang="ko">터미널</span>
+          </p>
+          <h2>
+            <span lang="en">The same threads,<br /><em>in your terminal.</em></span>
+            <span lang="ko">같은 스레드를<br /><em>터미널에서.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >Type <code>oop</code> and chat with your agents in a full-screen terminal app.
+              Threads are shared with the desktop app, and on the same computer it connects by
+              itself, with no pairing.</span
+            >
+            <span lang="ko"
+              ><code>oop</code>을 입력하면 터미널 전체 화면에서 에이전트와 대화합니다. 스레드는
+              데스크톱 앱과 공유되고, 같은 컴퓨터에서는 페어링 없이 알아서 연결됩니다.</span
+            >
+          </p>
+        </header>
+        <figure class="media term-vid">
+          <div class="vid" data-video>
+            <video
+              muted
+              loop
+              playsinline
+              preload="none"
+              controls
+              poster="assets/video/terminal-demo.webp"
+              aria-label="Screen recording of the oop terminal app"
+              data-aria-en="Screen recording of the oop terminal app"
+              data-aria-ko="oop 터미널 앱의 화면 녹화"
+            >
+              <source src="assets/video/terminal-demo.mp4" type="video/mp4" />
+            </video>
+            <span class="rec"
+              ><i aria-hidden="true"></i><span lang="en">Real screen recording</span
+              ><span lang="ko">실제 화면 녹화</span></span
+            >
+            <button type="button" class="vid-btn js-only" data-act="video" data-state="paused">
+              <span class="s-paused"
+                ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                  <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                ><span lang="en">Play</span><span lang="ko">재생</span></span
+              ><span class="s-playing"
+                ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                  <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+              >
+            </button>
+          </div>
+          <figcaption>
+            <span lang="en"
+              >A screen recording of the terminal app (<code>oop</code>), not a mockup.</span
+            ><span lang="ko">터미널 앱(<code>oop</code>)의 화면 녹화이며 목업이 아닙니다.</span>
+          </figcaption>
+        </figure>
+
+        <div class="term-grid">
+          <div class="reveal">
+            <h3>
+              <span lang="en">Start from any folder</span
+              ><span lang="ko">어느 폴더에서든 시작</span>
+            </h3>
+            <ul class="cmds">
+              <li>
+                <code>oop</code
+                ><span
+                  ><span lang="en">Pick a project and a thread, then chat.</span
+                  ><span lang="ko">프로젝트와 스레드를 고른 뒤 대화합니다.</span></span
+                >
+              </li>
+              <li>
+                <code>oop --continue</code
+                ><span
+                  ><span lang="en">Resume the latest thread of the project in this folder.</span
+                  ><span lang="ko">지금 폴더 프로젝트의 가장 최근 스레드를 이어갑니다.</span></span
+                >
+              </li>
+              <li>
+                <code>oop "your message"</code
+                ><span
+                  ><span lang="en"
+                    >Open a new thread in this folder's project and send the message at once.</span
+                  ><span lang="ko"
+                    >지금 폴더 프로젝트에 새 스레드를 열고 메시지를 바로 보냅니다.</span
+                  ></span
+                >
+              </li>
+              <li>
+                <code>oop pair &lt;link&gt;</code
+                ><span
+                  ><span lang="en"
+                    >Connect to the server of another computer (not needed on this one).</span
+                  ><span lang="ko"
+                    >다른 컴퓨터의 서버에 연결합니다(이 컴퓨터에서는 필요 없음).</span
+                  ></span
+                >
+              </li>
+              <li>
+                <code>oop stop</code
+                ><span
+                  ><span lang="en"
+                    >Stop the server that oop started. The app's own server is never stopped.</span
+                  ><span lang="ko"
+                    >oop이 띄운 서버를 멈춥니다. 앱이 쓰는 서버는 멈추지 않습니다.</span
+                  ></span
+                >
+              </li>
+              <li>
+                <code>oop doctor</code
+                ><span
+                  ><span lang="en">Check colours, settings, server and credentials.</span
+                  ><span lang="ko">터미널 색, 설정, 서버, 자격증명 파일을 점검합니다.</span></span
+                >
+              </li>
+              <li>
+                <code>oop update</code
+                ><span
+                  ><span lang="en">Check for a new release (installs nothing).</span
+                  ><span lang="ko">새 릴리스를 확인합니다(설치는 하지 않음).</span></span
+                >
+              </li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="reveal">
+              <span lang="en">Slash commands</span><span lang="ko">슬래시 명령</span>
+            </h3>
+            <div class="flow tm reveal" data-flow data-final="1">
+              <div class="flow-bar">
+                <div
+                  class="flow-ctl"
+                  role="group"
+                  aria-label="Animation controls / 애니메이션 제어"
+                >
+                  <button type="button" class="ctl" data-act="play" data-state="paused">
+                    <span class="s-paused"
+                      ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                        <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                      ><span lang="en">Play</span><span lang="ko">재생</span></span
+                    ><span class="s-playing"
+                      ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                        <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                      ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                    >
+                  </button>
+                  <button type="button" class="ctl" data-act="step">
+                    <span lang="en">Step</span><span lang="ko">한 단계</span>
+                  </button>
+                  <button type="button" class="ctl" data-act="replay">
+                    <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+                  </button>
+                </div>
+              </div>
+              <div
+                class="tm-win"
+                role="img"
+                aria-label="Terminal example: typing a slash opens a menu of commands, typing /mo narrows it to model and mode"
+                data-aria-en="Terminal example: typing a slash opens a menu of commands, typing /mo narrows it to model and mode"
+                data-aria-ko="터미널 예시: 슬래시를 입력하면 명령 메뉴가 열리고, /mo를 입력하면 model과 mode만 남습니다"
+              >
+                <div class="tm-bar" aria-hidden="true"><i></i><i></i><i></i><span>oop</span></div>
+                <div class="tm-body" aria-hidden="true">
+                  <ul class="tm-menu" data-id="m1">
+                    <li>
+                      <code>/model</code
+                      ><span class="gloss"
+                        ><span lang="en">Pick a model</span><span lang="ko">모델 선택</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/mode</code
+                      ><span class="gloss"
+                        ><span lang="en">Show or change the permission mode</span
+                        ><span lang="ko">권한 모드 보기·바꾸기</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/effort</code
+                      ><span class="gloss"
+                        ><span lang="en">Show or change reasoning effort</span
+                        ><span lang="ko">리저닝 강도 보기·바꾸기</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/plan</code
+                      ><span class="gloss"
+                        ><span lang="en">Switch to plan mode</span
+                        ><span lang="ko">계획 모드로 전환</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/default</code
+                      ><span class="gloss"
+                        ><span lang="en">Switch to default mode</span
+                        ><span lang="ko">기본 모드로 전환</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/implement</code
+                      ><span class="gloss"
+                        ><span lang="en">Implement the proposed plan</span
+                        ><span lang="ko">제안된 계획을 구현</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/goal</code
+                      ><span class="gloss"
+                        ><span lang="en">Set or check the thread goal</span
+                        ><span lang="ko">스레드 목표 설정·확인</span></span
+                      >
+                    </li>
+                    <li class="more" aria-hidden="true">…</li>
+                  </ul>
+                  <ul class="tm-menu on" data-id="m2">
+                    <li>
+                      <code>/model</code
+                      ><span class="gloss"
+                        ><span lang="en">Pick a model</span><span lang="ko">모델 선택</span></span
+                      >
+                    </li>
+                    <li>
+                      <code>/mode</code
+                      ><span class="gloss"
+                        ><span lang="en">Show or change the permission mode</span
+                        ><span lang="ko">권한 모드 보기·바꾸기</span></span
+                      >
+                    </li>
+                  </ul>
+                  <p class="tm-prompt">
+                    <span class="tm-caret">&gt;</span> <span data-id="p1">/</span
+                    ><span data-id="p2" class="on">/mo</span><span class="tm-cursor"></span>
+                  </p>
+                </div>
+              </div>
+              <ol class="flow-steps" data-steps="">
+                <li data-on="p1,m1" data-off="p2,m2" data-run="">
+                  <span lang="en"
+                    >Type <b><code>/</code></b> and a menu lists the commands.</span
+                  ><span lang="ko"
+                    ><b><code>/</code></b
+                    >를 입력하면 명령 메뉴가 열립니다.</span
+                  >
+                </li>
+                <li data-on="p2,m2" data-off="p1,m1" data-run="">
+                  <span lang="en"
+                    >Keep typing and the list narrows: <b><code>/mo</code></b> leaves
+                    <code>/model</code> and <code>/mode</code>.</span
+                  ><span lang="ko"
+                    >계속 입력하면 목록이 좁혀집니다. <b><code>/mo</code></b
+                    >에는 <code>/model</code>과 <code>/mode</code>만 남습니다.</span
+                  >
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en"
+                  >Command names are the real ones. The descriptions are short summaries.</span
+                ><span lang="ko">명령 이름은 실제와 같습니다. 설명은 요약한 것입니다.</span>
+              </p>
+              <p class="sr" aria-live="polite" data-live></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-head reveal">
+          <h3>
+            <span lang="en">One server, one data folder</span
+            ><span lang="ko">서버 하나, 데이터 폴더 하나</span>
+          </h3>
+          <p class="hint">
+            <span lang="en"
+              >The terminal does not need the app. If the app is closed, <code>oop</code> starts the
+              server bundled with it as a background process. When the app starts it takes that
+              server over and <code>oop</code> reconnects. Turns that are running at that moment are
+              interrupted.</span
+            ><span lang="ko"
+              >터미널은 앱 없이도 쓸 수 있습니다. 앱이 꺼져 있으면 <code>oop</code>이 앱에 들어 있는
+              서버를 백그라운드 프로세스로 띄웁니다. 앱을 켜면 앱이 그 서버를 이어받고
+              <code>oop</code>은 다시 연결합니다. 그 순간 진행 중이던 턴은 중단됩니다.</span
+            >
+          </p>
+        </div>
+        <div class="flow flow-ho reveal" data-flow>
+          <div class="flow-bar">
+            <div class="seg js-only" role="group" aria-label="App state / 앱 상태">
+              <button type="button" data-mode="closed" aria-pressed="true">
+                <span lang="en">App closed</span><span lang="ko">앱 꺼짐</span></button
+              ><button type="button" data-mode="open" aria-pressed="false">
+                <span lang="en">App open</span><span lang="ko">앱 켜짐</span>
+              </button>
+            </div>
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 520 320"
+              role="img"
+              aria-label="Handover: with the app closed, oop starts a server; when the app opens it takes that server over and oop reconnects; both use one data folder"
+              data-aria-en="Handover: with the app closed, oop starts a server; when the app opens it takes that server over and oop reconnects; both use one data folder"
+              data-aria-ko="인계: 앱이 꺼져 있으면 oop이 서버를 띄우고, 앱을 켜면 앱이 그 서버를 이어받고 oop이 다시 연결합니다. 데이터 폴더는 하나입니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="oop">
+                <rect class="halo" x="16" y="16" width="138" height="58" rx="14" />
+                <rect class="box" x="20" y="20" width="130" height="50" rx="10" />
+                <text x="85" y="51" text-anchor="middle" font-size="20" font-weight="600">oop</text>
+              </g>
+              <g class="fl-node" data-id="app">
+                <rect class="halo" x="366" y="16" width="138" height="58" rx="14" />
+                <rect class="box" x="370" y="20" width="130" height="50" rx="10" />
+                <text
+                  lang="en"
+                  x="435"
+                  y="51"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Desktop app
+                </text>
+                <text
+                  lang="ko"
+                  x="435"
+                  y="51"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  데스크톱 앱
+                </text>
+              </g>
+              <g class="fl-node on" data-id="srv-d">
+                <rect class="halo" x="181" y="121" width="158" height="64" rx="14" />
+                <rect class="box" x="185" y="125" width="150" height="56" rx="10" />
+                <text
+                  lang="en"
+                  x="260"
+                  y="151"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Server
+                </text>
+                <text
+                  lang="ko"
+                  x="260"
+                  y="151"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  서버
+                </text>
+                <text
+                  lang="en"
+                  x="260"
+                  y="169"
+                  text-anchor="middle"
+                  font-size="15"
+                  font-weight="400"
+                  class="sub"
+                >
+                  started by oop
+                </text>
+                <text
+                  lang="ko"
+                  x="260"
+                  y="169"
+                  text-anchor="middle"
+                  font-size="15"
+                  font-weight="400"
+                  class="sub"
+                >
+                  oop이 시작
+                </text>
+              </g>
+              <g class="fl-node" data-id="srv-a">
+                <rect class="halo" x="181" y="121" width="158" height="64" rx="14" />
+                <rect class="box" x="185" y="125" width="150" height="56" rx="10" />
+                <text
+                  lang="en"
+                  x="260"
+                  y="151"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Server
+                </text>
+                <text
+                  lang="ko"
+                  x="260"
+                  y="151"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  서버
+                </text>
+                <text
+                  lang="en"
+                  x="260"
+                  y="169"
+                  text-anchor="middle"
+                  font-size="15"
+                  font-weight="400"
+                  class="sub"
+                >
+                  inside the app
+                </text>
+                <text
+                  lang="ko"
+                  x="260"
+                  y="169"
+                  text-anchor="middle"
+                  font-size="15"
+                  font-weight="400"
+                  class="sub"
+                >
+                  앱 안
+                </text>
+              </g>
+              <g class="fl-node on" data-id="data">
+                <rect class="halo" x="146" y="236" width="228" height="64" rx="14" />
+                <rect class="box" x="150" y="240" width="220" height="56" rx="10" />
+                <text
+                  lang="en"
+                  x="260"
+                  y="266"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Data folder
+                </text>
+                <text
+                  lang="ko"
+                  x="260"
+                  y="266"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  데이터 폴더
+                </text>
+                <text
+                  lang="en"
+                  x="260"
+                  y="284"
+                  text-anchor="middle"
+                  font-size="15"
+                  font-weight="400"
+                  class="sub"
+                >
+                  ~/.oop-desktop
+                </text>
+                <text
+                  lang="ko"
+                  x="260"
+                  y="284"
+                  text-anchor="middle"
+                  font-size="15"
+                  font-weight="400"
+                  class="sub"
+                >
+                  ~/.oop-desktop
+                </text>
+              </g>
+              <path
+                class="fl-edge on"
+                data-id="e-term"
+                pathLength="1"
+                d="M85,70 L85,153 L185,153"
+              />
+              <path
+                class="fl-head on"
+                data-id="e-term"
+                d="M176.0,158.0 L185.0,153.0 L176.0,148.0"
+              />
+              <path class="fl-edge" data-id="e-app" pathLength="1" d="M435,70 L435,153 L335,153" />
+              <path class="fl-head" data-id="e-app" d="M344.0,148.0 L335.0,153.0 L344.0,158.0" />
+              <path class="fl-edge on" data-id="e-data" pathLength="1" d="M260,181 L260,240" />
+              <path
+                class="fl-head on"
+                data-id="e-data"
+                d="M255.0,231.0 L260.0,240.0 L265.0,231.0"
+              />
+              <g class="fl-chip" data-id="chip">
+                <rect x="185" y="88" width="150" height="26" rx="13" />
+                <text lang="en" x="260" y="106" text-anchor="middle" font-size="14">
+                  turn interrupted
+                </text>
+                <text lang="ko" x="260" y="106" text-anchor="middle" font-size="14">
+                  진행 중 턴 중단
+                </text>
+              </g>
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="closed">
+                <li data-on="oop,e-term" data-off="" data-run="e-term">
+                  <span lang="en"
+                    ><b>You run <code>oop</code></b> while the app is closed.</span
+                  ><span lang="ko"
+                    >앱이 꺼진 상태에서 <b><code>oop</code>을 실행</b>합니다.</span
+                  >
+                </li>
+                <li data-on="srv-d" data-off="" data-run="e-term">
+                  <span lang="en"
+                    ><b>oop starts the server</b> that is bundled with the app, as a background
+                    daemon.</span
+                  ><span lang="ko"
+                    ><b>oop이 서버를 띄웁니다.</b> 앱에 들어 있는 서버를 백그라운드 데몬으로
+                    실행합니다.</span
+                  >
+                </li>
+                <li data-on="data,e-data" data-off="" data-run="e-data">
+                  <span lang="en"
+                    ><b>One data folder.</b> The server uses the folder the app uses, so threads are
+                    shared. Closing oop leaves the server running; <code>oop stop</code> ends
+                    it.</span
+                  ><span lang="ko"
+                    ><b>데이터 폴더는 하나.</b> 서버는 앱이 쓰는 폴더를 그대로 쓰므로 스레드가
+                    공유됩니다. oop을 닫아도 서버는 계속 실행되며, <code>oop stop</code>으로
+                    멈춥니다.</span
+                  >
+                </li>
+              </ol>
+              <ol class="flow-steps" data-steps="open" data-base="closed" hidden>
+                <li data-on="app" data-off="" data-run="">
+                  <span lang="en"><b>You open the desktop app.</b></span
+                  ><span lang="ko"><b>데스크톱 앱을 켭니다.</b></span>
+                </li>
+                <li data-on="srv-a,e-app,chip" data-off="srv-d" data-run="e-app">
+                  <span lang="en"
+                    ><b>The app takes the server over.</b> A turn that is running at that moment is
+                    interrupted.</span
+                  ><span lang="ko"
+                    ><b>앱이 서버를 이어받습니다.</b> 그 순간 진행 중이던 턴은 중단됩니다.</span
+                  >
+                </li>
+                <li data-on="" data-off="" data-run="e-term">
+                  <span lang="en"
+                    ><b>oop reconnects by itself.</b> There is still one server and one data
+                    folder.</span
+                  ><span lang="ko"
+                    ><b>oop이 알아서 다시 연결합니다.</b> 서버도 데이터 폴더도 여전히
+                    하나입니다.</span
+                  >
+                </li>
+              </ol>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
+        </div>
+
+        <div class="cards points">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T1</span
+              ><span class="tag"><span lang="en">Local</span><span lang="ko">로컬</span></span>
+            </p>
+            <h3>
+              <span lang="en">No pairing on this computer</span
+              ><span lang="ko">이 컴퓨터에서는 페어링 없이</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >With the app running on the same computer, <code>oop</code> connects by itself.
+                Pairing is only for a server on another computer.</span
+              ><span lang="ko"
+                >같은 컴퓨터에서 앱이 실행 중이면 <code>oop</code>이 알아서 연결됩니다. 페어링은
+                다른 컴퓨터의 서버에 붙을 때만 필요합니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T2</span
+              ><span class="tag"
+                ><span lang="en">Standalone</span><span lang="ko">단독 실행</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">Runs without the app</span><span lang="ko">앱 없이도 실행</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Closing <code>oop</code> leaves the server it started running, so work continues.
+                <code>oop stop</code> ends it.</span
+              ><span lang="ko"
+                ><code>oop</code>을 닫아도 oop이 띄운 서버는 계속 실행되어 작업이 이어집니다.
+                <code>oop stop</code>으로 멈춥니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T3</span
+              ><span class="tag"><span lang="en">Queue</span><span lang="ko">대기열</span></span>
+            </p>
+            <h3><span lang="en">Message queue</span><span lang="ko">메시지 대기열</span></h3>
+            <p>
+              <span lang="en"
+                >Messages typed while a turn is running wait in a queue per thread. The queue lives
+                only while <code>oop</code> is open.</span
+              ><span lang="ko"
+                >턴이 실행되는 동안 입력한 메시지는 스레드별 대기열에서 기다립니다. 대기열은
+                <code>oop</code>이 열려 있는 동안에만 유지됩니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T4</span
+              ><span class="tag"><span lang="en">Notify</span><span lang="ko">알림</span></span>
+            </p>
+            <h3>
+              <span lang="en">Bell when it needs you</span><span lang="ko">필요할 때 벨</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >The terminal bell rings when a turn finishes or waits for an approval or an answer.
+                On by default; <code>oop config set notify false</code> turns it off.</span
+              ><span lang="ko"
+                >턴이 끝나거나 승인·답변을 기다리면 터미널 벨이 울립니다. 기본으로 켜져 있고,
+                <code>oop config set notify false</code>로 끕니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T5</span
+              ><span class="tag"><span lang="en">Themes</span><span lang="ko">테마</span></span>
+            </p>
+            <h3><span lang="en">Six themes</span><span lang="ko">여섯 가지 테마</span></h3>
+            <p>
+              <span lang="en"
+                >Pick one with <code>/theme</code> or
+                <code>oop config set theme &lt;name&gt;</code>.</span
+              ><span lang="ko"
+                ><code>/theme</code> 또는 <code>oop config set theme &lt;이름&gt;</code>으로
+                고릅니다.</span
+              >
+            </p>
+            <ul class="chips tight" aria-label="Themes / 테마">
+              <li><code>oop</code></li>
+              <li><code>oop-light</code></li>
+              <li><code>aurora</code></li>
+              <li><code>sunset</code></li>
+              <li><code>colorblind</code></li>
+              <li><code>ansi</code></li>
+            </ul>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T6</span
+              ><span class="tag"><span lang="en">Commands</span><span lang="ko">명령</span></span>
+            </p>
+            <h3>
+              <span lang="en">More slash commands</span><span lang="ko">더 많은 슬래시 명령</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Mode, plan, model, effort, goal, crew, provider, tasks, workflows, history, diff,
+                undo and more, all from the prompt.</span
+              ><span lang="ko"
+                >모드, 계획, 모델, 리저닝 강도, 목표, crew, provider, 작업 목록, 워크플로, 기록,
+                diff, 되돌리기 등을 프롬프트에서 바로 씁니다.</span
+              >
+            </p>
+            <ul class="chips tight" aria-label="Slash commands / 슬래시 명령">
+              <li><code>/model</code></li>
+              <li><code>/mode</code></li>
+              <li><code>/plan</code></li>
+              <li><code>/effort</code></li>
+              <li><code>/goal</code></li>
+              <li><code>/crew</code></li>
+              <li><code>/provider</code></li>
+              <li><code>/update</code></li>
+              <li><code>/tasks</code></li>
+              <li><code>/dag-workflow</code></li>
+              <li><code>/implement</code></li>
+              <li><code>/history</code></li>
+              <li><code>/diff</code></li>
+              <li><code>/undo</code></li>
+              <li><code>/theme</code></li>
+            </ul>
+          </article>
+        </div>
+
+        <p class="hint reveal">
+          <span lang="en"
+            >Needs OOP desktop 0.0.129 or newer. The desktop installer adds the
+            <code>oop</code> command on macOS and Windows; see <a href="#install">Install</a>. The
+            terminal app follows the desktop app's status: macOS Apple Silicon is the tested target
+            and Windows is experimental. Its language follows your locale (Korean if it starts with
+            <code>ko</code>, English otherwise); set it with
+            <code>oop config set language en</code> or <code>ko</code>.</span
+          ><span lang="ko"
+            >OOP 데스크톱 0.0.129 이상이 필요합니다. 데스크톱 설치 스크립트가 macOS와 Windows에서
+            <code>oop</code> 명령을 함께 설치합니다. <a href="#install">설치</a>를 참고하세요.
+            터미널 앱도 데스크톱 앱의 상태를 따릅니다. macOS Apple Silicon이 검증 대상이고 Windows는
+            실험 단계입니다. 화면 언어는 로캘을 따르며(<code>ko</code>로 시작하면 한국어, 아니면
+            영어), <code>oop config set language en</code> 또는 <code>ko</code>로 정합니다.</span
+          >
+        </p>
+      </section>
+
+      <!-- 05 -->
       <section class="section wrap" id="charts">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>04</span> · <span lang="en">Charts in chat</span
+            <span>05</span> · <span lang="en">Charts in chat</span
             ><span lang="ko">대화창 안의 차트</span>
           </p>
           <h2>
@@ -554,6 +1873,143 @@
             ><span lang="ko">타일, 막대 차트, 도넛 차트로 그려진 채팅 답변.</span>
           </figcaption>
         </figure>
+        <div class="chart-demo reveal" data-chart>
+          <div class="flow-bar">
+            <div class="seg js-only" role="group" aria-label="Sample data / 예시 데이터">
+              <button type="button" data-set="a" aria-pressed="true">
+                <span lang="en">Sample A</span><span lang="ko">예시 A</span>
+              </button>
+              <button type="button" data-set="b" aria-pressed="false">
+                <span lang="en">Sample B</span><span lang="ko">예시 B</span>
+              </button>
+            </div>
+            <div class="flow-ctl">
+              <button type="button" class="ctl js-only" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="cd-grid">
+            <div class="cd-panel">
+              <h3>
+                <span lang="en">Files changed per turn</span
+                ><span lang="ko">턴마다 바뀐 파일 수</span>
+              </h3>
+              <ul class="hbars">
+                <li>
+                  <span class="lbl"><span lang="en">Turn 1</span><span lang="ko">턴 1</span></span
+                  ><span class="track"><i style="--v: 0.25"></i></span><b data-num="3">3</b>
+                </li>
+                <li>
+                  <span class="lbl"><span lang="en">Turn 2</span><span lang="ko">턴 2</span></span
+                  ><span class="track"><i style="--v: 0.667"></i></span><b data-num="8">8</b>
+                </li>
+                <li>
+                  <span class="lbl"><span lang="en">Turn 3</span><span lang="ko">턴 3</span></span
+                  ><span class="track"><i style="--v: 0.417"></i></span><b data-num="5">5</b>
+                </li>
+                <li>
+                  <span class="lbl"><span lang="en">Turn 4</span><span lang="ko">턴 4</span></span
+                  ><span class="track"><i style="--v: 1"></i></span><b data-num="12">12</b>
+                </li>
+                <li>
+                  <span class="lbl"><span lang="en">Turn 5</span><span lang="ko">턴 5</span></span
+                  ><span class="track"><i style="--v: 0.5"></i></span><b data-num="6">6</b>
+                </li>
+              </ul>
+            </div>
+            <div class="cd-panel">
+              <h3>
+                <span lang="en">Tool calls by kind</span><span lang="ko">종류별 도구 호출</span>
+              </h3>
+              <div class="donut-wrap">
+                <svg
+                  class="donut"
+                  viewBox="0 0 120 120"
+                  role="img"
+                  aria-label="Sample donut chart of tool calls by kind"
+                  data-aria-en="Sample donut chart of tool calls by kind"
+                  data-aria-ko="종류별 도구 호출을 나타낸 예시 도넛 차트"
+                >
+                  <defs>
+                    <mask id="donut-mask">
+                      <circle
+                        class="sweep"
+                        cx="60"
+                        cy="60"
+                        r="40"
+                        fill="none"
+                        stroke="#fff"
+                        stroke-width="24"
+                        pathLength="100"
+                        stroke-dasharray="100"
+                        stroke-dashoffset="0"
+                        transform="rotate(-90 60 60)"
+                      />
+                    </mask>
+                  </defs>
+                  <g
+                    mask="url(#donut-mask)"
+                    fill="none"
+                    stroke-width="22"
+                    transform="rotate(-90 60 60)"
+                  >
+                    <circle
+                      class="sl s1"
+                      cx="60"
+                      cy="60"
+                      r="40"
+                      pathLength="100"
+                      stroke-dasharray="49.2 100"
+                      stroke-dashoffset="0"
+                    />
+                    <circle
+                      class="sl s2"
+                      cx="60"
+                      cy="60"
+                      r="40"
+                      pathLength="100"
+                      stroke-dasharray="29.2 100"
+                      stroke-dashoffset="-50"
+                    />
+                    <circle
+                      class="sl s3"
+                      cx="60"
+                      cy="60"
+                      r="40"
+                      pathLength="100"
+                      stroke-dasharray="19.2 100"
+                      stroke-dashoffset="-80"
+                    />
+                  </g>
+                </svg>
+                <ul class="legend">
+                  <li>
+                    <i class="sw s1"></i><span lang="en">Read</span><span lang="ko">읽기</span>
+                    <b data-num="50" data-unit="%">50%</b>
+                  </li>
+                  <li>
+                    <i class="sw s2"></i><span lang="en">Edit</span><span lang="ko">수정</span>
+                    <b data-num="30" data-unit="%">30%</b>
+                  </li>
+                  <li>
+                    <i class="sw s3"></i><span lang="en">Run</span><span lang="ko">실행</span>
+                    <b data-num="20" data-unit="%">20%</b>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <p class="flow-note">
+            <span lang="en"
+              >Sample data made up for this demo, only to show how a chat reply can draw charts.
+              These are not measured results.</span
+            ><span lang="ko"
+              >이 데모를 위해 만든 예시 데이터이며, 채팅 답변이 차트를 그리는 방식만 보여 줍니다.
+              측정한 결과가 아닙니다.</span
+            >
+          </p>
+        </div>
         <div class="cards points">
           <article class="card reveal">
             <p class="card-top">
@@ -611,11 +2067,11 @@
         </div>
       </section>
 
-      <!-- 05 -->
+      <!-- 06 -->
       <section class="section wrap" id="flows">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>05</span> · <span lang="en">Workflows</span><span lang="ko">워크플로</span>
+            <span>06</span> · <span lang="en">Workflows</span><span lang="ko">워크플로</span>
           </p>
           <h2>
             <span lang="en">Workflows you can see.<br /><em>Not just read about.</em></span>
@@ -662,6 +2118,272 @@
               ><span lang="ko">워크플로 패널: 도구 호출과 서브에이전트를 실시간으로.</span>
             </figcaption>
           </figure>
+        </div>
+        <div class="flow flow-dag reveal" data-flow>
+          <div class="flow-bar">
+            <div class="seg js-only" role="group" aria-label="Run order / 실행 순서">
+              <button type="button" data-mode="par" aria-pressed="true">
+                <span lang="en">Side by side</span><span lang="ko">나란히</span></button
+              ><button type="button" data-mode="seq" aria-pressed="false">
+                <span lang="en">One at a time</span><span lang="ko">하나씩</span>
+              </button>
+            </div>
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 420 400"
+              role="img"
+              aria-label="Example workflow: plan, then search code and read tests, then edit files, run tests and review, lighting up in dependency order"
+              data-aria-en="Example workflow: plan, then search code and read tests, then edit files, run tests and review, lighting up in dependency order"
+              data-aria-ko="예시 워크플로: 계획 다음에 코드 검색과 테스트 읽기, 이어서 파일 수정, 테스트 실행, 검토가 의존 순서대로 켜집니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="plan">
+                <rect class="halo" x="141" y="6" width="138" height="52" rx="14" />
+                <rect class="box" x="145" y="10" width="130" height="44" rx="10" />
+                <text
+                  lang="en"
+                  x="210"
+                  y="38"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Plan
+                </text>
+                <text
+                  lang="ko"
+                  x="210"
+                  y="38"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  계획
+                </text>
+              </g>
+              <g class="fl-node on" data-id="search">
+                <rect class="halo" x="36" y="96" width="138" height="52" rx="14" />
+                <rect class="box" x="40" y="100" width="130" height="44" rx="10" />
+                <text
+                  lang="en"
+                  x="105"
+                  y="128"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Search code
+                </text>
+                <text
+                  lang="ko"
+                  x="105"
+                  y="128"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  코드 검색
+                </text>
+              </g>
+              <g class="fl-node on" data-id="read">
+                <rect class="halo" x="246" y="96" width="138" height="52" rx="14" />
+                <rect class="box" x="250" y="100" width="130" height="44" rx="10" />
+                <text
+                  lang="en"
+                  x="315"
+                  y="128"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Read tests
+                </text>
+                <text
+                  lang="ko"
+                  x="315"
+                  y="128"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  테스트 읽기
+                </text>
+              </g>
+              <g class="fl-node on" data-id="edit">
+                <rect class="halo" x="141" y="186" width="138" height="52" rx="14" />
+                <rect class="box" x="145" y="190" width="130" height="44" rx="10" />
+                <text
+                  lang="en"
+                  x="210"
+                  y="218"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Edit files
+                </text>
+                <text
+                  lang="ko"
+                  x="210"
+                  y="218"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  파일 수정
+                </text>
+              </g>
+              <g class="fl-node on" data-id="test">
+                <rect class="halo" x="141" y="266" width="138" height="52" rx="14" />
+                <rect class="box" x="145" y="270" width="130" height="44" rx="10" />
+                <text
+                  lang="en"
+                  x="210"
+                  y="298"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Run tests
+                </text>
+                <text
+                  lang="ko"
+                  x="210"
+                  y="298"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  테스트 실행
+                </text>
+              </g>
+              <g class="fl-node on" data-id="review">
+                <rect class="halo" x="141" y="346" width="138" height="52" rx="14" />
+                <rect class="box" x="145" y="350" width="130" height="44" rx="10" />
+                <text
+                  lang="en"
+                  x="210"
+                  y="378"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  Review
+                </text>
+                <text
+                  lang="ko"
+                  x="210"
+                  y="378"
+                  text-anchor="middle"
+                  font-size="20"
+                  font-weight="600"
+                >
+                  검토
+                </text>
+              </g>
+              <path class="fl-edge on" data-id="p-s" pathLength="1" d="M190,54 L120,100" />
+              <path class="fl-head on" data-id="p-s" d="M124.8,90.9 L120.0,100.0 L130.3,99.2" />
+              <path class="fl-edge on" data-id="p-r" pathLength="1" d="M230,54 L300,100" />
+              <path class="fl-head on" data-id="p-r" d="M289.7,99.2 L300.0,100.0 L295.2,90.9" />
+              <path class="fl-edge on" data-id="s-e" pathLength="1" d="M120,144 L190,190" />
+              <path class="fl-head on" data-id="s-e" d="M179.7,189.2 L190.0,190.0 L185.2,180.9" />
+              <path class="fl-edge on" data-id="r-e" pathLength="1" d="M300,144 L230,190" />
+              <path class="fl-head on" data-id="r-e" d="M234.8,180.9 L230.0,190.0 L240.3,189.2" />
+              <path class="fl-edge on" data-id="e-t" pathLength="1" d="M210,234 L210,270" />
+              <path class="fl-head on" data-id="e-t" d="M205.0,261.0 L210.0,270.0 L215.0,261.0" />
+              <path class="fl-edge on" data-id="t-v" pathLength="1" d="M210,314 L210,350" />
+              <path class="fl-head on" data-id="t-v" d="M205.0,341.0 L210.0,350.0 L215.0,341.0" />
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="par">
+                <li data-on="plan" data-off="" data-run="">
+                  <span lang="en"><b>Plan.</b> The agent decides what to do.</span
+                  ><span lang="ko"><b>계획.</b> 에이전트가 할 일을 정합니다.</span>
+                </li>
+                <li data-on="search,read,p-s,p-r" data-off="" data-run="p-s,p-r">
+                  <span lang="en"
+                    ><b>Search code</b> and <b>Read tests</b> do not depend on each other, so they
+                    run side by side.</span
+                  ><span lang="ko"
+                    ><b>코드 검색</b>과 <b>테스트 읽기</b>는 서로 의존하지 않으므로 나란히
+                    실행됩니다.</span
+                  >
+                </li>
+                <li data-on="edit,s-e,r-e" data-off="" data-run="s-e,r-e">
+                  <span lang="en"><b>Edit files</b> waits for both.</span
+                  ><span lang="ko"><b>파일 수정</b>은 둘이 모두 끝나야 시작합니다.</span>
+                </li>
+                <li data-on="test,e-t" data-off="" data-run="e-t">
+                  <span lang="en"><b>Run tests</b> follows the edit.</span
+                  ><span lang="ko"><b>테스트 실행</b>은 수정 뒤에 이어집니다.</span>
+                </li>
+                <li data-on="review,t-v" data-off="" data-run="t-v">
+                  <span lang="en"><b>Review</b> comes last.</span
+                  ><span lang="ko"><b>검토</b>가 마지막입니다.</span>
+                </li>
+              </ol>
+              <ol class="flow-steps" data-steps="seq" hidden>
+                <li data-on="plan" data-off="" data-run="">
+                  <span lang="en"><b>Plan.</b> The agent decides what to do.</span
+                  ><span lang="ko"><b>계획.</b> 에이전트가 할 일을 정합니다.</span>
+                </li>
+                <li data-on="search,p-s" data-off="" data-run="p-s">
+                  <span lang="en"><b>Search code</b> runs first.</span
+                  ><span lang="ko"><b>코드 검색</b>이 먼저 실행됩니다.</span>
+                </li>
+                <li data-on="read,p-r" data-off="" data-run="p-r">
+                  <span lang="en"
+                    ><b>Read tests</b> waits in line, though it does not depend on the search.</span
+                  ><span lang="ko"
+                    ><b>테스트 읽기</b>는 검색에 의존하지 않지만 차례를 기다립니다.</span
+                  >
+                </li>
+                <li data-on="edit,s-e,r-e" data-off="" data-run="s-e,r-e">
+                  <span lang="en"><b>Edit files</b> starts once both are done.</span
+                  ><span lang="ko"><b>파일 수정</b>은 둘이 끝나야 시작합니다.</span>
+                </li>
+                <li data-on="test,e-t" data-off="" data-run="e-t">
+                  <span lang="en"><b>Run tests</b> follows the edit.</span
+                  ><span lang="ko"><b>테스트 실행</b>은 수정 뒤에 이어집니다.</span>
+                </li>
+                <li data-on="review,t-v" data-off="" data-run="t-v">
+                  <span lang="en"><b>Review</b> comes last.</span
+                  ><span lang="ko"><b>검토</b>가 마지막입니다.</span>
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en"
+                  >Illustrative workflow, not a recording. In the Workflows panel each tool call or
+                  subagent is a card, and parallel work shares a column.</span
+                ><span lang="ko"
+                  >예시 워크플로이며 녹화가 아닙니다. 워크플로 패널에서는 도구 호출과 서브에이전트가
+                  각각 카드 하나이고, 병렬 작업은 같은 열에 놓입니다.</span
+                >
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
         </div>
         <div class="cards points">
           <article class="card reveal">
@@ -723,11 +2445,11 @@
         </div>
       </section>
 
-      <!-- 06 -->
+      <!-- 07 -->
       <section class="section wrap" id="mobile">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>06</span> · <span lang="en">Phone</span><span lang="ko">휴대폰</span>
+            <span>07</span> · <span lang="en">Phone</span><span lang="ko">휴대폰</span>
           </p>
           <h2>
             <span lang="en">Your desktop,<br /><em>from your phone.</em></span>
@@ -823,13 +2545,265 @@
             </p>
           </div>
         </div>
+        <div class="sub-head reveal">
+          <h3><span lang="en">How pairing works</span><span lang="ko">페어링 방식</span></h3>
+        </div>
+        <div class="flow flow-pair reveal" data-flow>
+          <div class="flow-bar">
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 440 270"
+              role="img"
+              aria-label="Pairing path: the computer shows a one-time QR code, the phone scans it, then connects over Wi-Fi, Tailscale or your own relay"
+              data-aria-en="Pairing path: the computer shows a one-time QR code, the phone scans it, then connects over Wi-Fi, Tailscale or your own relay"
+              data-aria-ko="페어링 경로: 컴퓨터가 일회용 QR 코드를 보여 주면 휴대폰이 스캔하고, Wi-Fi, Tailscale 또는 직접 배포한 relay로 연결합니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="pc">
+                <rect class="halo" x="16" y="106" width="138" height="148" rx="14" />
+                <rect class="box" x="20" y="110" width="130" height="140" rx="10" />
+                <text
+                  lang="en"
+                  x="85"
+                  y="178"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Computer
+                </text>
+                <text
+                  lang="ko"
+                  x="85"
+                  y="178"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  컴퓨터
+                </text>
+                <text
+                  lang="en"
+                  x="85"
+                  y="196"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  agents run here
+                </text>
+                <text
+                  lang="ko"
+                  x="85"
+                  y="196"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  에이전트는 여기서
+                </text>
+              </g>
+              <g class="fl-node on" data-id="ph">
+                <rect class="halo" x="286" y="106" width="138" height="148" rx="14" />
+                <rect class="box" x="290" y="110" width="130" height="140" rx="10" />
+                <text
+                  lang="en"
+                  x="355"
+                  y="178"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Phone
+                </text>
+                <text
+                  lang="ko"
+                  x="355"
+                  y="178"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  휴대폰
+                </text>
+                <text
+                  lang="en"
+                  x="355"
+                  y="196"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  remote control
+                </text>
+                <text
+                  lang="ko"
+                  x="355"
+                  y="196"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  리모컨
+                </text>
+              </g>
+              <g class="fl-node on" data-id="qr">
+                <rect class="halo" x="151" y="6" width="138" height="54" rx="14" />
+                <rect class="box" x="155" y="10" width="130" height="46" rx="10" />
+                <text
+                  lang="en"
+                  x="220"
+                  y="39"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  One-time QR
+                </text>
+                <text
+                  lang="ko"
+                  x="220"
+                  y="39"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  일회용 QR
+                </text>
+              </g>
+              <path
+                class="fl-edge on"
+                data-id="c-q"
+                pathLength="1"
+                d="M85,110 C85,33 120,33 155,33"
+              />
+              <path class="fl-head on" data-id="c-q" d="M146.0,38.0 L155.0,33.0 L146.0,28.0" />
+              <path
+                class="fl-edge on"
+                data-id="p-q"
+                pathLength="1"
+                d="M355,110 C355,33 320,33 285,33"
+              />
+              <path class="fl-head on" data-id="p-q" d="M294.0,28.0 L285.0,33.0 L294.0,38.0" />
+              <path class="fl-edge on" data-id="r-lan" pathLength="1" d="M150,160 L290,160" />
+              <path class="fl-head on" data-id="r-lan" d="M281.0,165.0 L290.0,160.0 L281.0,155.0" />
+              <g class="fl-label on" data-id="r-lan">
+                <text lang="en" x="220" y="150" text-anchor="middle" font-size="14">
+                  Same Wi-Fi (LAN)
+                </text>
+                <text lang="ko" x="220" y="150" text-anchor="middle" font-size="14">
+                  같은 Wi-Fi(LAN)
+                </text>
+              </g>
+              <path class="fl-edge on" data-id="r-ts" pathLength="1" d="M150,200 L290,200" />
+              <path class="fl-head on" data-id="r-ts" d="M281.0,205.0 L290.0,200.0 L281.0,195.0" />
+              <g class="fl-label on" data-id="r-ts">
+                <text lang="en" x="220" y="190" text-anchor="middle" font-size="14">Tailscale</text>
+                <text lang="ko" x="220" y="190" text-anchor="middle" font-size="14">Tailscale</text>
+              </g>
+              <path class="fl-edge on" data-id="r-rl" pathLength="1" d="M150,240 L290,240" />
+              <path class="fl-head on" data-id="r-rl" d="M281.0,245.0 L290.0,240.0 L281.0,235.0" />
+              <g class="fl-label on" data-id="r-rl">
+                <text lang="en" x="220" y="230" text-anchor="middle" font-size="14">
+                  Your own relay
+                </text>
+                <text lang="ko" x="220" y="230" text-anchor="middle" font-size="14">
+                  직접 배포한 relay
+                </text>
+              </g>
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="">
+                <li data-on="pc,qr,c-q" data-off="" data-run="c-q">
+                  <span lang="en"
+                    ><b>Open Connect mobile</b> in the desktop sidebar. If mobile connections are
+                    off, allow them; OOP restarts once.</span
+                  ><span lang="ko"
+                    >데스크톱 사이드바에서 <b>Connect mobile을 엽니다.</b> 모바일 연결이 꺼져 있으면
+                    허용하세요. OOP가 한 번 재시작됩니다.</span
+                  >
+                </li>
+                <li data-on="ph,p-q" data-off="" data-run="p-q">
+                  <span lang="en"
+                    ><b>Scan the one-time QR code</b> with the phone camera and open the link in the
+                    phone browser.</span
+                  ><span lang="ko"
+                    >휴대폰 카메라로 <b>일회용 QR 코드를 스캔</b>하고 휴대폰 브라우저에서 링크를
+                    엽니다.</span
+                  >
+                </li>
+                <li data-on="r-lan" data-off="" data-run="r-lan">
+                  <span lang="en"
+                    ><b>On the same Wi-Fi</b>, pick the LAN address. A paired phone stays authorized
+                    for later visits.</span
+                  ><span lang="ko"
+                    ><b>같은 Wi-Fi</b>에서는 LAN 주소를 고릅니다. 페어링한 휴대폰은 이후 방문에도
+                    승인됩니다.</span
+                  >
+                </li>
+                <li data-on="r-ts,r-rl" data-off="" data-run="r-ts,r-rl">
+                  <span lang="en"
+                    ><b>Away from home:</b> use Tailscale, or a Cloudflare relay you deploy
+                    yourself.</span
+                  ><span lang="ko"
+                    ><b>집 밖에서는</b> Tailscale이나 직접 배포한 Cloudflare relay를 씁니다.</span
+                  >
+                </li>
+                <li data-on="pc" data-off="" data-run="">
+                  <span lang="en"
+                    ><b>The agents, files and logins stay on the computer.</b> The phone shows
+                    threads, sends messages and answers approval prompts.</span
+                  ><span lang="ko"
+                    ><b>에이전트, 파일, 로그인은 컴퓨터에 남습니다.</b> 휴대폰은 스레드를 보여 주고
+                    메시지를 보내며 승인 프롬프트에 답합니다.</span
+                  >
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en"
+                  >The computer has to stay awake and running. Treat pairing links as
+                  passwords.</span
+                ><span lang="ko"
+                  >컴퓨터는 켜져 있고 실행 중이어야 합니다. 페어링 링크는 비밀번호처럼
+                  다루세요.</span
+                >
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
+        </div>
       </section>
 
-      <!-- 07 -->
+      <!-- 08 -->
       <section class="section wrap" id="screens">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>07</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
+            <span>08</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
           </p>
           <h2>
             <span lang="en">See it before<br /><em>you install it.</em></span>
@@ -1143,11 +3117,11 @@
         </div>
       </section>
 
-      <!-- 08 -->
+      <!-- 09 -->
       <section class="section wrap" id="install">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>08</span> · <span lang="en">Install</span><span lang="ko">설치</span>
+            <span>09</span> · <span lang="en">Install</span><span lang="ko">설치</span>
           </p>
           <h2>
             <span lang="en">One command.<br /><em>Checked before it installs.</em></span>
@@ -1348,6 +3322,266 @@ node scripts/macos.mjs package</code></pre>
           >
         </p>
 
+        <div class="sub-head reveal">
+          <h3>
+            <span lang="en">What the installer does</span
+            ><span lang="ko">설치 스크립트가 하는 일</span>
+          </h3>
+        </div>
+        <div class="flow flow-inst reveal" data-flow>
+          <div class="flow-bar">
+            <div class="seg js-only" role="group" aria-label="Checksum / 체크섬">
+              <button type="button" data-mode="ok" aria-pressed="true">
+                <span lang="en">Matches</span><span lang="ko">일치</span></button
+              ><button type="button" data-mode="bad" aria-pressed="false">
+                <span lang="en">Differs</span><span lang="ko">불일치</span>
+              </button>
+            </div>
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 440 340"
+              role="img"
+              aria-label="Install flow: download, verify the checksum, install the app, add the oop command; a mismatch stops everything"
+              data-aria-en="Install flow: download, verify the checksum, install the app, add the oop command; a mismatch stops everything"
+              data-aria-ko="설치 흐름: 내려받기, 체크섬 검증, 앱 설치, oop 명령 추가. 체크섬이 다르면 모두 중단됩니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="dl">
+                <rect class="halo" x="36" y="6" width="178" height="54" rx="14" />
+                <rect class="box" x="40" y="10" width="170" height="46" rx="10" />
+                <text
+                  lang="en"
+                  x="125"
+                  y="39"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Download
+                </text>
+                <text
+                  lang="ko"
+                  x="125"
+                  y="39"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  내려받기
+                </text>
+              </g>
+              <g class="fl-node on" data-id="vf">
+                <rect class="halo" x="36" y="96" width="178" height="54" rx="14" />
+                <rect class="box" x="40" y="100" width="170" height="46" rx="10" />
+                <text
+                  lang="en"
+                  x="125"
+                  y="129"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Verify SHA-256
+                </text>
+                <text
+                  lang="ko"
+                  x="125"
+                  y="129"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  SHA-256 검증
+                </text>
+              </g>
+              <g class="fl-node on" data-id="in">
+                <rect class="halo" x="36" y="186" width="178" height="54" rx="14" />
+                <rect class="box" x="40" y="190" width="170" height="46" rx="10" />
+                <text
+                  lang="en"
+                  x="125"
+                  y="219"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Install the app
+                </text>
+                <text
+                  lang="ko"
+                  x="125"
+                  y="219"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  앱 설치
+                </text>
+              </g>
+              <g class="fl-node on" data-id="oo">
+                <rect class="halo" x="36" y="276" width="178" height="54" rx="14" />
+                <rect class="box" x="40" y="280" width="170" height="46" rx="10" />
+                <text
+                  lang="en"
+                  x="125"
+                  y="309"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Add oop
+                </text>
+                <text
+                  lang="ko"
+                  x="125"
+                  y="309"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  oop 추가
+                </text>
+              </g>
+              <g class="fl-node" data-id="st">
+                <rect class="halo" x="256" y="96" width="178" height="54" rx="14" />
+                <rect class="box" x="260" y="100" width="170" height="46" rx="10" />
+                <text
+                  lang="en"
+                  x="345"
+                  y="129"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  Nothing installed
+                </text>
+                <text
+                  lang="ko"
+                  x="345"
+                  y="129"
+                  text-anchor="middle"
+                  font-size="18"
+                  font-weight="600"
+                >
+                  설치 안 함
+                </text>
+              </g>
+              <path class="fl-edge on" data-id="d-v" pathLength="1" d="M125,56 L125,100" />
+              <path class="fl-head on" data-id="d-v" d="M120.0,91.0 L125.0,100.0 L130.0,91.0" />
+              <path class="fl-edge on" data-id="v-i" pathLength="1" d="M125,146 L125,190" />
+              <path class="fl-head on" data-id="v-i" d="M120.0,181.0 L125.0,190.0 L130.0,181.0" />
+              <path class="fl-edge on" data-id="i-o" pathLength="1" d="M125,236 L125,280" />
+              <path class="fl-head on" data-id="i-o" d="M120.0,271.0 L125.0,280.0 L130.0,271.0" />
+              <path class="fl-edge" data-id="v-s" pathLength="1" d="M210,123 L260,123" />
+              <path class="fl-head" data-id="v-s" d="M251.0,128.0 L260.0,123.0 L251.0,118.0" />
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="ok">
+                <li data-on="dl" data-off="" data-run="">
+                  <span lang="en"><b>Download</b> the app from a GitHub release.</span
+                  ><span lang="ko">GitHub 릴리스에서 <b>앱을 내려받습니다.</b></span>
+                </li>
+                <li data-on="vf,d-v" data-off="" data-run="d-v">
+                  <span lang="en"
+                    ><b>Verify</b> its SHA-256 against the checksum file of the release.</span
+                  ><span lang="ko">릴리스의 체크섬 파일과 대조해 <b>SHA-256을 검증</b>합니다.</span>
+                </li>
+                <li data-on="in,v-i" data-off="" data-run="v-i">
+                  <span lang="en"
+                    ><b>Install.</b> The new app is copied in; if that fails, the previous app is
+                    put back.</span
+                  ><span lang="ko"
+                    ><b>설치.</b> 새 앱을 복사해 넣고, 실패하면 이전 앱을 되돌려 놓습니다.</span
+                  >
+                </li>
+                <li data-on="oo,i-o" data-off="" data-run="i-o">
+                  <span lang="en"
+                    ><b>Add <code>oop</code></b> on macOS and Windows. Then open the app.</span
+                  ><span lang="ko"
+                    >macOS와 Windows에서는 <b><code>oop</code> 명령을 추가</b>합니다. 그다음 앱을
+                    엽니다.</span
+                  >
+                </li>
+              </ol>
+              <ol class="flow-steps" data-steps="bad" hidden>
+                <li data-on="dl" data-off="" data-run="">
+                  <span lang="en"><b>Download</b> the app from a GitHub release.</span
+                  ><span lang="ko">GitHub 릴리스에서 <b>앱을 내려받습니다.</b></span>
+                </li>
+                <li data-on="vf,d-v" data-off="" data-run="d-v">
+                  <span lang="en"
+                    ><b>Verify</b> its SHA-256 against the checksum file of the release.</span
+                  ><span lang="ko">릴리스의 체크섬 파일과 대조해 <b>SHA-256을 검증</b>합니다.</span>
+                </li>
+                <li data-on="st,v-s" data-off="in,oo,i-o,v-i" data-run="v-s">
+                  <span lang="en"
+                    ><b>The checksum differs:</b> the installer stops and nothing is
+                    installed.</span
+                  ><span lang="ko"
+                    ><b>체크섬이 다르면</b> 설치 스크립트가 멈추고 아무것도 설치하지 않습니다.</span
+                  >
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en"
+                  >Steps of the one-line installer. Shown here for macOS; Windows verifies the same
+                  way.</span
+                ><span lang="ko"
+                  >한 줄 설치 스크립트의 단계입니다. macOS 기준이며 Windows도 같은 방식으로
+                  검증합니다.</span
+                >
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
+        </div>
+
+        <div class="term-install reveal">
+          <h3><span lang="en">The terminal command</span><span lang="ko">터미널 명령</span></h3>
+          <p class="hint">
+            <span lang="en"
+              >On macOS and Windows the installer also adds an <code>oop</code> command (macOS:
+              <code>~/.local/bin</code>; Windows: <code>%LOCALAPPDATA%\oop-terminal</code>), unless
+              an <code>oop</code> that OOP did not write is already there. Open a new terminal and
+              run it in a project folder. <b>Already installed?</b> The in-app update does not add
+              the command, so run the installer once more.</span
+            ><span lang="ko"
+              >macOS와 Windows에서는 설치 스크립트가 <code>oop</code> 명령도 함께 설치합니다(macOS는
+              <code>~/.local/bin</code>, Windows는 <code>%LOCALAPPDATA%\oop-terminal</code>). OOP가
+              만들지 않은 <code>oop</code>가 이미 있으면 건드리지 않습니다. 새 터미널을 열고
+              프로젝트 폴더에서 실행하세요. <b>이미 설치했다면</b> 앱 안의 업데이트는 이 명령을
+              추가하지 않으므로 설치 스크립트를 한 번 더 실행하세요.</span
+            >
+          </p>
+          <div class="code small">
+            <pre><code>cd your-project &amp;&amp; oop</code></pre>
+            <button type="button" class="copy" data-copy>
+              <span lang="en">Copy</span><span lang="ko">복사</span>
+            </button>
+          </div>
+        </div>
+
         <div class="after reveal">
           <h3><span lang="en">After installing</span><span lang="ko">설치한 뒤에</span></h3>
           <ol>
@@ -1423,11 +3657,11 @@ node scripts/macos.mjs package</code></pre>
         </div>
       </section>
 
-      <!-- 09 -->
+      <!-- 10 -->
       <section class="section wrap" id="faq">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>09</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
+            <span>10</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
           </p>
           <h2>
             <span lang="en">Early, local,<br /><em>and clear about it.</em></span>
@@ -1514,6 +3748,27 @@ node scripts/macos.mjs package</code></pre>
                 데스크톱 앱을 감수할 수 있으며, 하나의 제어 화면을 원하는 개발자를 위한 앱입니다.
                 서명되고 자동 업데이트되는 완성형 제품을 원하신다면 현재로서는 업스트림 T3 Code가 더
                 잘 맞습니다.</span
+              >
+            </p>
+          </details>
+          <details>
+            <summary>
+              <span lang="en">Can I use OOP from a terminal?</span
+              ><span lang="ko">터미널에서도 쓸 수 있나요?</span>
+            </summary>
+            <p>
+              <span lang="en"
+                >Yes. Run <code>oop</code>: it shares threads with the desktop app and starts its
+                own background server if the app is closed. It needs desktop 0.0.129 or newer, and
+                its language follows your locale (English unless it starts with <code>ko</code>);
+                <code>oop config set language en|ko</code> sets it. See
+                <a href="#terminal">Terminal</a>.</span
+              ><span lang="ko"
+                >네. <code>oop</code>을 실행하면 됩니다. 데스크톱 앱과 스레드를 공유하고, 앱이 꺼져
+                있으면 자체 백그라운드 서버를 띄웁니다. 데스크톱 0.0.129 이상이 필요하고 화면 언어는
+                로캘을 따르며(<code>ko</code>로 시작하지 않으면 영어)
+                <code>oop config set language en|ko</code>로 정합니다.
+                <a href="#terminal">터미널</a>을 참고하세요.</span
               >
             </p>
           </details>

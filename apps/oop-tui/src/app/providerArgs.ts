@@ -12,6 +12,7 @@ import {
   type EnvEntry,
   type Target,
 } from "./providerSpec.ts";
+import { t } from "../i18n/index.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
 
 const NAME_SHAPE = /^[A-Za-z_-][A-Za-z0-9_.:-]*$/u;
@@ -30,10 +31,12 @@ export const echoWord = (word: string): string | null => {
   return looksLikeName ? name : null;
 };
 
-/** `알 수 없는 <what>: <name>`, or, when the word is not shaped like a name, that its form is wrong. */
+/** `Unknown <what>: <name>`, or, when the word is not shaped like a name, that its form is wrong. */
 const unknownWord = (what: string, word: string): string => {
   const name = echoWord(word);
-  return name === null ? `${what}의 형식이 잘못됐습니다` : `알 수 없는 ${what}: ${name}`;
+  return name === null
+    ? t("providers.args.badForm", { what })
+    : t("providers.args.unknownWord", { what, name });
 };
 
 /** Where the words came from: the shell command line, or the chat's slash command. */
@@ -85,7 +88,7 @@ export type Parsed<T> =
 
 const fail = (message: string): { ok: false; message: string } => ({ ok: false, message });
 
-const SECRET_HINT = "비밀값은 명령줄에 쓰지 않습니다. @환경변수 또는 -(표준입력)로 넘기세요.";
+const secretHint = (): string => t("providers.args.secretHint");
 
 /** `@NAME` reads the environment, `-` reads standard input; anything else is not a reference. */
 export const parseSecretRef = (text: string): SecretRef | null => {
@@ -120,7 +123,7 @@ export const splitWords = (text: string): Parsed<string[]> => {
       started = true;
     }
   }
-  if (quote !== null) return fail("따옴표가 닫히지 않았습니다.");
+  if (quote !== null) return fail(t("providers.args.unclosedQuote"));
   if (started) words.push(current);
   return { ok: true, value: words };
 };
@@ -137,20 +140,20 @@ export const collectFlags = (
     const raw = equals === -1 ? word : word.slice(0, equals);
     const name = raw === "-y" ? "--yes" : raw;
     if (PROVIDER_SWITCH_FLAGS.includes(name)) {
-      if (equals !== -1) return fail(`${name} 에는 값이 없습니다.`);
+      if (equals !== -1) return fail(t("providers.args.noValue", { name }));
       flags.push({ name, value: null });
     } else if (PROVIDER_VALUE_FLAGS.includes(name)) {
       let value: string | null = equals === -1 ? null : word.slice(equals + 1);
       if (value === null) {
         const next = words[index + 1];
         if (next === undefined || next.startsWith("-"))
-          return fail(`${name} 에는 값이 필요합니다.`);
+          return fail(t("providers.args.needsValue", { name }));
         value = next;
         index += 1;
       }
       flags.push({ name, value });
     } else if (word.startsWith("-") && word.length > 1) {
-      return fail(unknownWord("옵션", word));
+      return fail(unknownWord(t("providers.args.whatOption"), word));
     } else {
       positional.push(word);
     }
@@ -160,10 +163,8 @@ export const collectFlags = (
 
 // ---- turning words into a request -------------------------------------------------------------
 
-const USAGE: Readonly<Record<ProviderMode, string>> = {
-  cli: "사용법: oop provider [list | add [종류] [옵션] | remove <id> [-y] [--dry-run]]",
-  slash: "사용법: /provider [list | add [종류] [옵션] | remove <id> [--dry-run]]",
-};
+const usage = (mode: ProviderMode): string =>
+  t(mode === "cli" ? "providers.args.usageCli" : "providers.args.usageSlash");
 
 const splitAssignment = (
   flag: string,
@@ -171,7 +172,7 @@ const splitAssignment = (
   shape: string,
 ): Parsed<{ key: string; value: string }> => {
   const at = text.indexOf("=");
-  if (at <= 0) return fail(`${flag} 는 ${shape} 형식입니다.`);
+  if (at <= 0) return fail(t("providers.args.shape", { flag, shape }));
   return { ok: true, value: { key: text.slice(0, at), value: text.slice(at + 1) } };
 };
 
@@ -194,9 +195,7 @@ const readAddOptions = (flags: ReadonlyArray<RawFlag>, mode: ProviderMode): Pars
         break;
       case "--yes":
         if (mode === "slash") {
-          return fail(
-            "슬래시 명령은 확인 화면에서 직접 확인합니다. -y 는 oop provider add 에서 쓰세요.",
-          );
+          return fail(t("providers.args.slashYesAdd"));
         }
         yes = true;
         break;
@@ -204,26 +203,26 @@ const readAddOptions = (flags: ReadonlyArray<RawFlag>, mode: ProviderMode): Pars
         dryRun = true;
         break;
       case "--set": {
-        const parsed = splitAssignment("--set", value, "키=값");
+        const parsed = splitAssignment("--set", value, t("providers.args.shapeKeyValue"));
         if (!parsed.ok) return parsed;
         sets.push(parsed.value);
         break;
       }
       case "--env": {
-        const parsed = splitAssignment("--env", value, "이름=값");
+        const parsed = splitAssignment("--env", value, t("providers.args.shapeNameValue"));
         if (!parsed.ok) return parsed;
         env.push({ name: parsed.value.key, value: parsed.value.value });
         break;
       }
       case "--secret": {
         if (mode === "slash") {
-          return fail("슬래시 명령에서는 비밀값을 받지 않습니다. 입력 화면에서 가려서 입력하세요.");
+          return fail(t("providers.args.slashNoSecret"));
         }
-        const parsed = splitAssignment("--secret", value, "이름=@환경변수 또는 이름=-");
+        const parsed = splitAssignment("--secret", value, t("providers.args.shapeSecret"));
         if (!parsed.ok) return parsed;
         const ref = parseSecretRef(parsed.value.value);
         if (ref === null)
-          return fail(`--secret ${echoWord(parsed.value.key) ?? "…"}: ${SECRET_HINT}`);
+          return fail(`--secret ${echoWord(parsed.value.key) ?? "…"}: ${secretHint()}`);
         secrets.push({ name: parsed.value.key, ref });
         break;
       }
@@ -243,47 +242,45 @@ export const resolveProviderRequest = (
 ): Parsed<ProviderRequest> => {
   const [verb = "list", ...rest] = words;
   if (verb === "list") {
-    if (rest.length > 0 || flags.length > 0) return fail(USAGE[mode]);
+    if (rest.length > 0 || flags.length > 0) return fail(usage(mode));
     return { ok: true, value: { kind: "list" } };
   }
   if (verb === "add") {
-    if (rest.length > 1) return fail(USAGE[mode]);
+    if (rest.length > 1) return fail(usage(mode));
     let target: Target | null = null;
     if (rest[0] !== undefined) {
       target = parseTarget(rest[0]);
       if (target === null) {
-        return fail(`${unknownWord("종류", rest[0])} (${targetWords()})`);
+        return fail(`${unknownWord(t("providers.args.whatKind"), rest[0])} (${targetWords()})`);
       }
     }
     const options = readAddOptions(flags, mode);
     if (!options.ok) return options;
     const given = flags.some((flag) => flag.name !== "--dry-run" && flag.name !== "--yes");
     if (target === null && (given || options.value.dryRun || options.value.yes)) {
-      return fail(`종류가 필요합니다: ${targetWords()}`);
+      return fail(t("providers.args.kindRequired", { kinds: targetWords() }));
     }
     return { ok: true, value: { kind: "add", target, options: options.value } };
   }
   if (verb === "remove") {
-    if (rest.length > 1 || (rest.length === 0 && mode === "cli")) return fail(USAGE[mode]);
+    if (rest.length > 1 || (rest.length === 0 && mode === "cli")) return fail(usage(mode));
     let yes = false;
     let dryRun = false;
     for (const flag of flags) {
       if (flag.name === "--yes") {
         if (mode === "slash") {
-          return fail(
-            "슬래시 명령은 화면에서 yes 를 입력해 확인합니다. -y 는 oop provider remove 에서 쓰세요.",
-          );
+          return fail(t("providers.args.slashYesRemove"));
         }
         yes = true;
       } else if (flag.name === "--dry-run") {
         dryRun = true;
       } else {
-        return fail(USAGE[mode]);
+        return fail(usage(mode));
       }
     }
     return { ok: true, value: { kind: "remove", id: rest[0] ?? null, yes, dryRun } };
   }
-  return fail(`${unknownWord("하위 명령", verb)}. ${USAGE[mode]}`);
+  return fail(`${unknownWord(t("providers.args.whatSubcommand"), verb)}. ${usage(mode)}`);
 };
 
 /** The slash command's text after `/provider`, as a request. */
@@ -348,13 +345,13 @@ export const resolveAdd = (
     if (ref.kind === "env") {
       text = input.env[ref.variable]?.trim();
       if (text === undefined || text === "") {
-        return fail(`${label}: 환경 변수 ${ref.variable} 가 비어 있습니다.`);
+        return fail(t("providers.args.envEmpty", { label, variable: ref.variable }));
       }
     } else {
-      if (stdinUsed) return fail("표준입력(-)은 한 번만 쓸 수 있습니다.");
+      if (stdinUsed) return fail(t("providers.args.stdinOnce"));
       stdinUsed = true;
       text = input.stdin?.replace(/\r?\n$/u, "").trim();
-      if (text === undefined || text === "") return fail(`${label}: 표준입력이 비어 있습니다.`);
+      if (text === undefined || text === "") return fail(t("providers.args.stdinEmpty", { label }));
     }
     return { ok: true, value: text };
   };
@@ -364,15 +361,15 @@ export const resolveAdd = (
     const field = fields.find((candidate) => candidate.key === set.key);
     if (field === undefined) {
       return fail(
-        `${unknownWord("설정 키", set.key)}. 쓸 수 있는 키: ${fields.map((candidate) => candidate.key).join(", ")}`,
+        `${unknownWord(t("providers.args.whatSettingKey"), set.key)}. ${t("providers.args.allowedKeys", { keys: fields.map((candidate) => candidate.key).join(", ") })}`,
       );
     }
     if (field.control === "password") {
       if (input.refs === false) {
-        return fail(`${field.label} 은(는) 입력 화면에서 가려서 입력하세요.`);
+        return fail(t("providers.args.maskedOnly", { label: field.label }));
       }
       const ref = parseSecretRef(set.value);
-      if (ref === null) return fail(`--set ${field.key}: ${SECRET_HINT}`);
+      if (ref === null) return fail(`--set ${field.key}: ${secretHint()}`);
       const secret = read(`--set ${field.key}`, ref);
       if (!secret.ok) return secret;
       draft = { ...draft, values: withValue(target, draft.values, field.key, secret.value) };
@@ -381,13 +378,16 @@ export const resolveAdd = (
       const option = field.options?.find((candidate) => candidate.value.toLowerCase() === wanted);
       if (option === undefined) {
         return fail(
-          `--set ${field.key} 는 ${(field.options ?? []).map((candidate) => candidate.value).join(" | ")} 중 하나여야 합니다.`,
+          t("providers.args.oneOf", {
+            key: field.key,
+            options: (field.options ?? []).map((candidate) => candidate.value).join(" | "),
+          }),
         );
       }
       draft = { ...draft, values: withValue(target, draft.values, field.key, option.value) };
     } else if (field.control === "switch") {
       const word = BOOLEAN_WORDS.find(([text]) => text === set.value.trim().toLowerCase());
-      if (word === undefined) return fail(`--set ${field.key} 는 true 또는 false 여야 합니다.`);
+      if (word === undefined) return fail(t("providers.args.trueOrFalse", { key: field.key }));
       draft = { ...draft, values: withValue(target, draft.values, field.key, word[1]) };
     } else {
       const text = sanitizeForTerminal(set.value).trim();
@@ -403,7 +403,9 @@ export const resolveAdd = (
     const problem = validateEnvironmentName(name);
     if (problem !== null) return problem;
     if (env.some((entry) => entry.name === name)) {
-      return `환경 변수 ${echoWord(name) ?? "이름"} 가 두 번 쓰였습니다.`;
+      return t("providers.args.envTwice", {
+        name: echoWord(name) ?? t("providers.args.nameFallback"),
+      });
     }
     env.push({ name, value, sensitive });
     return null;
@@ -411,12 +413,12 @@ export const resolveAdd = (
   for (const entry of options.env) {
     if (looksSecret(entry.name)) {
       const shown = echoWord(entry.name);
-      if (shown === null) return fail("환경 변수 이름 형식이 잘못됐습니다.");
+      if (shown === null) return fail(t("providers.args.envNameBad"));
       // The chat takes no secret by reference: the way to add one is the shell command.
       return fail(
         input.refs === false
-          ? `${shown} 은(는) 비밀값 이름입니다. 채팅에서는 받지 않습니다. 터미널에서 oop provider add --secret ${shown}=@환경변수 로 추가하세요.`
-          : `${shown} 은(는) 비밀값 이름입니다. --secret ${shown}=@환경변수 로 넘기세요.`,
+          ? t("providers.args.secretNameChat", { shown })
+          : t("providers.args.secretNameCli", { shown }),
       );
     }
     const problem = addEnv(entry.name, sanitizeForTerminal(entry.value), false);

@@ -2,6 +2,7 @@ import { padEndVisible, truncateStyled, wrapStyled } from "../text/wrap.ts";
 import { visibleWidth } from "../text/width.ts";
 import type { Style } from "./style.ts";
 import { ASCII_SYMBOLS, type Symbols } from "./symbols.ts";
+import { t } from "../i18n/index.ts";
 
 /** What a rail needs to draw itself. */
 export interface Rail {
@@ -209,10 +210,14 @@ export const railChoice = (rail: Rail, choice: RailChoice): string[] => {
       railRow(rail, truncateStyled(row, choice.width - RAIL_COLUMNS), tone),
     ),
   ];
-  const more = (count: number, direction: string) =>
-    railRow(rail, theme.dim(`… ${direction} ${count}개`), tone);
+  const more = (count: number, direction: "above" | "below") =>
+    railRow(
+      rail,
+      theme.dim(t(direction === "above" ? "render.moreAbove" : "render.moreBelow", { count })),
+      tone,
+    );
   if (choice.hidden !== undefined && choice.hidden.above > 0) {
-    lines.push(more(choice.hidden.above, "위로"));
+    lines.push(more(choice.hidden.above, "above"));
   }
   for (const [index, option] of choice.options.entries()) {
     const chosen = index === choice.selected;
@@ -237,7 +242,7 @@ export const railChoice = (rail: Rail, choice: RailChoice): string[] => {
     }
   }
   if (choice.hidden !== undefined && choice.hidden.below > 0) {
-    lines.push(more(choice.hidden.below, "아래로"));
+    lines.push(more(choice.hidden.below, "below"));
   }
   for (const row of packHint(choice.hint, choice.width - RAIL_COLUMNS)) {
     lines.push(railRow(rail, theme.dim(row), tone));

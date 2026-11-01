@@ -10,6 +10,7 @@ import {
   type PanelInput,
   type PanelView,
 } from "./workflowPanel.ts";
+import { t } from "../i18n/index.ts";
 
 /** What each command of the side panel can be told; the Agents view always follows the live turn. */
 export const PANEL_USAGE: Readonly<Record<PanelView, string>> = {
@@ -38,10 +39,15 @@ export const planPanelMove = (
 
 /** Said for `off` aimed at a view that is not the one shown, which would otherwise do nothing in silence. */
 export const offElsewhereNotice = (view: PanelView, shown: PanelView): string =>
-  `${PANEL_TITLE[view]} 창은 열려 있지 않습니다. 지금은 ${PANEL_TITLE[shown]} 창이 열려 있고, ${PANEL_COMMAND[shown]} 로 닫습니다.`;
+  t("session.panel.offElsewhere", {
+    view: PANEL_TITLE[view],
+    shown: PANEL_TITLE[shown],
+    command: PANEL_COMMAND[shown],
+  });
 
 /** Said for `/dag-agents <number>`, `next` and `prev`: there is one turn to show, not a list to pick from. */
-const AGENTS_NO_PICK = `Agents 창은 현재 턴을 보여 줍니다. 흐름 고르기는 ${PANEL_COMMAND.workflow} <번호> 로 합니다.`;
+const agentsNoPick = (): string =>
+  t("session.panel.agentsNoPick", { command: PANEL_COMMAND.workflow });
 
 export type SidePanelInput = Omit<PanelInput, "flows" | "pinnedId">;
 
@@ -76,7 +82,7 @@ export class SidePanel {
   ): string | null {
     if (view === "workflow") return this.workflow.choose(flows(), action);
     return action.kind === "pick" || action.kind === "next" || action.kind === "prev"
-      ? AGENTS_NO_PICK
+      ? agentsNoPick()
       : null;
   }
 

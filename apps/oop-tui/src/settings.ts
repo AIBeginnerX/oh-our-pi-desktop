@@ -1,6 +1,7 @@
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
+import { isLanguage, t, type Language } from "./i18n/index.ts";
 import { configDirectory, type PathEnv } from "./link/paths.ts";
 import type { ColorLevel } from "./render/color.ts";
 import type { SymbolSetting } from "./render/symbols.ts";
@@ -19,6 +20,7 @@ export const SETTING_KEYS = [
   "banner",
   "statusLine",
   "notify",
+  "language",
 ] as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -32,6 +34,8 @@ export interface Settings {
   readonly banner: boolean;
   readonly statusLine: StatusLineSetting;
   readonly notify: boolean;
+  /** Null until the user picks one; the locale then decides. */
+  readonly language: Language | null;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -41,6 +45,7 @@ export const DEFAULT_SETTINGS: Settings = {
   banner: true,
   statusLine: "auto",
   notify: true,
+  language: null,
 };
 
 const SYMBOL_VALUES: ReadonlySet<string> = new Set(["auto", "unicode", "ascii"]);
@@ -56,15 +61,17 @@ const VALIDATORS: { readonly [K in SettingKey]: (raw: unknown) => Settings[K] | 
   statusLine: (raw) =>
     typeof raw === "string" && STATUS_LINE_VALUES.has(raw) ? (raw as StatusLineSetting) : undefined,
   notify: (raw) => (typeof raw === "boolean" ? raw : undefined),
+  language: (raw) => (isLanguage(raw) ? raw : undefined),
 };
 
-const EXPECTED: { readonly [K in SettingKey]: string } = {
-  theme: "테마 이름",
-  symbols: "auto | unicode | ascii",
-  animations: "true | false",
-  banner: "true | false",
-  statusLine: "auto | full | compact | minimal",
-  notify: "true | false",
+const EXPECTED: { readonly [K in SettingKey]: () => string } = {
+  theme: () => t("settings.expected.theme"),
+  symbols: () => "auto | unicode | ascii",
+  animations: () => "true | false",
+  banner: () => "true | false",
+  statusLine: () => "auto | full | compact | minimal",
+  notify: () => "true | false",
+  language: () => "en | ko",
 };
 
 const isSettingKey = (key: string): key is SettingKey =>
@@ -87,16 +94,16 @@ const readRawFile = (file: string): RawFile => {
     text = NodeFS.readFileSync(file, "utf8");
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === "ENOENT") return { ok: true, object: {} };
-    return { ok: false, reason: "읽을 수 없음" };
+    return { ok: false, reason: t("settings.reason.unreadable") };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, reason: "JSON이 아님" };
+    return { ok: false, reason: t("settings.reason.notJson") };
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, reason: "객체가 아님" };
+    return { ok: false, reason: t("settings.reason.notObject") };
   }
   return { ok: true, object: parsed as Record<string, unknown> };
 };
@@ -115,7 +122,7 @@ export const readSettings = (file: string): SettingsFile => {
   if (!raw.ok) {
     return {
       values: {},
-      warnings: [`설정 파일을 쓰지 않고 기본값으로 시작합니다 (${raw.reason}): ${file}`],
+      warnings: [t("settings.warn.damaged", { reason: raw.reason, file })],
       damaged: true,
     };
   }
@@ -126,7 +133,7 @@ export const readSettings = (file: string): SettingsFile => {
     if (value === undefined) continue;
     const accepted = VALIDATORS[key](value);
     if (accepted === undefined) {
-      warnings.push(`settings.json 의 ${key} 값이 올바르지 않아 무시했습니다 (${EXPECTED[key]}).`);
+      warnings.push(t("settings.warn.invalidValue", { key, expected: EXPECTED[key]() }));
     } else {
       (values as Record<string, unknown>)[key] = accepted;
     }
@@ -142,7 +149,7 @@ export const writeSetting = (file: string, key: SettingKey, value: unknown): Wri
   if (!raw.ok) {
     return {
       ok: false,
-      error: `설정 파일이 손상되어 건드리지 않았습니다 (${raw.reason}): ${file}`,
+      error: t("settings.err.damaged", { reason: raw.reason, file }),
     };
   }
   // A settings file that is a symlink (dotfiles) stays one: the target is replaced, not the link,
@@ -182,7 +189,9 @@ export const writeSetting = (file: string, key: SettingKey, value: unknown): Wri
     NodeFS.rmSync(temporary, { force: true });
     return {
       ok: false,
-      error: `설정을 저장하지 못했습니다: ${cause instanceof Error ? cause.message : String(cause)}`,
+      error: t("settings.err.saveFailed", {
+        message: cause instanceof Error ? cause.message : String(cause),
+      }),
     };
   }
 };
@@ -231,7 +240,10 @@ export const loadStartupTheme = (input: {
   if (loaded.ok) return { theme: loaded.theme, warnings: loaded.warnings };
   const second = loadTheme({ name: fallback, level: input.level, configDir: input.configDir });
   if (!second.ok) throw new Error(second.error);
-  return { theme: second.theme, warnings: [`${loaded.error} (${fallback} 로 시작합니다)`] };
+  return {
+    theme: second.theme,
+    warnings: [t("settings.warn.themeFallback", { error: loaded.error, fallback })],
+  };
 };
 
 /** `notes` are what a switch that worked still has to say: a warning, a failed save, an env override. */
@@ -262,18 +274,25 @@ export const createThemeSwitcher = (input: {
     select: (name) => {
       const loaded = loadTheme({ name, level: input.level, configDir: input.configDir });
       if (!loaded.ok) {
-        return { ok: false, message: `${loaded.error} — /theme 로 목록을 확인하세요.`, notes: [] };
+        return {
+          ok: false,
+          message: t("settings.theme.listHint", { error: loaded.error }),
+          notes: [],
+        };
       }
       theme = loaded.theme;
       const notes = [...loaded.warnings];
       const saved = writeSetting(input.settingsFile, "theme", name);
       if (!saved.ok) notes.push(saved.error);
       else if (VALIDATORS.theme(input.env.OOP_THEME?.trim()) !== undefined) {
-        notes.push("OOP_THEME 이 우선하므로 다음 실행에는 적용되지 않습니다");
+        notes.push(t("settings.theme.envWins"));
       }
       return {
         ok: true,
-        message: notes.length === 0 ? `테마: ${name}` : `테마: ${name} (${notes.join("; ")})`,
+        message:
+          notes.length === 0
+            ? t("settings.theme.selected", { name })
+            : t("settings.theme.selectedNotes", { name, notes: notes.join("; ") }),
         notes,
       };
     },
@@ -295,7 +314,7 @@ const BOOLEAN_WORDS: ReadonlyMap<string, boolean> = new Map([
   ["0", false],
 ]);
 
-const show = (value: unknown): string => (value === null ? "(기본)" : String(value));
+const show = (value: unknown): string => (value === null ? t("settings.default") : String(value));
 
 /** `oop config`. Returns the exit code; every line goes through `io` so a test can read it. */
 export const runConfigCommand = (
@@ -314,13 +333,13 @@ export const runConfigCommand = (
   const read = readSettings(file);
   for (const warning of read.warnings) io.err(warning);
   const { settings, fromEnv } = resolveSettings(read.values, io.paths.env);
-  const origin = (key: SettingKey) => (fromEnv.includes(key) ? " (환경 변수)" : "");
+  const origin = (key: SettingKey) => (fromEnv.includes(key) ? t("settings.fromEnv") : "");
   if (command.action === "list") {
     for (const key of SETTING_KEYS) io.out(`${key} = ${show(settings[key])}${origin(key)}`);
     return 0;
   }
   if (!isSettingKey(command.key)) {
-    io.err(`알 수 없는 설정: ${command.key} (${SETTING_KEYS.join(", ")})`);
+    io.err(t("settings.err.unknownKey", { key: command.key, keys: SETTING_KEYS.join(", ") }));
     return 2;
   }
   const key = command.key;
@@ -334,11 +353,16 @@ export const runConfigCommand = (
       : command.value;
   const value = VALIDATORS[key](typed);
   if (value === undefined) {
-    io.err(`${key} 에는 ${EXPECTED[key]} 만 쓸 수 있습니다.`);
+    io.err(t("settings.err.badValue", { key, expected: EXPECTED[key]() }));
     return 2;
   }
   if (key === "theme" && !listThemeNames(configDirectory(io.paths)).includes(value as string)) {
-    io.err(`알 수 없는 테마: ${value} (${listThemeNames(configDirectory(io.paths)).join(", ")})`);
+    io.err(
+      t("settings.err.unknownTheme", {
+        value: value as string,
+        themes: listThemeNames(configDirectory(io.paths)).join(", "),
+      }),
+    );
     return 2;
   }
   const saved = writeSetting(file, key, value);
@@ -347,6 +371,6 @@ export const runConfigCommand = (
     return 1;
   }
   io.out(`${key} = ${show(value)}`);
-  if (fromEnv.includes(key)) io.err("환경 변수가 우선하므로 이 값은 지금 적용되지 않습니다.");
+  if (fromEnv.includes(key)) io.err(t("settings.warn.envWins"));
   return 0;
 };

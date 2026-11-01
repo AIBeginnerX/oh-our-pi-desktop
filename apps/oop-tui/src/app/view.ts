@@ -26,6 +26,7 @@ import type { ThreadStatus } from "../state/threadStatus.ts";
 import { sanitizeForTerminal, stringWidth } from "../text/width.ts";
 import { padEndVisible, truncateStyled, wrapStyled } from "../text/wrap.ts";
 import { windowAround } from "./projects.ts";
+import { t } from "../i18n/index.ts";
 
 export interface PickerItem {
   readonly label: string;
@@ -204,7 +205,7 @@ const pinBanner = (lines: string[], kept: number, rows: number): string[] =>
 export interface SlashMenuItem {
   readonly label: string;
   readonly note: string;
-  /** Marks a command of the provider, which is not ours: `provider` or `스킬`. */
+  /** Marks a command of the provider, which is not ours: `provider` or `skill`. */
   readonly tag?: string;
   /** What picking the item writes into the composer without running it (the provider's own commands). */
   readonly fill?: string;
@@ -272,10 +273,10 @@ const firstLine = (value: string): string => oneLine(value.split("\n")[0] ?? "")
  */
 const blockedAdvice = (reason: string | undefined): string | null => {
   if (reason === "authentication") {
-    return "토큰 거절 — 'oop' 재시작 (원격은 새 링크로 'oop pair')";
+    return t("session.link.authRejected");
   }
   if (reason === "unsupported") {
-    return "프로토콜 불일치 — 앱이나 oop 을 업데이트하세요";
+    return t("session.link.unsupported");
   }
   return null;
 };
@@ -286,19 +287,31 @@ export const linkNotice = (link: LinkStatus, now: number, style: Style): string 
   if (link.phase === "blocked") {
     const advice = blockedAdvice(link.reason);
     const detail = firstLine(link.detail ?? "");
-    if (advice === null) return theme.error(`연결 거부: ${detail || "연결할 수 없습니다."}`);
-    return theme.error(`연결 거부: ${advice}${detail ? ` · ${detail}` : ""}`);
+    if (advice === null) {
+      return theme.error(
+        t("session.link.refusedNoAdvice", { detail: detail || t("session.link.cannotConnect") }),
+      );
+    }
+    return theme.error(
+      t("session.link.refusedAdvice", { advice, detail: detail ? ` · ${detail}` : "" }),
+    );
   }
   if (link.phase === "reconnecting" || link.phase === "connecting") {
-    if (link.phase === "connecting") return theme.warning("서버에 연결하는 중…");
+    if (link.phase === "connecting") return theme.warning(t("session.link.connecting"));
     const wait =
       link.retryAt !== null
-        ? ` ${Math.max(0, Math.ceil((link.retryAt - now) / 1000))}초 후 재시도`
+        ? t("session.link.retryIn", {
+            seconds: Math.max(0, Math.ceil((link.retryAt - now) / 1000)),
+          })
         : "";
     // The reason comes last: the countdown above it changes width, and a narrow terminal cuts the tail.
     const why = firstLine(link.detail ?? "");
     return theme.warning(
-      `연결이 끊어졌습니다.${wait} (${link.attempt}회)${why ? ` — ${why}` : ""}`,
+      t("session.link.disconnected", {
+        wait,
+        attempt: link.attempt,
+        why: why ? ` — ${why}` : "",
+      }),
     );
   }
   return null;
@@ -326,7 +339,7 @@ const stateLine = (view: ChatView, rail: Rail, width: number): string[] | null =
   } else {
     if (view.status?.phase === "error") {
       const why = view.status.lastError ? `: ${firstLine(view.status.lastError)}` : "";
-      parts.push(theme.error(`오류${why}`));
+      parts.push(theme.error(t("session.view.error", { why })));
     }
     if (view.notice) parts.push(view.notice);
   }
@@ -344,7 +357,7 @@ const menuRows = (menu: SlashMenuView, rail: Rail, width: number, room: number):
   if (menu.items.length === 0) {
     return railWrap(
       rail,
-      theme.dim(menu.noMatch ?? "일치하는 명령이 없습니다. 그대로 보내려면 앞에 공백"),
+      theme.dim(menu.noMatch ?? t("session.view.noMatch")),
       width,
       "active",
     ).slice(0, room);
@@ -400,7 +413,7 @@ export const composerHeight = (editor: EditorState, inner: number, maxRows: numb
 /** Most waiting messages that get a row of their own; the rest are counted in the title. */
 const QUEUE_ROWS = 3;
 
-/** `대기 N건` and the first words of the next messages; `room` rows at most, the title always first. */
+/** `N queued` and the first words of the next messages; `room` rows at most, the title always first. */
 const queueRows = (
   queue: QueueView,
   rail: Rail,
@@ -411,11 +424,11 @@ const queueRows = (
   const { theme } = rail.style;
   const inner = width - RAIL_COLUMNS;
   // The arrow belongs to the panel while one waits for an answer, so it pulls nothing back then.
-  const pull = pullBack ? " · ↑ 꺼내기" : "";
+  const pull = pullBack ? t("session.view.pullBack") : "";
   const title =
     queue.held === null
-      ? `대기 ${queue.items.length}건 · 작업이 끝나면 차례로 전송${pull}`
-      : `대기 ${queue.items.length}건 · ${queue.held} · 빈 입력에서 Enter 전송${pull}`;
+      ? t("session.view.queueIdle", { count: queue.items.length, pull })
+      : t("session.view.queueHeld", { count: queue.items.length, held: queue.held, pull });
   const shown = Math.min(QUEUE_ROWS, queue.items.length, Math.max(0, room - 1));
   const rows = [railRow(rail, theme.warning(truncateStyled(title, inner)), "idle")];
   queue.items.slice(0, shown).forEach((item, index) => {
@@ -439,7 +452,7 @@ const promptTone = (view: ChatView): RailTone => {
 
 /**
  * The live region of a chat, top to bottom: the unfinished reply, the plan and sub-agents of the
- * running turn, a line of state, then the prompt on the rail: a gap, `◆ 메시지` (the work row while a
+ * running turn, a line of state, then the prompt on the rail: a gap, `◆ Message` (the work row while a
  * turn runs, nothing when a panel asks something instead), the panel, the composer between two
  * lines of the theme, the slash menu under it, and the status bar as the end of the rail. When the
  * screen is short the menu shrinks first, then the state line and the gap go, then the plan and
@@ -473,14 +486,15 @@ export const renderChat = (view: ChatView, columns: number, maxRows: number): Re
       )
     : null;
   const progress = view.sending
-    ? ` ${theme.dim("•")} ${theme.accent("전송 중…")}`
+    ? ` ${theme.dim("•")} ${theme.accent(t("session.view.sending"))}`
     : view.loading
-      ? ` ${theme.dim("•")} ${theme.dim("스레드를 불러오는 중…")}`
+      ? ` ${theme.dim("•")} ${theme.dim(t("session.view.loading"))}`
       : "";
   const header =
     view.panel.length > 0
       ? null
-      : (work ?? railActive(rail, `${theme.text.bold("메시지")}${progress}`, tone));
+      : (work ??
+        railActive(rail, `${theme.text.bold(t("session.view.message"))}${progress}`, tone));
 
   const inner = Math.max(2, width - RAIL_COLUMNS);
   const layout = layoutInput(view.editor, inner);
@@ -556,7 +570,12 @@ export const renderChat = (view: ChatView, columns: number, maxRows: number): Re
     const more = (arrow: string, count: number) =>
       railRow(
         rail,
-        theme.dim(truncateStyled(`${arrow} ${count.toLocaleString("en-US")}줄 더`, inner)),
+        theme.dim(
+          truncateStyled(
+            t("session.view.moreLines", { arrow, count: count.toLocaleString("en-US") }),
+            inner,
+          ),
+        ),
         tone,
       );
     if (shown.above > 0) lines.push(more("↑", shown.above));

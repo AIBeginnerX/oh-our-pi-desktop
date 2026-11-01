@@ -72,6 +72,7 @@ import {
 import { debounced, watchSignals } from "./signals.ts";
 import { guardTerminal } from "./terminalGuard.ts";
 import { sanitizeForTerminal } from "./text/width.ts";
+import { t } from "./i18n/index.ts";
 
 /** Text from a server or a failure is untrusted; only the plain characters of it reach the terminal. */
 const say = (stream: NodeJS.WriteStream, text: string) => {
@@ -111,10 +112,7 @@ const ownServerFor = (home: string | null): DaemonLauncher | undefined => {
   const program = appProgram();
   if (program === null) {
     if (paths.env[DAEMON_ENTRY_VARIABLE]?.trim()) {
-      say(
-        process.stderr,
-        `${DAEMON_ENTRY_VARIABLE} 가 가리키는 파일이 없어 서버를 띄우지 않습니다.`,
-      );
+      say(process.stderr, t("link.daemonEntryMissing", { variable: DAEMON_ENTRY_VARIABLE }));
     }
     return undefined;
   }
@@ -183,13 +181,13 @@ const connectLocally = async (
     label: identity(version).label,
   });
   if (token === null) {
-    say(process.stderr, "자동 연결 실패: 실행 중인 OOP 서버에서 연결 토큰을 받지 못했습니다.");
+    say(process.stderr, t("link.autoPairNoToken"));
     return null;
   }
   return exchangeAndSave(store, { httpBaseUrl: server.origin, credential: token }, version).catch(
     (cause: unknown) => {
       const reason = cause instanceof Error ? cause.message : String(cause);
-      say(process.stderr, `자동 연결 실패: ${reason}`);
+      say(process.stderr, t("link.autoPairFailed", { reason }));
       return null;
     },
   );
@@ -218,7 +216,7 @@ export const runPair = async (input: {
     const store = new CredentialStore(credentialsFilePath(currentPathEnv()));
     await store.verify();
     const paired = await exchangeAndSave(store, target, input.version);
-    say(process.stdout, `연결되었습니다: ${paired.label}\n이제 'oop' 으로 시작하세요.`);
+    say(process.stdout, t("link.paired", { label: paired.label }));
     return 0;
   } catch (cause) {
     say(process.stderr, pairFailureMessage(cause));
@@ -359,7 +357,7 @@ const openConnection = async (input: {
     }
   }
   if (credential === null) {
-    say(process.stderr, "error" in selected ? selected.error : "서버에 연결할 수 없습니다.");
+    say(process.stderr, "error" in selected ? selected.error : t("link.cannotConnect"));
     return null;
   }
   const warning = plainHttpWarning(resolved.origin);
@@ -378,10 +376,7 @@ export const runInteractive = async (input: {
   const stdin = terminalInput();
   const { stdout } = process;
   if (!stdin.isTTY || !stdout.isTTY) {
-    say(
-      process.stderr,
-      "oop 은 대화형 터미널에서만 실행됩니다. (표준 입출력이 터미널이 아닙니다.)",
-    );
+    say(process.stderr, t("link.needsTty"));
     return 2;
   }
 
@@ -695,10 +690,11 @@ export const runProvider = async (input: {
       PROVIDER_ONLINE_TIMEOUT_MS,
     );
     if (online === null) {
-      return `서버가 연결을 거부했습니다${link.status.detail === null ? "" : `: ${link.status.detail}`}`;
+      return t("link.serverRefused", {
+        detail: link.status.detail === null ? "" : `: ${link.status.detail}`,
+      });
     }
-    if (!online)
-      return "서버에 연결하지 못했습니다. OOP 앱이나 터미널 서버가 실행 중인지 확인하세요.";
+    if (!online) return t("link.serverUnreachable");
     // The thread list only sharpens the impact of a removal; without it that part is unknown.
     if (need.shell) await until(() => link.shell !== null, PROVIDER_SHELL_GRACE_MS);
     return null;

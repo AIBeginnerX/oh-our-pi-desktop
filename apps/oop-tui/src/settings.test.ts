@@ -4,6 +4,8 @@ import * as NodePath from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { setLanguage } from "./i18n/index.ts";
+
 import { hostPlatform } from "./host.ts";
 import type { PathEnv } from "./link/paths.ts";
 import { BUILTIN_THEMES, createTheme } from "./render/theme.ts";
@@ -108,6 +110,7 @@ describe("resolveSettings", () => {
         banner: true,
         statusLine: "auto",
         notify: true,
+        language: null,
       },
       fromEnv: [],
     });
@@ -317,6 +320,7 @@ describe("runConfigCommand", () => {
       "banner = false",
       "statusLine = auto",
       "notify = true",
+      "language = (기본)",
     ]);
   });
 
@@ -384,5 +388,37 @@ describe("runConfigCommand", () => {
     const listed = run({ action: "get", key: "banner" });
     expect(listed.out).toEqual(["true"]);
     expect(listed.err).toHaveLength(1);
+  });
+});
+
+describe("language setting", () => {
+  afterEach(() => setLanguage("ko"));
+
+  it("accepts en and ko and ignores anything else with a warning", () => {
+    NodeFS.writeFileSync(file, JSON.stringify({ language: "en" }));
+    expect(readSettings(file).values.language).toBe("en");
+    NodeFS.writeFileSync(file, JSON.stringify({ language: "fr" }));
+    const read = readSettings(file);
+    expect(read.values.language).toBeUndefined();
+    expect(read.warnings[0]).toContain("language");
+  });
+
+  it("sets and lists language, in English when the language is English", () => {
+    setLanguage("en");
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = {
+      paths: paths(),
+      out: (l: string) => void out.push(l),
+      err: (l: string) => void err.push(l),
+    };
+    expect(runConfigCommand({ action: "set", key: "language", value: "en" }, io)).toBe(0);
+    expect(JSON.parse(readFile()).language).toBe("en");
+    expect(runConfigCommand({ action: "set", key: "language", value: "fr" }, io)).toBe(2);
+    expect(err).toEqual(["language only accepts en | ko."]);
+    out.length = 0;
+    expect(runConfigCommand({ action: "list" }, io)).toBe(0);
+    expect(out[0]).toBe("theme = (default)");
+    expect(out.at(-1)).toBe("language = en");
   });
 });

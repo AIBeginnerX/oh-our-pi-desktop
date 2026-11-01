@@ -1,0 +1,71 @@
+import { defineMessages } from "./define.ts";
+
+export const doctor = defineMessages(
+  {
+    "doctor.color.0": "none",
+    "doctor.color.1": "16 colors",
+    "doctor.color.2": "256 colors",
+    "doctor.color.3": "true color",
+    "doctor.reason.notTty": "not a terminal",
+    "doctor.reason.default": "default",
+    "doctor.color": "Color: {name} ({reason})",
+    "doctor.symbols": "Symbols: {kind} ({setting})",
+    "doctor.theme": "Theme: {name}",
+    "doctor.settings.unreadable": "Cannot read the settings file, using defaults: {file}",
+    "doctor.settings.none": "No settings file (using defaults)",
+    "doctor.settings.ok": "Settings file is fine: {file}",
+    "doctor.server.found": "OOP server on this computer: running (port {port}) — {kind}",
+    "doctor.server.standalone": "terminal-only server",
+    "doctor.server.app": "server used by the app",
+    "doctor.server.none": "OOP server on this computer: none{detail}",
+    "doctor.credentials.none":
+      "No credentials file — 'oop' connects automatically on this computer; use 'oop pair' for other computers",
+    "doctor.credentials.wide":
+      "The credentials file permissions are too open ({mode}): tighten them with chmod 600",
+    "doctor.credentials.ok": "Credentials file present (contents not read)",
+    "doctor.standalone.ok": "Standalone terminal mode: available ({script})",
+    "doctor.standalone.noApp":
+      "Standalone terminal mode: unavailable — the installed OOP app was not found (the connection drops when the app closes)",
+    "doctor.standalone.unsupported":
+      "Standalone terminal mode: not supported on this operating system (the connection drops when the app closes)",
+    "doctor.section.terminal": "Terminal",
+    "doctor.section.settings": "Settings",
+    "doctor.section.connection": "Connection",
+    "doctor.title": "Terminal check",
+    "doctor.passed": "{passed}/{total} checks passed",
+    "doctor.attention": "{count} need attention",
+  },
+  {
+    "doctor.color.0": "없음",
+    "doctor.color.1": "16색",
+    "doctor.color.2": "256색",
+    "doctor.color.3": "트루컬러",
+    "doctor.reason.notTty": "터미널이 아님",
+    "doctor.reason.default": "기본값",
+    "doctor.color": "색: {name} ({reason})",
+    "doctor.symbols": "심볼: {kind} ({setting})",
+    "doctor.theme": "테마: {name}",
+    "doctor.settings.unreadable": "설정 파일을 읽을 수 없어 기본값을 씁니다: {file}",
+    "doctor.settings.none": "설정 파일 없음 (기본값 사용)",
+    "doctor.settings.ok": "설정 파일 정상: {file}",
+    "doctor.server.found": "이 컴퓨터의 OOP 서버: 있음 (포트 {port}) — {kind}",
+    "doctor.server.standalone": "터미널 단독 서버",
+    "doctor.server.app": "앱이 쓰는 서버",
+    "doctor.server.none": "이 컴퓨터의 OOP 서버: 없음{detail}",
+    "doctor.credentials.none":
+      "자격증명 파일 없음 — 이 컴퓨터는 'oop' 이 자동 연결하고, 다른 컴퓨터는 'oop pair' 로 연결합니다",
+    "doctor.credentials.wide": "자격증명 파일 권한이 넓습니다 ({mode}): chmod 600 으로 줄이세요",
+    "doctor.credentials.ok": "자격증명 파일 있음 (내용은 읽지 않음)",
+    "doctor.standalone.ok": "터미널 단독 실행: 가능 ({script})",
+    "doctor.standalone.noApp":
+      "터미널 단독 실행: 불가 — 설치된 OOP 앱을 찾지 못했습니다 (앱이 꺼지면 연결이 끊어집니다)",
+    "doctor.standalone.unsupported":
+      "터미널 단독 실행: 이 운영체제에서는 지원하지 않습니다 (앱이 꺼지면 연결이 끊어집니다)",
+    "doctor.section.terminal": "터미널",
+    "doctor.section.settings": "설정",
+    "doctor.section.connection": "연결",
+    "doctor.title": "터미널 점검",
+    "doctor.passed": "{passed}/{total} 점검 통과",
+    "doctor.attention": "{count}건 확인 필요",
+  },
+);

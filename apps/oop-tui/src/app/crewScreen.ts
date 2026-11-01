@@ -21,6 +21,7 @@ import { boardSummary, roleName, taskDetail, taskHeadline, taskNote } from "../r
 import { RAIL_COLUMNS, type RailTone } from "../render/rail.ts";
 import type { Style } from "../render/style.ts";
 import type { Symbols } from "../render/symbols.ts";
+import { getLanguage, t } from "../i18n/index.ts";
 import { graphemesOf, sanitizeForTerminal } from "../text/width.ts";
 import { wrapStyled } from "../text/wrap.ts";
 import {
@@ -343,7 +344,7 @@ const activate = (view: CrewView, context: CrewContext): CrewKeyResult => {
   if (view.kind === "model") {
     const pick = modelItems(context, view.role, view.query)[view.selected];
     if (pick === undefined) {
-      return { ...stay(view), notice: "일치하는 모델이 없습니다. Esc로 검색어를 지우세요." };
+      return { ...stay(view), notice: t("providers.crewScreen.noMatch") };
     }
     return {
       view: mainViewAt(
@@ -436,43 +437,56 @@ export const crewFrame = (
   const dim = (text: string) => theme.dim(sanitizeForTerminal(text));
   const draw = (picker: Parameters<typeof renderPicker>[0]) =>
     renderPicker(picker, env.columns, env.rows, env.style, env.symbols, env.banner, env.tone);
-  const scope = context.scope === "thread" ? "이 스레드" : "새 채팅 기본값";
+  const scope =
+    context.scope === "thread"
+      ? t("providers.crewScreen.scopeThread")
+      : t("providers.crewScreen.scopeDefault");
 
   if (view.kind === "preset") {
     return draw({
-      title: "Crew 프리셋",
+      title: t("providers.crewScreen.presetTitle"),
       items: numbered(
         PRESETS.map((entry) => ({
           label: entry.label,
-          note: [entry.value === context.crew.preset ? "현재" : "", entry.hint]
+          note: [
+            entry.value === context.crew.preset ? t("providers.screen.current") : "",
+            entry.hint,
+          ]
             .filter((part) => part !== "")
             .join(" · "),
         })),
       ),
       selected: view.selected,
-      hint: "↑/↓ 이동 • 1-4 선택 • Enter 적용 • Esc 뒤로",
+      hint: t("providers.crewScreen.hintPreset"),
       empty: "",
-      before: [dim(`${scope}에 적용됩니다. 직접 고른 모델은 그대로 둡니다.`)],
+      before: [dim(t("providers.crewScreen.presetNote", { scope }))],
     });
   }
 
   if (view.kind === "model") {
     const items = modelItems(context, view.role, view.query);
     return draw({
-      title: `${roleName(view.role)} 모델`,
+      title: t("providers.crewScreen.roleModel", { role: roleName(view.role) }),
       items: items.map((item) => ({
         label: item.label,
-        note: [pickIsCurrent(item, context.crew, view.role) ? "현재" : "", item.note]
+        note: [
+          pickIsCurrent(item, context.crew, view.role) ? t("providers.screen.current") : "",
+          item.note,
+        ]
           .filter((part) => part !== "")
           .join(" · "),
       })),
       selected: view.selected,
-      hint: `↑/↓ 이동 • Enter 선택 • Esc ${view.query === "" ? "뒤로" : "검색어 지우기"}`,
-      empty: "일치하는 모델이 없습니다. Esc로 검색어를 지우세요.",
+      hint: t(
+        view.query === ""
+          ? "providers.crewScreen.hintModel"
+          : "providers.crewScreen.hintModelClear",
+      ),
+      empty: t("providers.crewScreen.noMatch"),
       before: [
         view.query === ""
-          ? dim(`${ROLE_HINT[view.role]} · 글자를 치면 걸러집니다`)
-          : `${theme.dim("검색:")} ${theme.text(sanitizeForTerminal(view.query))}`,
+          ? dim(t("providers.crewScreen.typeToFilter", { hint: ROLE_HINT[view.role] }))
+          : `${theme.dim(t("providers.crewScreen.search"))} ${theme.text(sanitizeForTerminal(view.query))}`,
       ],
     });
   }
@@ -481,41 +495,49 @@ export const crewFrame = (
     const task = findTask(context, view.taskId);
     if (task === null) {
       return draw({
-        title: "Crew 작업",
+        title: t("providers.crewScreen.taskTitle"),
         items: [],
         selected: 0,
-        hint: "Esc 뒤로",
-        empty: "이 작업은 더 이상 보드에 없습니다.",
+        hint: t("providers.crewScreen.hintBack"),
+        empty: t("providers.crewScreen.taskGone"),
       });
     }
     const waiting = waitingOf(context, task);
     const detail = taskDetail(task, context.now, waiting).flatMap(([name, value]) => {
       const rows = wrapStyled(
-        `${theme.dim(name.padEnd(4))} ${theme.text(sanitizeForTerminal(value))}`,
+        `${theme.dim(name.padEnd(getLanguage() === "ko" ? 4 : 9))} ${theme.text(sanitizeForTerminal(value))}`,
         room,
       );
-      return name === "요약" && rows.length > SUMMARY_ROWS
+      return name === t("render.crew.field.summary") && rows.length > SUMMARY_ROWS
         ? [...rows.slice(0, SUMMARY_ROWS - 1), dim("…")]
         : rows;
     });
     const labels: Record<TaskItem, PickerItem> = {
       open: {
-        label: "서브 스레드 열기",
-        note: waiting === null ? "작업의 대화를 봅니다" : "승인·질문에 답합니다",
+        label: t("providers.crewScreen.openSub"),
+        note:
+          waiting === null
+            ? t("providers.crewScreen.openSubNote")
+            : t("providers.crewScreen.openSubWaitingNote"),
       },
-      stop: { label: "중단", note: "작업이 있던 곳에서 멈춥니다" },
-      retry: { label: "재시도", note: "새 작업으로 다시 실행합니다" },
-      back: { label: "보드로" },
-      confirm: { label: "중단 확인", note: "이후 재시도할 수 있습니다" },
-      cancel: { label: "취소" },
+      stop: { label: t("providers.crewScreen.stop"), note: t("providers.crewScreen.stopNote") },
+      retry: { label: t("providers.crewScreen.retry"), note: t("providers.crewScreen.retryNote") },
+      back: { label: t("providers.crewScreen.toBoard") },
+      confirm: {
+        label: t("providers.crewScreen.confirmStop"),
+        note: t("providers.crewScreen.confirmStopNote"),
+      },
+      cancel: { label: t("providers.crewScreen.cancel") },
     };
     return draw({
-      title: view.confirmStop ? "이 작업을 중단할까요?" : `${roleName(task.role)} 작업`,
+      title: view.confirmStop
+        ? t("providers.crewScreen.stopQuestion")
+        : t("providers.crewScreen.roleTask", { role: roleName(task.role) }),
       items: numbered(taskItems(task, view.confirmStop).map((item) => labels[item])),
       selected: view.selected,
       hint: view.confirmStop
-        ? "↑/↓ 이동 • Enter 확인 • Esc 취소"
-        : "↑/↓ 이동 • Enter 실행 • Esc 보드로",
+        ? t("providers.crewScreen.hintConfirm")
+        : t("providers.crewScreen.hintTask"),
       empty: "",
       before: detail,
     });
@@ -525,10 +547,13 @@ export const crewFrame = (
   const items: PickerItem[] = rows.map((row) => {
     switch (row.kind) {
       case "toggle":
-        return { label: `Crew  ${context.crew.enabled ? "켜짐" : "꺼짐"}`, note: scope };
+        return {
+          label: `Crew  ${context.crew.enabled ? t("providers.cmd.on") : t("providers.cmd.off")}`,
+          note: scope,
+        };
       case "preset":
         return {
-          label: `프리셋  ${presetLabel(context.crew.preset)}`,
+          label: `${t("providers.crewScreen.preset")}  ${presetLabel(context.crew.preset)}`,
           note: PRESETS.find((entry) => entry.value === context.crew.preset)?.hint ?? "",
         };
       case "role":
@@ -537,18 +562,24 @@ export const crewFrame = (
           note: ROLE_HINT[row.role],
         };
       case "autoAll":
-        return { label: "역할 모델 모두 Auto", note: "직접 고른 모델을 풉니다" };
+        return {
+          label: t("providers.crewScreen.autoAll"),
+          note: t("providers.crewScreen.autoAllNote"),
+        };
       case "default":
-        return { label: "새 채팅 기본값으로 사용", note: "지금 설정을 새 스레드에도" };
+        return {
+          label: t("providers.crewScreen.makeDefault"),
+          note: t("providers.crewScreen.makeDefaultNote"),
+        };
       case "thread":
         return {
-          label: `${row.entry.kind === "approval" ? "승인 대기" : "질문 대기"}  ${crewSubThreadLabel(row.entry.thread.title)}`,
-          note: "Enter 로 열기",
+          label: `${t(row.entry.kind === "approval" ? "providers.crewScreen.waitApproval" : "providers.crewScreen.waitInput")}  ${crewSubThreadLabel(row.entry.thread.title)}`,
+          note: t("providers.crewScreen.enterToOpen"),
         };
       case "task": {
         const waiting = waitingOf(context, row.task);
         return {
-          label: `${taskHeadline(row.task)}${waiting === null ? "" : waiting === "approval" ? " · 승인 대기" : " · 질문 대기"}`,
+          label: `${taskHeadline(row.task)}${waiting === null ? "" : waiting === "approval" ? ` · ${t("providers.crewScreen.waitApproval")}` : ` · ${t("providers.crewScreen.waitInput")}`}`,
           note: taskNote(row.task, context.now),
         };
       }
@@ -561,7 +592,7 @@ export const crewFrame = (
   const waitingLine = waitingText(context.waiting);
   if (waitingLine !== null) before.push(...wrapStyled(theme.warning(waitingLine), room));
   if (board === null) {
-    before.push(dim("이 스레드에는 아직 crew 작업이 없습니다."));
+    before.push(dim(t("providers.crewScreen.noTasks")));
   } else {
     before.push(dim(boardSummary(board)));
     for (const note of board.notes) before.push(...wrapStyled(dim(note.text), room));
@@ -570,7 +601,7 @@ export const crewFrame = (
     title: "Crew",
     items: numbered(items),
     selected: view.selected,
-    hint: "↑/↓ 이동 • 1-9 선택 • Enter 실행 • Esc 닫기",
+    hint: t("providers.crewScreen.hintMain"),
     empty: "",
     before,
   });

@@ -31,7 +31,8 @@ export const PROVIDER_PRESENTATION = {
   },
   claude: {
     label: "Claude Code",
-    color: "#d97757",
+    // Claude brand orange, except in the iris theme where index.css points it at `--primary`.
+    color: "var(--provider-claude)",
     mark: ClaudeAI,
   },
   grok: {

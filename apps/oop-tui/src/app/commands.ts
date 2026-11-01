@@ -15,6 +15,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationProposedPlanId,
 } from "@t3tools/contracts";
+import { t } from "../i18n/index.ts";
 
 export { reasoningEffortOf } from "./effort.ts";
 
@@ -37,7 +38,7 @@ export const titleFromMessage = (text: string): string => {
       .split("\n")
       .find((line) => line.trim() !== "")
       ?.trim() ?? "";
-  if (first === "") return "새 대화";
+  if (first === "") return t("session.title.untitled");
   const characters = Array.from(first);
   return characters.length <= TITLE_LIMIT
     ? first
@@ -104,24 +105,27 @@ export const providersPending = (config: ServerConfig | null): boolean =>
  * Empty when a model is available.
  */
 export const noModelCause = (config: ServerConfig | null): string => {
-  if (config === null) return "서버 설정을 아직 받지 못했습니다";
+  if (config === null) return t("session.noModel.noConfig");
   if (availableModels(config).length > 0) return "";
   const on = config.providers.filter((provider) => provider.enabled);
-  if (on.length === 0) return "켜진 Provider 가 없습니다";
+  if (on.length === 0) return t("session.noModel.noProvider");
   const reasons = on.map((provider) => {
     const name = provider.displayName ?? provider.instanceId;
-    if (!provider.installed) return `${name} 설치 안 됨`;
-    if (provider.availability === "unavailable") return `${name} 사용할 수 없음`;
-    return `${name} 모델 없음`;
+    if (!provider.installed) return t("session.noModel.notInstalled", { name });
+    if (provider.availability === "unavailable") return t("session.noModel.unavailable", { name });
+    return t("session.noModel.noModels", { name });
   });
   return reasons.length <= 3
     ? reasons.join(", ")
-    : `${reasons.slice(0, 3).join(", ")} 외 ${reasons.length - 3}개`;
+    : t("session.noModel.more", {
+        list: reasons.slice(0, 3).join(", "),
+        count: reasons.length - 3,
+      });
 };
 
 /** What to tell a user who cannot send because no model can run, and where to go from here. */
 export const noModelNotice = (config: ServerConfig | null): string =>
-  `사용할 수 있는 모델이 없습니다 (${noModelCause(config)}). /provider add 로 Provider 를 추가하거나 설치한 뒤 다시 보내세요 — 터미널에서는 oop provider add`;
+  t("session.noModel.notice", { cause: noModelCause(config) });
 
 /**
  * Models a thread that has already run may switch to: the same provider driver (and continuation

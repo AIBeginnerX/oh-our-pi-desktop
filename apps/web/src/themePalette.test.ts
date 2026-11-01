@@ -441,6 +441,25 @@ describe("theme files", () => {
     }
   });
 
+  it("keeps Iris on a lavender base with no magenta hue", () => {
+    const hueOf = (value: string) => Number(/oklch\([^ ]+ ([^ ]+) ([^ )]+)\)/.exec(value)?.[2]);
+    const chromaOf = (value: string) => Number(/oklch\([^ ]+ ([^ ]+) /.exec(value)?.[1]);
+    for (const colors of [IRIS_THEME.colors, IRIS_THEME.variants!.dark!]) {
+      for (const value of Object.values(colors)) {
+        if (chromaOf(value) < 0.02) continue;
+        const hue = hueOf(value);
+        // Reds and ambers (error, warning) sit below 100; everything else stays violet.
+        expect(hue < 100 || (hue >= 255 && hue <= 310)).toBe(true);
+      }
+      expect(hueOf(colors.accent)).toBeGreaterThanOrEqual(285);
+      expect(hueOf(colors.accent)).toBeLessThanOrEqual(300);
+      expect(chromaOf(colors.canvas)).toBeGreaterThan(0.015);
+    }
+    expect(contrastRatio(IRIS_THEME.colors.text, IRIS_THEME.colors.canvas)).toBeGreaterThanOrEqual(
+      4.5,
+    );
+  });
+
   it("includes the dual-mode maintainer themes", () => {
     for (const theme of [T3_CHAT_THEME, GROVE_THEME, OCEAN_THEME, EMBER_THEME, IRIS_THEME]) {
       expect(getThemeDefinition(theme.id)).toBe(theme);

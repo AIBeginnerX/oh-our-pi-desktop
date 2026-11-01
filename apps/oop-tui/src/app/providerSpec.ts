@@ -23,6 +23,7 @@ import {
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import { t, type MessageKey } from "../i18n/index.ts";
 import { sanitizeForTerminal } from "../text/width.ts";
 
 // ---- drivers ----------------------------------------------------------------------------------
@@ -122,23 +123,28 @@ export interface FieldModel {
   readonly required?: boolean;
 }
 
-/** Korean names for the fields the schemas name in English; an unlisted field keeps its own title. */
-const FIELD_LABELS: Readonly<Record<string, string>> = {
-  binaryPath: "실행 파일 경로",
-  homePath: "홈 폴더",
-  shadowHomePath: "계정별 홈 폴더",
-  launchArgs: "실행 인자",
-  telemetry: "사용 통계 전송",
-  authMethod: "로그인 방식",
-  apiKey: "API 키",
-  gcpProject: "GCP 프로젝트",
-  gcpLocation: "GCP 지역",
-  serverUrl: "서버 주소",
-  serverPassword: "서버 비밀번호",
-  apiEndpoint: "API 주소",
-  bridgePath: "ACP 브리지 경로",
-  autoCompactWindow: "자동 압축 기준(토큰)",
-  claudeAiConnectors: "claude.ai 커넥터",
+/** Our own names for the fields the schemas name in English; an unlisted field keeps its own title. */
+const FIELD_LABELS: Readonly<Record<string, MessageKey>> = {
+  binaryPath: "providers.field.binaryPath",
+  homePath: "providers.field.homePath",
+  shadowHomePath: "providers.field.shadowHomePath",
+  launchArgs: "providers.field.launchArgs",
+  telemetry: "providers.field.telemetry",
+  authMethod: "providers.field.authMethod",
+  apiKey: "providers.field.apiKey",
+  gcpProject: "providers.field.gcpProject",
+  gcpLocation: "providers.field.gcpLocation",
+  serverUrl: "providers.field.serverUrl",
+  serverPassword: "providers.field.serverPassword",
+  apiEndpoint: "providers.field.apiEndpoint",
+  bridgePath: "providers.field.bridgePath",
+  autoCompactWindow: "providers.field.autoCompactWindow",
+  claudeAiConnectors: "providers.field.claudeAiConnectors",
+};
+
+const labelOf = (key: string, title: unknown): string => {
+  const known = FIELD_LABELS[key];
+  return known !== undefined ? t(known) : typeof title === "string" ? title : key;
 };
 
 const annotationsOf = (field: Schema.Top) =>
@@ -170,7 +176,7 @@ export const driverFields = (driver: DriverEntry): ReadonlyArray<FieldModel> => 
         {
           key,
           control,
-          label: FIELD_LABELS[key] ?? (typeof title === "string" ? title : key),
+          label: labelOf(key, title),
           ...(form.placeholder === undefined ? {} : { placeholder: form.placeholder }),
           ...(control === "select" && form.options ? { options: form.options } : {}),
           ...(control === "switch" ? { defaultBoolean: booleanDefault(field) ?? false } : {}),
@@ -183,15 +189,20 @@ export const driverFields = (driver: DriverEntry): ReadonlyArray<FieldModel> => 
 export const presetFields = (preset: ProviderPresetId): ReadonlyArray<FieldModel> => {
   const entry = PROVIDER_PRESETS[preset];
   return [
-    { key: "apiKey", control: "password", label: "API 키", required: true },
+    { key: "apiKey", control: "password", label: t("providers.field.apiKey"), required: true },
     {
       key: "service",
       control: "select",
-      label: "서비스",
+      label: t("providers.spec.service"),
       options: entry.services.map((service) => ({ value: service.value, label: service.label })),
     },
-    { key: "model", control: "text", label: "모델" },
-    { key: "binaryPath", control: "text", label: "OpenCode 경로", placeholder: "opencode" },
+    { key: "model", control: "text", label: t("providers.spec.model") },
+    {
+      key: "binaryPath",
+      control: "text",
+      label: t("providers.spec.openCodePath"),
+      placeholder: "opencode",
+    },
   ];
 };
 
@@ -249,13 +260,13 @@ const ENVIRONMENT_NAME_MAX = 128;
 
 /** Why `id` cannot name a new instance, as a sentence; null when it can. `taken` holds every id in use. */
 export const validateInstanceId = (id: string, taken: ReadonlySet<string>): string | null => {
-  if (id.length === 0) return "ID 가 필요합니다.";
-  if (id.length > INSTANCE_ID_MAX) return `ID 는 ${INSTANCE_ID_MAX}자 이하여야 합니다.`;
+  if (id.length === 0) return t("providers.spec.idRequired");
+  if (id.length > INSTANCE_ID_MAX) return t("providers.spec.idTooLong", { max: INSTANCE_ID_MAX });
   if (!INSTANCE_ID_PATTERN.test(id)) {
-    return "ID 는 영문자로 시작하고 영문자, 숫자, '-', '_' 만 쓸 수 있습니다.";
+    return t("providers.spec.idShape");
   }
-  if (isDefaultInstanceId(id)) return `'${id}' 는 기본 인스턴스의 ID 라서 쓸 수 없습니다.`;
-  if (taken.has(id)) return `'${id}' 는 이미 있는 ID 입니다.`;
+  if (isDefaultInstanceId(id)) return t("providers.spec.idBuiltIn", { id });
+  if (taken.has(id)) return t("providers.cmd.idTaken", { id });
   return null;
 };
 
@@ -268,12 +279,12 @@ export const isInstanceIdShape = (id: string): boolean =>
  * repeated: a value typed where a name belongs would otherwise be printed.
  */
 export const validateEnvironmentName = (name: string): string | null => {
-  if (name.length === 0) return "환경 변수 이름이 필요합니다.";
+  if (name.length === 0) return t("providers.spec.envNameRequired");
   if (name.length > ENVIRONMENT_NAME_MAX) {
-    return `환경 변수 이름은 ${ENVIRONMENT_NAME_MAX}자 이하여야 합니다.`;
+    return t("providers.spec.envNameTooLong", { max: ENVIRONMENT_NAME_MAX });
   }
   if (!ENVIRONMENT_NAME_PATTERN.test(name)) {
-    return "환경 변수 이름 형식이 잘못됐습니다. 영문자나 '_' 로 시작하고 영문자, 숫자, '_' 만 쓸 수 있습니다.";
+    return t("providers.spec.envNameShape");
   }
   return null;
 };
@@ -377,7 +388,7 @@ export const draftProblem = (draft: AddDraft, taken: ReadonlySet<string>): strin
   if (idProblem !== null) return idProblem;
   for (const field of targetFields(draft.target)) {
     if (field.required === true && secretOf(draft, field.key) === "") {
-      return `${field.label} 이(가) 필요합니다.`;
+      return t("providers.spec.fieldRequired", { label: field.label });
     }
   }
   return null;
@@ -426,7 +437,7 @@ export const buildInstance = (draft: AddDraft): ProviderInstanceConfig => {
     });
     const taken = new Set((made.environment ?? []).map((entry) => entry.name));
     const clash = extra.find((entry) => taken.has(entry.name));
-    if (clash !== undefined) throw new Error(`${clash.name} 은(는) 이 프리셋이 이미 정합니다.`);
+    if (clash !== undefined) throw new Error(t("providers.spec.presetFixes", { name: clash.name }));
     return {
       ...made,
       ...displayName,
@@ -457,7 +468,7 @@ export const buildInstance = (draft: AddDraft): ProviderInstanceConfig => {
 // ---- showing it ------------------------------------------------------------------------------
 
 /** Word for a value that is set but not shown. */
-export const SECRET_SET = "설정됨 (가려짐)";
+export const secretSet = (): string => t("providers.spec.secretSet");
 
 const SHOWN_LIMIT = 60;
 
@@ -481,18 +492,24 @@ export const summarize = (draft: AddDraft): ReadonlyArray<SummaryRow> => {
   const rows: SummaryRow[] = [
     { label: "ID", value: shown(draft.id) },
     {
-      label: "이름",
-      value: draft.name.trim() === "" ? `(기본: ${targetLabel(target)})` : shown(draft.name),
+      label: t("providers.cmd.colName"),
+      value:
+        draft.name.trim() === ""
+          ? t("providers.spec.defaultName", { name: targetLabel(target) })
+          : shown(draft.name),
     },
-    { label: "종류", value: targetLabel(target) },
+    { label: t("providers.cmd.colKind"), value: targetLabel(target) },
   ];
   for (const field of fields) {
     const value = draft.values[field.key];
     if (value === undefined) continue;
     if (field.control === "password") {
-      if (secretOf(draft, field.key) !== "") rows.push({ label: field.label, value: SECRET_SET });
+      if (secretOf(draft, field.key) !== "") rows.push({ label: field.label, value: secretSet() });
     } else if (typeof value === "boolean") {
-      rows.push({ label: field.label, value: value ? "켜짐" : "꺼짐" });
+      rows.push({
+        label: field.label,
+        value: value ? t("providers.cmd.on") : t("providers.cmd.off"),
+      });
     } else if (value.trim() !== "") {
       const option = field.options?.find((candidate) => candidate.value === value);
       rows.push({ label: field.label, value: shown(option?.label ?? value) });
@@ -500,8 +517,8 @@ export const summarize = (draft: AddDraft): ReadonlyArray<SummaryRow> => {
   }
   for (const entry of draft.env) {
     rows.push({
-      label: `환경 변수 ${entry.name}`,
-      value: entry.sensitive ? SECRET_SET : shown(entry.value),
+      label: t("providers.spec.envLabel", { name: entry.name }),
+      value: entry.sensitive ? secretSet() : shown(entry.value),
     });
   }
   return rows;
@@ -511,17 +528,17 @@ export const summarize = (draft: AddDraft): ReadonlyArray<SummaryRow> => {
 export const afterAddAdvice = (draft: AddDraft): string | null => {
   const { target } = draft;
   if (target.kind === "preset") {
-    return `${PROVIDER_PRESETS[target.preset].label} 는 이 컴퓨터에 설치된 OpenCode 1.14.19 이상으로 실행됩니다.`;
+    return t("providers.spec.adviceOpenCode", { label: PROVIDER_PRESETS[target.preset].label });
   }
   const method = draft.values.authMethod;
   if (
     target.driver.value === "antigravity" &&
     (method === undefined || method.toString().startsWith("oauth"))
   ) {
-    return "Google 로그인은 브라우저가 필요합니다. OOP 앱의 설정 > Providers 에서 로그인하세요.";
+    return t("providers.spec.adviceGoogle");
   }
   if (target.driver.value === "codex" || target.driver.value === "claudeAgent") {
-    return "로그인이 필요하면 해당 CLI 에서 로그인하거나 OOP 앱의 설정 > Providers 에서 하세요.";
+    return t("providers.spec.adviceLogin");
   }
   return null;
 };

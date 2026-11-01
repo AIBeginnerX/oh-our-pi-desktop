@@ -42,7 +42,7 @@ const spawnChild = (baseDir: string, mode: "lock" | "nolock"): Child => {
 const settle = (child: Child) =>
   new Promise<"ready" | { code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     const poll = setInterval(() => {
-      if (child.stdout().includes("ready")) {
+      if (/^ready$/mu.test(child.stdout())) {
         clearInterval(poll);
         resolve("ready");
       }

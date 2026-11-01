@@ -2,7 +2,7 @@ import {
   LISTED_HIGHLIGHTS,
   terminalBehindText,
   terminalIsBehind,
-  UPDATE_HOW_TO,
+  updateHowTo,
   type ReleaseView,
   type UpdateReport,
 } from "../app/updateCheck.ts";
@@ -11,6 +11,7 @@ import { renderBanner } from "./banner.ts";
 import type { RegionFrame } from "./liveRegion.ts";
 import { ASCII_SYMBOLS, type Symbols } from "./symbols.ts";
 import type { Theme } from "./theme.ts";
+import { t } from "../i18n/index.ts";
 
 /** Releases the home screen spells out; the rest are counted and left to `/update`. */
 const HOME_RELEASES = 3;
@@ -45,13 +46,15 @@ const updateBlock = (input: HomeInput, report: UpdateReport, room: number): stri
   if (report.status === "current") {
     return room < 1
       ? []
-      : [`${theme.success(symbols.check)} ${theme.dim(`최신 버전입니다 (${report.current})`)}`];
+      : [
+          `${theme.success(symbols.check)} ${theme.dim(t("render.home.current", { version: report.current }))}`,
+        ];
   }
   const header = truncateStyled(
-    `${theme.accent(symbols.brand)} ${theme.accent.bold("업데이트 있음")}${theme.dim(":")} ${theme.muted(report.current)} → ${theme.text.bold(report.latest)}`,
+    `${theme.accent(symbols.brand)} ${theme.accent.bold(t("render.home.available"))}${theme.dim(":")} ${theme.muted(report.current)} → ${theme.text.bold(report.latest)}`,
     usable,
   );
-  const howTo = wrapStyled(theme.dim(UPDATE_HOW_TO), Math.max(8, usable - INDENT.length)).map(
+  const howTo = wrapStyled(theme.dim(updateHowTo()), Math.max(8, usable - INDENT.length)).map(
     (row) => INDENT + row,
   );
   const releaseRows = (release: ReleaseView, highlights: number): string[] => [
@@ -66,7 +69,11 @@ const updateBlock = (input: HomeInput, report: UpdateReport, room: number): stri
       ),
   ];
   const tail = (omitted: number, onlyThese: boolean): string =>
-    `${INDENT}${theme.dim(onlyThese ? `릴리스 ${omitted}개 — /update` : `외 ${omitted}개 릴리스 — /update`)}`;
+    `${INDENT}${theme.dim(
+      onlyThese
+        ? t("render.home.tailOnly", { count: omitted })
+        : t("render.home.tailMore", { count: omitted }),
+    )}`;
   const total = report.releases.length;
   const visible = Math.min(total, HOME_RELEASES);
   // From the fullest listing to the barest; the first that fits is shown.

@@ -5,6 +5,7 @@ import { padEndVisible, truncateStyled, wrapStyled } from "../text/wrap.ts";
 import type { Style } from "./style.ts";
 import type { Symbols } from "./symbols.ts";
 import { asRecord, firstLine, resultSummary, toolFailed, toolTitle } from "./toolLine.ts";
+import { t } from "../i18n/index.ts";
 
 export interface StatsInput {
   /** The thread's activities, as the client has them. */
@@ -51,8 +52,11 @@ const AXIS_ONES = new Map([
   [20, "0"],
   [23, "3"],
 ]);
-const TAB_LABELS = ["[1] 개요", "[2] 시간대", "[3] 도구"] as const;
-const TAB_HINT = "r:새로고침 q:닫기";
+const tabLabels = (): ReadonlyArray<string> => [
+  t("render.stats.tabOverview"),
+  t("render.stats.tabHours"),
+  t("render.stats.tabTools"),
+];
 
 /** The widest of these, by display width. A plain loop: spreading a long list into Math.max overflows the stack. */
 const widest = (texts: ReadonlyArray<string>): number =>
@@ -135,15 +139,17 @@ export const renderStats = (input: StatsInput): string[] => {
   const ascii = /^[ -~]+$/u.test(symbols.rail.bar);
   const data = tally(activities);
   const inner = Math.max(1, width - 1);
-  const note = hasOlder ? theme.dim("최근 활동만 집계") : "";
+  const note = hasOlder ? theme.dim(t("render.stats.recentOnly")) : "";
 
-  const tabs = TAB_LABELS.map((label, index) => {
-    const text = ` ${label} `;
-    if (index !== tab) return text;
-    return style.enabled ? style.inverse(style.bold(text)) : `>${label}<`;
-  }).join(" ");
+  const tabs = tabLabels()
+    .map((label, index) => {
+      const text = ` ${label} `;
+      if (index !== tab) return text;
+      return style.enabled ? style.inverse(style.bold(text)) : `>${label}<`;
+    })
+    .join(" ");
   const tabsWidth = visibleWidth(tabs);
-  const hint = theme.dim(TAB_HINT);
+  const hint = theme.dim(t("render.stats.hint"));
   const head =
     tabsWidth + 2 + visibleWidth(hint) <= width
       ? `${tabs}${" ".repeat(width - tabsWidth - visibleWidth(hint))}${hint}`
@@ -163,19 +169,24 @@ export const renderStats = (input: StatsInput): string[] => {
     }
   };
   if (data.list.length === 0) {
-    summaryLine(theme.dim("아직 집계할 도구 활동이 없습니다"));
+    summaryLine(theme.dim(t("render.stats.none")));
     return fit(out, width, limit);
   }
 
   const summary = (extra: string): string =>
-    `${extra}호출 ${style.bold(String(data.calls))}  실패율 ${
-      data.failed > 0
-        ? theme.error(`${percent(data.failed, data.calls)}%`)
-        : style.bold(`${percent(data.failed, data.calls)}%`)
-    }`;
+    t("render.stats.summary", {
+      extra,
+      calls: style.bold(String(data.calls)),
+      rate:
+        data.failed > 0
+          ? theme.error(`${percent(data.failed, data.calls)}%`)
+          : style.bold(`${percent(data.failed, data.calls)}%`),
+    });
 
   if (tab === 0) {
-    summaryLine(summary(`도구 ${style.bold(String(data.list.length))}  `));
+    summaryLine(
+      summary(t("render.stats.toolCount", { count: style.bold(String(data.list.length)) })),
+    );
     out.push("");
     const spare = Math.max(0, limit - out.length);
     const shown =
@@ -185,13 +196,19 @@ export const renderStats = (input: StatsInput): string[] => {
       widest(shown.map((tool) => tool.name)),
       Math.max(4, Math.floor(inner / 3)),
     );
-    const full = shown.map(
-      (tool) => `${tool.failed}실패/${tool.calls - tool.failed}성공 ${tool.calls}회`,
+    const full = shown.map((tool) =>
+      t("render.stats.split", {
+        failed: tool.failed,
+        ok: tool.calls - tool.failed,
+        calls: tool.calls,
+      }),
     );
     const wide = widest(full);
     // On a narrow screen the bar matters more than the split, so the split gives way first.
     const compact = inner - names - 1 - wide - 1 < 6;
-    const counts = compact ? shown.map((tool) => `${tool.calls}회`) : full;
+    const counts = compact
+      ? shown.map((tool) => t("render.stats.callsOnly", { calls: tool.calls }))
+      : full;
     const countsWidth = widest(counts);
     const bar = Math.max(1, Math.min(BAR_COLUMNS, inner - names - 1 - countsWidth - 1));
     shown.forEach((tool, index) => {
@@ -200,7 +217,7 @@ export const renderStats = (input: StatsInput): string[] => {
       );
     });
     if (shown.length < data.list.length) {
-      line(theme.dim(`… 외 ${data.list.length - shown.length}개`));
+      line(theme.dim(t("render.stats.moreTools", { count: data.list.length - shown.length })));
     }
     return fit(out, width, limit);
   }
@@ -211,7 +228,9 @@ export const renderStats = (input: StatsInput): string[] => {
       0,
     );
     const most = data.hours[peak]?.calls ?? 0;
-    summaryLine(`${summary("")}${most > 0 ? `  최다 ${style.bold(`${two(peak)}:00`)}` : ""}`);
+    summaryLine(
+      `${summary("")}${most > 0 ? t("render.stats.peak", { hour: style.bold(`${two(peak)}:00`) }) : ""}`,
+    );
     out.push("");
     const glyphs = ascii ? [".", ":", "*", "#"] : ["░", "▒", "▓", "█"];
     const cells = data.hours
@@ -222,22 +241,28 @@ export const renderStats = (input: StatsInput): string[] => {
         return index === peak ? theme.warning(glyph) : theme.accent(glyph);
       })
       .join("");
-    const label = "시간  ";
-    line(`${style.bold("시간")}  ${cells}`);
+    const hourWord = t("render.stats.hour");
+    const label = `${hourWord}  `;
+    line(`${style.bold(hourWord)}  ${cells}`);
     const axis = (marks: ReadonlyMap<number, string>): string =>
       Array.from({ length: HOURS }, (_, hour) => marks.get(hour) ?? " ").join("");
     line(theme.dim(`${" ".repeat(stringWidth(label))}${axis(AXIS_TENS)}`));
     line(theme.dim(`${" ".repeat(stringWidth(label))}${axis(AXIS_ONES)}`));
     out.push("");
-    line(style.bold("많은 시간"));
+    line(style.bold(t("render.stats.busyHours")));
     const ranked = data.hours
       .map((hour, index) => ({ ...hour, index }))
       .filter((hour) => hour.calls > 0)
       .sort((left, right) => right.calls - left.calls || left.index - right.index)
       .slice(0, TOP_HOURS);
     for (const hour of ranked) {
-      const failed = hour.failed > 0 ? `  ${theme.error(`(${hour.failed}실패)`)}` : "";
-      line(`  ${two(hour.index)}:00  ${hour.calls}회${failed}`);
+      const failed =
+        hour.failed > 0
+          ? `  ${theme.error(t("render.stats.hourFailed", { count: hour.failed }))}`
+          : "";
+      line(
+        `  ${two(hour.index)}:00  ${t("render.stats.hourCalls", { calls: hour.calls })}${failed}`,
+      );
     }
     return fit(out, width, limit);
   }
@@ -315,13 +340,22 @@ const toolBox = (tool: ToolStat, outer: number, style: Style, symbols: Symbols):
   const body = [
     theme.accent.bold(truncateStyled(tool.name, inside)),
     "",
-    `호출 ${style.bold(String(tool.calls))}  실패 ${theme.error(String(tool.failed))}  성공 ${theme.success(String(succeeded))}`,
-    `${theme.dim("마지막 호출")} ${tool.lastAt === null ? "-" : localTime(tool.lastAt)}`,
+    t("render.stats.detailCalls", {
+      calls: style.bold(String(tool.calls)),
+      failed: theme.error(String(tool.failed)),
+      ok: theme.success(String(succeeded)),
+    }),
+    `${theme.dim(t("render.stats.lastCall"))} ${tool.lastAt === null ? "-" : localTime(tool.lastAt)}`,
     "",
     ...(tool.failed === 0
-      ? [theme.dim("마지막 실패 없음")]
+      ? [theme.dim(t("render.stats.noLastFailure"))]
       : wrapStyled(
-          theme.error(truncateStyled(`마지막 실패 ${tool.lastFailure || "-"}`, inside * 3)),
+          theme.error(
+            truncateStyled(
+              t("render.stats.lastFailure", { reason: tool.lastFailure || "-" }),
+              inside * 3,
+            ),
+          ),
           inside,
         ).slice(0, 3)),
   ];

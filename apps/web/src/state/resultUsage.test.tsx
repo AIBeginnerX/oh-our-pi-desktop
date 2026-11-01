@@ -1016,6 +1016,8 @@ function stubDom() {
     listeners.get(type)?.delete(handler);
   };
   vi.stubGlobal("window", {
+    // The copy asserted in this file is the Korean table.
+    localStorage: { getItem: () => "ko", setItem: () => undefined },
     addEventListener: add,
     removeEventListener: remove,
   });

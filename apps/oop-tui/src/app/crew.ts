@@ -17,6 +17,7 @@ import {
   type ResolvedCrew,
 } from "@t3tools/shared/crew";
 
+import { t } from "../i18n/index.ts";
 import type { ModelChoice } from "./commands.ts";
 import { filterModels } from "./modelSearch.ts";
 
@@ -35,19 +36,71 @@ export const PRESETS: ReadonlyArray<{
   /** Other words `/crew preset <word>` accepts. */
   readonly aliases: ReadonlyArray<string>;
 }> = [
-  { value: "recommended", label: "OOP 추천", hint: "OOP 가 고른 균형 잡힌 팀", aliases: ["pick"] },
-  { value: "speed", label: "속도", hint: "어디서나 빠른 모델", aliases: ["fast"] },
-  { value: "quality", label: "품질", hint: "어려운 일에 가장 강한 모델", aliases: [] },
-  { value: "budget", label: "예산", hint: "되는 가장 저렴한 모델", aliases: ["cheap"] },
+  {
+    value: "recommended",
+    get label() {
+      return t("providers.crew.preset.recommended");
+    },
+    get hint() {
+      return t("providers.crew.preset.recommendedHint");
+    },
+    aliases: ["pick"],
+  },
+  {
+    value: "speed",
+    get label() {
+      return t("providers.crew.preset.speed");
+    },
+    get hint() {
+      return t("providers.crew.preset.speedHint");
+    },
+    aliases: ["fast"],
+  },
+  {
+    value: "quality",
+    get label() {
+      return t("providers.crew.preset.quality");
+    },
+    get hint() {
+      return t("providers.crew.preset.qualityHint");
+    },
+    aliases: [],
+  },
+  {
+    value: "budget",
+    get label() {
+      return t("providers.crew.preset.budget");
+    },
+    get hint() {
+      return t("providers.crew.preset.budgetHint");
+    },
+    aliases: ["cheap"],
+  },
 ];
 
 export const ROLE_HINT: Record<CrewRole, string> = {
-  worker: "검색·수정·테스트",
-  expert: "어려운 구현",
-  auditor: "바뀐 파일 검토",
+  get worker() {
+    return t("providers.crew.role.worker");
+  },
+  get expert() {
+    return t("providers.crew.role.expert");
+  },
+  get auditor() {
+    return t("providers.crew.role.auditor");
+  },
 };
 
-const TIER_WORD: Record<CrewModelTier, string> = { 1: "빠름", 2: "균형", 3: "강력" };
+const TIER_WORD: Record<CrewModelTier, string> = {
+  get 1() {
+    return t("providers.crew.tier.fast");
+  },
+  get 2() {
+    return t("providers.crew.tier.balanced");
+  },
+  get 3() {
+    return t("providers.crew.tier.strong");
+  },
+};
 
 export const presetLabel = (preset: CrewPreset): string =>
   PRESETS.find((entry) => entry.value === preset)?.label ?? preset;
@@ -58,7 +111,7 @@ export const parseCrewRole = (word: string): CrewRole | null => {
   return CREW_ROLES.find((role) => role === wanted) ?? null;
 };
 
-/** The preset a `/crew preset` argument names: the value, an alias or the Korean label. */
+/** The preset a `/crew preset` argument names: the value, an alias or the label. */
 export const parseCrewPreset = (word: string): CrewPreset | null => {
   const wanted = word.trim().toLowerCase();
   if (wanted === "") return null;
@@ -89,14 +142,14 @@ export const crewBrainProblem = (
   config: ServerConfig | null,
   brain: { readonly instanceId: string } | null,
 ): string | null => {
-  if (brain === null) return "사용할 수 있는 모델이 없습니다. /model 로 확인하세요.";
+  if (brain === null) return t("providers.crew.noModels");
   const provider = config?.providers.find((candidate) => candidate.instanceId === brain.instanceId);
   if (provider === undefined) {
-    return "서버 목록에 없는 모델이라 crew 를 쓸 수 있는지 알 수 없습니다.";
+    return t("providers.crew.unknownModel");
   }
   if (CREW_BRAIN_DRIVERS.has(provider.driver)) return null;
   const name = provider.displayName ?? provider.driver;
-  return `${name} 모델은 crew 의 brain 이 될 수 없습니다. Claude, Codex, Antigravity 모델에서만 crew 를 씁니다. /model 로 바꾸세요.`;
+  return t("providers.crew.badBrain", { name });
 };
 
 export interface CrewChange {
@@ -221,19 +274,22 @@ export const crewPickItems = (
             kind: "model" as const,
             selection: option.selection,
             label: choice.label,
-            note: `${TIER_WORD[option.tier]}${option.isDefault ? " · 기본" : ""}`,
+            note: `${TIER_WORD[option.tier]}${option.isDefault ? ` · ${t("providers.cmd.default")}` : ""}`,
           },
         ];
   });
   const needle = query.trim().toLowerCase();
-  const showAuto = needle === "" || "auto 자동 추천 recommended".includes(needle);
+  const showAuto = needle === "" || t("providers.crew.autoWords").includes(needle);
   const auto: CrewPickItem = {
     kind: "auto",
     label: "Auto",
     note:
       autoPick === null
-        ? "쓸 수 있는 모델 없음"
-        : `추천: ${autoPick.label} · ${autoPick.providerLabel}`,
+        ? t("providers.crew.noneAvailable")
+        : t("providers.crew.recommended", {
+            model: autoPick.label,
+            provider: autoPick.providerLabel,
+          }),
   };
   return [...(showAuto ? [auto] : []), ...matches];
 };
@@ -247,6 +303,6 @@ export const pickIsCurrent = (item: CrewPickItem, crew: ResolvedCrew, role: Crew
 /** How a role's model reads: `Auto · Haiku` for an unpinned role, the model alone when pinned. */
 export const roleModelText = (crew: ResolvedCrew, role: CrewRole): string => {
   const option = crew.roles[role];
-  if (option === null) return "쓸 수 있는 모델 없음";
+  if (option === null) return t("providers.crew.noneAvailable");
   return `${crew.pinned.has(role) ? "" : "Auto · "}${option.label}`;
 };

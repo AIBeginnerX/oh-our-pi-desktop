@@ -10,6 +10,7 @@ import {
 import { feedbackBannerItem } from "./chat/ComposerFeedback";
 import { selectTurnStallNoticeEnabled, useTurnStallNotice } from "./chat/useTurnStallNotice";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
+import { decideStop } from "./chat/stopBackgroundAgents.logic";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
 import {
   questionAttachmentDraftId,
@@ -4052,6 +4053,19 @@ export default function ChatView(props: ChatViewProps) {
   }, [interruptThreadTurn]);
   const canInterruptRunningThread =
     buildRunningThreadTurnInterruptInput(activeThread, phase) !== null;
+  // Stop ends the session and every background agent with it, so it asks first
+  // when any are live. The dialog's "Stop all" is the only path to onInterrupt.
+  const liveBackgroundAgentCountRef = useRef(0);
+  liveBackgroundAgentCountRef.current = agentPanelModel.liveCount;
+  const [stopAgentsConfirmCount, setStopAgentsConfirmCount] = useState<number | null>(null);
+  const requestInterrupt = useCallback(() => {
+    const decision = decideStop(liveBackgroundAgentCountRef.current);
+    if (decision.kind === "confirm") {
+      setStopAgentsConfirmCount(decision.agentCount);
+      return;
+    }
+    void onInterrupt();
+  }, [onInterrupt]);
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
@@ -6374,7 +6388,7 @@ export default function ChatView(props: ChatViewProps) {
     messages: activeThread?.messages ?? EMPTY_MESSAGES,
     turnStartedAt: activeLatestTurn?.startedAt ?? null,
     sessionUpdatedAt: activeThread?.session?.updatedAt ?? null,
-    onStop: canInterruptRunningThread ? () => void onInterrupt() : null,
+    onStop: canInterruptRunningThread ? requestInterrupt : null,
   });
   const backgroundLivenessBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (activeBackgroundLiveness === null || !activeThread) {
@@ -7035,7 +7049,7 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         if (event.repeat) return;
-        void onInterrupt();
+        requestInterrupt();
         return;
       }
 
@@ -7073,7 +7087,7 @@ export default function ChatView(props: ChatViewProps) {
     keybindings,
     handleUnsettleActiveThread,
     isServerThread,
-    onInterrupt,
+    requestInterrupt,
     onToggleDiff,
     pinThread,
     settleThread,
@@ -7375,8 +7389,10 @@ export default function ChatView(props: ChatViewProps) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
-          title: "기억 버전 충돌",
-          description: "같은 기억의 다른 버전이 선택되어 해당 메시지를 대기 행에 보류했습니다.",
+          title: t("Memory version conflict"),
+          description: t(
+            "A different version of the same memory was selected, so the message was held in the queue.",
+          ),
         }),
       );
     }
@@ -10389,7 +10405,8 @@ export default function ChatView(props: ChatViewProps) {
                             onPageScrollRelease={onComposerPageScrollRelease}
                             onCompactContext={onCompactContext}
                             onSend={onSend}
-                            onInterrupt={onInterrupt}
+                            onInterrupt={requestInterrupt}
+                            liveBackgroundAgentCount={agentPanelModel.liveCount}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
                             onSelectActivePendingUserInputOption={
@@ -10485,6 +10502,43 @@ export default function ChatView(props: ChatViewProps) {
             ) : null}
 
             {projectMemoryRecoveryDialog}
+
+            <AlertDialog
+              open={stopAgentsConfirmCount !== null}
+              onOpenChange={(open) => {
+                if (!open) setStopAgentsConfirmCount(null);
+              }}
+            >
+              <AlertDialogPopup>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("Stop background agents too?")}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {stopAgentsConfirmCount === 1
+                      ? t(
+                          "1 background agent is still running. Stopping ends it and its work. Queued messages return to the composer.",
+                        )
+                      : t(
+                          "{count} background agents are still running. Stopping ends them and their work. Queued messages return to the composer.",
+                          { count: stopAgentsConfirmCount ?? 0 },
+                        )}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogClose render={<Button variant="outline" autoFocus />}>
+                    {t("Keep running")}
+                  </AlertDialogClose>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      setStopAgentsConfirmCount(null);
+                      void onInterrupt();
+                    }}
+                  >
+                    {t("Stop all")}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogPopup>
+            </AlertDialog>
 
             <AlertDialog open={branchRestoreConfirmOpen} onOpenChange={setBranchRestoreConfirmOpen}>
               <AlertDialogPopup>

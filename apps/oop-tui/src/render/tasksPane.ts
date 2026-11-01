@@ -4,6 +4,7 @@ import { sanitizeForTerminal, visibleWidth } from "../text/width.ts";
 import { truncateStyled } from "../text/wrap.ts";
 import type { Symbols } from "./symbols.ts";
 import type { Theme } from "./theme.ts";
+import { t } from "../i18n/index.ts";
 
 /** Shortest terminal that keeps a usable conversation above the task list. */
 export const MIN_TASKS_ROWS = 16;
@@ -13,10 +14,10 @@ export const MIN_TASKS_COLUMNS = 40;
 /** Why the task list cannot be used at this size; null when it can. */
 export const tasksUnavailable = (columns: number, rows: number): string | null => {
   if (rows < MIN_TASKS_ROWS) {
-    return `터미널 높이가 ${MIN_TASKS_ROWS}줄 미만이라 작업 목록을 쓸 수 없습니다 (지금 ${rows}줄)`;
+    return t("render.tasks.tooShort", { min: MIN_TASKS_ROWS, now: rows });
   }
   if (columns < MIN_TASKS_COLUMNS) {
-    return `터미널 폭이 ${MIN_TASKS_COLUMNS}칸 미만이라 작업 목록을 쓸 수 없습니다 (지금 ${columns}칸)`;
+    return t("render.tasks.tooNarrow", { min: MIN_TASKS_COLUMNS, now: columns });
   }
   return null;
 };
@@ -76,13 +77,16 @@ export const renderTasksPane = (
   const { theme, symbols, columns, rows } = options;
   const steps = content.kind === "plan" ? content.plan.steps : [];
   const done = steps.filter((step) => step.status === "completed").length;
-  const title = steps.length === 0 ? "작업" : `작업 ${done}/${steps.length}`;
+  const title =
+    steps.length === 0
+      ? t("render.tasks.title")
+      : t("render.tasks.titleProgress", { done, total: steps.length });
   const lead = `${theme.border(symbols.rule.repeat(2))} ${theme.brand.bold(title)} `;
   const header = `${lead}${theme.border(symbols.rule.repeat(Math.max(0, columns - visibleWidth(lead))))}`;
   const lines = [header];
 
-  if (content.kind === "loading") lines.push(theme.dim("불러오는 중…"));
-  else if (content.kind === "empty") lines.push(theme.dim("아직 작업 목록이 없습니다"));
+  if (content.kind === "loading") lines.push(theme.dim(t("render.tasks.loading")));
+  else if (content.kind === "empty") lines.push(theme.dim(t("render.tasks.empty")));
   else {
     const explanation = oneLine(content.plan.explanation ?? "");
     if (explanation !== "") lines.push(theme.dim(explanation));
@@ -90,7 +94,7 @@ export const renderTasksPane = (
     const { start, size } = windowOf(steps.length, focusOf(steps), room);
     const above = start;
     const below = steps.length - start - size;
-    if (above > 0) lines.push(theme.dim(`… 위로 ${above}개`));
+    if (above > 0) lines.push(theme.dim(t("render.moreAbove", { count: above })));
     for (const step of steps.slice(start, start + size)) {
       const text = oneLine(step.step);
       lines.push(
@@ -101,7 +105,7 @@ export const renderTasksPane = (
             : `  ${theme.muted(symbols.todo.open)} ${theme.muted(text)}`,
       );
     }
-    if (below > 0) lines.push(theme.dim(`… 아래로 ${below}개`));
+    if (below > 0) lines.push(theme.dim(t("render.moreBelow", { count: below })));
   }
 
   const shown = lines.slice(0, rows).map((line) => truncateStyled(line, columns));

@@ -1,3 +1,4 @@
+import { useT } from "../../i18n";
 import * as DateTime from "effect/DateTime";
 import { useState } from "react";
 import {
@@ -334,6 +335,7 @@ function RecoveryConsent({
  * appear in the "row" phase — every other phase is honest unavailable copy.
  */
 export function ResultUsageDisclosure({ state }: { readonly state: ResultUsageDisclosureState }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   return (
     <details open={open} className="rounded-md border border-border">
@@ -346,20 +348,20 @@ export function ResultUsageDisclosure({ state }: { readonly state: ResultUsageDi
           setOpen((value) => !value);
         }}
       >
-        이 결과까지의 사용량
+        {t("Usage up to this result")}
       </summary>
       <div className="space-y-1 px-3 pb-2 text-muted-foreground">
         {state.phase === "row" ? (
           <>
-            <p className="font-medium text-foreground">{RESULT_USAGE_HEADLINE}</p>
-            <p>{RESULT_USAGE_SCOPE_NOTE}</p>
+            <p className="font-medium text-foreground">{t(RESULT_USAGE_HEADLINE)}</p>
+            <p>{t(RESULT_USAGE_SCOPE_NOTE)}</p>
             {formatResultUsageRowLines(state.row).map((line, index) => (
               <p key={`${index}:${line}`}>{line}</p>
             ))}
-            <p>{RESULT_USAGE_SNAPSHOT_NOTE}</p>
+            <p>{t(RESULT_USAGE_SNAPSHOT_NOTE)}</p>
           </>
         ) : state.phase === "hidden" ? null : (
-          <p>{RESULT_USAGE_STATE_COPY[state.phase]}</p>
+          <p>{t(RESULT_USAGE_STATE_COPY[state.phase])}</p>
         )}
       </div>
     </details>

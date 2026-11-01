@@ -2018,7 +2018,7 @@ it("sends activate with thread and script target after confirmation", async () =
   chooseLifecycleTarget();
   harness.confirmSession.mockResolvedValueOnce(AsyncResult.success(confirmedSession));
   harness.activate.mockResolvedValueOnce(AsyncResult.success({ stateSeq: 5 }));
-  await act(async () => button("활성화").props.onClick());
+  await act(async () => button("Activate").props.onClick());
   expect(harness.activate).toHaveBeenCalledTimes(1);
   expect(harness.activate.mock.calls[0]![0].input).toEqual({
     ref: refV1,
@@ -2040,7 +2040,7 @@ it("retire sends no target and only the pinned state sequence", async () => {
   render(<ProjectSkillDialog {...dialogArgs} />);
   harness.confirmSession.mockResolvedValueOnce(AsyncResult.success(confirmedSession));
   harness.retire.mockResolvedValueOnce(AsyncResult.success({ stateSeq: 7 }));
-  await act(async () => button("사용 중지").props.onClick());
+  await act(async () => button("Disable").props.onClick());
   expect(harness.retire).toHaveBeenCalledTimes(1);
   expect(harness.retire.mock.calls[0]![0].input).toEqual({
     ref: refV1,
@@ -2056,7 +2056,7 @@ it("refuses lifecycle RPC when only the lifecycle capability is lost during held
   render(<ProjectSkillDialog {...dialogArgs} />);
   chooseLifecycleTarget();
   const release = beginHeldConfirmation();
-  act(() => button("활성화").props.onClick());
+  act(() => button("Activate").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   // Manage still holds, so only the lifecycle read can be what refuses.
@@ -2081,7 +2081,7 @@ it("revalidates after a typed state-changed rejection without retrying activate"
       Cause.fail({ _tag: "ProjectSkillStoreRejectedError", reason: "state-changed" }),
     ),
   );
-  await act(async () => button("활성화").props.onClick());
+  await act(async () => button("Activate").props.onClick());
   expect(harness.activate).toHaveBeenCalledTimes(1);
   expect(harness.revalidate).toHaveBeenCalled();
 });
@@ -2098,7 +2098,7 @@ it("restores a retired version with an explicit thread target", async () => {
   chooseLifecycleTarget();
   harness.confirmSession.mockResolvedValueOnce(AsyncResult.success(confirmedSession));
   harness.activate.mockResolvedValueOnce(AsyncResult.success({ stateSeq: 9 }));
-  await act(async () => button("이전 버전 복원").props.onClick());
+  await act(async () => button("Restore previous version").props.onClick());
   expect(harness.activate).toHaveBeenCalledTimes(1);
   expect(harness.activate.mock.calls[0]![0].input.target).toEqual({
     threadId: "thread-1",
@@ -2224,7 +2224,7 @@ it("refuses activate when script definitions change during held confirmation", a
   render(<ProjectSkillDialog {...dialogArgs} />);
   chooseLifecycleTarget();
   const release = beginHeldConfirmation();
-  act(() => button("활성화").props.onClick());
+  act(() => button("Activate").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   harness.project = {
@@ -2251,7 +2251,7 @@ it("refuses activate when stateSeq drifts during held confirmation", async () =>
   render(<ProjectSkillDialog {...dialogArgs} />);
   chooseLifecycleTarget();
   const release = beginHeldConfirmation();
-  act(() => button("활성화").props.onClick());
+  act(() => button("Activate").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   useDetail({ ...detailV1, stateSeq: 5 });
@@ -2276,7 +2276,7 @@ it("revalidates after not-ready without auto-retrying activate", async () => {
       }),
     ),
   );
-  await act(async () => button("활성화").props.onClick());
+  await act(async () => button("Activate").props.onClick());
   expect(harness.activate).toHaveBeenCalledTimes(1);
   expect(harness.revalidate).toHaveBeenCalled();
 });
@@ -2297,7 +2297,7 @@ const activateOperation = {
     useDetail(detail);
     render(<ProjectSkillDialog {...dialogArgs} />);
     chooseLifecycleTarget();
-    return { detail, click: () => button("활성화").props.onClick() };
+    return { detail, click: () => button("Activate").props.onClick() };
   },
   expectDraftKept: () => {
     expect(selectedValueOf("Activation thread")).toBe("thread-1");
@@ -2318,7 +2318,7 @@ const retireOperation = {
     primeLifecycleProject();
     useDetail(detail);
     render(<ProjectSkillDialog {...dialogArgs} />);
-    return { detail, click: () => button("사용 중지").props.onClick() };
+    return { detail, click: () => button("Disable").props.onClick() };
   },
   expectDraftKept: () => {},
 };
@@ -2476,7 +2476,7 @@ it("disables activate and restore when use is false but keeps retire and judgmen
   useDetail({ ...detailV1, stateSeq: 4 });
   render(<ProjectSkillDialog {...dialogArgs} />);
   chooseLifecycleTarget();
-  expect(button("활성화").props.disabled).toBe(true);
+  expect(button("Activate").props.disabled).toBe(true);
   expect(hasText(LIFECYCLE_USE_UNAVAILABLE_COPY)).toBe(true);
   await act(async () => renderer?.unmount());
   renderer = null;
@@ -2487,7 +2487,7 @@ it("disables activate and restore when use is false but keeps retire and judgmen
     versions: [{ ...versionViewV1, version: { ...versionViewV1.version, state: "active" } }],
   });
   render(<ProjectSkillDialog {...dialogArgs} />);
-  expect(button("사용 중지").props.disabled).not.toBe(true);
+  expect(button("Disable").props.disabled).not.toBe(true);
   await act(async () => renderer?.unmount());
   renderer = null;
 
@@ -2522,7 +2522,7 @@ it("refuses activate RPC when use is lost during held confirmation", async () =>
   render(<ProjectSkillDialog {...dialogArgs} />);
   chooseLifecycleTarget();
   const release = beginHeldConfirmation();
-  act(() => button("활성화").props.onClick());
+  act(() => button("Activate").props.onClick());
   await act(async () => {});
   expect(harness.confirmSession).toHaveBeenCalledTimes(1);
   harness.capability = lifecycleWithoutUse;
@@ -2541,8 +2541,8 @@ it("hides lifecycle controls when stateSeq is unknown", () => {
     versions: detailV1.versions,
   });
   render(<ProjectSkillDialog {...dialogArgs} />);
-  expect(hasText("활성화")).toBe(false);
-  expect(hasText("사용 중지")).toBe(false);
+  expect(hasText("Activate")).toBe(false);
+  expect(hasText("Disable")).toBe(false);
 });
 
 // ── ChatHeader transition ─────────────────────────────────────────────────
