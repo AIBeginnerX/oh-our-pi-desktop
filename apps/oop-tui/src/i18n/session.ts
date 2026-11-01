@@ -138,7 +138,9 @@ export const session = defineMessages(
     "session.c.help.keyQuit":
       "Ctrl-D on an empty input quits • Ctrl-T collapses or expands the plan",
     "session.c.help.keyScroll":
-      "In a split view, PageUp/PageDown or Shift+PageUp/PageDown scrolls the conversation (when your terminal does not send them without Shift)",
+      "In a split view, the mouse wheel or PageUp/PageDown scrolls the conversation back, and Home/End jump to the oldest and newest line (Home/End edit the input when it has text); reaching the top loads older turns • Shift+PageUp/PageDown if your terminal needs Shift",
+    "session.c.help.keyMouse":
+      "The wheel is read by this app, so the terminal does not select text by itself: hold Shift (Option on macOS Terminal and iTerm2) while dragging to select, or /mouse off to select freely • /mouse on turns the wheel back on • OOP_MOUSE=off starts without it",
     "session.c.help.keySend": "Enter send • Ctrl-J / Alt-Enter new line",
     "session.c.help.keys": "Keys",
     "session.c.help.providerMain":
@@ -277,6 +279,10 @@ export const session = defineMessages(
     "session.c.tasksUsage": "Usage: /tasks [on|off]",
     "session.c.sidebarClosed": "The thread list is not open.",
     "session.c.sidebarOpen": "The thread list is already open.",
+    "session.c.mouseUsage": "Usage: /mouse [on|off]",
+    "session.c.mouseOn":
+      "Mouse wheel scrolling is on. Hold Shift (Option on macOS) to select text.",
+    "session.c.mouseOff": "Mouse wheel scrolling is off. The terminal selects text again.",
     "session.c.sidebarUsage": "Usage: /sidebar [on|off]",
     "session.c.themeLabel": "Theme",
     "session.c.threadDeleted": "This thread was deleted.",
@@ -401,6 +407,8 @@ export const session = defineMessages(
     "session.slash.stats.note": "This thread's tool usage stats",
     "session.slash.tasks.note": "Open or close the task list at the bottom left",
     "session.slash.tasks.usage": "[on|off]",
+    "session.slash.mouse.note": "Turn mouse wheel scrolling on or off",
+    "session.slash.mouse.usage": "[on|off]",
     "session.slash.sidebar.note": "Open or close the thread list on the left",
     "session.slash.sidebar.usage": "[on|off]",
     "session.slash.theme.note": "View or change the color theme",
@@ -578,7 +586,9 @@ export const session = defineMessages(
       "작업 중 Enter 는 대기열에 쌓여 끝나면 차례로 전송 • 빈 입력에서 ↑ 로 꺼내 고치기·지우기 • Esc 는 대기열을 입력칸으로 돌려놓음",
     "session.c.help.keyQuit": "빈 입력창에서 Ctrl-D 종료 • Ctrl-T 계획 접기/펼치기",
     "session.c.help.keyScroll":
-      "분리 창에서 PageUp/PageDown 또는 Shift+PageUp/PageDown 으로 대화 스크롤 (터미널이 Shift 없이는 보내지 않을 때)",
+      "분리 창에서 마우스 휠 또는 PageUp/PageDown 으로 대화를 거슬러 올라가고, Home/End 로 가장 오래된·최신 줄로 이동 (입력창에 글이 있으면 Home/End 는 커서 이동) • 맨 위에 닿으면 이전 대화를 불러옵니다 • 터미널이 Shift 를 요구하면 Shift+PageUp/PageDown",
+    "session.c.help.keyMouse":
+      "휠은 이 앱이 받으므로 터미널이 글자를 스스로 선택하지 않습니다: Shift(macOS 터미널·iTerm2 는 Option)를 누른 채 드래그하면 선택되고, /mouse off 로 끄면 자유롭게 선택 • /mouse on 으로 휠을 다시 켬 • OOP_MOUSE=off 로 시작하면 꺼진 채 열림",
     "session.c.help.keySend": "Enter 전송 • Ctrl-J / Alt-Enter 줄바꿈",
     "session.c.help.keys": "키",
     "session.c.help.providerMain":
@@ -713,6 +723,10 @@ export const session = defineMessages(
     "session.c.tasksUsage": "사용법: /tasks [on|off]",
     "session.c.sidebarClosed": "스레드 목록이 열려 있지 않습니다.",
     "session.c.sidebarOpen": "스레드 목록이 이미 열려 있습니다.",
+    "session.c.mouseUsage": "사용법: /mouse [on|off]",
+    "session.c.mouseOn":
+      "마우스 휠 스크롤을 켰습니다. 글자 선택은 Shift(macOS 는 Option)를 누른 채 드래그하세요.",
+    "session.c.mouseOff": "마우스 휠 스크롤을 껐습니다. 터미널이 다시 글자를 직접 선택합니다.",
     "session.c.sidebarUsage": "사용법: /sidebar [on|off]",
     "session.c.themeLabel": "테마",
     "session.c.threadDeleted": "이 스레드는 삭제되었습니다.",
@@ -832,6 +846,8 @@ export const session = defineMessages(
     "session.slash.stats.note": "이 스레드의 도구 사용 통계",
     "session.slash.tasks.note": "왼쪽 아래에 작업 목록 열기·닫기",
     "session.slash.tasks.usage": "[on|off]",
+    "session.slash.mouse.note": "마우스 휠 스크롤 켜기·끄기",
+    "session.slash.mouse.usage": "[on|off]",
     "session.slash.sidebar.note": "왼쪽에 스레드 목록 열기·닫기",
     "session.slash.sidebar.usage": "[on|off]",
     "session.slash.theme.note": "색 테마 보기·바꾸기",

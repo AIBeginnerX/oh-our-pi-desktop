@@ -1,0 +1,18 @@
+{
+  "sequence": 22,
+  "eventId": "evt-22",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.pinned",
+  "payload": {
+    "threadId": "thread-1",
+    "pinnedAt": "2026-01-01T00:00:05.000Z",
+    "pinOrderKey": "a0",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

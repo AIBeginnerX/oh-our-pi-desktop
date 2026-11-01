@@ -1,0 +1,24 @@
+{
+  "sequence": 41,
+  "eventId": "evt-41",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.proposed-plan-upserted",
+  "payload": {
+    "threadId": "thread-1",
+    "proposedPlan": {
+      "id": "plan-1",
+      "turnId": "turn-1",
+      "planMarkdown": "# Plan\n- one",
+      "implementedAt": null,
+      "implementationThreadId": null,
+      "createdAt": "2026-01-01T00:00:05.000Z",
+      "updatedAt": "2026-01-01T00:00:05.000Z"
+    }
+  }
+}

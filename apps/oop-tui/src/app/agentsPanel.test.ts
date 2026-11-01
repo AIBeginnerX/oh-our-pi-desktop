@@ -139,7 +139,7 @@ describe("the Agents view of a thread", () => {
     expect(text).toContain("지금: 명령 실행 중…");
     expect(text).toContain("파일 1개 읽음");
     // The worker: role, state, task, model, elapsed, usage, tool calls, what it does now.
-    expect(text).toContain("Worker  진행 중");
+    expect(text).toMatch(/Worker\s+GPT-6\.1-Sol\s+진행 중/u);
     expect(text).toContain("Implement invoice totals");
     expect(text).toContain("GPT-6.1-Sol");
     expect(text).toContain("12.4k 토큰");

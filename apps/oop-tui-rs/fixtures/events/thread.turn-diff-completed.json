@@ -1,0 +1,29 @@
+{
+  "sequence": 42,
+  "eventId": "evt-42",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.turn-diff-completed",
+  "payload": {
+    "threadId": "thread-1",
+    "turnId": "turn-1",
+    "checkpointTurnCount": 1,
+    "checkpointRef": "refs/oop/checkpoints/1",
+    "status": "ready",
+    "files": [
+      {
+        "path": "src/a.rs",
+        "kind": "modified",
+        "additions": 3,
+        "deletions": 1
+      }
+    ],
+    "assistantMessageId": "msg-2",
+    "completedAt": "2026-01-01T00:00:10.000Z"
+  }
+}

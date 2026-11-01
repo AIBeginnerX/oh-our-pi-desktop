@@ -5,7 +5,7 @@ import { RAIL_COLUMNS } from "../render/rail.ts";
 import { ASCII_SYMBOLS } from "../render/symbols.ts";
 import { BUILTIN_THEMES, createTheme } from "../render/theme.ts";
 import { makeActivity, makeMessage, makeThread } from "../testing/fixtures.ts";
-import { stripAnsi, visibleWidth } from "../text/width.ts";
+import { stringWidth, stripAnsi, visibleWidth } from "../text/width.ts";
 import { TranscriptPrinter, type TranscriptOptions } from "./transcript.ts";
 
 const printer = (historyMessages = 20, over: Partial<TranscriptOptions> = {}) =>
@@ -19,6 +19,13 @@ const at = (second: number) => `2026-10-30T09:00:${String(second).padStart(2, "0
 
 const assistant = (text: string, streaming: boolean, second = 1) =>
   makeMessage({ id: "m-a", role: "assistant", text, streaming, createdAt: at(second) });
+
+/**
+ * A user message with no colour: against the right edge of `width` columns, one space of padding on
+ * the left of the text and a bar closing the row. `inner` is the width of the widest row of its block.
+ */
+const sent = (text: string, inner = stringWidth(text), width = 40) =>
+  `${" ".repeat(width - inner - 3)} ${text}${" ".repeat(inner - stringWidth(text))} │`;
 
 const plainRows = (rows: ReadonlyArray<string>) => rows.map(stripAnsi);
 
@@ -64,7 +71,7 @@ describe("TranscriptPrinter", () => {
     expect(next.partial).toEqual(["│  다음"]);
   });
 
-  it("prints a user message once as a bold step and strips control sequences", () => {
+  it("prints a user message once against the right edge and strips control sequences", () => {
     const transcript = printer();
     const user = makeMessage({
       id: "m-u",
@@ -73,17 +80,17 @@ describe("TranscriptPrinter", () => {
       createdAt: at(1),
     });
     const first = transcript.sync(makeThread({ messages: [user] }));
-    expect(first.commit).toEqual(["│", "◇  안녕하세요"]);
+    expect(first.commit).toEqual(["│", sent("안녕하세요")]);
     expect(transcript.sync(makeThread({ messages: [user] })).commit).toEqual([]);
   });
 
-  it("keeps the lines of a multi-line user message on the rail, and an empty line as a bare bar", () => {
+  it("keeps the lines of a multi-line user message in one block of equal width, an empty line included", () => {
     const user = makeMessage({ id: "m-u", role: "user", text: "하나\n\n셋", createdAt: at(1) });
     expect(printer().sync(makeThread({ messages: [user] })).commit).toEqual([
       "│",
-      "◇  하나",
-      "│",
-      "│  셋",
+      sent("하나", 4),
+      sent("", 4),
+      sent("셋", 4),
     ]);
   });
 
@@ -100,11 +107,11 @@ describe("TranscriptPrinter", () => {
     );
     expect(synced.commit).toEqual([
       "│",
-      "◇  하나",
+      sent("하나"),
       "│",
       "│  답 하나",
       "│",
-      "◇  둘",
+      sent("둘"),
       "│",
       "│  답 둘",
     ]);
@@ -120,9 +127,9 @@ describe("TranscriptPrinter", () => {
       "│",
       "│  ... 이전 메시지 2개 · /history 로 보기",
       "│",
-      "◇  메시지 3",
+      sent("메시지 3", 8, 80),
       "│",
-      "◇  메시지 4",
+      sent("메시지 4", 8, 80),
     ]);
     const next = transcript.sync(
       makeThread({
@@ -132,7 +139,7 @@ describe("TranscriptPrinter", () => {
         ],
       }),
     );
-    expect(next.commit).toEqual(["│", "◇  메시지 5"]);
+    expect(next.commit).toEqual(["│", sent("메시지 5", 8, 80)]);
   });
 
   it("counts what the opening skipped, and says the server has more when it does", () => {
@@ -152,11 +159,11 @@ describe("TranscriptPrinter", () => {
     expect(whole.skippedMessages).toBe(0);
     expect(plainRows(printer(5, { width: 80 }).sync(makeThread({ messages })).commit)).toEqual([
       "│",
-      "◇  메시지 1",
+      sent("메시지 1", 8, 80),
       "│",
-      "◇  메시지 2",
+      sent("메시지 2", 8, 80),
       "│",
-      "◇  메시지 3",
+      sent("메시지 3", 8, 80),
     ]);
   });
 
@@ -193,7 +200,7 @@ describe("TranscriptPrinter", () => {
     );
     expect(synced.commit).toEqual([
       "│",
-      "◇  실행",
+      sent("실행"),
       "│",
       "✗  프로바이더 오류 - 연결 끊김",
       "│",
@@ -535,23 +542,48 @@ describe("messages in colour", () => {
   const userAt = (second: number, text: string) =>
     makeMessage({ id: `u${second}`, role: "user", text, createdAt: at(second) });
 
-  it("prints a user message bold after a success-coloured step mark, with no background fill", () => {
+  it("fills a user message with the theme's user tint, against the right edge, one block of equal width", () => {
     const theme = themeAt(3);
-    const rows = coloured(3).sync(makeThread({ messages: [userAt(1, "안녕\n둘째")] })).commit;
-    expect(rows).toEqual([
-      theme.dim("│"),
-      `${theme.success("◇")}  \u001b[1m안녕\u001b[22m`,
-      `${theme.dim("│")}  \u001b[1m둘째\u001b[22m`,
-    ]);
-    expect(rows.join("")).not.toContain(";48;");
+    const rows = coloured(3).sync(makeThread({ messages: [userAt(1, "안녕\n둘째 줄")] })).commit;
+    expect(rows[0]).toBe(theme.dim("│"));
+    const block = rows.slice(1);
+    expect(block).toHaveLength(2);
+    for (const row of block) {
+      expect(row).toContain(";48;2;30;36;51m");
+      // The block ends at the last column of the conversation.
+      expect(visibleWidth(row)).toBe(40);
+    }
+    expect(plainRows(block).map((row) => row.trimStart())).toEqual(["안녕    ", "둘째 줄 "]);
   });
 
-  it("wraps a long user message under its text, on the rail, inside the width", () => {
+  it("wraps a long user message inside a block of at most four fifths of the width, with wide characters counted as two", () => {
     const rows = printer().sync(makeThread({ messages: [userAt(1, "가나다 ".repeat(20))] })).commit;
     expect(rows.length).toBeGreaterThan(3);
-    expect(rows[1]?.startsWith("◇  ")).toBe(true);
-    for (const row of rows.slice(2)) expect(row.startsWith("│  ")).toBe(true);
+    for (const row of rows.slice(1)) {
+      expect(row.endsWith("│")).toBe(true);
+      expect(visibleWidth(row)).toBe(40);
+      expect(row.trimStart().length).toBeLessThan(40);
+    }
     for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(40);
+    // The text keeps every character; only the layout around it changed.
+    const text = rows
+      .slice(1)
+      .map((row) => row.replace(/^ +/u, "").replace(/ │$/u, "").trim())
+      .join(" ");
+    expect(text.replace(/\s+/gu, " ")).toBe("가나다 ".repeat(20).trim());
+  });
+
+  it("right-aligns a user message in the ASCII preset with an ASCII bar, and leaves the reply on the left", () => {
+    const rows = printer(20, { symbols: ASCII_SYMBOLS }).sync(
+      makeThread({
+        messages: [
+          userAt(1, "hello 안녕"),
+          makeMessage({ id: "a1", role: "assistant", text: "reply", createdAt: at(2) }),
+        ],
+      }),
+    ).commit;
+    expect(rows).toEqual(["|", `${" ".repeat(40 - 10 - 3)} hello 안녕 |`, "|", "|  reply"]);
+    expect(rows.join("\n")).toMatch(/^[\n -~가-힣]+$/u);
   });
 
   it("keeps the text of a reply on the rail but lets code start at column 0, joined by a bar either side", () => {
@@ -702,7 +734,7 @@ describe("plain terminals", () => {
     const rows = printer(20, { symbols: ASCII_SYMBOLS }).sync(thread).commit;
     // The app's own Korean wording stays; every symbol it draws must be ASCII.
     expect(rows.join("\n").replace(/[가-힣]/gu, "")).toMatch(/^[\n -~]+$/u);
-    expect(rows).toContain("o  run tests");
+    expect(rows.some((row) => row.endsWith("run tests |"))).toBe(true);
     expect(rows).toContain("x  bun test  all");
     expect(rows).toContain("|  1 failed");
     expect(rows).toContain("|  | note");

@@ -118,6 +118,40 @@ export class RegionSwitch implements SplitControl {
     this.split.follow();
   }
 
+  /** The wheel and Home/End; like PageUp, only the side-by-side layout has a viewport to move. */
+  scrollBy(rows: number): void {
+    this.split.scrollBy(rows);
+  }
+
+  scrollTop(): void {
+    this.split.scrollTop();
+  }
+
+  scrollBottom(): void {
+    this.split.scrollBottom();
+  }
+
+  isScrolled(): boolean {
+    return this.split.isScrolled();
+  }
+
+  /** Older finished lines go in front of the conversation of the side-by-side layout. */
+  prepend(lines: ReadonlyArray<string>): void {
+    this.split.prepend(lines);
+  }
+
+  onOlder(listener: (() => void) | null): void {
+    this.split.onOlder(listener);
+  }
+
+  setMouse(on: boolean): void {
+    this.split.setMouse(on);
+  }
+
+  mouseOn(): boolean {
+    return this.split.mouseOn();
+  }
+
   /**
    * The size settled. A terminal that became too small for the side-by-side layout leaves it, and
    * the controller is told why.

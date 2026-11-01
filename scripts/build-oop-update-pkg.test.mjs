@@ -147,6 +147,8 @@ NodeTest.test(
     NodeAssert.match(postinstall, /codesign --verify --deep --strict/u);
     NodeAssert.match(postinstall, /xattr -d -r com\.apple\.quarantine "\$target"/u);
     NodeAssert.match(postinstall, /\$version" != '0\.0\.45'/u);
+    NodeAssert.match(postinstall, /stat -f %Su \/dev\/console/u);
+    NodeAssert.match(postinstall, /chown -R "\$owner":staff "\$target"/u);
   },
 );
 

@@ -308,6 +308,10 @@ export const providers = defineMessages(
     "providers.wf.above": "↑ {count} lines above",
     "providers.wf.below": "↓ {count} lines below",
     "providers.wf.closeWith": "{command} to close",
+    "providers.wf.switchWith": "{key} to switch",
+    "providers.wf.parallel": "{count} in parallel",
+    "providers.wf.emptyTitle": "No work to draw yet",
+    "providers.agents.emptyTitle": "No agents yet",
     "providers.wf.offline": "Disconnected · showing what arrived last",
     "providers.wf.openThread": "Open a thread and its workflow shows up here.",
     "providers.wf.empty":
@@ -640,6 +644,10 @@ export const providers = defineMessages(
     "providers.wf.above": "↑ 위에 {count}줄",
     "providers.wf.below": "↓ 아래에 {count}줄",
     "providers.wf.closeWith": "{command} 로 닫기",
+    "providers.wf.switchWith": "{key} 로 전환",
+    "providers.wf.parallel": "병렬 {count}",
+    "providers.wf.emptyTitle": "그릴 작업이 아직 없습니다",
+    "providers.agents.emptyTitle": "에이전트가 아직 없습니다",
     "providers.wf.offline": "연결 끊김 · 마지막으로 받은 내용",
     "providers.wf.openThread": "스레드를 열면 그 스레드의 작업 흐름이 여기에 보입니다.",
     "providers.wf.empty":

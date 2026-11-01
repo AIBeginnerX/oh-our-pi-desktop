@@ -315,6 +315,12 @@ const harness = (options: Options = {}) => {
   };
 };
 
+/** The conversation rows of `대화 N`: a user message sits against the right edge (bar-closed), a reply on the rail. */
+const talkRows = (rows: ReadonlyArray<string>): string[] =>
+  rows
+    .filter((row) => /대화 \d+( │)?$/u.test(row))
+    .map((row) => (row.endsWith(" │") ? `우 ${row.slice(0, -2).trim()}` : `좌 ${row.slice(3)}`));
+
 describe("starting up", () => {
   it("lands on the project list when the folder belongs to no project", () => {
     const h = harness({ cwd: "/elsewhere" });
@@ -4023,16 +4029,14 @@ describe("the live screen while a turn runs", () => {
 
         say(h, "/history 4");
         const first = h.commits.slice(before).map(stripAnsi);
-        expect(
-          first.filter((row) => /^[◇│] {2}대화 \d+$/u.test(row)).map((row) => row.trim()),
-        ).toEqual(["◇  대화 7", "│  대화 8", "◇  대화 9", "│  대화 10"]);
+        expect(talkRows(first)).toEqual(["우 대화 7", "좌 대화 8", "우 대화 9", "좌 대화 10"]);
         expect(first.join("\n")).toContain("이전 대화 4개");
         expect(first.join("\n")).toContain("여기까지 이전 대화 · 더 이전 메시지 6개 · /history");
 
         const middle = h.commits.length;
         say(h, "/history");
         const rest = h.commits.slice(middle).map(stripAnsi);
-        expect(rest.filter((row) => /^[◇│] {2}대화 \d+$/u.test(row))).toHaveLength(6);
+        expect(talkRows(rest)).toHaveLength(6);
         expect(rest.join("\n")).toContain("대화의 처음까지 봤습니다");
 
         say(h, "/history");
@@ -4060,17 +4064,13 @@ describe("the live screen while a turn runs", () => {
         expect(h.screen()).toContain("이전 대화 불러오는 중");
         await flushMicrotasks();
         expect(asked).toEqual([["thread-new", "cursor"]]);
-        const shown = h.commits
-          .slice(before)
-          .map(stripAnsi)
-          .filter((row) => /^[◇│] {2}대화 \d+$/u.test(row))
-          .map((row) => row.trim());
+        const shown = talkRows(h.commits.slice(before).map(stripAnsi));
         expect(shown).toEqual([
-          "│  대화 10",
-          "◇  대화 11",
-          "│  대화 12",
-          "◇  대화 13",
-          "│  대화 14",
+          "좌 대화 10",
+          "우 대화 11",
+          "좌 대화 12",
+          "우 대화 13",
+          "좌 대화 14",
         ]);
         expect(h.screen()).not.toContain("이전 대화 불러오는 중");
       });

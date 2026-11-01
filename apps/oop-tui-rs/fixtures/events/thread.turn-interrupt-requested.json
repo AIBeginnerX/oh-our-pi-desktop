@@ -1,0 +1,17 @@
+{
+  "sequence": 34,
+  "eventId": "evt-34",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.turn-interrupt-requested",
+  "payload": {
+    "threadId": "thread-1",
+    "turnId": "turn-1",
+    "createdAt": "2026-01-01T00:00:05.000Z"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "args": {
+    "text": "switch",
+    "model": {
+      "instanceId": "codex",
+      "model": "gpt-5",
+      "options": [
+        {
+          "id": "reasoningEffort",
+          "value": "high"
+        }
+      ]
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default"
+  },
+  "command": {
+    "type": "thread.turn.start",
+    "commandId": "cmd-1",
+    "threadId": "thread-1",
+    "message": {
+      "messageId": "msg-1",
+      "role": "user",
+      "text": "switch",
+      "attachments": []
+    },
+    "modelSelection": {
+      "instanceId": "codex",
+      "model": "gpt-5",
+      "options": [
+        {
+          "id": "reasoningEffort",
+          "value": "high"
+        }
+      ]
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

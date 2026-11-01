@@ -13,6 +13,8 @@ export interface Symbols {
   readonly warning: string;
   readonly todo: { readonly open: string; readonly active: string; readonly done: string };
   readonly separator: string;
+  /** The chevron of a list section that opens and closes. */
+  readonly fold: { readonly open: string; readonly closed: string };
   readonly rule: string;
   readonly box: {
     readonly topLeft: string;
@@ -45,6 +47,13 @@ export interface Symbols {
     readonly cancelled: string;
     readonly skipped: string;
   };
+  /** Connectors between cards: a settled or live link, a link not yet taken, its arrowhead, and the chevron between phases. */
+  readonly link: {
+    readonly line: string;
+    readonly dashed: string;
+    readonly arrow: string;
+    readonly next: string;
+  };
   readonly spinner: ReadonlyArray<string>;
 }
 
@@ -63,6 +72,7 @@ export const UNICODE_SYMBOLS: Symbols = {
   warning: "▲",
   todo: { open: "☐", active: "◐", done: "☑" },
   separator: "│",
+  fold: { open: "▾", closed: "▸" },
   rule: "─",
   box: {
     topLeft: "╭",
@@ -93,6 +103,7 @@ export const UNICODE_SYMBOLS: Symbols = {
     cancelled: "■",
     skipped: "⊘",
   },
+  link: { line: "│", dashed: "┆", arrow: "▼", next: "›" },
   spinner: ["◒", "◐", "◓", "◑"],
 };
 
@@ -109,6 +120,7 @@ export const ASCII_SYMBOLS: Symbols = {
   warning: "!",
   todo: { open: "[ ]", active: "[~]", done: "[x]" },
   separator: "|",
+  fold: { open: "v", closed: ">" },
   rule: "-",
   box: {
     topLeft: "+",
@@ -139,6 +151,7 @@ export const ASCII_SYMBOLS: Symbols = {
     cancelled: "-",
     skipped: "/",
   },
+  link: { line: "|", dashed: ":", arrow: "v", next: ">" },
   spinner: ["|", "/", "-", "\\"],
 };
 

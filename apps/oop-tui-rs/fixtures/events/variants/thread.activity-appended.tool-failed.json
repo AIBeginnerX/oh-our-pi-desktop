@@ -1,0 +1,34 @@
+{
+  "sequence": 52,
+  "eventId": "evt-52",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.activity-appended",
+  "payload": {
+    "threadId": "thread-1",
+    "activity": {
+      "id": "act-fail",
+      "tone": "tool",
+      "kind": "tool.completed",
+      "summary": "Ran command",
+      "payload": {
+        "title": "Ran command",
+        "detail": "false",
+        "status": "failed",
+        "itemId": "item-2",
+        "data": {
+          "item": {
+            "error": "exit 1"
+          }
+        }
+      },
+      "turnId": "turn-1",
+      "createdAt": "2026-01-01T00:00:10.000Z"
+    }
+  }
+}

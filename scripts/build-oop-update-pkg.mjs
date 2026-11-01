@@ -123,7 +123,7 @@ export function welcomeHtml() {
 <h2>설치 전에</h2>
 <ol>
 <li>OOP가 실행 중이면 Cmd+Q로 완전히 종료합니다. 창을 닫는 것만으로는 종료되지 않습니다.</li>
-<li>계속을 누르고, 물어보면 관리자 암호를 입력합니다.</li>
+<li>계속을 누르고, 물어보면 관리자 암호를 입력합니다. 설치가 OOP를 현재 사용자 소유로 바꾸므로, 이후 업데이트는 OOP가 스스로 교체해 암호를 묻지 않습니다.</li>
 </ol>
 <h2>처음 설치하는 Mac이라면</h2>
 <ol>
@@ -228,6 +228,14 @@ fi
 # A first install from a downloaded package can leave the app quarantined; clear it so OOP
 # opens without the Gatekeeper "Open Anyway" step. Exits 0 when nothing is quarantined.
 /usr/bin/xattr -d -r com.apple.quarantine "$target"
+# The one privileged step: hand the app to the person at the console, as a drag-installed app is.
+# OOP can then replace itself on later updates without asking for an administrator password.
+# Skipped when nobody real is logged in; later updates then fall back to this installer.
+owner=$(/usr/bin/stat -f %Su /dev/console 2>/dev/null || true)
+case "$owner" in
+  ''|root|loginwindow) ;;
+  *) /usr/sbin/chown -R "$owner":staff "$target" || echo 'Could not hand OOP to the current user; updates will ask for a password.' >&2 ;;
+esac
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$target" || exit 1
 exit 0
 `;

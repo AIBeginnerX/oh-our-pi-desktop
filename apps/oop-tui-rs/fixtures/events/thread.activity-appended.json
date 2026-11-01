@@ -1,0 +1,28 @@
+{
+  "sequence": 43,
+  "eventId": "evt-43",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.activity-appended",
+  "payload": {
+    "threadId": "thread-1",
+    "activity": {
+      "id": "act-1",
+      "tone": "tool",
+      "kind": "tool.completed",
+      "summary": "Ran ls",
+      "payload": {
+        "title": "Ran command",
+        "detail": "ls -la",
+        "status": "completed"
+      },
+      "turnId": "turn-1",
+      "createdAt": "2026-01-01T00:00:05.000Z"
+    }
+  }
+}

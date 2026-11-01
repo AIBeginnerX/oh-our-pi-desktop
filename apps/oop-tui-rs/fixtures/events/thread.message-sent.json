@@ -1,0 +1,22 @@
+{
+  "sequence": 32,
+  "eventId": "evt-32",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.message-sent",
+  "payload": {
+    "threadId": "thread-1",
+    "messageId": "msg-2",
+    "role": "assistant",
+    "text": "hi",
+    "turnId": "turn-1",
+    "streaming": true,
+    "createdAt": "2026-01-01T00:00:05.000Z",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

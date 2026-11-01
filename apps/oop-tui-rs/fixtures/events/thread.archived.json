@@ -1,0 +1,17 @@
+{
+  "sequence": 16,
+  "eventId": "evt-16",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.archived",
+  "payload": {
+    "threadId": "thread-1",
+    "archivedAt": "2026-01-01T00:00:05.000Z",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

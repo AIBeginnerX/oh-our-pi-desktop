@@ -1,0 +1,17 @@
+{
+  "sequence": 31,
+  "eventId": "evt-31",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.interaction-mode-set",
+  "payload": {
+    "threadId": "thread-1",
+    "interactionMode": "plan",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

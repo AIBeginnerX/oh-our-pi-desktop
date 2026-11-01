@@ -326,10 +326,11 @@ describe("SplitRegion", () => {
       expect(term.text(23, 0, 20)).toContain("❯");
     });
 
-    it("names the Shift form of the key that goes back down, which a terminal may need", () => {
+    it("names the keys that go back down", () => {
       const { term, region } = started();
       region.scrollUp();
-      expect(term.screen().join("\n")).toContain("Shift+PageDown");
+      expect(term.screen().join("\n")).toContain("PageDown");
+      expect(term.screen().join("\n")).toContain("End");
     });
 
     it("follows again when PageDown reaches the bottom", () => {
@@ -427,6 +428,132 @@ describe("SplitRegion", () => {
     region.commit(["x"]);
     settle();
     expect(queued()).toBe(0);
+    expect(term.writes).toEqual([]);
+  });
+});
+
+describe("SplitRegion mouse wheel and older lines", () => {
+  const ON = "\u001b[?1000h\u001b[?1006h";
+  const OFF = "\u001b[?1006l\u001b[?1000l";
+  const lines = Array.from({ length: 100 }, (_, index) => `줄 ${index}`);
+  const started = () => {
+    const kit = setup(100, 24);
+    kit.region.enter();
+    kit.region.commit(lines);
+    kit.region.set(frameOf("❯"));
+    kit.settle();
+    return kit;
+  };
+
+  it("asks for SGR wheel reports on entry and gives them back on every way out", () => {
+    for (const leave of ["leave", "suspend"] as const) {
+      const { term, region } = setup();
+      region.enter();
+      expect(term.writes.join("")).toContain(ON);
+      term.writes.length = 0;
+      region[leave]();
+      expect(term.writes.join("")).toContain(OFF);
+      // The report is switched off before the normal screen comes back.
+      expect(term.writes.join("").indexOf(OFF)).toBeLessThan(
+        term.writes.join("").indexOf("\u001b[?1049l"),
+      );
+    }
+  });
+
+  it("does not ask for reports when the option is off, and follows /mouse while on", () => {
+    const term = new FakeTerminal(100, 24);
+    const region = new SplitRegion(
+      { write: (text) => term.write(text), columns: () => term.columns, rows: () => term.rows },
+      () => () => {},
+      { divider: () => "|", mouse: false },
+    );
+    region.enter();
+    expect(term.writes.join("")).not.toContain(ON);
+    region.setMouse(true);
+    expect(term.writes.join("")).toContain(ON);
+    region.setMouse(false);
+    expect(term.writes.join("")).toContain(OFF);
+    expect(region.mouseOn()).toBe(false);
+  });
+
+  it("scrolls back by rows and returns to following at the bottom", () => {
+    const { term, region, settle } = started();
+    region.scrollBy(3);
+    settle();
+    expect(region.isScrolled()).toBe(true);
+    expect(term.screen().join("\n")).not.toContain("줄 99");
+    region.scrollBy(-1000);
+    settle();
+    expect(region.isScrolled()).toBe(false);
+    expect(term.screen().join("\n")).toContain("줄 99");
+  });
+
+  it("says new messages are below when lines arrive while scrolled back, and clears it at the bottom", () => {
+    const { term, region, settle } = started();
+    region.scrollBy(10);
+    settle();
+    expect(term.screen().join("\n")).toContain("↑ 스크롤 중");
+    region.commit(["새 메시지"]);
+    settle();
+    expect(term.screen().join("\n")).toContain("아래에 새 메시지");
+    region.scrollBottom();
+    settle();
+    expect(term.screen().join("\n")).not.toContain("아래에 새 메시지");
+    expect(term.screen().join("\n")).toContain("새 메시지");
+  });
+
+  it("follows the bottom while streaming when it was not scrolled back", () => {
+    const { term, region, settle } = started();
+    region.commit(["스트림 1", "스트림 2"]);
+    settle();
+    expect(term.screen().join("\n")).toContain("스트림 2");
+    expect(region.isScrolled()).toBe(false);
+  });
+
+  it("Home goes to the oldest line and End back to the newest", () => {
+    const { term, region, settle } = started();
+    region.scrollTop();
+    settle();
+    expect(term.text(0, 0, 10)).toContain("줄 0");
+    region.scrollBottom();
+    settle();
+    expect(term.screen().join("\n")).toContain("줄 99");
+  });
+
+  it("asks for older lines once the top is reached, and keeps the reader's place when they arrive", () => {
+    const { term, region, settle } = started();
+    let asked = 0;
+    region.onOlder(() => {
+      asked += 1;
+    });
+    region.scrollBy(2);
+    settle();
+    expect(asked).toBe(0);
+    region.scrollTop();
+    settle();
+    settle();
+    expect(asked).toBeGreaterThan(0);
+    const before = term.text(0, 0, 10);
+    region.prepend(["더 오래된 줄 A", "더 오래된 줄 B"]);
+    settle();
+    expect(term.text(0, 0, 10)).toBe(before);
+    expect(region.leave()[0]).toContain("더 오래된 줄 A");
+  });
+
+  it("keeps memory bounded: the oldest lines are dropped past the keep limit", () => {
+    const { region } = setup();
+    region.enter();
+    region.commit(Array.from({ length: KEEP_LIMIT + 50 }, (_, index) => `줄 ${index}`));
+    const kept = region.leave();
+    expect(kept).toHaveLength(KEEP_LIMIT + 1);
+    expect(kept[1]).toBe("줄 50");
+  });
+
+  it("ignores the wheel when it is not on", () => {
+    const { term, region, settle } = setup();
+    region.scrollBy(5);
+    region.scrollTop();
+    settle();
     expect(term.writes).toEqual([]);
   });
 });

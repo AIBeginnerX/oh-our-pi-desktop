@@ -1,0 +1,43 @@
+{
+  "sequence": 49,
+  "eventId": "evt-49",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.activity-appended",
+  "payload": {
+    "threadId": "thread-1",
+    "activity": {
+      "id": "act-input",
+      "tone": "info",
+      "kind": "user-input.requested",
+      "summary": "User input requested",
+      "payload": {
+        "requestId": "req-2",
+        "questions": [
+          {
+            "id": "color",
+            "header": "Color",
+            "question": "Which color?",
+            "options": [
+              {
+                "label": "red",
+                "description": "warm"
+              },
+              {
+                "label": "blue",
+                "description": "cold"
+              }
+            ]
+          }
+        ]
+      },
+      "turnId": "turn-1",
+      "createdAt": "2026-01-01T00:00:05.000Z"
+    }
+  }
+}

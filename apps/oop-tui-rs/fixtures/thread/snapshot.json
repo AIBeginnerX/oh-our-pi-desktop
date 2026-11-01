@@ -1,0 +1,96 @@
+{
+  "kind": "snapshot",
+  "snapshot": {
+    "snapshotSequence": 20,
+    "thread": {
+      "id": "thread-1",
+      "projectId": "project-1",
+      "title": "hello",
+      "modelSelection": {
+        "instanceId": "codex",
+        "model": "gpt-5"
+      },
+      "runtimeMode": "full-access",
+      "interactionMode": "default",
+      "branch": null,
+      "worktreePath": null,
+      "pullRequests": [],
+      "latestTurn": {
+        "turnId": "turn-1",
+        "state": "completed",
+        "requestedAt": "2026-01-01T00:00:00.000Z",
+        "startedAt": "2026-01-01T00:00:00.000Z",
+        "completedAt": "2026-01-01T00:00:10.000Z",
+        "assistantMessageId": "msg-2"
+      },
+      "createdAt": "2026-01-01T00:00:00.000Z",
+      "updatedAt": "2026-01-01T00:00:05.000Z",
+      "archivedAt": null,
+      "settledOverride": null,
+      "settledAt": null,
+      "deletedAt": null,
+      "messages": [
+        {
+          "id": "msg-1",
+          "role": "user",
+          "text": "안녕? run the tests",
+          "turnId": null,
+          "streaming": false,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "msg-r",
+          "role": "reasoning",
+          "text": "thinking about it",
+          "turnId": "turn-1",
+          "streaming": false,
+          "createdAt": "2026-01-01T00:00:00.000Z",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        },
+        {
+          "id": "msg-2",
+          "role": "assistant",
+          "text": "# Done\n\nAll **green**.\n\n```rust\nfn main() {}\n```\n",
+          "turnId": "turn-1",
+          "streaming": false,
+          "createdAt": "2026-01-01T00:00:05.000Z",
+          "updatedAt": "2026-01-01T00:00:05.000Z"
+        }
+      ],
+      "proposedPlans": [],
+      "activities": [
+        {
+          "id": "act-1",
+          "tone": "tool",
+          "kind": "tool.completed",
+          "summary": "Ran command",
+          "payload": {
+            "title": "Ran command",
+            "detail": "cargo test",
+            "status": "completed",
+            "data": {
+              "item": {
+                "aggregatedOutput": "ok. 12 passed",
+                "durationMs": 2300
+              }
+            }
+          },
+          "turnId": "turn-1",
+          "createdAt": "2026-01-01T00:00:00.000Z"
+        }
+      ],
+      "checkpoints": [],
+      "session": {
+        "threadId": "thread-1",
+        "status": "ready",
+        "providerName": "codex",
+        "providerInstanceId": "codex",
+        "runtimeMode": "full-access",
+        "activeTurnId": null,
+        "lastError": null,
+        "updatedAt": "2026-01-01T00:00:05.000Z"
+      }
+    }
+  }
+}

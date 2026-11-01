@@ -1,0 +1,29 @@
+{
+  "sequence": 29,
+  "eventId": "evt-29",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.pull-request-synced",
+  "payload": {
+    "threadId": "thread-1",
+    "host": "github.com",
+    "repository": "t3tools/oop",
+    "number": 7,
+    "snapshot": {
+      "state": "open",
+      "title": "Add the Rust terminal",
+      "headBranch": "rust-tui",
+      "baseBranch": "main",
+      "isDraft": false,
+      "updatedAt": "2026-01-01T00:00:05.000Z",
+      "syncedAt": "2026-01-01T00:00:05.000Z"
+    },
+    "stack": null,
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

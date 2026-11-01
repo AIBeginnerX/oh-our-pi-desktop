@@ -1,0 +1,10 @@
+{
+  "instanceId": "codex",
+  "model": "gpt-5",
+  "options": [
+    {
+      "id": "reasoningEffort",
+      "value": "high"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "sequence": 20,
+  "eventId": "evt-20",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.snoozed",
+  "payload": {
+    "threadId": "thread-1",
+    "snoozedUntil": "2026-01-01T00:00:10.000Z",
+    "snoozedAt": "2026-01-01T00:00:05.000Z",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

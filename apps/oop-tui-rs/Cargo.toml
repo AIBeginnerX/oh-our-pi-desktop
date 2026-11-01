@@ -1,0 +1,38 @@
+[package]
+name = "oop-rs"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "Rust terminal client for OOP (vertical slice)"
+
+[[bin]]
+name = "oop-rs"
+path = "src/main.rs"
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+libc = "0.2"
+ratatui = "0.30"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tokio = { version = "1", features = [
+  "rt-multi-thread",
+  "macros",
+  "net",
+  "time",
+  "process",
+  "sync",
+  "io-util",
+  "fs",
+  "signal",
+] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
+unicode-width = "0.2"
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = true

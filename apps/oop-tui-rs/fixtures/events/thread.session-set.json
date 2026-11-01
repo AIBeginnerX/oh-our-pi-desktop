@@ -1,0 +1,25 @@
+{
+  "sequence": 40,
+  "eventId": "evt-40",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.session-set",
+  "payload": {
+    "threadId": "thread-1",
+    "session": {
+      "threadId": "thread-1",
+      "status": "running",
+      "providerName": "codex",
+      "providerInstanceId": "codex",
+      "runtimeMode": "full-access",
+      "activeTurnId": "turn-1",
+      "lastError": null,
+      "updatedAt": "2026-01-01T00:00:05.000Z"
+    }
+  }
+}

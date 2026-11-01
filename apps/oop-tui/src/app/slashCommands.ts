@@ -179,6 +179,17 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     },
   },
   {
+    name: "mouse",
+    get note() {
+      return t("session.slash.mouse.note");
+    },
+    aliases: [],
+    takesArgument: true,
+    get usage() {
+      return t("session.slash.mouse.usage");
+    },
+  },
+  {
     name: "pet",
     get note() {
       return t("session.slash.pet.note");

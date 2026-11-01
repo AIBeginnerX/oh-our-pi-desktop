@@ -135,10 +135,9 @@ describe("the flow panel as text", () => {
     expect(joined).toContain("선행: 계획 세우기");
     expect(joined).toContain("완료 1 · 진행 1");
     // 100 s since the step began at +70 s is 30 s.
-    const facts = text[text.findIndex((line) => line.includes("코드 쓰기")) + 1];
-    expect(facts).toContain("작업 중");
-    expect(facts).toContain("opus-5-5");
-    expect(facts).toContain("30s");
+    const at_ = text.findIndex((line) => line.includes("코드 쓰기"));
+    expect(text[at_ + 1]).toContain("opus-5-5");
+    expect(text[at_ + 2]).toContain("작업 중 · 30s");
   });
 
   it("says what to do when there is nothing to draw, and when no thread is open", () => {
@@ -392,7 +391,8 @@ describe("flows read from a thread", () => {
     const text = plain(renderFlowPanel(input(flows, { rows: 40 }))).join("\n");
     expect(text).toContain("턴 1 · Crew");
     expect(text).toContain("메인 에이전트");
-    expect(text).toContain("Worker · Implement invoice totals");
+    expect(text).toContain("Worker");
+    expect(text).toContain("Implement invoice totals");
     expect(text).toContain("위임된 작업");
     expect(text).toContain("선행: 메인 에이전트");
   });

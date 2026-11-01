@@ -1,0 +1,14 @@
+{
+  "args": {
+    "requestId": "req-1",
+    "decision": "acceptForSession"
+  },
+  "command": {
+    "type": "thread.approval.respond",
+    "commandId": "cmd-1",
+    "threadId": "thread-1",
+    "requestId": "req-1",
+    "decision": "acceptForSession",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- These tests exercise symlink, permission and hash behavior on real temporary folders.
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
@@ -15,6 +16,7 @@ import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
+import { HostProcessPlatform, HostProcessUserId } from "@t3tools/shared/hostProcess";
 import * as LocalPkgUpdates from "./LocalPkgUpdates.ts";
 import * as LocalPkgSource from "./LocalPkgSource.ts";
 
@@ -1316,6 +1318,107 @@ describe("LocalPkgUpdates.pruneInstalledStages", () => {
           [],
         );
         assert.deepEqual(yield* listStaging(stagingRoot), ["stage-a"]);
+      }),
+    ),
+  );
+});
+
+describe("LocalPkgUpdates in-place swap", () => {
+  it.effect("reports whether the app can be replaced without an administrator", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* tempDirectory;
+        const app = NodePath.join(root, "OOP.app");
+        yield* Effect.promise(() => NodeFSP.mkdir(app));
+        assert.isTrue(yield* LocalPkgUpdates.isAppReplaceableInPlace(app));
+        yield* Effect.promise(() => NodeFSP.chmod(app, 0o555));
+        const readOnly = yield* LocalPkgUpdates.isAppReplaceableInPlace(app);
+        yield* Effect.promise(() => NodeFSP.chmod(app, 0o755));
+        // root can write anywhere, so only a normal user proves the refusal.
+        if ((yield* HostProcessUserId) !== 0) assert.isFalse(readOnly);
+      }),
+    ),
+  );
+
+  it.effect("replaces the app from a local-folder package without the Installer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        if ((yield* HostProcessPlatform) !== "darwin") return;
+        const root = yield* tempDirectory;
+        const run = (command: string, args: ReadonlyArray<string>, env = process.env) => {
+          const result = NodeChildProcess.spawnSync(command, [...args], {
+            encoding: "utf8",
+            env,
+          });
+          assert.equal(result.status, 0, `${command}: ${result.stderr}`);
+        };
+        const makeApp = async (directory: string, marker: string) => {
+          const app = NodePath.join(directory, "OOP.app");
+          await NodeFSP.mkdir(NodePath.join(app, "Contents", "MacOS"), { recursive: true });
+          await NodeFSP.writeFile(
+            NodePath.join(app, "Contents", "Info.plist"),
+            `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.t3tools.t3code</string><key>CFBundleExecutable</key><string>OOP</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>`,
+          );
+          await NodeFSP.writeFile(
+            NodePath.join(app, "Contents", "MacOS", "OOP"),
+            `#!/bin/sh\n# ${marker}\n`,
+            {
+              mode: 0o755,
+            },
+          );
+          return app;
+        };
+        const payload = NodePath.join(root, "payload");
+        const newApp = yield* Effect.promise(() =>
+          makeApp(NodePath.join(payload, "Applications"), "new"),
+        );
+        run("/usr/bin/codesign", ["--force", "--sign", "-", newApp]);
+        const installed = NodePath.join(root, "Apps");
+        const oldApp = yield* Effect.promise(() => makeApp(installed, "old"));
+        const staging = NodePath.join(root, "stage");
+        const pkg = NodePath.join(staging, "OOP-update.pkg");
+        const distribution = NodePath.join(root, "distribution.xml");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(staging);
+          await NodeFSP.writeFile(
+            distribution,
+            `<?xml version="1.0" encoding="utf-8"?><installer-gui-script minSpecVersion="2"><choices-outline><line choice="default"/></choices-outline><choice id="default" visible="false"><pkg-ref id="test.oop"/></choice><pkg-ref id="test.oop" version="1.0.0">component.pkg</pkg-ref></installer-gui-script>`,
+          );
+        });
+        run("/usr/bin/pkgbuild", [
+          "--root",
+          payload,
+          "--install-location",
+          "/",
+          "--identifier",
+          "test.oop",
+          "--version",
+          "1.0.0",
+          NodePath.join(root, "component.pkg"),
+        ]);
+        run("/usr/bin/productbuild", ["--distribution", distribution, "--package-path", root, pkg]);
+        // A stand-in for `open` keeps the test from launching the replaced app.
+        const bin = NodePath.join(root, "bin");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(bin);
+          await NodeFSP.writeFile(NodePath.join(bin, "open"), "#!/bin/sh\nexit 0\n", {
+            mode: 0o755,
+          });
+        });
+        const script = NodePath.join(staging, "install.sh");
+        yield* Effect.promise(() => NodeFSP.writeFile(script, LocalPkgUpdates.DMG_SWAP_SCRIPT));
+        // A finished child's PID is gone, so the script does not wait for it.
+        const finished = NodeChildProcess.spawnSync("/usr/bin/true");
+        run("/bin/sh", [script, String(finished.pid), pkg, oldApp], {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ""}`,
+        });
+        const swapped = yield* Effect.promise(() =>
+          NodeFSP.readFile(NodePath.join(oldApp, "Contents", "MacOS", "OOP"), "utf8"),
+        );
+        assert.include(swapped, "# new");
+        const leftovers = yield* Effect.promise(() => NodeFSP.readdir(installed));
+        assert.deepEqual(leftovers, ["OOP.app"]);
       }),
     ),
   );

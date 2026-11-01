@@ -1,0 +1,27 @@
+{
+  "sequence": 48,
+  "eventId": "evt-48",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.activity-appended",
+  "payload": {
+    "threadId": "thread-1",
+    "activity": {
+      "id": "act-approval-done",
+      "tone": "approval",
+      "kind": "approval.resolved",
+      "summary": "Approval resolved",
+      "payload": {
+        "requestId": "req-1",
+        "decision": "accept"
+      },
+      "turnId": "turn-1",
+      "createdAt": "2026-01-01T00:00:10.000Z"
+    }
+  }
+}

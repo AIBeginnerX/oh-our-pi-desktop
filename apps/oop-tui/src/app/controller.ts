@@ -58,7 +58,14 @@ import {
 import type { KeyEvent } from "../input/keys.ts";
 import type { RegionFrame, Scheduler } from "../render/liveRegion.ts";
 import type { ClosedPart, SplitControl } from "../render/regionSwitch.ts";
-import { renderNavPane, type NavRow } from "../render/navPane.ts";
+import { isPickable, renderNavPane, type NavItem } from "../render/navPane.ts";
+import {
+  buildSidebar,
+  INITIAL_SIDEBAR_VIEW,
+  SETTLED_PAGE,
+  type SidebarView,
+} from "./sidebarModel.ts";
+import { WHEEL_ROWS } from "../render/splitRegion.ts";
 import { renderTasksPane, tasksPaneRows, type TasksContent } from "../render/tasksPane.ts";
 import {
   defaultApprovalOptions,
@@ -152,6 +159,7 @@ import {
 import { parseSlash } from "./commandsRouter.ts";
 import {
   addHistoryPage,
+  HISTORY_DEFAULT,
   HISTORY_MAX,
   historyLeft,
   openHistoryPool,
@@ -316,9 +324,6 @@ export interface ControllerLink {
   }) => Promise<string>;
 }
 
-/** What the row that starts a new thread is picked by in the thread list; no thread id looks like it. */
-const NAV_NEW = "new:";
-
 export interface ControllerRegion {
   readonly set: (frame: RegionFrame) => void;
   readonly commit: (lines: ReadonlyArray<string>) => void;
@@ -330,6 +335,18 @@ export interface ControllerRegion {
   readonly scrollDown?: () => void;
   /** Called on input other than PageUp and PageDown: a scrolled conversation goes back to the newest line. */
   readonly follow?: () => void;
+  /** The wheel (positive rows go back in time) and Home/End of the side-by-side layout's viewport. */
+  readonly scrollBy?: (rows: number) => void;
+  readonly scrollTop?: () => void;
+  readonly scrollBottom?: () => void;
+  readonly isScrolled?: () => boolean;
+  /** Older finished lines placed in front of the conversation; only the side-by-side layout has them. */
+  readonly prepend?: (lines: ReadonlyArray<string>) => void;
+  /** The reader scrolled up to the oldest line on screen: the controller may fetch older turns. */
+  readonly onOlder?: (listener: (() => void) | null) => void;
+  /** Wheel reporting on or off (`/mouse`), and whether it is on. */
+  readonly setMouse?: (on: boolean) => void;
+  readonly mouseOn?: () => boolean;
 }
 
 export interface ControllerDeps {
@@ -594,13 +611,21 @@ export class AppController {
   /** The rows for the thread list last built, so a repaint while text streams sorts nothing again. */
   private navMemo: {
     readonly threads: unknown;
-    readonly projectId: string;
+    readonly projects: unknown;
     readonly threadId: string;
-    readonly rows: ReadonlyArray<NavRow>;
+    readonly draft: boolean;
+    readonly view: SidebarView;
+    /** Minute of the clock the ages in the rows were read at. */
+    readonly minute: number;
+    readonly rows: ReadonlyArray<NavItem>;
   } | null = null;
+  /** Which shelves of the thread list are open, and how much of the settled one. */
+  private navView: SidebarView = INITIAL_SIDEBAR_VIEW;
+  /** When each thread was last on screen (epoch ms): an answer or a wake after it shows as unseen. */
+  private readonly navVisited = new Map<string, number>();
   /** The thread list for the inputs last drawn, so an identical one is not built again. */
   private navDrawn: {
-    readonly rows: ReadonlyArray<NavRow>;
+    readonly rows: ReadonlyArray<NavItem>;
     readonly pick: string | null;
     readonly focus: boolean;
     readonly placement: string;
@@ -771,6 +796,7 @@ export class AppController {
     this.petMemory = newPetMemory(deps.now());
     const prompt = deps.prompt?.trim();
     this.startPrompt = prompt ? { text: prompt, threadId: null } : null;
+    deps.region.onOlder?.(() => this.loadOlderForViewport());
   }
 
   private get symbols(): Symbols {
@@ -904,6 +930,7 @@ export class AppController {
     // The title was ours for the session; the shell's own comes back.
     this.deps.terminal?.restoreTitle();
     this.lastTitle = null;
+    this.deps.region.onOlder?.(null);
   }
 
   /**
@@ -2244,6 +2271,7 @@ export class AppController {
           command.name !== "dag-agents" &&
           command.name !== "tasks" &&
           command.name !== "pet" &&
+          command.name !== "mouse" &&
           command.name !== "sidebar") ||
           this.deps.split !== undefined),
     );
@@ -3653,6 +3681,10 @@ export class AppController {
       this.onFocus(event.focused);
       return;
     }
+    if (event.type === "mouse") {
+      this.handleMouse(event);
+      return;
+    }
     this.petMemory = touchPet(this.petMemory, this.deps.now());
     if (event.type === "ctrl" && event.letter === "z") {
       this.deps.suspend?.();
@@ -3674,6 +3706,19 @@ export class AppController {
     } finally {
       this.handlingKey = false;
     }
+  }
+
+  /**
+   * The wheel scrolls the conversation of the side-by-side layout, three rows a notch, while the
+   * chat is what is on screen. Clicks and drags are not used: they only reach the program because
+   * wheel reporting needs them on, and are dropped here.
+   */
+  private handleMouse(event: Extract<KeyEvent, { type: "mouse" }>): void {
+    if (event.action !== "wheelUp" && event.action !== "wheelDown") return;
+    if (this.screen.kind !== "chat" || this.deps.split?.active() !== true) return;
+    if (this.picker !== null || this.stats !== null || this.prompt !== null) return;
+    if (this.crewView !== null || this.provider.isOpen()) return;
+    this.deps.region.scrollBy?.(event.action === "wheelUp" ? WHEEL_ROWS : -WHEEL_ROWS);
   }
 
   private handlePickerKey(
@@ -3890,6 +3935,20 @@ export class AppController {
       else this.deps.region.scrollDown?.();
       return;
     }
+    // Home/End move the conversation when it is scrolled back, with Ctrl held, or while the input
+    // is empty (nothing to move a cursor in); otherwise they stay the cursor keys of the input.
+    if (
+      event.type === "key" &&
+      (event.name === "home" || event.name === "end") &&
+      !event.alt &&
+      !event.shift &&
+      this.deps.split?.active() === true &&
+      (event.ctrl || this.deps.region.isScrolled?.() === true || editorText(this.editor) === "")
+    ) {
+      if (event.name === "home") this.deps.region.scrollTop?.();
+      else this.deps.region.scrollBottom?.();
+      return;
+    }
     this.deps.region.follow?.();
     const status = screen.status;
     // A request behind an open menu has no panel yet, so no key of the menu can be its answer.
@@ -3953,6 +4012,17 @@ export class AppController {
           return;
         }
       }
+    }
+    // The side panel's two tabs, Workflow and Agents, as the desktop's: Tab flips them, or
+    // Shift-Tab while the thread list has Tab.
+    if (
+      event.type === "key" &&
+      (event.name === "backtab" || (event.name === "tab" && !this.navOn)) &&
+      this.panelOpen &&
+      this.deps.split?.active()
+    ) {
+      this.sidePanel.show(this.sidePanel.view() === "workflow" ? "agents" : "workflow");
+      return;
     }
     // Tab hands the keys to the thread list when it is open and the composer has no use for Tab.
     if (event.type === "key" && event.name === "tab" && this.navOn && this.deps.split?.active()) {
@@ -4756,6 +4826,10 @@ export class AppController {
         if (this.deps.split === undefined) return false;
         this.runSidebarCommand(args);
         break;
+      case "mouse":
+        if (this.deps.split === undefined || this.deps.region.setMouse === undefined) return false;
+        this.runMouseCommand(args);
+        break;
       case "theme": {
         if (this.deps.themes === undefined) return false;
         this.runThemeCommand(this.deps.themes, args[0]);
@@ -5163,6 +5237,7 @@ export class AppController {
           rows: size.rows,
           style: this.deps.style,
           symbols: this.symbols,
+          switchKey: this.navOn ? "Shift+Tab" : "Tab",
         },
         { flows: () => this.flowsOf(screen), agents: () => this.agentsViewOf(screen) },
       ),
@@ -5342,6 +5417,18 @@ export class AppController {
    * conversation in a terminal too narrow for the column), with or without the other panes. The
    * choice is remembered for the next start.
    */
+  /** `/mouse [on|off]`: wheel scrolling on, or off so the terminal selects text by itself again. */
+  private runMouseCommand(args: ReadonlyArray<string>): void {
+    const word = args[0]?.toLowerCase();
+    if (args.length > 1 || (word !== undefined && word !== "on" && word !== "off")) {
+      this.notice = t("session.c.mouseUsage");
+      return;
+    }
+    const wanted = word === undefined ? this.deps.region.mouseOn?.() !== true : word === "on";
+    this.deps.region.setMouse?.(wanted);
+    this.notice = t(wanted ? "session.c.mouseOn" : "session.c.mouseOff");
+  }
+
   private runSidebarCommand(args: ReadonlyArray<string>): void {
     const word = args[0]?.toLowerCase();
     if (args.length > 1 || (word !== undefined && word !== "on" && word !== "off")) {
@@ -5414,61 +5501,70 @@ export class AppController {
   }
 
   /** The key a row is picked by: its thread, or one word for the row that starts a new thread. */
-  private navKey(row: NavRow | undefined): string | null {
-    return row === undefined ? null : (row.id ?? NAV_NEW);
+  private navKey(row: NavItem | undefined): string | null {
+    return row?.key ?? null;
   }
 
-  /** The threads of the project on screen as rows, the one that starts a new thread first. */
+  /**
+   * The thread list as the desktop sidebar builds it from the shell: every project's threads in
+   * pinned, active, snoozed and settled order, the action that starts a thread first.
+   */
   private navRowsOf(screen: Screen): {
-    readonly rows: ReadonlyArray<NavRow>;
+    readonly rows: ReadonlyArray<NavItem>;
     readonly loading: boolean;
   } {
     const shell = this.deps.link.shell;
     if (screen.kind !== "chat" && screen.kind !== "threads") return { rows: [], loading: false };
     if (shell === null) return { rows: [], loading: true };
     const threadId = screen.kind === "chat" ? screen.threadId : "";
+    const draft = screen.kind === "chat" && screen.isDraft;
+    const now = this.deps.now();
+    // The thread on screen is seen as of now; one met for the first time counts as seen already.
+    if (threadId !== "") this.navVisited.set(threadId, now);
+    for (const thread of shell.threads) {
+      if (!this.navVisited.has(thread.id)) this.navVisited.set(thread.id, now);
+    }
+    const minute = Math.floor(now / 60_000);
     const memo = this.navMemo;
     if (
       memo !== null &&
       memo.threads === shell.threads &&
-      memo.projectId === screen.projectId &&
-      memo.threadId === threadId
+      memo.projects === shell.projects &&
+      memo.threadId === threadId &&
+      memo.draft === draft &&
+      memo.view === this.navView &&
+      memo.minute === minute
     ) {
       return { rows: memo.rows, loading: false };
     }
-    const { rows: threads, listed } = threadRows(shell.threads, screen.projectId, "");
-    const rows: NavRow[] = [
-      {
-        id: null,
-        label: t("render.nav.new"),
-        status: "idle",
-        pinned: false,
-        current: screen.kind === "chat" && screen.isDraft,
-      },
-      ...threads.map((thread) => ({
-        id: thread.id as string,
-        label: threadRowLabel(thread, listed),
-        status:
-          listed.waiting.has(thread.id) || thread.hasPendingApprovals || thread.hasPendingUserInput
-            ? ("waiting" as const)
-            : isThreadRunning(thread)
-              ? ("running" as const)
-              : ("idle" as const),
-        pinned: isPinned(thread),
-        current: thread.id === threadId,
-      })),
-    ];
-    this.navMemo = { threads: shell.threads, projectId: screen.projectId, threadId, rows };
+    const rows = buildSidebar({
+      threads: shell.threads,
+      projects: shell.projects,
+      currentId: threadId === "" ? null : threadId,
+      draft,
+      now,
+      visited: this.navVisited,
+      view: this.navView,
+    });
+    this.navMemo = {
+      threads: shell.threads,
+      projects: shell.projects,
+      threadId,
+      draft,
+      view: this.navView,
+      minute,
+      rows,
+    };
     return { rows, loading: false };
   }
 
   /** Index of the pick: the row picked, else the thread on screen, else the first. */
-  private navIndex(rows: ReadonlyArray<NavRow>): number {
+  private navIndex(rows: ReadonlyArray<NavItem>): number {
     const picked = rows.findIndex((row) => this.navKey(row) === this.navPick);
     if (picked >= 0) return picked;
     return Math.max(
       0,
-      rows.findIndex((row) => row.current),
+      rows.findIndex((row) => (row.kind === "thread" || row.kind === "new") && row.current),
     );
   }
 
@@ -5512,6 +5608,7 @@ export class AppController {
       focused: this.navFocus,
       selected: this.navIndex(rows),
       loading,
+      noProjects: this.deps.link.shell?.projects.length === 0,
     });
     this.navDrawn = {
       rows,
@@ -5540,18 +5637,24 @@ export class AppController {
     if (event.type !== "key") return;
     const { rows } = this.navRowsOf(screen);
     const at = this.navIndex(rows);
-    const move = (to: number) => {
-      this.navPick = this.navKey(rows[Math.max(0, Math.min(rows.length - 1, to))]);
+    // A section label is not picked: the pick steps over it in the direction it was moving.
+    const move = (to: number, step = 1) => {
+      let target = Math.max(0, Math.min(rows.length - 1, to));
+      while (target > 0 && target < rows.length - 1 && rows[target]?.kind === "section") {
+        target += step;
+      }
+      const row = rows[target];
+      if (row !== undefined && isPickable(row)) this.navPick = row.key;
     };
     switch (event.name) {
       case "up":
-        move(at - 1);
+        move(at - 1, -1);
         return;
       case "down":
         move(at + 1);
         return;
       case "pageup":
-        move(at - 5);
+        move(at - 5, -1);
         return;
       case "pagedown":
         move(at + 5);
@@ -5560,7 +5663,7 @@ export class AppController {
         move(0);
         return;
       case "end":
-        move(rows.length - 1);
+        move(rows.length - 1, -1);
         return;
       case "escape":
       case "tab":
@@ -5568,23 +5671,46 @@ export class AppController {
         this.navFocus = false;
         this.navPick = null;
         return;
-      case "enter":
+      case "enter": {
+        const row = rows[at];
+        // A shelf header opens or closes its shelf, and "show more" shows more; the keys stay here.
+        if (row?.kind === "shelf" || row?.kind === "more") {
+          this.openShelf(row);
+          return;
+        }
         this.navFocus = false;
         this.navPick = null;
-        this.openNavRow(screen, rows[at]);
+        this.openNavRow(screen, row);
         return;
+      }
       default:
         return;
     }
   }
 
+  /** Enter on a shelf header opens or closes it; on "show more" the settled shelf grows by a page. */
+  private openShelf(row: Extract<NavItem, { kind: "shelf" | "more" }>): void {
+    const view = this.navView;
+    if (row.kind === "more") {
+      this.navView = { ...view, settledShown: view.settledShown + SETTLED_PAGE };
+    } else if (row.section === "snoozed") {
+      this.navView = { ...view, snoozedOpen: !view.snoozedOpen };
+    } else {
+      this.navView = {
+        ...view,
+        settledOpen: !view.settledOpen,
+        settledShown: INITIAL_SIDEBAR_VIEW.settledShown,
+      };
+    }
+  }
+
   /** Moves the conversation to the thread picked in the list (or to a new one) and keeps working there. */
-  private openNavRow(screen: ChatScreen, row: NavRow | undefined): void {
-    if (row === undefined || row.current) return;
+  private openNavRow(screen: ChatScreen, row: NavItem | undefined): void {
+    if (row === undefined || (row.kind !== "new" && row.kind !== "thread") || row.current) return;
     // What is on screen is scrolled out of view, as with Ctrl-L: the thread opened starts clean,
     // and the old lines still reach the scrollback when the layout is left.
     this.deps.region.abandon();
-    if (row.id === null) {
+    if (row.kind === "new") {
       this.deps.link.closeThread();
       this.openChat(screen.projectId, null, true);
       return;
@@ -5620,7 +5746,7 @@ export class AppController {
       this.notice = historyLoadingNotice();
       return;
     }
-    const refusal = this.answerRefusal(screen, "/history");
+    const refusal = this.historyInView() ? null : this.answerRefusal(screen, "/history");
     if (refusal !== null) {
       this.notice = refusal;
       return;
@@ -5642,6 +5768,42 @@ export class AppController {
     screen.historyBusy = true;
     this.notice = historyLoadingNotice();
     void this.fillHistory(screen, pool, count);
+  }
+
+  /** Whether older turns go in front of the conversation (side-by-side layout) rather than below it. */
+  private historyInView(): boolean {
+    return this.deps.split?.active() === true && this.deps.region.prepend !== undefined;
+  }
+
+  /**
+   * The reader scrolled up to the oldest line of the side-by-side conversation: the next page of
+   * older turns is taken from the same pool `/history` reads and put in front of it. Nothing is
+   * said when there is nothing older, and a load under way is not started twice.
+   */
+  private loadOlderForViewport(): void {
+    const screen = this.screen;
+    if (this.disposed || screen.kind !== "chat" || screen.isDraft) return;
+    if (!this.historyInView()) return;
+    const { link } = this.deps;
+    const thread = link.thread.thread;
+    if (!screen.loaded || thread === null || thread.id !== screen.threadId || screen.historyBusy) {
+      return;
+    }
+    screen.history ??= openHistoryPool(
+      thread,
+      screen.printer.skippedMessages,
+      link.thread.hasOlder ? link.thread.olderCursor : null,
+    );
+    const pool = screen.history;
+    if (!historyLeft(pool)) return;
+    if (pool.messages.length >= HISTORY_DEFAULT || pool.cursor === null) {
+      this.printHistory(screen, pool, HISTORY_DEFAULT);
+      this.render();
+      return;
+    }
+    screen.historyBusy = true;
+    this.notice = historyLoadingNotice();
+    void this.fillHistory(screen, pool, HISTORY_DEFAULT);
   }
 
   /** Why a report cannot be written now: a reply being written would end up in the middle of it. */
@@ -5675,7 +5837,10 @@ export class AppController {
   private printHistory(screen: ChatScreen, pool: HistoryPool, count: number): void {
     const thread = this.deps.link.thread.thread;
     if (thread === null || thread.id !== screen.threadId) return;
-    const refusal = this.answerRefusal(screen, "/history");
+    // In the side-by-side layout the page goes in front of the conversation, so a reply being
+    // written below is not in its way.
+    const inView = this.historyInView();
+    const refusal = inView ? null : this.answerRefusal(screen, "/history");
     if (refusal !== null) {
       this.notice = refusal;
       return;
@@ -5702,13 +5867,15 @@ export class AppController {
         : more
           ? t("session.c.moreSome")
           : t("session.c.reachedStart");
-    this.emit([
+    const page = [
       railGap(this.rail),
       railRow(this.rail, theme.dim(t("session.c.earlierCount", { count: batch.messages.length }))),
       ...rows,
       railGap(this.rail),
       railRow(this.rail, theme.dim(t("session.c.earlierUpToHere", { remaining }))),
-    ]);
+    ];
+    if (inView) this.deps.region.prepend?.(page);
+    else this.emit(page);
   }
 
   /** `/update`: looks the newest release up again and lists what the releases after this one brought. */
@@ -5810,6 +5977,7 @@ export class AppController {
         t("session.c.help.keyModel"),
         t("session.c.help.keyLists"),
         t("session.c.help.keyScroll"),
+        t("session.c.help.keyMouse"),
       ]),
       "",
       heading("Crew"),

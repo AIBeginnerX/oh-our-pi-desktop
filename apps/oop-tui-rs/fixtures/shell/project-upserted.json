@@ -1,0 +1,13 @@
+{
+  "kind": "project-upserted",
+  "sequence": 12,
+  "project": {
+    "id": "project-1",
+    "title": "demo renamed",
+    "workspaceRoot": "/work/demo",
+    "defaultModelSelection": null,
+    "scripts": [],
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  }
+}

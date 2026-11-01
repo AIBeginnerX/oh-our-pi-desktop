@@ -1,0 +1,16 @@
+{
+  "sequence": 15,
+  "eventId": "evt-15",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.deleted",
+  "payload": {
+    "threadId": "thread-1",
+    "deletedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

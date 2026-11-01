@@ -1,0 +1,16 @@
+{
+  "sequence": 38,
+  "eventId": "evt-38",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.reverted",
+  "payload": {
+    "threadId": "thread-1",
+    "turnCount": 1
+  }
+}

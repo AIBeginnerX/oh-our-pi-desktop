@@ -1,0 +1,26 @@
+{
+  "sequence": 27,
+  "eventId": "evt-27",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.pull-request-linked",
+  "payload": {
+    "threadId": "thread-1",
+    "link": {
+      "host": "github.com",
+      "repository": "t3tools/oop",
+      "number": 7,
+      "url": "https://github.com/t3tools/oop/pull/7",
+      "source": "manual",
+      "linkedAt": "2026-01-01T00:00:05.000Z",
+      "snapshot": null,
+      "stack": null
+    },
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

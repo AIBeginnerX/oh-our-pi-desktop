@@ -124,3 +124,36 @@ describe("KeyParser", () => {
     expect(parser.feed("1~")).toEqual([{ type: "paste", text: "x" }]);
   });
 });
+
+describe("KeyParser mouse reports", () => {
+  it("reads the SGR wheel as wheelUp and wheelDown with its position", () => {
+    const parser = new KeyParser();
+    expect(parser.feed("\u001b[<64;10;5M\u001b[<65;10;5M")).toEqual([
+      { type: "mouse", action: "wheelUp", x: 10, y: 5 },
+      { type: "mouse", action: "wheelDown", x: 10, y: 5 },
+    ]);
+  });
+
+  it("reads the wheel with modifiers held, and clicks and drags as their own actions", () => {
+    const parser = new KeyParser();
+    expect(parser.feed("\u001b[<68;1;1M")).toEqual([
+      { type: "mouse", action: "wheelUp", x: 1, y: 1 },
+    ]);
+    expect(parser.feed("\u001b[<0;3;4M")).toEqual([{ type: "mouse", action: "press", x: 3, y: 4 }]);
+    expect(parser.feed("\u001b[<0;3;4m")).toEqual([
+      { type: "mouse", action: "release", x: 3, y: 4 },
+    ]);
+    expect(parser.feed("\u001b[<32;5;6M")).toEqual([{ type: "mouse", action: "drag", x: 5, y: 6 }]);
+  });
+
+  it("holds a report split across chunks and does not leak it as typed text", () => {
+    const parser = new KeyParser();
+    expect(parser.feed("\u001b[<64;1")).toEqual([]);
+    expect(parser.feed("2;7M")).toEqual([{ type: "mouse", action: "wheelUp", x: 12, y: 7 }]);
+  });
+
+  it("drops a button report it does not use without disturbing the keys around it", () => {
+    const parser = new KeyParser();
+    expect(parser.feed("\u001b[<66;1;1Ma")).toEqual([{ type: "text", text: "a" }]);
+  });
+});

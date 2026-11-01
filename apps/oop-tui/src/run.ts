@@ -320,6 +320,7 @@ const BRACKETED_PASTE_OFF = "\u001b[?2004l";
 /** Focus reporting: the terminal sends `ESC [ I` and `ESC [ O` as its window gains and loses focus. */
 const FOCUS_REPORT_ON = "\u001b[?1004h";
 const FOCUS_REPORT_OFF = "\u001b[?1004l";
+const MOUSE_REPORT_OFF = "\u001b[?1006l\u001b[?1000l";
 
 /** `host:port` of a server address; the rest of it (user, path, query) is not something to print. */
 const hostOf = (origin: string): string | null => {
@@ -422,6 +423,7 @@ export const runInteractive = async (input: {
     new LiveRegion(screen),
     new SplitRegion(screen, defaultScheduler, {
       divider: () => style.theme.border(symbols.separator),
+      mouse: !/^(?:off|0|false|no)$/iu.test(process.env.OOP_MOUSE?.trim() ?? ""),
     }),
     screen,
     { onClosed: (reason, part) => controller?.onSplitClosed(reason, part) },
@@ -505,7 +507,9 @@ export const runInteractive = async (input: {
 
   // Raw mode and bracketed paste are undone on every way out, including a crash.
   const releaseInput = () => {
-    stdout.write(`${FOCUS_REPORT_OFF}${BRACKETED_PASTE_OFF}${SHOW_CURSOR}`);
+    // Wheel reporting is also switched off here: the split region does it when it leaves, but a
+    // terminal that was left reporting would print `^[[<64;..M` into the shell.
+    stdout.write(`${MOUSE_REPORT_OFF}${FOCUS_REPORT_OFF}${BRACKETED_PASTE_OFF}${SHOW_CURSOR}`);
     if (stdin.isTTY) stdin.setRawMode(false);
   };
   // The alternate screen of the workflow layout is left first, so what was said in it is not lost.

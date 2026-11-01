@@ -8,28 +8,36 @@ import {
   navColumns,
   navUnavailable,
   renderNavPane,
-  type NavRow,
+  type NavItem,
 } from "./navPane.ts";
 import { navPlacement, splitLayout } from "./splitRegion.ts";
 import { ASCII_SYMBOLS, UNICODE_SYMBOLS } from "./symbols.ts";
 import { BUILTIN_THEMES, createTheme } from "./theme.ts";
 
 const theme = createTheme("oop", BUILTIN_THEMES.oop, 3);
-const row = (id: string | null, label: string, over: Partial<NavRow> = {}): NavRow => ({
+type ThreadItem = Extract<NavItem, { kind: "thread" }>;
+const row = (id: string, title: string, over: Partial<ThreadItem> = {}): ThreadItem => ({
+  kind: "thread",
+  key: id,
   id,
-  label,
-  status: "idle",
+  project: "내 프로젝트",
+  title,
+  status: "ready",
+  since: "5m",
   pinned: false,
   current: false,
+  crew: 0,
+  section: "active",
   ...over,
 });
+const fresh: NavItem = { kind: "new", key: "new:", current: false };
 const draw = (
-  list: ReadonlyArray<NavRow>,
+  list: ReadonlyArray<NavItem>,
   over: Partial<Parameters<typeof renderNavPane>[1]> = {},
 ): string[] =>
   renderNavPane(list, {
     columns: 28,
-    rows: 8,
+    rows: 20,
     theme,
     symbols: UNICODE_SYMBOLS,
     focused: false,
@@ -82,63 +90,130 @@ describe("where the list sits", () => {
 });
 
 describe("renderNavPane", () => {
-  const list = [
-    row(null, "새 스레드"),
-    row("a", "고정한 스레드", { pinned: true }),
-    row("b", "지금 스레드", { current: true, status: "running" }),
-    row("c", "기다리는 스레드", { status: "waiting" }),
+  const list: NavItem[] = [
+    fresh,
+    { kind: "section", key: "section:pinned", section: "pinned" },
+    row("a", "고정한 스레드", { pinned: true, section: "pinned", since: "2d" }),
+    { kind: "section", key: "section:active", section: "active" },
+    row("b", "지금 스레드", { current: true, status: "working", since: "3m" }),
+    row("c", "승인을 기다리는 스레드", { status: "approval" }),
+    { kind: "shelf", key: "shelf:snoozed", section: "snoozed", count: 2, open: false },
+    { kind: "shelf", key: "shelf:settled", section: "settled", count: 40, open: false },
   ];
 
-  it("is exactly the rows and columns asked for", () => {
-    for (const lines of [draw(list), draw(list, { rows: 5 }), draw([], { rows: 6 })]) {
+  it("is exactly the rows and columns asked for, in the roomy and the compact form", () => {
+    for (const rows of [5, 8, 12, 20]) {
+      const lines = draw(list, { rows });
+      expect(lines).toHaveLength(rows);
       for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(28);
     }
-    expect(draw(list)).toHaveLength(8);
-    expect(draw(list, { rows: 5 })).toHaveLength(5);
     expect(draw([], { rows: 6 })).toHaveLength(6);
   });
 
-  it("marks the current thread, the state, the pin, and names the keys", () => {
+  it("lays the list out like the desktop sidebar: sections, project over title, status or age", () => {
     const lines = draw(list);
     expect(lines[0]).toMatch(/^── 스레드 ─+$/u);
-    expect(lines[1]).toBe("    새 스레드");
-    expect(lines[2]).toBe("    고정한 스레드 고정");
-    expect(lines[3]).toBe(" ◆◐ 지금 스레드");
-    expect(lines[4]).toBe("  ▲ 기다리는 스레드");
+    expect(lines[1]).toBe("    + 새 스레드");
+    expect(lines[2]).toBe("  고정됨");
+    expect(lines[3]).toBe("    내 프로젝트 고정      2d");
+    expect(lines[4]).toBe("    고정한 스레드");
+    expect(lines[5]).toBe("  활성");
+    // The current thread is marked, and a working one says so with how long it has worked.
+    expect(lines[6]).toBe(" ◆◐ 내 프로젝트   작업 중 3m");
+    expect(lines[7]).toBe("    지금 스레드");
+    expect(lines[8]).toBe("  ▲ 내 프로젝트    승인 필요");
+    expect(lines[9]).toBe("    승인을 기다리는 스레드");
+    expect(lines[10]).toBe("   ▸ 미룸 (2)");
+    expect(lines[11]).toBe("   ▸ 정리됨 (40)");
     expect(lines.at(-1)).toBe("Tab 으로 선택");
   });
 
-  it("shows the pick only while the list has the keys", () => {
-    const lines = draw(list, { focused: true, selected: 3 });
-    expect(lines[4]).toBe("❯ ▲ 기다리는 스레드");
-    expect(lines.slice(1, 4).every((line) => !line.startsWith("❯"))).toBe(true);
-    expect(lines.at(-1)).toBe("↑↓ Enter Esc");
+  it("shows every status the desktop row has, each with its own mark", () => {
+    const statuses = [
+      "working",
+      "monitoring",
+      "approval",
+      "input",
+      "failed",
+      "woke",
+      "unread",
+    ] as const;
+    const lines = draw(
+      statuses.map((status) => row(status, `t-${status}`, { status, project: null })),
+      { rows: 24, columns: 40 },
+    ).join("\n");
+    for (const word of [
+      "작업 중",
+      "지켜보는 중",
+      "승인 필요",
+      "입력 필요",
+      "실패",
+      "깨어남",
+      "응답 완료",
+    ]) {
+      expect(lines).toContain(word);
+    }
+    for (const mark of ["◐", "‖", "▲", "?", "✗", "●"]) expect(lines).toContain(mark);
   });
 
-  it("scrolls to keep the pick in view and counts what is cut off", () => {
-    const many = Array.from({ length: 20 }, (_, i) => row(`t${i}`, `스레드 ${i}`));
-    const lines = draw(many, { rows: 7, focused: true, selected: 10 });
-    expect(lines.join("\n")).toContain("❯   스레드 10");
+  it("folds crew tasks into a count on the title row", () => {
+    expect(draw([row("a", "리드", { crew: 3 })]).join("\n")).toContain("리드 크루 3");
+  });
+
+  it("puts the project name on a row of its own width without pushing the status out", () => {
+    const lines = draw([
+      row("a", "제목", { project: "아주아주아주긴프로젝트이름입니다", status: "approval" }),
+    ]);
+    expect(lines[1]).toMatch(/승인 필요$/u);
+    expect(visibleWidth(lines[1] ?? "")).toBeLessThanOrEqual(28);
+  });
+
+  it("shows the pick only while the list has the keys, and an open shelf's chevron", () => {
+    const lines = draw(
+      [
+        fresh,
+        row("a", "하나"),
+        { kind: "shelf", key: "shelf:settled", section: "settled", count: 3, open: true },
+      ],
+      { focused: true, selected: 2 },
+    );
+    expect(lines.join("\n")).toContain("❯  ▾ 정리됨");
+    expect(lines.at(-1)).toBe("↑↓ Enter Esc");
+    expect(draw([fresh, row("a", "하나")]).join("\n")).not.toContain("❯");
+  });
+
+  it("offers more of a shelf", () => {
+    expect(draw([fresh, { kind: "more", key: "more:settled", count: 30 }]).join("\n")).toContain(
+      "30개 더 보기",
+    );
+  });
+
+  it("scrolls whole entries to keep the pick in view and counts what is cut off", () => {
+    const many = [fresh, ...Array.from({ length: 20 }, (_, i) => row(`t${i}`, `스레드 ${i}`))];
+    const lines = draw(many, { rows: 9, focused: true, selected: 10 });
+    expect(lines.join("\n")).toContain("스레드 9");
     expect(lines.join("\n")).toMatch(/… 위로 \d+개/u);
     expect(lines.join("\n")).toMatch(/… 아래로 \d+개/u);
-    expect(lines).toHaveLength(7);
+    expect(lines).toHaveLength(9);
   });
 
   it("without focus keeps the thread on screen in view", () => {
     const many = Array.from({ length: 20 }, (_, i) =>
       row(`t${i}`, `스레드 ${i}`, { current: i === 15 }),
     );
-    expect(draw(many, { rows: 7 }).join("\n")).toContain("◆");
+    expect(draw(many, { rows: 9 }).join("\n")).toContain("◆");
   });
 
-  it("says when there is nothing, or the threads are still being read", () => {
+  it("says when there is nothing, no project, or the threads are still being read", () => {
     expect(draw([])[1]).toBe("아직 스레드가 없습니다");
     expect(draw([], { loading: true })[1]).toBe("불러오는 중…");
+    expect(draw([fresh], { noProjects: true }).join("\n")).toContain("아직 프로젝트가 없습니다");
+    expect(draw([fresh]).join("\n")).toContain("아직 스레드가 없습니다");
   });
 
   it("uses only ASCII marks with the ASCII symbols", () => {
-    const lines = draw(list, { symbols: ASCII_SYMBOLS, focused: true, selected: 2 });
+    const lines = draw(list, { symbols: ASCII_SYMBOLS, focused: true, selected: 4 });
     expect(lines[0]).toMatch(/^-- 스레드 -+$/u);
-    expect(lines.join("\n")).not.toMatch(/[─◆◐▲❯]/u);
+    expect(lines.join("\n")).not.toMatch(/[─◆◐▲❯▸▾‖✗●]/u);
   });
 });

@@ -1,0 +1,38 @@
+{
+  "kind": "thread-upserted",
+  "sequence": 14,
+  "thread": {
+    "id": "thread-1",
+    "projectId": "project-1",
+    "title": "again",
+    "modelSelection": {
+      "instanceId": "codex",
+      "model": "gpt-5"
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "branch": null,
+    "worktreePath": null,
+    "pullRequests": [],
+    "latestTurn": null,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:05.000Z",
+    "archivedAt": null,
+    "settledOverride": null,
+    "settledAt": null,
+    "session": {
+      "threadId": "thread-1",
+      "status": "ready",
+      "providerName": "codex",
+      "providerInstanceId": "codex",
+      "runtimeMode": "full-access",
+      "activeTurnId": null,
+      "lastError": null,
+      "updatedAt": "2026-01-01T00:00:05.000Z"
+    },
+    "latestUserMessageAt": "2026-01-01T00:00:00.000Z",
+    "hasPendingApprovals": false,
+    "hasPendingUserInput": false,
+    "hasActionableProposedPlan": false
+  }
+}

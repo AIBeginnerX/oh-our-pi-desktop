@@ -341,7 +341,8 @@ describe("the panel", () => {
     expect(panel).toContain("Workflow");
     expect(panel).toContain("턴 1 · Crew");
     expect(panel).toContain("메인 에이전트");
-    expect(panel).toContain("Worker · Implement invoice totals");
+    expect(panel).toContain("Worker");
+    expect(panel).toContain("Implement invoice totals");
   });
 
   it("follows the thread when another one is opened", () => {
@@ -628,7 +629,7 @@ describe("/dag-agents", () => {
     const panel = panelOf(h).join("\n");
     expect(panel).toContain("Agents");
     expect(panel).toContain("/dag-agents 로 닫기");
-    expect(panel).not.toContain("Workflow");
+    expect(panel).not.toContain("/dag-workflow");
     h.run("/dag-agents");
     expect(h.term.altScreen).toBe(false);
     const rows = h.term.normalText();
@@ -687,6 +688,24 @@ describe("/dag-agents", () => {
     expect(h.term.altScreen).toBe(true);
     expect(panelOf(h).join("\n")).toContain("/dag-agents 로 닫기");
     expect(h.screen()).toContain("Workflow 창은 열려 있지 않습니다");
+  });
+
+  it("flips between the Workflow and Agents tabs with Tab, and Shift-Tab, keeping the layout", () => {
+    const h = harness();
+    h.openNewest();
+    h.deliver(withCrewThread());
+    h.run("/dag-workflow");
+    expect(panelOf(h).join("\n")).toContain("/dag-workflow 로 닫기");
+    h.press(key("tab"));
+    expect(h.term.altScreen).toBe(true);
+    expect(panelOf(h).join("\n")).toContain("/dag-agents 로 닫기");
+    expect(panelOf(h).join("\n")).toContain("흐름 · 이번 턴");
+    h.press(key("backtab"));
+    expect(panelOf(h).join("\n")).toContain("/dag-workflow 로 닫기");
+    // With the panel closed Tab is not taken.
+    h.run("/dag-workflow");
+    h.press(key("tab"));
+    expect(h.term.altScreen).toBe(false);
   });
 
   it("keeps the flow picked in the Workflow view when going to Agents and back", () => {
@@ -770,7 +789,7 @@ describe("/dag-agents", () => {
     h.run("/dag-agents");
     const panel = panelOf(h).join("\n");
     expect(panel).toContain("Lead");
-    expect(panel).toContain("Worker  진행 중");
+    expect(panel).toMatch(/Worker\s+GPT-6\.1-Sol\s+진행 중/u);
     expect(panel).toContain("Implement invoice totals");
     expect(panel).toContain("GPT-6.1-Sol");
     expect(panel).toContain("Crew 이번 턴");
@@ -1533,9 +1552,33 @@ describe("/sidebar", () => {
   /** The text of the first `width` cells of every row (a wide character is one string, two cells). */
   const leftEdge = (h: H, width: number) =>
     Array.from({ length: h.term.rows }, (_, row) => h.term.text(row, 0, width));
-  /** The row of the list that holds `title`, cut to `width` cells; the conversation's own mentions are not it. */
-  const listRow = (h: H, title: string, width = h.term.columns) =>
-    leftEdge(h, width).find((row) => new RegExp(`^[❯ ][◆ ][◐▲ ] ${title}`, "u").test(row)) ?? "";
+  /**
+   * The row of the list that holds `title`, cut to `width` cells, in the form `<pick><current><state> <title>`:
+   * a thread is two rows (its project and status, then its title under it), and the marks are read off the
+   * first. The conversation's own mentions of the title are not it.
+   */
+  const listRow = (h: H, title: string, width = h.term.columns) => {
+    const rows = leftEdge(h, width);
+    if (title === "새 스레드") {
+      const row = rows.find((candidate) => /^[❯ ][◆ ] {2}\+ 새 스레드/u.test(candidate));
+      return row === undefined ? "" : `${row.slice(0, 3)} 새 스레드`;
+    }
+    const at = rows.findIndex(
+      (row, index) =>
+        row.startsWith(`    ${title}`) && /^.{3} 내 프로젝트/u.test(rows[index - 1] ?? ""),
+    );
+    if (at >= 0) return `${(rows[at - 1] as string).slice(0, 3)} ${title}`;
+    // Under the conversation the list is compact: one row per thread, marks then title.
+    const compact = rows.find((row) => new RegExp(`^[❯ ][◆ ].? ${title}`, "u").test(row));
+    return compact === undefined ? "" : `${compact.slice(0, 3)} ${title}`;
+  };
+  /** The titles of the list, top to bottom. */
+  const listTitles = (h: H, width: number) => {
+    const rows = leftEdge(h, width);
+    return rows.flatMap((row, index) =>
+      /^.{3} 내 프로젝트/u.test(row) ? [(rows[index + 1] ?? "").trim()] : [],
+    );
+  };
   const ruleRow = (h: H, title: string) =>
     leftEdge(h, h.term.columns).findIndex((row) => row.startsWith(`── ${title}`));
   const thread = (id: string, title: string, over: Record<string, unknown> = {}) =>
@@ -1734,10 +1777,13 @@ describe("/sidebar", () => {
     h.openNewest();
     h.run("/sidebar");
     const width = navColumns(140);
-    const order = leftEdge(h, width)
-      .filter((row) => /^[❯ ][◆ ][◐▲ ] /u.test(row))
-      .map((row) => row.slice(4).trim());
-    expect(order).toEqual(["새 스레드", "고정한 스레드 고정", "최근 스레드", "오래된 스레드"]);
+    expect(listTitles(h, width)).toEqual(["고정한 스레드", "최근 스레드", "오래된 스레드"]);
+    const left = leftEdge(h, width).join("\n");
+    expect(left).toContain("+ 새 스레드");
+    // The pinned block is told apart from the rest, as the desktop's pinned block is.
+    expect(left).toContain("고정됨");
+    expect(left).toContain("활성");
+    expect(left).toContain("내 프로젝트 고정");
     // A thread starts running while the list is up: its row changes, and nothing is cleared.
     h.link.shell = shellOf({
       old: { session: makeSession("running", { threadId: "thread-old" }) },
@@ -1927,7 +1973,7 @@ describe("/sidebar", () => {
     try {
       const h = harness({ columns: 140, rows: 40 });
       h.link.shell = makeSnapshot(
-        [makeProject()],
+        [makeProject({ title: "App" })],
         [thread("thread-a", "Fix login"), thread("thread-b", "Add tests")],
       );
       h.openNewest();
@@ -1961,5 +2007,98 @@ describe("/sidebar", () => {
     h.run("/help");
     expect(h.screen()).toContain("/sidebar");
     expect(h.screen()).toContain("Ctrl-O");
+  });
+});
+
+describe("the wheel and the keys that scroll the split conversation", () => {
+  const wheel = (action: "wheelUp" | "wheelDown"): KeyEvent => ({
+    type: "mouse",
+    action,
+    x: 5,
+    y: 5,
+  });
+  const ON = "\u001b[?1000h\u001b[?1006h";
+  const OFF = "\u001b[?1006l\u001b[?1000l";
+  const SCROLLING = "스크롤 중";
+  const opened = () => {
+    const h = harness();
+    h.openNewest();
+    h.run("/dag-workflow");
+    // Enough said to need scrolling.
+    for (let n = 0; n < 4; n += 1) h.run("/help");
+    return h;
+  };
+
+  it("scrolls the conversation with the wheel and follows again at the bottom", () => {
+    const h = opened();
+    expect(h.screen()).not.toContain(SCROLLING);
+    h.press(wheel("wheelUp"));
+    expect(h.screen()).toContain(SCROLLING);
+    for (let n = 0; n < 40; n += 1) h.controller.handleKey(wheel("wheelDown"));
+    h.settle();
+    expect(h.screen()).not.toContain(SCROLLING);
+  });
+
+  it("End follows the newest line again", () => {
+    const h = opened();
+    h.press(wheel("wheelUp"), wheel("wheelUp"));
+    expect(h.screen()).toContain(SCROLLING);
+    h.press(key("end"));
+    expect(h.screen()).not.toContain(SCROLLING);
+  });
+
+  it("typing a command takes a scrolled-back reader to the newest line", () => {
+    const h = opened();
+    h.press(wheel("wheelUp"));
+    h.run("/help");
+    expect(h.screen()).not.toContain(SCROLLING);
+  });
+
+  it("Home goes to the top of what is kept", () => {
+    const h = opened();
+    h.press(key("home"));
+    expect(h.screen()).toContain(SCROLLING);
+  });
+
+  it("ignores the wheel when the layout is not split", () => {
+    const h = harness();
+    h.openNewest();
+    const mark = h.writes();
+    h.press(wheel("wheelUp"));
+    expect(h.writes()).toBe(mark);
+  });
+
+  it("ignores clicks", () => {
+    const h = opened();
+    h.press({ type: "mouse", action: "press", x: 5, y: 5 });
+    expect(h.screen()).not.toContain(SCROLLING);
+  });
+
+  it("asks for wheel reports on entry, turns them off with /mouse off and back on with /mouse on", () => {
+    const h = harness();
+    h.openNewest();
+    const mark = h.writes();
+    h.run("/dag-workflow");
+    expect(h.since(mark)).toContain(ON);
+    const before = h.writes();
+    h.run("/mouse off");
+    expect(h.since(before)).toContain(OFF);
+    const again = h.writes();
+    h.run("/mouse on");
+    expect(h.since(again)).toContain(ON);
+  });
+
+  it("gives the mouse back when the layout closes and when the program restores the screen", () => {
+    const h = harness();
+    h.openNewest();
+    h.run("/dag-workflow");
+    const mark = h.writes();
+    h.run("/dag-workflow");
+    expect(h.since(mark)).toContain(OFF);
+    h.run("/dag-workflow");
+    const crash = h.writes();
+    h.region.restore();
+    expect(h.since(crash)).toContain(OFF);
+    expect(h.term.altScreen).toBe(false);
   });
 });

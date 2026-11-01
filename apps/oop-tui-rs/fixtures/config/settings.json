@@ -1,0 +1,12 @@
+{
+  "theme": "lavender",
+  "symbols": "unicode",
+  "animations": true,
+  "banner": true,
+  "statusLine": "auto",
+  "notify": true,
+  "language": "ko",
+  "sidebar": true,
+  "workflow": true,
+  "pet": true
+}

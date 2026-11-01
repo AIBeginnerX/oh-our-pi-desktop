@@ -1,0 +1,17 @@
+{
+  "sequence": 24,
+  "eventId": "evt-24",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.pin-reordered",
+  "payload": {
+    "threadId": "thread-1",
+    "orderKey": "a1",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

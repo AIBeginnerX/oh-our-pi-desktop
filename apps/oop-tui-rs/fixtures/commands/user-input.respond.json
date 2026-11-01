@@ -1,0 +1,18 @@
+{
+  "args": {
+    "requestId": "req-2",
+    "answers": {
+      "color": "blue"
+    }
+  },
+  "command": {
+    "type": "thread.user-input.respond",
+    "commandId": "cmd-1",
+    "threadId": "thread-1",
+    "requestId": "req-2",
+    "answers": {
+      "color": "blue"
+    },
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

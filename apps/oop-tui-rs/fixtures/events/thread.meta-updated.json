@@ -1,0 +1,28 @@
+{
+  "sequence": 26,
+  "eventId": "evt-26",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.meta-updated",
+  "payload": {
+    "threadId": "thread-1",
+    "title": "renamed",
+    "modelSelection": {
+      "instanceId": "codex",
+      "model": "gpt-5",
+      "options": [
+        {
+          "id": "reasoningEffort",
+          "value": "high"
+        }
+      ]
+    },
+    "branch": "main",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

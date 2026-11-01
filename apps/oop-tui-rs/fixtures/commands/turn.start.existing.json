@@ -1,0 +1,22 @@
+{
+  "args": {
+    "text": "and then?",
+    "model": null,
+    "runtimeMode": "approval-required",
+    "interactionMode": "plan"
+  },
+  "command": {
+    "type": "thread.turn.start",
+    "commandId": "cmd-1",
+    "threadId": "thread-1",
+    "message": {
+      "messageId": "msg-1",
+      "role": "user",
+      "text": "and then?",
+      "attachments": []
+    },
+    "runtimeMode": "approval-required",
+    "interactionMode": "plan",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

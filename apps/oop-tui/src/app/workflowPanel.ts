@@ -26,12 +26,12 @@ import {
 } from "@t3tools/client-runtime/workflow-graph";
 
 import { t } from "../i18n/index.ts";
-import { formatCost, formatTokenCount, roleName } from "../render/crewBoard.ts";
+import { evidenceWord, formatCost, formatTokenCount, roleName } from "../render/crewBoard.ts";
 import { formatElapsed } from "../render/spinner.ts";
 import type { Style } from "../render/style.ts";
 import type { Symbols } from "../render/symbols.ts";
-import { sanitizeForTerminal } from "../text/width.ts";
-import { truncateStyled, wrapStyled, wrapWithPrefix } from "../text/wrap.ts";
+import { sanitizeForTerminal, visibleWidth } from "../text/width.ts";
+import { padEndVisible, truncateStyled, wrapStyled } from "../text/wrap.ts";
 
 // ---- what `/dag-workflow` can be told ---------------------------------------------------------
 
@@ -292,6 +292,8 @@ export interface PanelInput {
   readonly rows: number;
   readonly style: Style;
   readonly symbols: Symbols;
+  /** The key that flips between the Workflow and Agents tabs, named in the tab bar; none left out. */
+  readonly switchKey?: string;
 }
 
 export interface Block {
@@ -334,73 +336,177 @@ const progressBar = (counts: WorkflowCounts, width: number, style: Style, symbol
   );
 };
 
-const nodeBlock = (
+/** The facts in as few lines of `width` as they fit, none split across two. */
+export const packFacts = (facts: ReadonlyArray<string>, width: number): string[] => {
+  const lines: string[] = [];
+  let line = "";
+  for (const fact of facts) {
+    const joined = line === "" ? fact : `${line} · ${fact}`;
+    if (line !== "" && visibleWidth(joined) > width) {
+      lines.push(line);
+      line = fact;
+    } else {
+      line = joined;
+    }
+  }
+  return line === "" ? lines : [...lines, line];
+};
+
+/** The words on top of a card: the agent's role, or the step's own label. */
+const cardTitle = (node: WorkflowNode): string => {
+  if (node.id.startsWith(THINKING_NODE_PREFIX)) return t("providers.wf.thinking");
+  const { actor } = node.info;
+  return actor === undefined ? flat(node.label) : ROLE_WORDS[actor.role];
+};
+
+/** What a card says the step does or did: the agent's task, the main agent's work, or the step's note. */
+const cardBody = (node: WorkflowNode): string => {
+  const { info } = node;
+  const { actor } = info;
+  if (actor === undefined) return flat(info.subtitle ?? info.description ?? "");
+  if (actor.role === "main") {
+    const work: string[] = [];
+    if (actor.delegated !== undefined)
+      work.push(t("providers.wf.delegatedToCrew", { count: actor.delegated }));
+    for (const tool of actor.tools ?? []) work.push(toolWord(tool));
+    return work.join(" · ");
+  }
+  return flat(actor.task ?? info.progress ?? "");
+};
+
+/** The desktop board's rule: a card is dim until its step has begun. */
+const hasBegun = (node: WorkflowNode): boolean =>
+  node.state === "running" ||
+  node.state === "completed" ||
+  node.state === "failed" ||
+  node.state === "paused" ||
+  node.info.startedAt !== undefined;
+
+/**
+ * One step as the desktop board's card: a frame (accent while it runs, red once it failed), the
+ * state mark and the role or label with the evidence at the right, the model, what it does, and a
+ * status line in the colour of its state with the time, tokens and cost.
+ */
+const cardBlock = (
   node: WorkflowNode,
   upstream: ReadonlyArray<WorkflowNode>,
   input: PanelInput,
-  room: number,
+  width: number,
 ): string[] => {
   const { style, symbols, now } = input;
   const { theme } = style;
   const { info } = node;
-  const mark = paintFor(style, node.state)(symbols.flow[node.state]);
-  const lines = wrapWithPrefix(theme.text(nodeName(node)), room, `  ${mark} `, "    ");
-  const indent = "    ";
-  const facts: string[] = [stateWord(node)];
+  const { actor } = info;
+  const inner = Math.max(4, width - 4);
+  const tone = paintFor(style, node.state);
+  const frame =
+    node.state === "running" ? theme.accent : node.state === "failed" ? theme.error : theme.dim;
+  const rows: string[] = [];
+
+  const evidence = info.evidence === undefined ? "" : ` [${evidenceWord(info.evidence)}]`;
+  const title = truncateStyled(
+    `${tone(symbols.flow[node.state])} ${(hasBegun(node) ? theme.text : theme.dim).bold(cardTitle(node))}`,
+    Math.max(2, inner - visibleWidth(evidence)),
+  );
+  rows.push(title + (evidence === "" ? "" : theme.dim(evidence)));
+
   const model = formatSubagentModelLabel(info.model ?? null, null);
-  if (model !== null && model !== "") facts.push(flat(model));
+  if (model !== null && model !== "") rows.push(theme.dim(flat(model)));
+
+  const body = cardBody(node);
+  if (body !== "") {
+    const paint = actor === undefined ? theme.dim : theme.text;
+    const wrapped = wrapStyled(paint(body), inner);
+    // An agent's task gets two lines, as on the desktop; a step's note one.
+    const room = actor === undefined ? 1 : 2;
+    const shown = wrapped.slice(0, room);
+    const last = shown[room - 1];
+    if (wrapped.length > room && last !== undefined)
+      shown[room - 1] = truncateStyled(`${last}…`, inner);
+    rows.push(...shown);
+  }
+
+  const doing =
+    node.state === "running" && actor?.doing !== undefined ? DOING_WORDS[actor.doing] : null;
+  const facts: string[] = [doing ?? stateWord(node)];
   const elapsed = nodeElapsedMs(info, now);
   if (elapsed !== undefined) facts.push(formatElapsed(elapsed));
   if (info.tokens !== undefined)
     facts.push(t("providers.wf.tokens", { count: formatTokenCount(info.tokens) }));
   if (info.costUsd !== undefined) facts.push(formatCost(info.costUsd));
-  lines.push(...wrapWithPrefix(theme.dim(facts.join(" · ")), room, indent, indent));
-  const { actor } = info;
-  const work: string[] = [];
-  if (actor?.delegated !== undefined)
-    work.push(t("providers.wf.delegatedToCrew", { count: actor.delegated }));
-  for (const tool of actor?.tools ?? []) work.push(toolWord(tool));
-  if (work.length > 0)
-    lines.push(...wrapWithPrefix(theme.dim(work.join(" · ")), room, indent, indent));
-  const now_ =
-    node.state === "running"
-      ? actor?.doing !== undefined
-        ? DOING_WORDS[actor.doing]
-        : info.progress === undefined
-          ? ""
-          : flat(info.progress)
-      : "";
-  if (now_ !== "")
-    lines.push(
-      ...wrapWithPrefix(theme.dim(t("providers.wf.now", { text: now_ })), room, indent, indent),
-    );
+  for (const line of packFacts(facts, inner)) rows.push(tone(line));
+
+  if (actor === undefined && node.state === "running" && info.progress !== undefined)
+    rows.push(theme.dim(flat(info.progress)));
   if (upstream.length > 0) {
     const names = upstream.slice(0, 3).map(nodeName);
     const more =
       upstream.length > 3 ? t("providers.wf.andMore", { count: upstream.length - 3 }) : "";
-    lines.push(
-      ...wrapWithPrefix(
+    rows.push(
+      ...wrapStyled(
         theme.dim(t("providers.wf.upstream", { names: names.join(", "), more })),
-        room,
-        indent,
-        indent,
+        inner,
       ),
     );
   }
-  if (info.error !== undefined) {
-    lines.push(
-      ...wrapWithPrefix(
-        theme.error(t("providers.wf.error", { text: flat(info.error) })),
-        room,
-        indent,
-        indent,
-      ),
+  if (info.error !== undefined)
+    rows.push(
+      ...wrapStyled(theme.error(t("providers.wf.error", { text: flat(info.error) })), inner),
     );
-  }
-  return lines;
+
+  const { box } = symbols;
+  return [
+    frame(`${box.topLeft}${box.horizontal.repeat(width - 2)}${box.topRight}`),
+    ...rows.map(
+      (row) =>
+        `${frame(box.vertical)} ${padEndVisible(truncateStyled(row, inner), inner)} ${frame(box.vertical)}`,
+    ),
+    frame(`${box.bottomLeft}${box.horizontal.repeat(width - 2)}${box.bottomRight}`),
+  ];
 };
 
-/** The waves of a flow as text: a heading, then each step with its state, time, work, and what it waits for. */
+/** How the link into a wave looks: the desktop's edge tones, a live one over a failed one over a finished one. */
+const linkTone = (
+  from: ReadonlyArray<WorkflowNode>,
+  to: ReadonlyArray<WorkflowNode>,
+  edges: WorkflowGraph["edges"],
+): "active" | "failed" | "done" | "idle" => {
+  const source = new Map(from.map((node) => [node.id, node]));
+  const target = new Map(to.map((node) => [node.id, node]));
+  const tones = new Set(
+    edges.flatMap((edge) => {
+      const a = source.get(edge.from);
+      const b = target.get(edge.to);
+      if (a === undefined || b === undefined) return [];
+      if (b.state === "running") return ["active" as const];
+      if (a.state === "failed") return ["failed" as const];
+      return [a.state === "completed" ? ("done" as const) : ("idle" as const)];
+    }),
+  );
+  for (const tone of ["active", "failed", "done"] as const) if (tones.has(tone)) return tone;
+  return "idle";
+};
+
+/** The two rows between waves: a line and an arrowhead, solid when taken or live, dashed otherwise. */
+const connector = (tone: ReturnType<typeof linkTone>, input: PanelInput): string[] => {
+  const { theme } = input.style;
+  const { link } = input.symbols;
+  const paint =
+    tone === "active"
+      ? theme.accent
+      : tone === "done"
+        ? theme.success
+        : tone === "failed"
+          ? theme.error
+          : theme.dim;
+  const line = tone === "idle" || tone === "failed" ? link.dashed : link.line;
+  return [`  ${paint(line)}`, `  ${paint(link.arrow)}`];
+};
+
+/**
+ * The flow as the desktop board draws it, waves from top to bottom: a heading with the counts,
+ * a card for each step, and a connector between one wave and the next in the colour of its edges.
+ */
 const waveBlock = (flow: WorkflowGraph, input: PanelInput, room: number): Block => {
   const { theme } = input.style;
   const waves = workflowWaves(flow.nodes, flow.edges);
@@ -424,13 +530,33 @@ const waveBlock = (flow: WorkflowGraph, input: PanelInput, room: number): Block 
   let focus = 0;
   order.forEach((wave, position) => {
     const nodes = columns.get(wave) ?? [];
-    const settled = nodes.filter((node) => isSettledState(node.state)).length;
+    const previous = position === 0 ? undefined : columns.get(order[position - 1] ?? -1);
+    if (previous !== undefined)
+      lines.push(...connector(linkTone(previous, nodes, flow.edges), input));
     if (wave === current) focus = lines.length;
-    const heading = `${position + 1}. ${waveTitle(flow.waveTitles[wave], wave)}`;
-    const paint = wave === current ? theme.accent.bold : theme.text.bold;
-    lines.push(`${paint(heading)} ${theme.dim(`${settled}/${nodes.length}`)}`);
+    // A single column needs no heading, as on the desktop board.
+    if (order.length > 1) {
+      const settled = nodes.filter((node) => isSettledState(node.state)).length;
+      const failed = nodes.filter((node) => node.state === "failed").length;
+      const running = nodes.filter((node) => node.state === "running").length;
+      const heading = `${position + 1}. ${waveTitle(flow.waveTitles[wave], wave)}`;
+      const paint = wave === current ? theme.accent.bold : theme.text.bold;
+      const extra = [
+        nodes.length > 1 ? theme.dim(t("providers.wf.parallel", { count: nodes.length })) : null,
+        failed > 0 ? theme.error(t("providers.wf.counts.failed", { count: failed })) : null,
+        running > 0 ? theme.accent(t("providers.wf.counts.running", { count: running })) : null,
+      ].filter((part): part is string => part !== null);
+      lines.push(
+        truncateStyled(
+          [`${paint(heading)} ${theme.dim(`${settled}/${nodes.length}`)}`, ...extra].join(
+            theme.dim(" · "),
+          ),
+          room,
+        ),
+      );
+    }
     for (const node of nodes)
-      lines.push(...nodeBlock(node, upstream.get(node.id) ?? [], input, room));
+      lines.push(...cardBlock(node, upstream.get(node.id) ?? [], input, room));
   });
   return { lines, focus };
 };
@@ -452,31 +578,58 @@ export const windowOf = (block: Block, rows: number, dim: (text: string) => stri
 };
 
 /**
- * What every view of the side panel starts with: the title with how to close it, a rule, and the
- * way to say a sentence or the link's state inside the margin.
+ * What every view of the side panel starts with: the desktop's tab bar (Workflow and Agents, the
+ * one shown lit and underlined) with how to switch and close, and the ways to say a sentence, an
+ * empty state or the link's state inside the margin.
  */
 export const panelHead = (
   view: PanelView,
-  input: Pick<PanelInput, "columns" | "style" | "symbols">,
+  input: Pick<PanelInput, "columns" | "style" | "symbols" | "switchKey">,
 ) => {
   const { style, symbols, columns } = input;
   const { theme } = style;
   const room = Math.max(8, columns - 2);
   const margin = (text: string) => ` ${text}`;
+  const tabs: PanelView[] = ["workflow", "agents"];
+  const gap = ` ${symbols.separator} `;
+  const widths = tabs.map((tab) => visibleWidth(PANEL_TITLE[tab]));
+  const bar = tabs
+    .map((tab) => (tab === view ? theme.accent.bold : theme.dim)(PANEL_TITLE[tab]))
+    .join(theme.dim(gap));
+  // The longest hint that fits under the tabs.
+  const close = t("providers.wf.closeWith", { command: PANEL_COMMAND[view] });
+  const switchHint =
+    input.switchKey === undefined ? null : t("providers.wf.switchWith", { key: input.switchKey });
+  const hints = [switchHint === null ? null : `${switchHint} · ${close}`, close, switchHint].filter(
+    (candidate): candidate is string => candidate !== null,
+  );
+  const hint = hints.find((candidate) => visibleWidth(candidate) <= room) ?? close;
+  const { full } = symbols.progress;
+  const before = view === "workflow" ? 0 : (widths[0] ?? 0) + visibleWidth(gap);
+  const lit = widths[tabs.indexOf(view)] ?? 0;
   const out: string[] = [
+    margin(truncateStyled(bar, room)),
     margin(
-      truncateStyled(
-        `${theme.accent.bold(PANEL_TITLE[view])}${theme.dim(`  ${t("providers.wf.closeWith", { command: PANEL_COMMAND[view] })}`)}`,
-        room,
-      ),
+      theme.dim(symbols.rule.repeat(before)) +
+        theme.accent(full.repeat(lit)) +
+        theme.dim(symbols.rule.repeat(Math.max(0, room - before - lit))),
     ),
-    margin(theme.dim(symbols.rule.repeat(room))),
+    margin(truncateStyled(theme.dim(hint), room)),
   ];
+  const say = (text: string) => out.push(...wrapStyled(theme.dim(text), room).map(margin));
   return {
     room,
     margin,
     out,
-    say: (text: string) => out.push(...wrapStyled(theme.dim(text), room).map(margin)),
+    say,
+    /** The desktop's empty state: a mark, a title and a few words, centred in the panel. */
+    empty: (title: string, text: string) => {
+      const centred = (line: string) =>
+        margin(" ".repeat(Math.max(0, Math.floor((room - visibleWidth(line)) / 2))) + line);
+      out.push("", centred(theme.dim(symbols.brand)), centred(theme.text.bold(title)));
+      for (const line of wrapStyled(theme.dim(text), Math.min(room - 4, 34)))
+        out.push(centred(line));
+    },
     /** While the server cannot be reached what is drawn is the last that arrived; the panel says so. */
     offline: () => out.push(margin(truncateStyled(theme.warning(t("providers.wf.offline")), room))),
   };
@@ -486,7 +639,7 @@ export const panelHead = (
 export const renderFlowPanel = (input: PanelInput): string[] => {
   const { style, symbols, rows } = input;
   const { theme } = style;
-  const { room, margin, out, say, offline } = panelHead("workflow", input);
+  const { room, margin, out, say, empty, offline } = panelHead("workflow", input);
   const { flows } = input;
   if (flows === null) {
     say(t("providers.wf.openThread"));
@@ -494,7 +647,7 @@ export const renderFlowPanel = (input: PanelInput): string[] => {
   }
   if (!input.online) offline();
   if (flows.length === 0) {
-    say(t("providers.wf.empty"));
+    empty(t("providers.wf.emptyTitle"), t("providers.wf.empty"));
     return out.slice(0, rows);
   }
 
@@ -513,7 +666,7 @@ export const renderFlowPanel = (input: PanelInput): string[] => {
       const mark = paintFor(style, chip.status)(symbols.flow[chip.status]);
       const text = `${picked ? theme.accent(symbols.prompt) : " "} ${flows.indexOf(chip) + 1} ${mark} ${(picked ? theme.text.bold : theme.text)(flowName(chip))}${
         counts.total === 0 ? "" : theme.dim(` ${counts.completed}/${counts.total}`)
-      }`;
+      }${counts.failed === 0 ? "" : theme.error(` ${t("providers.wf.counts.failed", { count: counts.failed })}`)}`;
       out.push(margin(truncateStyled(text, room)));
     }
     if (earlier.length > 0)
@@ -652,6 +805,7 @@ export class WorkflowPanel {
       memo.input.columns === full.columns &&
       memo.input.rows === full.rows &&
       memo.input.symbols === full.symbols &&
+      memo.input.switchKey === full.switchKey &&
       memo.themeName === full.style.theme.name &&
       memo.themeLevel === full.style.theme.level
     ) {

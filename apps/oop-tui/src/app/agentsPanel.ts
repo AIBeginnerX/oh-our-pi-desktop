@@ -25,13 +25,14 @@ import type { Style } from "../render/style.ts";
 import type { Symbols } from "../render/symbols.ts";
 import { visibleWidth } from "../text/width.ts";
 import { t } from "../i18n/index.ts";
-import { truncateStyled } from "../text/wrap.ts";
+import { truncateStyled, wrapStyled } from "../text/wrap.ts";
 import type { CrewBoard, CrewTask, CrewTaskPhase, WaitingCrewThread } from "./crewBoard.ts";
 import {
   activeTurnOf,
   agentModelOf,
   DOING_WORDS,
   flat,
+  packFacts,
   paintFor,
   panelHead,
   STATE_WORDS,
@@ -96,6 +97,7 @@ interface LaneItem {
 interface PhaseData {
   readonly title: string;
   readonly running: boolean;
+  readonly done: boolean;
   /** What the phase says about itself, e.g. `1 active · 2 done`. */
   readonly summary: string;
   readonly members: ReadonlyArray<AgentRow>;
@@ -414,6 +416,7 @@ const groupOf = (group: AgentPanelWorkflowGroup): GroupData => {
       ? group.phases.map((phase) => ({
           title: flat(phase.title),
           running: phase.state === "running",
+          done: phase.state === "done",
           summary: phaseSummary(phase),
           members: phase.members.map(row),
         }))
@@ -565,26 +568,12 @@ export interface AgentsPanelInput {
   readonly rows: number;
   readonly style: Style;
   readonly symbols: Symbols;
+  /** The key that flips between the Workflow and Agents tabs, named in the tab bar; none left out. */
+  readonly switchKey?: string;
 }
 
 const elapsedOf = (span: Span | null, now: number): string | null =>
   span === null ? null : formatElapsed(Math.max(0, (span.end ?? now) - span.start));
-
-/** The facts in as few lines of `width` as they fit, none split across two. */
-const packFacts = (facts: ReadonlyArray<string>, width: number): string[] => {
-  const lines: string[] = [];
-  let line = "";
-  for (const fact of facts) {
-    const joined = line === "" ? fact : `${line} · ${fact}`;
-    if (line !== "" && visibleWidth(joined) > width) {
-      lines.push(line);
-      line = fact;
-    } else {
-      line = joined;
-    }
-  }
-  return line === "" ? lines : [...lines, line];
-};
 
 /** One agent: who and how it stands, what it was asked, what it costs and takes, what it does now. */
 const rowBlock = (
@@ -623,15 +612,106 @@ const rowBlock = (
   return lines;
 };
 
-const laneBlock = (item: LaneItem, number: number, input: AgentsPanelInput, room: number) => {
+/**
+ * One agent of the roster as the desktop's card: a bar down the left in the colour of its state,
+ * the name and model with the state word at the right, what it was asked, and its time and usage.
+ */
+const rosterCard = (row: AgentRow, input: AgentsPanelInput, room: number): string[] => {
+  const { style, symbols, now } = input;
+  const { theme } = style;
+  const tone = paintFor(style, row.mark);
+  const state =
+    row.waiting === null
+      ? theme.dim(row.state)
+      : theme.warning(
+          row.waiting === "approval"
+            ? t("providers.crewScreen.waitApproval")
+            : t("providers.crewScreen.waitInput"),
+        );
+  const inner = Math.max(4, room - 2);
+  const head = `${tone(symbols.flow[row.mark])} ${theme.text.bold(row.name)}${
+    row.model === null ? "" : `  ${theme.dim(row.model)}`
+  }`;
+  const left = truncateStyled(head, Math.max(2, inner - visibleWidth(state) - 1));
+  const lines = [
+    `${left}${" ".repeat(Math.max(1, inner - visibleWidth(left) - visibleWidth(state)))}${state}`,
+  ];
+  if (row.task !== null) lines.push(truncateStyled(theme.text(row.task), inner));
+  const metrics = [elapsedOf(row.span, now), ...row.facts].filter(
+    (part): part is string => part !== null,
+  );
+  for (const line of packFacts(metrics, inner)) lines.push(truncateStyled(theme.dim(line), inner));
+  if (row.note !== null) {
+    const paint = row.note.tone === "error" ? theme.error : theme.dim;
+    lines.push(truncateStyled(paint(row.note.text), inner));
+  }
+  const { rail } = symbols;
+  return lines.map((line, index) => {
+    const bar =
+      lines.length === 1
+        ? rail.bar
+        : index === 0
+          ? rail.start
+          : index === lines.length - 1
+            ? rail.end
+            : rail.bar;
+    return `${tone(bar)} ${line}`;
+  });
+};
+
+/**
+ * The turn's work as a chain of small cards, each joined to the one before by a connector that is
+ * lit while the step it leads into is live, as the desktop's flow lane draws it.
+ */
+const laneBlock = (items: ReadonlyArray<LaneItem>, input: AgentsPanelInput, room: number) => {
   const { style, symbols } = input;
   const { theme } = style;
-  const mark = paintFor(style, item.mark)(symbols.flow[item.mark]);
-  const detail = item.detail === null ? "" : theme.dim(` · ${item.detail}`);
-  return truncateStyled(
-    `  ${theme.dim(String(number).padStart(2))} ${mark} ${(item.live ? theme.text.bold : theme.text)(item.title)}${detail}${theme.dim(` · ${item.state}`)}`,
-    room,
-  );
+  const { rail } = symbols;
+  const inner = Math.max(4, room - 2);
+  return items.flatMap((item, index) => {
+    const tone = paintFor(style, item.mark);
+    const detail = [item.detail, item.state]
+      .filter((part) => part !== null && part !== "")
+      .join(" · ");
+    const first = truncateStyled(
+      `${tone(symbols.flow[item.mark])} ${(item.live ? theme.text.bold : theme.text)(item.title)}`,
+      inner,
+    );
+    const link = index === 0 ? [] : [(item.live ? theme.accent : theme.dim)(symbols.link.line)];
+    return [
+      ...link,
+      `${tone(rail.start)} ${first}`,
+      `${tone(rail.end)} ${truncateStyled(theme.dim(detail), inner)}`,
+    ];
+  });
+};
+
+/** The run's shape at a glance, as the desktop's phase rail: a chip for each phase, joined by chevrons. */
+const phaseRail = (group: GroupData, input: AgentsPanelInput, room: number): string[] => {
+  const { style, symbols } = input;
+  const { theme } = style;
+  const chips = group.phases.map((phase) => {
+    const paint = phase.running ? theme.accent : phase.done ? theme.success : theme.dim;
+    const marks =
+      phase.members.length === 0
+        ? theme.dim("-")
+        : phase.members
+            .map((member) => paintFor(style, member.mark)(symbols.flow[member.mark]))
+            .join("");
+    return `${paint(`${phase.done ? `${symbols.check} ` : ""}${phase.title}`)} ${marks}`;
+  });
+  const lines: string[] = [];
+  let line = "";
+  for (const chip of chips) {
+    const joined = line === "" ? chip : `${line} ${theme.dim(symbols.link.next)} ${chip}`;
+    if (line !== "" && visibleWidth(joined) > room) {
+      lines.push(line);
+      line = chip;
+    } else {
+      line = joined;
+    }
+  }
+  return line === "" ? lines : [...lines, line].map((text) => truncateStyled(text, room));
 };
 
 const groupBlock = (group: GroupData, input: AgentsPanelInput, room: number): string[] => {
@@ -660,6 +740,7 @@ const groupBlock = (group: GroupData, input: AgentsPanelInput, room: number): st
       `  ${mark} ${theme.text.bold(group.name)}  ${theme.dim(t("providers.agents.settled", { settled: group.settled, total: group.total }))}${failed}`,
       room,
     ),
+    ...phaseRail(group, input, room - 4).map((line) => `    ${line}`),
   ];
   for (const phase of group.phases) {
     const marks = phase.running
@@ -681,9 +762,9 @@ const groupBlock = (group: GroupData, input: AgentsPanelInput, room: number): st
 
 /** The Agents panel as lines for a column `columns` wide and `rows` tall. */
 export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
-  const { style, rows, view } = input;
+  const { style, symbols, rows, view } = input;
   const { theme } = style;
-  const { room, margin, out, say, offline } = panelHead("agents", input);
+  const { room, margin, out, say, empty, offline } = panelHead("agents", input);
   if (view === null) {
     say(t("providers.agents.openThread"));
     return out.slice(0, rows);
@@ -694,31 +775,49 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
     if (view.loading) {
       say(input.online ? t("providers.agents.loading") : t("providers.agents.loadingOffline"));
     } else if (input.online) {
-      say(t("providers.agents.empty"));
+      empty(t("providers.agents.emptyTitle"), t("providers.agents.empty"));
     }
     return out.slice(0, rows);
   }
 
   const { counts } = view;
+  const working =
+    counts.working > 0
+      ? theme.accent(
+          `${symbols.bullet} ${t("providers.agents.sumWorking", { count: counts.working })}`,
+        )
+      : null;
   const summary = [
-    counts.working > 0 ? t("providers.agents.sumWorking", { count: counts.working }) : null,
-    counts.idle > 0 ? t("providers.agents.sumIdle", { count: counts.idle }) : null,
-    counts.done > 0 ? t("providers.wf.counts.completed", { count: counts.done }) : null,
-    counts.failed > 0 ? t("providers.wf.counts.failed", { count: counts.failed }) : null,
-    counts.stopped > 0 ? t("providers.wf.counts.stopped", { count: counts.stopped }) : null,
+    working,
+    counts.idle > 0 ? theme.dim(t("providers.agents.sumIdle", { count: counts.idle })) : null,
+    counts.done > 0 ? theme.dim(t("providers.wf.counts.completed", { count: counts.done })) : null,
+    counts.failed > 0
+      ? theme.error(t("providers.wf.counts.failed", { count: counts.failed }))
+      : null,
+    counts.stopped > 0
+      ? theme.dim(t("providers.wf.counts.stopped", { count: counts.stopped }))
+      : null,
     counts.tokens > 0
-      ? t("providers.agents.sumTokens", { count: formatTokenCount(counts.tokens) })
+      ? theme.dim(t("providers.agents.sumTokens", { count: formatTokenCount(counts.tokens) }))
       : null,
   ].filter((part): part is string => part !== null);
-  if (summary.length > 0) out.push(margin(truncateStyled(theme.dim(summary.join(" · ")), room)));
-  if (view.board !== null) out.push(margin(truncateStyled(theme.dim(`Crew ${view.board}`), room)));
+  // The desktop pins its totals under the list; here they are the last rows of the panel.
+  const footer: string[] = [];
+  if (summary.length > 0) {
+    footer.push(...wrapStyled(summary.join(theme.dim(" · ")), room).slice(0, 2));
+  }
+  if (view.board !== null) footer.unshift(truncateStyled(theme.dim(`Crew ${view.board}`), room));
+  const pinned =
+    footer.length === 0 || rows < 12
+      ? []
+      : [theme.dim(symbols.rule.repeat(room)), ...footer].map(margin);
   out.push("");
 
   const body: string[] = [];
   // Scrolling keeps in view the first row that waits for the user, else the first that works.
   let focus = -1;
   let focusWaiting = false;
-  const heading = (text: string) => body.push(theme.text.bold(text));
+  const heading = (text: string) => body.push(theme.dim(text));
   heading(t("providers.agents.headingAgents"));
   for (const row of view.rows) {
     if (row.waiting !== null && !focusWaiting) {
@@ -727,13 +826,13 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
     } else if (focus < 0 && row.live) {
       focus = body.length;
     }
-    body.push(...rowBlock(row, input, room - 1, 0));
+    body.push(...rosterCard(row, input, room - 1));
   }
   if (view.folded > 0) body.push(theme.dim(t("providers.agents.folded", { count: view.folded })));
   body.push("");
   heading(t("providers.agents.headingFlow"));
   if (view.lane.length === 0) body.push(theme.dim(t("providers.agents.noLane")));
-  view.lane.forEach((item, index) => body.push(laneBlock(item, index + 1, input, room - 1)));
+  else body.push(...laneBlock(view.lane, input, room - 1));
   if (view.groups.length > 0) {
     body.push("");
     heading(t("providers.wf.role.workflow"));
@@ -741,12 +840,14 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
     if (view.groupsFolded > 0)
       body.push(theme.dim(t("providers.agents.folded", { count: view.groupsFolded })));
   }
+  const available = Math.max(0, rows - out.length - pinned.length);
   const shown = windowOf(
     { lines: body.map(margin), focus: Math.max(0, focus) },
-    Math.max(0, rows - out.length),
+    available,
     theme.dim,
   );
-  return [...out, ...shown].slice(0, rows);
+  while (pinned.length > 0 && shown.length < available) shown.push("");
+  return [...out, ...shown, ...pinned].slice(0, rows);
 };
 
 // ---- the panel's state in the controller ------------------------------------------------------
@@ -831,6 +932,7 @@ export class AgentsPanel {
       memo.input.columns === input.columns &&
       memo.input.rows === input.rows &&
       memo.input.symbols === input.symbols &&
+      memo.input.switchKey === input.switchKey &&
       memo.themeName === input.style.theme.name &&
       memo.themeLevel === input.style.theme.level
     ) {

@@ -29,7 +29,34 @@ export type KeyEvent =
     }
   | { readonly type: "ctrl"; readonly letter: string }
   /** The terminal window gained or lost focus (needs focus reporting, `ESC [ ? 1004 h`). */
-  | { readonly type: "focus"; readonly focused: boolean };
+  | { readonly type: "focus"; readonly focused: boolean }
+  /** A mouse report (SGR 1006, `ESC [ ? 1000 h` + `ESC [ ? 1006 h`); `x` and `y` count from 1. */
+  | {
+      readonly type: "mouse";
+      readonly action: MouseAction;
+      readonly x: number;
+      readonly y: number;
+    };
+
+export type MouseAction = "wheelUp" | "wheelDown" | "press" | "release" | "drag";
+
+/**
+ * `ESC [ < b ; x ; y M|m`: the button code carries the wheel (64, 65), motion (32) and the
+ * modifiers (4, 8, 16), which are not told apart here. Other wheels (66, 67: sideways) are dropped.
+ */
+const parseSgrMouse = (params: string, final: string): KeyEvent | null => {
+  const match = /^<(\d+);(\d+);(\d+)$/u.exec(params);
+  if (match === null) return null;
+  const code = Number(match[1]);
+  const x = Number(match[2]);
+  const y = Number(match[3]);
+  const base = code & ~(4 | 8 | 16);
+  if (base === 64) return { type: "mouse", action: "wheelUp", x, y };
+  if (base === 65) return { type: "mouse", action: "wheelDown", x, y };
+  if (base >= 66 && base < 128) return null;
+  if ((base & 32) !== 0) return { type: "mouse", action: "drag", x, y };
+  return { type: "mouse", action: final === "M" ? "press" : "release", x, y };
+};
 
 const key = (
   name: KeyName,
@@ -217,6 +244,10 @@ export class KeyParser {
       const second = Number.parseInt(params[1] ?? "", 10);
       const mods = Number.isNaN(second) ? {} : decodeModifiers(second);
 
+      if ((final === "M" || final === "m") && rest[2] === "<") {
+        const mouse = parseSgrMouse(rest.slice(2, end), final);
+        return { events: mouse === null ? [] : [mouse], length };
+      }
       const named = CSI_FINAL[final];
       if (named !== undefined) {
         return { events: [key(named, mods)], length };

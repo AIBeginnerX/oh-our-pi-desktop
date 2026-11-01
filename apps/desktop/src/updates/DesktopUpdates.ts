@@ -1069,9 +1069,15 @@ export const make = Effect.gen(function* () {
           );
           if (Option.isSome(stagedForInstall)) {
             const appBundle = LocalPkgUpdates.appBundleOf(environment.appPath);
+            // A local-folder package normally goes through the macOS Installer, which asks for an
+            // administrator password. When this user already owns the app, swap it in place instead.
+            const replaceInPlace =
+              environment.platform === "darwin" &&
+              appBundle !== undefined &&
+              (yield* LocalPkgUpdates.isAppReplaceableInPlace(appBundle));
             yield* environment.platform === "win32"
               ? LocalPkgUpdates.launchSetup(stagedForInstall.value.path)
-              : localMode._tag === "ready" && localMode.github !== undefined
+              : (localMode._tag === "ready" && localMode.github !== undefined) || replaceInPlace
                 ? appBundle === undefined
                   ? Effect.fail(
                       new LocalPkgUpdates.LocalPkgUpdateError({ reason: "installer-failed" }),

@@ -15,6 +15,7 @@ import { CREW_AUDIT_SKIPPED_ACTIVITY, THREAD_GOAL_ACTIVITY } from "@t3tools/shar
 import { auditSkippedText, crewStatusWord, followUpText, roleName } from "../render/crewBoard.ts";
 import { MarkdownStream } from "../render/markdown.ts";
 import { RAIL_COLUMNS, railDone, railGap, railRow, type Rail } from "../render/rail.ts";
+import { userBubble } from "../render/userBubble.ts";
 import type { Style } from "../render/style.ts";
 import { type Symbols, UNICODE_SYMBOLS } from "../render/symbols.ts";
 import { asRecord, firstLine, toolLines } from "../render/toolLine.ts";
@@ -325,13 +326,8 @@ export class TranscriptPrinter {
         ),
       ];
     }
-    const rows: string[] = [];
-    for (const line of sanitizeForTerminal(text).split("\n")) {
-      for (const row of line === "" ? [""] : wrapStyled(style.bold(line), this.textWidth)) {
-        rows.push(rows.length === 0 ? railDone(this.rail, row) : railRow(this.rail, row));
-      }
-    }
-    return rows;
+    // Against the right edge, in the theme's user tint: the agent's text stays on the rail.
+    return userBubble(this.rail, sanitizeForTerminal(text), this.options.width);
   }
 
   private messageLines(

@@ -1,0 +1,19 @@
+{
+  "sequence": 28,
+  "eventId": "evt-28",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.pull-request-unlinked",
+  "payload": {
+    "threadId": "thread-1",
+    "host": "github.com",
+    "repository": "t3tools/oop",
+    "number": 7,
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

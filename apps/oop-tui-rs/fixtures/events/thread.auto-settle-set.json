@@ -1,0 +1,17 @@
+{
+  "sequence": 25,
+  "eventId": "evt-25",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.auto-settle-set",
+  "payload": {
+    "threadId": "thread-1",
+    "autoSettleDisabledAt": "2026-01-01T00:00:05.000Z",
+    "updatedAt": "2026-01-01T00:00:05.000Z"
+  }
+}

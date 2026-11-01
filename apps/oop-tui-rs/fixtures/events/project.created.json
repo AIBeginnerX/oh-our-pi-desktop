@@ -1,0 +1,21 @@
+{
+  "sequence": 11,
+  "eventId": "evt-11",
+  "aggregateKind": "project",
+  "aggregateId": "project-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "project.created",
+  "payload": {
+    "projectId": "project-1",
+    "title": "demo",
+    "workspaceRoot": "/work/demo",
+    "defaultModelSelection": null,
+    "scripts": [],
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z"
+  }
+}

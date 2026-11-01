@@ -27,6 +27,16 @@ const ALT_OFF = "\u001b[?1049l";
 const ALT_SCROLL_SAVE = "\u001b[?1007s";
 const ALT_SCROLL_OFF = "\u001b[?1007l";
 const ALT_SCROLL_RESTORE = "\u001b[?1007h\u001b[?1007r";
+/**
+ * Mouse reporting in SGR form (1006) for the wheel. 1000 is the lightest level that reports the
+ * wheel at all (press and release, no motion), so no drag or hover traffic reaches the program. While
+ * it is on the terminal no longer selects text by itself: most terminals select again with Shift (or
+ * Option on macOS) held. It is turned off together with the alternate screen on every way out.
+ */
+const MOUSE_ON = "\u001b[?1000h\u001b[?1006h";
+const MOUSE_OFF = "\u001b[?1006l\u001b[?1000l";
+/** Rows one wheel notch moves the conversation. */
+export const WHEEL_ROWS = 3;
 const HIDE_CURSOR = "\u001b[?25l";
 const SHOW_CURSOR = "\u001b[?25h";
 const SYNC_BEGIN = "\u001b[?2026h";
@@ -164,6 +174,13 @@ export class SplitRegion {
   private scroll = 0;
   /** Rows the viewport had at the last paint, for the size of a page. */
   private viewRows = 0;
+  /** Rows were committed while the reader was scrolled back; shown on the last row of the view. */
+  private unseen = false;
+  /** The reader scrolled back since the last paint; reaching the oldest line then asks for older turns. */
+  private wantOlder = false;
+  /** Whether the wheel is reported while the layout is on (`/mouse`, `OOP_MOUSE=off`). */
+  private mouse: boolean;
+  private olderListener: (() => void) | null = null;
   private wrapWidth = 0;
   private dirty = false;
   private held = false;
@@ -178,8 +195,9 @@ export class SplitRegion {
   constructor(
     out: TerminalOutput,
     schedule: Scheduler,
-    options: { readonly divider: () => string },
+    options: { readonly divider: () => string; readonly mouse?: boolean },
   ) {
+    this.mouse = options.mouse ?? true;
     this.out = out;
     this.schedule = schedule;
     this.divider = options.divider;
@@ -263,7 +281,9 @@ export class SplitRegion {
     this.mode = "on";
     this.stale = true;
     this.painted = null;
-    this.out.write(ALT_ON + ALT_SCROLL_SAVE + ALT_SCROLL_OFF + HIDE_CURSOR);
+    this.out.write(
+      ALT_ON + ALT_SCROLL_SAVE + ALT_SCROLL_OFF + (this.mouse ? MOUSE_ON : "") + HIDE_CURSOR,
+    );
     this.requestPaint();
   }
 
@@ -275,7 +295,7 @@ export class SplitRegion {
    */
   leave(): string[] {
     this.cancelScheduled();
-    if (this.mode === "on") this.out.write(ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
+    if (this.mode === "on") this.out.write(MOUSE_OFF + ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
     const lines = this.history.map((entry) => entry.raw);
     if (this.header?.scrollback !== undefined) lines.unshift(...this.header.scrollback);
     if (this.omitted > 0) lines.unshift(t("render.split.omitted", { count: this.omitted }));
@@ -283,6 +303,8 @@ export class SplitRegion {
     this.history = [];
     this.omitted = 0;
     this.scroll = 0;
+    this.unseen = false;
+    this.wantOlder = false;
     this.viewFrom = 0;
     this.wrapWidth = 0;
     this.dirty = false;
@@ -301,7 +323,7 @@ export class SplitRegion {
   suspend(): void {
     this.cancelScheduled();
     if (this.mode !== "on") return;
-    this.out.write(ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
+    this.out.write(MOUSE_OFF + ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
     this.mode = "suspended";
     this.painted = null;
   }
@@ -322,6 +344,7 @@ export class SplitRegion {
         if (this.scroll > 0) {
           entry.rows = wrapStyled(entry.raw, this.wrapWidth);
           this.scroll += entry.rows.length;
+          this.unseen = true;
         }
       }
     }
@@ -331,6 +354,81 @@ export class SplitRegion {
       this.omitted += excess;
       this.viewFrom = Math.max(0, this.viewFrom - excess);
     }
+    this.requestPaint();
+  }
+
+  /**
+   * Puts older finished lines in front of the conversation of the thread on screen (after anything
+   * Ctrl-L or a thread switch scrolled out of view), so scrolling back reaches them. The place of a
+   * reader who scrolled back does not move, since the offset counts from the newest line.
+   */
+  prepend(lines: ReadonlyArray<string>): void {
+    const entries: HistoryEntry[] = [];
+    for (const line of lines) {
+      for (const row of line.split(LINE_BREAK)) {
+        entries.push({ raw: stripControlSequences(row), rows: null });
+      }
+    }
+    if (entries.length === 0) return;
+    this.history = [
+      ...this.history.slice(0, this.viewFrom),
+      ...entries,
+      ...this.history.slice(this.viewFrom),
+    ];
+    const excess = this.history.length - KEEP_LIMIT;
+    if (excess > 0) {
+      this.history.splice(0, excess);
+      this.omitted += excess;
+      this.viewFrom = Math.max(0, this.viewFrom - excess);
+    }
+    this.requestPaint();
+  }
+
+  /** Called (from the scheduler, never inside a paint) when the reader scrolls up to the oldest line shown. */
+  onOlder(listener: (() => void) | null): void {
+    this.olderListener = listener;
+  }
+
+  /** Turns wheel reporting on or off while the layout is on; the choice also holds for the next entry. */
+  setMouse(on: boolean): void {
+    if (on === this.mouse) return;
+    this.mouse = on;
+    if (this.mode === "on") this.out.write(on ? MOUSE_ON : MOUSE_OFF);
+  }
+
+  mouseOn(): boolean {
+    return this.mouse;
+  }
+
+  /** Whether the conversation is scrolled back from the newest line. */
+  isScrolled(): boolean {
+    return this.scroll > 0;
+  }
+
+  /** The wheel: `rows` back in time when positive, toward the newest line when negative. */
+  scrollBy(rows: number): void {
+    if (this.mode !== "on" || rows === 0) return;
+    if (rows > 0) {
+      this.scroll += rows;
+      this.wantOlder = true;
+    } else {
+      this.scroll = Math.max(0, this.scroll + rows);
+    }
+    this.requestPaint();
+  }
+
+  /** Home: as far back as the lines kept go. */
+  scrollTop(): void {
+    if (this.mode !== "on") return;
+    this.scroll = VIEW_LIMIT + KEEP_LIMIT;
+    this.wantOlder = true;
+    this.requestPaint();
+  }
+
+  /** End: the newest line, followed again. */
+  scrollBottom(): void {
+    if (this.mode !== "on" || this.scroll === 0) return;
+    this.scroll = 0;
     this.requestPaint();
   }
 
@@ -435,6 +533,7 @@ export class SplitRegion {
   scrollUp(): void {
     if (this.mode !== "on") return;
     this.scroll += this.page();
+    this.wantOlder = true;
     this.requestPaint();
     this.flush();
   }
@@ -501,21 +600,28 @@ export class SplitRegion {
     }
     const newestFirst: string[] = [];
     const oldest = Math.max(this.viewFrom, this.history.length - VIEW_LIMIT);
-    for (
-      let index = this.history.length - 1;
-      index >= oldest && newestFirst.length < count + this.scroll;
-      index -= 1
-    ) {
+    let index = this.history.length - 1;
+    for (; index >= oldest && newestFirst.length < count + this.scroll; index -= 1) {
       const entry = this.history[index] as HistoryEntry;
       entry.rows ??= wrapStyled(entry.raw, width);
       for (let row = entry.rows.length - 1; row >= 0; row -= 1) {
         newestFirst.push(entry.rows[row] as string);
       }
     }
-    this.scroll = Math.min(this.scroll, Math.max(0, newestFirst.length - count));
+    const reach = Math.max(0, newestFirst.length - count);
+    this.scroll = Math.min(this.scroll, reach);
+    if (this.scroll === 0) this.unseen = false;
+    // The oldest line of the whole conversation is in view (not merely the oldest the view reaches).
+    const atTop = index < oldest && oldest === this.viewFrom && this.scroll >= reach;
+    if (this.wantOlder && atTop && this.olderListener !== null) {
+      const listener = this.olderListener;
+      this.schedule(() => listener());
+    }
+    this.wantOlder = false;
     const rows = newestFirst.slice(this.scroll, this.scroll + count).toReversed();
     if (this.scroll > 0 && rows.length > 0) {
-      rows[rows.length - 1] = truncateStyled(t("render.split.scrolling"), width);
+      const key = this.unseen ? "render.split.newBelow" : "render.split.scrolling";
+      rows[rows.length - 1] = truncateStyled(t(key), width);
     }
     return [...Array.from({ length: count - rows.length }, () => ""), ...rows];
   }

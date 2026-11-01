@@ -896,16 +896,32 @@ staged="$dir/.OOP.app.update-$$"
 previous="$dir/.OOP.app.previous-$$"
 finish() {
   /usr/bin/hdiutil detach "$mnt" -quiet >/dev/null 2>&1 || true
+  rm -rf "$mnt/expanded"
   rmdir "$mnt" 2>/dev/null || true
   rm -rf "$staged"
 }
 trap finish EXIT
 fail() { echo "$1"; open "$app"; exit 1; }
-/usr/bin/hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$dmg" >/dev/null || fail "Could not open the update disk image."
-[ -d "$mnt/OOP.app" ] || fail "The update disk image has no OOP.app."
-new_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$mnt/OOP.app/Contents/Info.plist") || fail "The update has no bundle identifier."
+case "$dmg" in
+  *.pkg)
+    # The local-folder installer package: unpack its payload as this user, so no administrator
+    # password is needed once the app is user-owned. The package was verified before OOP quit.
+    /usr/sbin/pkgutil --expand-full "$dmg" "$mnt/expanded" >/dev/null || fail "Could not open the update package."
+    src="$mnt/expanded/component.pkg/Payload/Applications/OOP.app"
+    [ -d "$src" ] || fail "The update package has no OOP.app."
+    ;;
+  *)
+    /usr/bin/hdiutil attach -nobrowse -readonly -noautoopen -mountpoint "$mnt" "$dmg" >/dev/null || fail "Could not open the update disk image."
+    src="$mnt/OOP.app"
+    [ -d "$src" ] || fail "The update disk image has no OOP.app."
+    ;;
+esac
+new_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Contents/Info.plist") || fail "The update has no bundle identifier."
 [ "$new_id" = "$id" ] || fail "The update is a different app; it was not installed."
-/usr/bin/ditto "$mnt/OOP.app" "$staged" || fail "Could not copy the update next to OOP."
+/usr/bin/ditto "$src" "$staged" || fail "Could not copy the update next to OOP."
+case "$dmg" in
+  *.pkg) /usr/bin/codesign --verify --deep --strict "$staged" || fail "The update app signature is invalid; it was not installed." ;;
+esac
 mv "$app" "$previous" || fail "Could not move the current OOP aside."
 if ! mv "$staged" "$dir/OOP.app"; then
   mv "$previous" "$app"
@@ -922,9 +938,25 @@ export const appBundleOf = (path: string): string | undefined => {
   return index < 0 ? undefined : path.slice(0, index + ".app".length);
 };
 
+/** True when this user can rename the app bundle and its parent folder, so no administrator is needed. */
+export const isAppReplaceableInPlace = (appBundle: string) =>
+  Effect.promise(() =>
+    Promise.all(
+      [NodePath.dirname(appBundle), appBundle].map((path) =>
+        NodeFSP.access(path, NodeFS.constants.W_OK).then(
+          () => true,
+          () => false,
+        ),
+      ),
+    ),
+  ).pipe(Effect.map((writable) => !writable.includes(false)));
+
 /**
  * Checks that OOP can replace its own bundle, then starts the swap as its own process so it
  * outlives the app. A bundle in a folder this user cannot change is refused before OOP quits.
+ * The staged file may be the release disk image or the local-folder `.pkg`; the `.pkg` skips the
+ * macOS Installer and its administrator password, which works once the package's postinstall has
+ * made the app user-owned (the one privileged step).
  */
 export const installFromDmg = (input: {
   readonly stagedPath: string;
@@ -932,17 +964,7 @@ export const installFromDmg = (input: {
   readonly pid: number;
 }) =>
   Effect.gen(function* () {
-    const writable = yield* Effect.promise(() =>
-      Promise.all(
-        [NodePath.dirname(input.appBundle), input.appBundle].map((path) =>
-          NodeFSP.access(path, NodeFS.constants.W_OK).then(
-            () => true,
-            () => false,
-          ),
-        ),
-      ),
-    );
-    if (writable.includes(false)) {
+    if (!(yield* isAppReplaceableInPlace(input.appBundle))) {
       return yield* new LocalPkgUpdateError({ reason: "app-folder-not-writable" });
     }
     const script = NodePath.join(NodePath.dirname(input.stagedPath), "install.sh");

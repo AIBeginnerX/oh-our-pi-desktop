@@ -1,0 +1,24 @@
+{
+  "sequence": 53,
+  "eventId": "evt-53",
+  "aggregateKind": "thread",
+  "aggregateId": "thread-1",
+  "occurredAt": "2026-01-01T00:00:05.000Z",
+  "commandId": null,
+  "causationEventId": null,
+  "correlationId": null,
+  "metadata": {},
+  "type": "thread.activity-appended",
+  "payload": {
+    "threadId": "thread-1",
+    "activity": {
+      "id": "act-error",
+      "tone": "error",
+      "kind": "runtime.error",
+      "summary": "Provider failed",
+      "payload": {},
+      "turnId": "turn-1",
+      "createdAt": "2026-01-01T00:00:10.000Z"
+    }
+  }
+}
