@@ -101,8 +101,19 @@ interface HistoryEntry {
   rows: string[] | null;
 }
 
+/** The pinned header of the conversation column: `lead` rows and the pet's `track` beside them. */
+export interface PinnedHeader {
+  readonly lead: ReadonlyArray<string>;
+  readonly track: ReadonlyArray<string>;
+  readonly trackWidth: number;
+  /** The header's form in the scrollback, written ahead of the conversation when the layout is left. */
+  readonly scrollback?: ReadonlyArray<string>;
+}
+
 interface Painted {
   readonly left: ReadonlyArray<string>;
+  readonly headLead: ReadonlyArray<string>;
+  readonly headTrack: ReadonlyArray<string>;
   readonly panel: ReadonlyArray<string>;
   readonly nav: ReadonlyArray<string>;
   readonly navCols: number;
@@ -142,6 +153,8 @@ export class SplitRegion {
   private taskLines: ReadonlyArray<string> = [];
   /** The thread list; null while it is off. */
   private navLines: ReadonlyArray<string> | null = null;
+  /** Rows pinned above the conversation (logo and status); null while there are none. */
+  private header: PinnedHeader | null = null;
   private history: HistoryEntry[] = [];
   /** Entries before this one were scrolled out of view with Ctrl-L; `leave` still hands them back. */
   private viewFrom = 0;
@@ -198,7 +211,17 @@ export class SplitRegion {
   /** Tallest live frame the left column can hold; the viewport keeps a few rows above it. */
   maxRows(): number {
     const columns = this.out.columns();
-    return Math.max(3, this.out.rows() - this.bottomRows(columns) - MIN_VIEWPORT_ROWS);
+    return Math.max(
+      3,
+      this.out.rows() - this.bottomRows(columns) - this.headerRows() - MIN_VIEWPORT_ROWS,
+    );
+  }
+
+  /** Rows the header takes, never so many that the conversation has fewer than a few left. */
+  private headerRows(): number {
+    if (this.header === null) return 0;
+    const room = this.out.rows() - this.bottomRows(this.out.columns()) - MIN_VIEWPORT_ROWS - 3;
+    return Math.max(0, Math.min(this.header.lead.length, room));
   }
 
   /** Columns a line of the conversation may use. */
@@ -254,6 +277,7 @@ export class SplitRegion {
     this.cancelScheduled();
     if (this.mode === "on") this.out.write(ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
     const lines = this.history.map((entry) => entry.raw);
+    if (this.header?.scrollback !== undefined) lines.unshift(...this.header.scrollback);
     if (this.omitted > 0) lines.unshift(t("render.split.omitted", { count: this.omitted }));
     this.mode = "off";
     this.history = [];
@@ -269,6 +293,7 @@ export class SplitRegion {
     this.side = true;
     this.taskLines = [];
     this.navLines = null;
+    this.header = null;
     return lines;
   }
 
@@ -332,6 +357,30 @@ export class SplitRegion {
     if (open === this.side) return;
     this.side = open;
     this.stale = true;
+    this.requestPaint();
+  }
+
+  /**
+   * Pins rows above the conversation, or none with null. The same rows cause no paint; a change in
+   * their number moves the conversation, so the whole screen is drawn again.
+   */
+  setHeader(header: PinnedHeader | null): void {
+    const before = this.header;
+    const same =
+      header === null || before === null
+        ? header === before
+        : header.trackWidth === before.trackWidth &&
+          header.lead.length === before.lead.length &&
+          header.lead.every((l, i) => l === before.lead[i]) &&
+          header.track.length === before.track.length &&
+          header.track.every((l, i) => l === before.track[i]);
+    if (same) return;
+    const clean = (rows: ReadonlyArray<string>) =>
+      rows.map((row) => stripControlSequences(row.replace(LINE_BREAK, " ")));
+    if ((header?.lead.length ?? 0) !== (before?.lead.length ?? 0)) this.stale = true;
+    if ((header?.trackWidth ?? 0) !== (before?.trackWidth ?? 0)) this.stale = true;
+    this.header =
+      header === null ? null : { ...header, lead: clean(header.lead), track: clean(header.track) };
     this.requestPaint();
   }
 
@@ -485,7 +534,21 @@ export class SplitRegion {
       ...(this.navLines !== null && navCols === 0 ? this.navLines : []),
       ...this.taskLines,
     ].slice(0, Math.max(0, rows - MIN_VIEWPORT_ROWS - 1));
-    const leftRows = rows - tasks.length;
+    const head = this.headerRows();
+    const trackWidth = head > 0 ? (this.header?.trackWidth ?? 0) : 0;
+    const leadWidth = layout.left - trackWidth;
+    // A row with no strip of its own runs the full width of the column.
+    const stripped = (row: number) => trackWidth > 0 && row < (this.header?.track.length ?? 0);
+    const headLead = Array.from({ length: head }, (_, row) => {
+      const width = stripped(row) ? leadWidth : layout.left;
+      return cell(truncateStyled(this.header?.lead[row] ?? "", Math.max(1, width)), width);
+    });
+    const headTrack = Array.from({ length: head }, (_, row) =>
+      stripped(row)
+        ? cell(truncateStyled(this.header?.track[row] ?? "", trackWidth), trackWidth)
+        : "",
+    );
+    const leftRows = rows - tasks.length - head;
     let lines = this.frame.lines.map((line) => truncateStyled(line, leftLimit));
     let cursor = this.frame.cursor;
     const cap = this.maxRows();
@@ -500,6 +563,7 @@ export class SplitRegion {
       ...[...this.viewport(top, leftLimit), ...lines].slice(-leftRows),
       ...tasks.map((line) => truncateStyled(line, leftLimit)),
     ].map((line) => cell(line, layout.left));
+    left.unshift(...Array.from({ length: head }, () => ""));
     const nav =
       navCols > 0
         ? Array.from({ length: rows }, (_, row) =>
@@ -516,7 +580,7 @@ export class SplitRegion {
       cursor === null
         ? null
         : {
-            row: Math.min(leftRows - 1, top + cursor.row),
+            row: head + Math.min(leftRows - 1, top + cursor.row),
             col: x0 + Math.min(layout.left - 1, cursor.col),
           };
 
@@ -536,7 +600,12 @@ export class SplitRegion {
           text += at(row, 0) + (nav[row] as string) + RESET;
           text += at(row, navCols) + divider + RESET;
         }
-        text += at(row, x0) + (left[row] as string) + RESET;
+        if (row < head) {
+          text += at(row, x0) + (headLead[row] as string) + RESET;
+          if (stripped(row)) text += at(row, x0 + leadWidth) + (headTrack[row] as string) + RESET;
+        } else {
+          text += at(row, x0) + (left[row] as string) + RESET;
+        }
         if (!side) continue;
         text += at(row, x0 + layout.left) + divider + RESET;
         text += at(row, x0 + layout.left + 1) + (panel[row] as string) + RESET;
@@ -549,7 +618,16 @@ export class SplitRegion {
         if (navCols > 0 && divider !== before.divider) {
           text += at(row, navCols) + divider + RESET;
         }
-        if (left[row] !== before.left[row]) text += at(row, x0) + (left[row] as string) + RESET;
+        if (row < head) {
+          if (headLead[row] !== before.headLead[row]) {
+            text += at(row, x0) + (headLead[row] as string) + RESET;
+          }
+          if (stripped(row) && headTrack[row] !== before.headTrack[row]) {
+            text += at(row, x0 + leadWidth) + (headTrack[row] as string) + RESET;
+          }
+        } else if (left[row] !== before.left[row]) {
+          text += at(row, x0) + (left[row] as string) + RESET;
+        }
         if (!side) continue;
         if (divider !== before.divider) text += at(row, x0 + layout.left) + divider + RESET;
         if (panel[row] !== before.panel[row]) {
@@ -559,7 +637,19 @@ export class SplitRegion {
     }
     const sameCursor =
       before !== null && before.cursor?.row === place?.row && before.cursor?.col === place?.col;
-    this.painted = { left, panel, nav, navCols, divider, side, cursor: place, columns, rows };
+    this.painted = {
+      left,
+      headLead,
+      headTrack,
+      panel,
+      nav,
+      navCols,
+      divider,
+      side,
+      cursor: place,
+      columns,
+      rows,
+    };
     this.stale = false;
     if (text === "" && sameCursor) return;
     const finish = place === null ? HIDE_CURSOR : at(place.row, place.col) + SHOW_CURSOR;

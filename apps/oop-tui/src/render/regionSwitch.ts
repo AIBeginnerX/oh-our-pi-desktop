@@ -1,9 +1,14 @@
 import type { LiveRegion, RegionFrame, TerminalOutput } from "./liveRegion.ts";
-import { splitUnavailable, type SplitParts, type SplitRegion } from "./splitRegion.ts";
+import {
+  splitUnavailable,
+  type PinnedHeader,
+  type SplitParts,
+  type SplitRegion,
+} from "./splitRegion.ts";
 import { t } from "../i18n/index.ts";
 
 /** What a resize took out of the side-by-side layout: all of it, or only the optional parts. */
-export type ClosedPart = "all" | "tasks" | "nav" | "tasksNav";
+export type ClosedPart = "all" | "tasks" | "nav" | "tasksNav" | "panel";
 
 /** What the controller can do with the side-by-side layout. */
 export interface SplitControl {
@@ -31,6 +36,10 @@ export interface SplitControl {
   };
   /** The thread list; null turns it off. */
   readonly setNav: (lines: ReadonlyArray<string> | null) => void;
+  /** Rows pinned above the conversation (logo and status, the pet in its strip); null for none. */
+  readonly setHeader: (header: PinnedHeader | null) => void;
+  /** Rows of the terminal, for choosing the full or the one-line header. */
+  readonly terminalRows: () => number;
 }
 
 /**
@@ -136,6 +145,16 @@ export class RegionSwitch implements SplitControl {
       { tasks: false, nav: true, part: "nav" },
       { tasks: true, nav: true, part: "tasksNav" },
     ];
+    // Too narrow for the right panel but wide enough for the rest: only the panel gives way.
+    if (
+      parts.panel &&
+      (parts.tasks || parts.nav === true) &&
+      this.unavailable({ ...parts, panel: false }) === null
+    ) {
+      this.split.setSide(false);
+      this.onClosed(t("render.region.panelClosed", { reason }), "panel");
+      return true;
+    }
     for (const fold of folds) {
       if ((fold.tasks && !parts.tasks) || (fold.nav && parts.nav !== true)) continue;
       const rest = {
@@ -213,6 +232,14 @@ export class RegionSwitch implements SplitControl {
 
   setNav(lines: ReadonlyArray<string> | null): void {
     this.split.setNav(lines);
+  }
+
+  setHeader(header: PinnedHeader | null): void {
+    this.split.setHeader(header);
+  }
+
+  terminalRows(): number {
+    return this.out.rows();
   }
 
   // ---- the ways out of the program -----------------------------------------------------------

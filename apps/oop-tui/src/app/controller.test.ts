@@ -1,5 +1,6 @@
 import type {
   ClientOrchestrationCommand,
+  ModelSelection,
   OrchestrationShellSnapshot,
   ServerConfig,
   ServerSettings,
@@ -84,6 +85,8 @@ interface Options {
   readonly symbols?: Symbols;
   readonly animations?: boolean;
   readonly notify?: boolean;
+  /** The model remembered from the last launch; `saved` collects every pick. */
+  readonly lastModel?: { readonly read: ModelSelection | null; readonly saved?: ModelSelection[] };
   readonly columns?: number;
   /** Rows the live region may use; 24 when absent. */
   readonly rows?: number;
@@ -212,6 +215,14 @@ const harness = (options: Options = {}) => {
     ...(options.symbols ? { symbols: options.symbols } : {}),
     ...(options.animations === undefined ? {} : { animations: options.animations }),
     ...(options.notify === undefined ? {} : { notify: options.notify }),
+    ...(options.lastModel
+      ? {
+          lastModel: {
+            read: () => options.lastModel?.read ?? null,
+            save: (selection: ModelSelection) => void options.lastModel?.saved?.push(selection),
+          },
+        }
+      : {}),
     ticker: (run, interval) => {
       const timer = { interval, run, stopped: false };
       timers.push(timer);
@@ -10393,5 +10404,117 @@ describe("in English", () => {
     h.press(key("enter"));
     expect(flat(h)).toContain("Unknown command: /nosuchthing");
     expect(flat(h)).toContain("start with a space");
+  });
+});
+
+describe("the model picked last", () => {
+  type TurnStart = Extract<ClientOrchestrationCommand, { type: "thread.turn.start" }>;
+  const mini = { instanceId: "codex", model: "gpt-5-mini" } as unknown as ModelSelection;
+
+  it("starts a new thread on it", async () => {
+    const h = harness({ lastModel: { read: mini } });
+    h.start();
+    h.press(key("enter"));
+    h.typeText("안녕");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    const command = h.dispatched[0] as TurnStart;
+    expect(command.bootstrap?.createThread?.modelSelection).toEqual(mini);
+    expect(command.modelSelection).toEqual(mini);
+  });
+
+  it("is used by oop with a message, and wins over the project's default", async () => {
+    const h = harness({
+      prompt: "고쳐줘",
+      lastModel: { read: mini },
+      shell: makeSnapshot(
+        [makeProject({ defaultModelSelection: { instanceId: "codex", model: "gpt-5" } as never })],
+        [],
+      ),
+    });
+    h.start();
+    await flushMicrotasks();
+    expect((h.dispatched[0] as TurnStart).bootstrap?.createThread?.modelSelection).toEqual(mini);
+  });
+
+  it("keeps its options", async () => {
+    const withOptions = {
+      ...mini,
+      options: [{ id: "custom", value: "high" }],
+    } as unknown as ModelSelection;
+    const h = harness({ lastModel: { read: withOptions } });
+    h.start();
+    h.press(key("enter"));
+    h.typeText("안녕");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    expect((h.dispatched[0] as TurnStart).bootstrap?.createThread?.modelSelection).toEqual(
+      withOptions,
+    );
+  });
+
+  it("is remembered when /model picks another model", () => {
+    const saved: ModelSelection[] = [];
+    const h = harness({ lastModel: { read: null, saved } });
+    h.start();
+    h.press(key("enter"));
+    h.typeText("/model");
+    h.press(key("enter"));
+    h.press(key("down"), key("enter"));
+    expect(saved).toEqual([mini]);
+  });
+
+  it("falls back to the usual default, and says so, when its provider is gone", async () => {
+    const gone = { instanceId: "removed", model: "x" } as unknown as ModelSelection;
+    const h = harness({ lastModel: { read: gone } });
+    h.start();
+    h.press(key("enter"));
+    h.typeText("안녕");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    const command = h.dispatched[0] as TurnStart;
+    expect(command.bootstrap?.createThread?.modelSelection).toEqual({
+      instanceId: "codex",
+      model: "gpt-5",
+    });
+    expect(h.screen()).toContain("마지막에 쓴 모델(x)을 쓸 수 없어");
+  });
+
+  it("falls back when the provider no longer lists the model", async () => {
+    const h = harness({
+      lastModel: { read: { instanceId: "codex", model: "retired" } as unknown as ModelSelection },
+    });
+    h.start();
+    h.press(key("enter"));
+    h.typeText("안녕");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    expect((h.dispatched[0] as TurnStart).bootstrap?.createThread?.modelSelection).toMatchObject({
+      model: "gpt-5",
+    });
+  });
+
+  it("does not change an existing thread's own model", async () => {
+    const h = harness({
+      lastModel: { read: mini },
+      shell: makeSnapshot(
+        [makeProject()],
+        [
+          makeThreadShell({
+            id: "thread-new",
+            latestUserMessageAt: T0,
+            modelSelection: { instanceId: "codex", model: "gpt-5" },
+          }),
+        ],
+      ),
+    });
+    h.openNewest();
+    h.deliver([threadSnapshotItem(makeThread({ id: "thread-new" }), 3)]);
+    h.typeText("계속해 줘");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    const command = h.dispatched[0] as TurnStart;
+    expect(command.bootstrap).toBeUndefined();
+    expect(command.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5" });
   });
 });

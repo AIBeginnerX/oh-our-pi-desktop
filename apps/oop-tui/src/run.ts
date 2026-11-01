@@ -57,6 +57,7 @@ import { defaultScheduler, LiveRegion } from "./render/liveRegion.ts";
 import { RegionSwitch } from "./render/regionSwitch.ts";
 import { SplitRegion } from "./render/splitRegion.ts";
 import { detectColorLevel } from "./render/color.ts";
+import { lastModelFilePath, readLastModel, writeLastModel } from "./lastModel.ts";
 import { makeStyle } from "./render/style.ts";
 import { resolveSymbols } from "./render/symbols.ts";
 import { createTerminalHooks } from "./render/terminalHooks.ts";
@@ -316,6 +317,9 @@ const RESIZE_SETTLE_MS = 80;
 const SHOW_CURSOR = "\u001b[?25h";
 const BRACKETED_PASTE_ON = "\u001b[?2004h";
 const BRACKETED_PASTE_OFF = "\u001b[?2004l";
+/** Focus reporting: the terminal sends `ESC [ I` and `ESC [ O` as its window gains and loses focus. */
+const FOCUS_REPORT_ON = "\u001b[?1004h";
+const FOCUS_REPORT_OFF = "\u001b[?1004l";
 
 /** `host:port` of a server address; the rest of it (user, path, query) is not something to print. */
 const hostOf = (origin: string): string | null => {
@@ -465,6 +469,14 @@ export const runInteractive = async (input: {
     notify: settings.notify,
     sidebar: settings.sidebar,
     saveSidebar: (on) => void writeSetting(settingsFilePath(paths), "sidebar", on),
+    workflow: settings.workflow,
+    saveWorkflow: (on) => void writeSetting(settingsFilePath(paths), "workflow", on),
+    pet: settings.pet,
+    savePet: (on) => void writeSetting(settingsFilePath(paths), "pet", on),
+    lastModel: {
+      read: () => readLastModel(lastModelFilePath(paths)),
+      save: (selection) => writeLastModel(lastModelFilePath(paths), selection),
+    },
     home: NodeOS.homedir(),
     server: hostOf(resolved.origin),
     terminal: createTerminalHooks((text) => void stdout.write(text), {
@@ -493,7 +505,7 @@ export const runInteractive = async (input: {
 
   // Raw mode and bracketed paste are undone on every way out, including a crash.
   const releaseInput = () => {
-    stdout.write(`${BRACKETED_PASTE_OFF}${SHOW_CURSOR}`);
+    stdout.write(`${FOCUS_REPORT_OFF}${BRACKETED_PASTE_OFF}${SHOW_CURSOR}`);
     if (stdin.isTTY) stdin.setRawMode(false);
   };
   // The alternate screen of the workflow layout is left first, so what was said in it is not lost.
@@ -537,7 +549,7 @@ export const runInteractive = async (input: {
   const enterTerminal = () => {
     stdin.setRawMode(true);
     stdin.resume();
-    stdout.write(BRACKETED_PASTE_ON);
+    stdout.write(BRACKETED_PASTE_ON + FOCUS_REPORT_ON);
   };
   // Ctrl-Z: hand the terminal back, then stop. SIGCONT (from `fg`) re-enters and redraws.
   const suspend = () => {

@@ -1,6 +1,24 @@
 {
   "versions": [
     {
+      "version": "0.0.134",
+      "date": "2026-11-01",
+      "highlights": [
+        {
+          "en": "The terminal app now opens with the thread list on the left and the workflow panel on the right, and keeps the OOP logo and live status pinned above the conversation while you work.",
+          "ko": "터미널 앱이 왼쪽 스레드 목록과 오른쪽 워크플로 패널이 열린 화면으로 시작하고, 작업 중에도 OOP 로고와 현재 상태를 대화 위에 계속 표시합니다."
+        },
+        {
+          "en": "Meet Oo, a new terminal pet beside the logo. It greets you, works, thinks, waits, rests and reacts to success and errors. Turn it off with /pet off.",
+          "ko": "로고 옆에 새 터미널 펫 Oo가 생겼습니다. 인사하고, 일하고, 생각하고, 기다리고, 쉬며, 성공과 오류에 반응합니다. /pet off로 끌 수 있습니다."
+        },
+        {
+          "en": "The terminal app starts with the model you last selected there, and falls back with a notice if that model is no longer available.",
+          "ko": "터미널 앱이 마지막으로 고른 모델로 시작하며, 그 모델을 쓸 수 없으면 알림과 함께 기본 모델로 돌아갑니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.133",
       "date": "2026-11-01",
       "highlights": [

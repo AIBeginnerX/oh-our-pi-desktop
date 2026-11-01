@@ -157,11 +157,29 @@ export const modelSelectionOf = (choice: {
   model: choice.model,
 });
 
-/** What a brand-new thread runs on: the project's default, else the first provider's default model. */
+/** The remembered selection when the server can run it now; null when its provider or model is gone, or the config is unknown. */
+export const usableRemembered = (
+  config: ServerConfig | null,
+  remembered: ModelSelection | null | undefined,
+): ModelSelection | null =>
+  remembered &&
+  availableModels(config).some(
+    (choice) => choice.instanceId === remembered.instanceId && choice.model === remembered.model,
+  )
+    ? remembered
+    : null;
+
+/**
+ * What a brand-new thread runs on: the model picked last (options included) while it can still
+ * run, else the project's default, else the first provider's default model.
+ */
 export const defaultModelSelection = (
   project: OrchestrationProjectShell | undefined,
   config: ServerConfig | null,
+  remembered?: ModelSelection | null,
 ): ModelSelection | null => {
+  const last = usableRemembered(config, remembered);
+  if (last) return last;
   if (project?.defaultModelSelection) return project.defaultModelSelection;
   for (const provider of config?.providers ?? []) {
     if (!provider.enabled || !provider.installed || provider.availability === "unavailable")

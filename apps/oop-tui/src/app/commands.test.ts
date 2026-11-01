@@ -70,6 +70,19 @@ describe("models", () => {
     expect(defaultModelSelection(project, config)).toEqual({ instanceId: "claude", model: "opus" });
     expect(defaultModelSelection(undefined, null)).toBeNull();
   });
+
+  it("prefers the remembered model while it can run, and ignores it when it cannot", () => {
+    const config = makeConfig();
+    const mini = { instanceId: "codex", model: "gpt-5-mini" } as never;
+    const project = makeProject({ defaultModelSelection: { instanceId: "claude", model: "opus" } });
+    expect(defaultModelSelection(project, config, mini)).toEqual(mini);
+    expect(defaultModelSelection(undefined, null, mini)).toBeNull();
+    const gone = { instanceId: "codex", model: "retired" } as never;
+    expect(defaultModelSelection(undefined, config, gone)).toEqual({
+      instanceId: "codex",
+      model: "gpt-5",
+    });
+  });
 });
 
 describe("turnStartCommand", () => {

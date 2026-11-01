@@ -81,6 +81,19 @@ import {
   type RailTone,
 } from "../render/rail.ts";
 import { renderBanner } from "../render/banner.ts";
+import { headerTrack, renderHeader, travelOf, type HeaderState } from "../render/header.ts";
+import {
+  INITIAL_POSE,
+  newPetMemory,
+  observePet,
+  petClock,
+  petState,
+  stepPose,
+  touchPet,
+  type PetMemory,
+  type PetObservation,
+  type PetPose,
+} from "../render/pet.ts";
 import { crewBarText, roleName } from "../render/crewBoard.ts";
 import {
   composeHome,
@@ -112,6 +125,7 @@ import {
   type CommandContext,
   compatibleModels,
   defaultModelSelection,
+  usableRemembered,
   dismissUserInputCommand,
   interactionModeCommand,
   interruptCommand,
@@ -335,6 +349,19 @@ export interface ControllerDeps {
   readonly sidebar?: boolean;
   /** Remembers `/sidebar on|off` for the next start (settings `sidebar`). */
   readonly saveSidebar?: (on: boolean) => void;
+  /** Settings `workflow`: the right panel (`/dag-workflow`) opens by itself with the first conversation. */
+  readonly workflow?: boolean;
+  /** Remembers `/dag-workflow` closed or opened for the next start (settings `workflow`). */
+  readonly saveWorkflow?: (on: boolean) => void;
+  /** Settings `pet`: the pet in the pinned header. */
+  readonly pet?: boolean;
+  /** Remembers `/pet on|off` for the next start (settings `pet`). */
+  readonly savePet?: (on: boolean) => void;
+  /** The model picked last, kept between launches: read once at the start, saved at every pick. */
+  readonly lastModel?: {
+    readonly read: () => ModelSelection | null;
+    readonly save: (selection: ModelSelection) => void;
+  };
   /** Settings `notify`: ring the terminal bell when a turn finishes or waits for an approval or an answer. */
   readonly notify?: boolean;
   /** Repeats a call while a turn runs; the spinner and the elapsed time hang off it. */
@@ -497,6 +524,14 @@ export class AppController {
   private historyDraft = "";
   private notice: string | null = null;
   private modelOverride: ModelChoice | null = null;
+  /** The model picked last in this terminal, options included; what a new thread starts on. */
+  private lastModel: ModelSelection | null;
+  /**
+   * The model a new thread had when its first pick was made here. A pick is remembered at once, so
+   * without this "back to where it started" would find the pick itself, and lose the options the
+   * project's default or the earlier pick carried.
+   */
+  private draftBase: ModelSelection | null = null;
   private picker: ListPicker | null = null;
   /** A typed question over the chat (`/goal` with no goal yet); it has every key until closed. */
   private prompt: PromptScreen | null = null;
@@ -538,8 +573,24 @@ export class AppController {
   private navFocus = false;
   /** The thread the pick is on (null is the row for a new thread); kept by id so a reordering does not move it. */
   private navPick: string | null = null;
-  /** `deps.sidebar` is acted on once, with the first conversation. */
+  /** `deps.sidebar` and `deps.workflow` are acted on once, with the first conversation. */
   private navAutoOpened = false;
+  /** The header's pet: what it remembers, where it stands, and the one timer that wakes it. */
+  private petOn: boolean;
+  private petMemory: PetMemory;
+  private petStarted = false;
+  private petPose: PetPose = INITIAL_POSE;
+  private petTimer: { readonly due: number; readonly stop: () => void } | null = null;
+  /** Milliseconds from `petDueAt` to the pet's next frame; null when it needs no timer. */
+  private petNext: { readonly due: number } | null = null;
+  /** The start screen's banner line was skipped for the pinned header and is not yet in the scrollback. */
+  private bannerOwed = false;
+  /** The pinned header has been drawn since the banner became owed. */
+  private headerPinned = false;
+  /** The terminal window has focus (assumed until it says otherwise). */
+  private focused = true;
+  /** Interval of the running spinner timer, to swap it when focus changes. */
+  private tickerMs = 0;
   /** The rows for the thread list last built, so a repaint while text streams sorts nothing again. */
   private navMemo: {
     readonly threads: unknown;
@@ -692,6 +743,7 @@ export class AppController {
 
   constructor(deps: ControllerDeps) {
     this.deps = deps;
+    this.lastModel = deps.lastModel?.read() ?? null;
     this.patchSettings = createSettingsPatcher(deps.link);
     this.provider = new ProviderFlow({
       config: () => deps.link.config,
@@ -715,6 +767,8 @@ export class AppController {
       changed: () => this.render(),
     });
     this.landing = deps.startup === undefined ? null : { held: [], setupEndAt: null };
+    this.petOn = deps.pet !== false;
+    this.petMemory = newPetMemory(deps.now());
     const prompt = deps.prompt?.trim();
     this.startPrompt = prompt ? { text: prompt, threadId: null } : null;
   }
@@ -846,6 +900,7 @@ export class AppController {
     this.stopAnimation();
     this.stopClock();
     this.stopStartWait();
+    this.stopPetTimer();
     // The title was ours for the session; the shell's own comes back.
     this.deps.terminal?.restoreTitle();
     this.lastTitle = null;
@@ -886,14 +941,17 @@ export class AppController {
    * Ends the start screen: its padding is dropped and one line of banner goes into the scrollback,
    * followed by what waited. It does not come back in this run, and a new thread is a plain empty one.
    */
-  private endHome(): void {
+  private endHome(pinned = false): void {
+    if (pinned && this.landing !== null && this.deps.startup?.banner === true)
+      this.bannerOwed = true;
     const landing = this.landing;
     const startup = this.deps.startup;
     if (landing === null || startup === undefined) return;
     this.landing = null;
     const { region, style } = this.deps;
     this.deps.region.commit([
-      ...(startup.banner
+      // The pinned header says it all the time, so the layouts that have one skip this line.
+      ...(startup.banner && !pinned
         ? renderBanner({
             version: startup.version,
             server: this.deps.server ?? null,
@@ -986,7 +1044,7 @@ export class AppController {
     const { link } = this.deps;
     const project = link.shell?.projects.find((candidate) => candidate.id === screen.projectId);
     return (
-      defaultModelSelection(project, link.config) === null &&
+      defaultModelSelection(project, link.config, this.lastModel) === null &&
       (link.config === null || providersPending(link.config))
     );
   }
@@ -1293,6 +1351,7 @@ export class AppController {
    */
   private resetThreadChoices(): void {
     this.modelOverride = null;
+    this.draftBase = null;
     this.effortPick = null;
     this.runtimeIntent = null;
     this.interactionIntent = null;
@@ -1610,6 +1669,8 @@ export class AppController {
     // The task list takes rows from the conversation, so it is sized before the frame is built.
     this.syncTasks();
     this.syncNavState();
+    // The header takes rows from the conversation, so it is settled before the frame is built.
+    this.syncHeader();
     const columns = region.usableColumns() + 1;
     const rows = region.maxRows();
     const now = this.deps.now();
@@ -1623,6 +1684,7 @@ export class AppController {
     this.syncPanel();
     this.syncNav();
     this.syncAnimation();
+    this.syncPetTimer();
     this.syncStartWait();
     this.syncTitle();
     this.syncWorkspaceLists();
@@ -1665,8 +1727,10 @@ export class AppController {
     const moving = calm && screen.status?.phase === "working";
     if (!moving) {
       this.stopAnimation();
-    } else if (this.stopTicker === null) {
-      const interval = this.deps.animations === false ? STATIC_TICK_MS : SPINNER_INTERVAL_MS;
+    } else if (this.stopTicker === null || this.tickerMs !== this.tickMsNow()) {
+      this.stopAnimation();
+      const interval = this.tickMsNow();
+      this.tickerMs = interval;
       this.stopTicker = (this.deps.ticker ?? defaultTicker)(() => {
         this.tick += 1;
         this.render();
@@ -1732,6 +1796,165 @@ export class AppController {
   private stopClock(): void {
     this.stopPanelClock?.();
     this.stopPanelClock = null;
+  }
+
+  /** The spinner's interval: a second (the elapsed time alone) with animations off or the window unfocused. */
+  private tickMsNow(): number {
+    return this.deps.animations === false || !this.focused ? STATIC_TICK_MS : SPINNER_INTERVAL_MS;
+  }
+
+  // ---- the pinned header and its pet ---------------------------------------------------------
+
+  /** The terminal reported that its window gained or lost focus. An unfocused window animates nothing. */
+  private onFocus(focused: boolean): void {
+    if (focused === this.focused) return;
+    this.focused = focused;
+    if (focused) this.petMemory = touchPet(this.petMemory, this.deps.now());
+    this.render();
+  }
+
+  private stopPetTimer(): void {
+    this.petTimer?.stop();
+    this.petTimer = null;
+  }
+
+  /** What the pet reacts to, read from the screen and the link. */
+  private petObservation(screen: Screen): PetObservation {
+    const phase = this.deps.link.status.phase;
+    const chat = screen.kind === "chat" ? screen : null;
+    return {
+      phase: chat === null ? null : (chat.status?.phase ?? "idle"),
+      tool: chat?.status?.runningTool != null,
+      streaming: chat !== null && chat.partial.length > 0,
+      online: phase === "online" || phase === "connecting",
+    };
+  }
+
+  /** The thread's title as the header shows it. */
+  private headerThread(screen: Screen): string | null {
+    if (screen.kind !== "chat") return null;
+    if (screen.isDraft) return t("session.c.newThread");
+    const mirror = this.deps.link.thread.thread;
+    return mirror?.id === screen.threadId
+      ? mirror.title
+      : (this.deps.link.shell?.threads.find((thread) => thread.id === screen.threadId)?.title ??
+          null);
+  }
+
+  /** The model of the thread on screen, as the status bar names it. */
+  private headerModel(screen: Screen): string | null {
+    if (screen.kind !== "chat") return null;
+    const known = this.deps.link.shell?.threads.find(
+      (thread) => thread.id === screen.threadId,
+    )?.modelSelection;
+    if (this.modelOverride) return this.modelOverride.label;
+    return known
+      ? this.labelForModel(known.instanceId, known.model)
+      : this.defaultModelLabel(screen.projectId);
+  }
+
+  /**
+   * Pins the logo, the live status and the pet above the conversation while the side-by-side
+   * layout is on and the banner setting is. The rows are replaced only when their text differs,
+   * so a render that changed nothing in the header (every streamed token) writes nothing.
+   */
+  private syncHeader(): void {
+    const split = this.deps.split;
+    const startup = this.deps.startup;
+    this.petNext = null;
+    if (split === undefined) return;
+    if (startup === undefined || !startup.banner || !split.active()) {
+      split.setHeader(null);
+      // Leaving the layout handed the banner line to the scrollback, once.
+      if (this.headerPinned) this.bannerOwed = false;
+      this.headerPinned = false;
+      return;
+    }
+    this.headerPinned = true;
+    const screen = this.screen;
+    const now = this.deps.now();
+    if (!this.petStarted) {
+      // The greeting belongs to the moment the header first appears.
+      this.petStarted = true;
+      this.petMemory = newPetMemory(now);
+    }
+    const observation = this.petObservation(screen);
+    this.petMemory = observePet(this.petMemory, observation, now);
+    const state = petState(this.petMemory, observation, now);
+    const animate = this.deps.animations !== false && this.focused;
+    const clock = animate ? petClock(state, now) : { frame: 0, step: 0, remaining: 0 };
+    const columns = this.deps.region.usableColumns() + 1;
+    const rows = split.terminalRows();
+    const track = headerTrack(columns, rows, this.petOn);
+    this.petPose = stepPose(
+      this.petPose,
+      animate ? state : "idle",
+      clock.step,
+      travelOf(track.width, !track.full),
+    );
+    const link = this.deps.link.status.phase;
+    const threadPhase = screen.kind === "chat" ? (screen.status?.phase ?? "idle") : null;
+    const headerState: HeaderState =
+      link !== "online" && link !== "connecting"
+        ? "offline"
+        : threadPhase === null
+          ? "none"
+          : threadPhase === "approval" || threadPhase === "input"
+            ? "waiting"
+            : threadPhase;
+    const scrollback = this.bannerOwed
+      ? renderBanner({
+          version: startup.version,
+          server: this.deps.server ?? null,
+          cwd: this.deps.cwd,
+          home: this.deps.home ?? null,
+          columns,
+          theme: this.deps.style.theme,
+          symbols: this.symbols,
+          compact: true,
+        })
+      : undefined;
+    const frame = renderHeader({
+      columns,
+      rows,
+      theme: this.deps.style.theme,
+      symbols: this.symbols,
+      version: startup.version,
+      server: this.deps.server ?? null,
+      cwd: this.deps.cwd,
+      home: this.deps.home ?? null,
+      status: {
+        state: headerState,
+        model: this.headerModel(screen),
+        thread: this.headerThread(screen),
+      },
+      pet: this.petOn && track.width > 0 ? { state, frame: clock.frame, pose: this.petPose } : null,
+    });
+    split.setHeader(scrollback === undefined ? frame : { ...frame, scrollback });
+    if (animate && this.petOn && track.width > 0) this.petNext = { due: now + clock.remaining };
+  }
+
+  /**
+   * The pet's one timer, set for the moment its frame changes. It exists only while the pet is
+   * drawn, animations are on, the window has focus and the spinner's own timer (which already
+   * redraws every few frames during a turn) is not running; every wake-up sets the next or none.
+   */
+  private syncPetTimer(): void {
+    const next = this.petNext;
+    if (this.disposed || next === null || this.stopTicker !== null) {
+      this.stopPetTimer();
+      return;
+    }
+    if (this.petTimer?.due === next.due) return;
+    this.stopPetTimer();
+    const stop = (this.deps.ticker ?? defaultTicker)(
+      () => {
+        this.stopPetTimer();
+        this.render();
+      },
+      Math.max(20, next.due - this.deps.now() + 5),
+    );
+    this.petTimer = { due: next.due, stop };
   }
 
   /** `OOP · title`, with the brand mark in front while a turn runs. Sent only when it changes. */
@@ -2020,6 +2243,7 @@ export class AppController {
         ((command.name !== "dag-workflow" &&
           command.name !== "dag-agents" &&
           command.name !== "tasks" &&
+          command.name !== "pet" &&
           command.name !== "sidebar") ||
           this.deps.split !== undefined),
     );
@@ -2414,10 +2638,11 @@ export class AppController {
       (thread) => thread.id === screen.threadId,
     )?.modelSelection;
     if (own) return own;
+    if (screen.isDraft && this.draftBase !== null) return this.draftBase;
     const project = this.deps.link.shell?.projects.find(
       (candidate) => candidate.id === screen.projectId,
     );
-    return defaultModelSelection(project, this.deps.link.config);
+    return defaultModelSelection(project, this.deps.link.config, this.lastModel);
   }
 
   /** The model the next message would run on: the one picked here, or the thread's own. */
@@ -2436,7 +2661,7 @@ export class AppController {
 
   private defaultModelLabel(projectId: string): string | null {
     const project = this.deps.link.shell?.projects.find((candidate) => candidate.id === projectId);
-    const selection = defaultModelSelection(project, this.deps.link.config);
+    const selection = defaultModelSelection(project, this.deps.link.config, this.lastModel);
     return selection ? this.labelForModel(selection.instanceId, selection.model) : null;
   }
 
@@ -2807,6 +3032,7 @@ export class AppController {
       return;
     }
     this.effortPick = value;
+    this.rememberModel(screen);
     // A resend would carry the old effort.
     this.failedSend = null;
     this.record(
@@ -3423,6 +3649,11 @@ export class AppController {
 
   handleKey(event: KeyEvent): void {
     if (this.disposed) return;
+    if (event.type === "focus") {
+      this.onFocus(event.focused);
+      return;
+    }
+    this.petMemory = touchPet(this.petMemory, this.deps.now());
     if (event.type === "ctrl" && event.letter === "z") {
       this.deps.suspend?.();
       return;
@@ -4424,7 +4655,16 @@ export class AppController {
       | { projectId: ProjectId; modelSelection: ReturnType<typeof modelSelectionOf> }
       | undefined;
     if (screen.isDraft) {
-      const selection = override ?? defaultModelSelection(project, link.config);
+      const selection = override ?? defaultModelSelection(project, link.config, this.lastModel);
+      // The model picked last cannot run now (its provider is gone, off or no longer lists it).
+      if (
+        picked === null &&
+        this.lastModel !== null &&
+        link.config !== null &&
+        usableRemembered(link.config, this.lastModel) === null
+      ) {
+        this.notice = t("session.c.lastModelGone", { model: this.lastModel.model });
+      }
       if (selection === null) {
         this.notice = noModelNotice(link.config);
         this.render();
@@ -4507,6 +4747,10 @@ export class AppController {
       case "tasks":
         if (this.deps.split === undefined) return false;
         this.runTasksCommand(args);
+        break;
+      case "pet":
+        if (this.deps.split === undefined) return false;
+        this.runPetCommand(args);
         break;
       case "sidebar":
         if (this.deps.split === undefined) return false;
@@ -4943,6 +5187,7 @@ export class AppController {
     if (move === "close") {
       this.panelOpen = false;
       this.applyLayout();
+      this.deps.saveWorkflow?.(false);
       return;
     }
     if (action.kind === "off") {
@@ -4965,13 +5210,33 @@ export class AppController {
         return;
       }
       // The start screen is over once the conversation moves to a layout of its own.
-      this.endHome();
+      this.endHome(true);
     }
     this.sidePanel.show(view);
     if (move === "open") {
       this.panelOpen = true;
       this.applyLayout();
+      if (view === "workflow") this.deps.saveWorkflow?.(true);
     }
+  }
+
+  /** `/pet [on|off]`: shows or hides the pet in the header; the choice is remembered. */
+  private runPetCommand(args: ReadonlyArray<string>): void {
+    const word = args[0]?.toLowerCase();
+    if (args.length > 1 || (word !== undefined && word !== "on" && word !== "off")) {
+      this.notice = t("session.c.petUsage");
+      return;
+    }
+    const wanted = word === undefined ? !this.petOn : word === "on";
+    if (wanted === this.petOn) {
+      this.notice = wanted ? t("session.c.petOn") : t("session.c.petOff");
+      return;
+    }
+    this.petOn = wanted;
+    this.deps.savePet?.(wanted);
+    // Without a pinned header the pet has nowhere to be: say so once it is turned on.
+    const pinned = this.deps.split?.active() === true && this.deps.startup?.banner === true;
+    this.notice = wanted && !pinned ? t("session.c.petNoHeader") : null;
   }
 
   /**
@@ -4998,8 +5263,8 @@ export class AppController {
    * task list was folded and the side panel stays.
    */
   onSplitClosed(reason: string, part: ClosedPart = "all"): void {
-    if (part === "all") this.panelOpen = false;
-    if (part !== "nav") this.tasksOn = false;
+    if (part === "all" || part === "panel") this.panelOpen = false;
+    if (part !== "nav" && part !== "panel") this.tasksOn = false;
     if (part === "all" || part === "nav" || part === "tasksNav") this.navOn = false;
     this.notice = reason;
     this.render();
@@ -5028,7 +5293,7 @@ export class AppController {
         return;
       }
       // The start screen is over once the conversation moves to a layout of its own.
-      this.endHome();
+      this.endHome(true);
     }
     this.tasksOn = wanted;
     this.applyLayout();
@@ -5103,7 +5368,7 @@ export class AppController {
         return false;
       }
       // The start screen is over once the conversation moves to a layout of its own.
-      this.endHome();
+      this.endHome(true);
     }
     this.navOn = wanted;
     if (!wanted) this.navFocus = false;
@@ -5111,16 +5376,35 @@ export class AppController {
     return true;
   }
 
-  /** With `deps.sidebar` set, the list opens with the first conversation if the terminal has room. */
+  /**
+   * With `deps.workflow` and `deps.sidebar` set, the workflow panel on the right and the thread list
+   * on the left open with the first conversation, each only if the terminal has room. The
+   * conversation comes first: a terminal too narrow for the panel gets the list alone, and one too
+   * small for either keeps the plain layout. Nothing is said about what did not fit.
+   */
   private autoOpenNav(): void {
-    if (this.navAutoOpened || this.deps.sidebar !== true || this.deps.split === undefined) return;
+    const split = this.deps.split;
+    if (this.navAutoOpened || split === undefined) return;
     this.navAutoOpened = true;
-    const why = this.deps.split.unavailable({
-      panel: this.panelOpen,
-      tasks: this.tasksOn,
-      nav: true,
-    });
-    if (why === null) this.setNavOn(true);
+    let panel = false;
+    if (
+      this.deps.workflow === true &&
+      split.unavailable({ panel: true, tasks: this.tasksOn }) === null
+    ) {
+      // The start screen is over once the conversation moves to a layout of its own.
+      this.endHome(true);
+      this.sidePanel.show("workflow");
+      this.panelOpen = true;
+      panel = true;
+    }
+    if (
+      this.deps.sidebar === true &&
+      split.unavailable({ panel: this.panelOpen, tasks: this.tasksOn, nav: true }) === null
+    ) {
+      this.setNavOn(true);
+    } else if (panel) {
+      this.applyLayout();
+    }
   }
 
   /** Ctrl-O: the thread list opens, or closes. */
@@ -5542,6 +5826,7 @@ export class AppController {
         t("session.c.help.wfAgents"),
         t("session.c.help.wfTasks"),
         t("session.c.help.sidebar"),
+        t("session.c.help.pet"),
       ]),
       "",
       heading("Provider"),
@@ -5685,6 +5970,8 @@ export class AppController {
         }
         const choice = models[at];
         const current = this.currentModel(screen);
+        const inUse = choice !== undefined && current !== null && sameModel(choice, current);
+        if (screen.isDraft && this.draftBase === null) this.draftBase = this.baseModel(screen);
         // The model already in use stays as it is: picking it again would drop its reasoning effort.
         if (choice && !(current !== null && sameModel(choice, current))) {
           // Going back to the thread's own model drops the pick: a turn names the model on screen
@@ -5700,6 +5987,7 @@ export class AppController {
           ) {
             this.effortPick = null;
           }
+          this.rememberModel(screen);
           this.emit(
             this.answered({
               label: t("session.c.modelLabel"),
@@ -5707,11 +5995,20 @@ export class AppController {
             }),
           );
         }
+        if (inUse) this.rememberModel(screen);
         return;
       }
       default:
         return;
     }
+  }
+
+  /** Keeps the model on screen, effort included, as the one the next new thread starts on. */
+  private rememberModel(screen: ChatScreen): void {
+    const selection = this.turnSelection(screen);
+    if (selection === null) return;
+    this.lastModel = resolveEffort(this.deps.link.config, selection, this.effortPick).selection;
+    this.deps.lastModel?.save(this.lastModel);
   }
 
   /** The goal question: Enter saves, Esc leaves without saving, everything else edits the text. */

@@ -1,5 +1,6 @@
 import { cli } from "./cli.ts";
 import { doctor } from "./doctor.ts";
+import { header } from "./header.ts";
 import { link } from "./link.ts";
 import { providers } from "./providers.ts";
 import { render } from "./render.ts";
@@ -10,7 +11,7 @@ export type Language = "en" | "ko";
 
 export const LANGUAGES: ReadonlyArray<Language> = ["en", "ko"];
 
-const AREAS = [cli, doctor, link, providers, render, session, settings] as const;
+const AREAS = [cli, doctor, header, link, providers, render, session, settings] as const;
 
 type AreaEn = (typeof AREAS)[number]["en"];
 type UnionToIntersection<U> = (U extends unknown ? (value: U) => void : never) extends (

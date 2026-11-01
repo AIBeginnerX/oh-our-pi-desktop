@@ -21,6 +21,8 @@ export const SETTING_KEYS = [
   "statusLine",
   "notify",
   "sidebar",
+  "workflow",
+  "pet",
   "language",
 ] as const;
 
@@ -39,6 +41,10 @@ export interface Settings {
   readonly language: Language | null;
   /** The thread list on the left (`/sidebar`) opens by itself with the first conversation; on unless turned off. */
   readonly sidebar: boolean;
+  /** The `/dag-workflow` panel on the right opens by itself with the first conversation; on unless turned off. */
+  readonly workflow: boolean;
+  /** The pet in the pinned header (`/pet`); on unless turned off. */
+  readonly pet: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -50,6 +56,8 @@ export const DEFAULT_SETTINGS: Settings = {
   notify: true,
   language: null,
   sidebar: true,
+  workflow: true,
+  pet: true,
 };
 
 const SYMBOL_VALUES: ReadonlySet<string> = new Set(["auto", "unicode", "ascii"]);
@@ -67,6 +75,8 @@ const VALIDATORS: { readonly [K in SettingKey]: (raw: unknown) => Settings[K] | 
   notify: (raw) => (typeof raw === "boolean" ? raw : undefined),
   language: (raw) => (isLanguage(raw) ? raw : undefined),
   sidebar: (raw) => (typeof raw === "boolean" ? raw : undefined),
+  workflow: (raw) => (typeof raw === "boolean" ? raw : undefined),
+  pet: (raw) => (typeof raw === "boolean" ? raw : undefined),
 };
 
 const EXPECTED: { readonly [K in SettingKey]: () => string } = {
@@ -78,6 +88,8 @@ const EXPECTED: { readonly [K in SettingKey]: () => string } = {
   notify: () => "true | false",
   language: () => "en | ko",
   sidebar: () => "true | false",
+  workflow: () => "true | false",
+  pet: () => "true | false",
 };
 
 const isSettingKey = (key: string): key is SettingKey =>

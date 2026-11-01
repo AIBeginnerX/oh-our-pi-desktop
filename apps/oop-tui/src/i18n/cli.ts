@@ -15,7 +15,7 @@ Usage
   oop pair <link or token>   Connect to a server on another computer (not needed on this one)
   oop config                 Show settings
   oop config get <key>       Show one setting
-  oop config set <key> <value>  Change a setting (theme, symbols, animations, banner, statusLine, notify, language, sidebar)
+  oop config set <key> <value>  Change a setting (theme, symbols, animations, banner, statusLine, notify, sidebar, workflow, pet, language)
   oop config path            Show where the settings file is
   oop doctor                 Check terminal colors, symbols, settings, server and credentials (does not start the app)
   oop stop                   Stop the server the terminal started (never the one the app uses)
@@ -108,7 +108,7 @@ the app it takes the server over and oop reconnects by itself; a turn in progres
   oop pair <링크 또는 토큰>   다른 컴퓨터의 서버에 연결합니다 (이 컴퓨터는 필요 없음)
   oop config                 설정 보기
   oop config get <키>        설정 값 하나 보기
-  oop config set <키> <값>   설정 바꾸기 (theme, symbols, animations, banner, statusLine, notify, language, sidebar)
+  oop config set <키> <값>   설정 바꾸기 (theme, symbols, animations, banner, statusLine, notify, sidebar, workflow, pet, language)
   oop config path            설정 파일 위치
   oop doctor                 터미널 색·심볼·설정·서버·자격증명 파일을 점검합니다 (앱을 띄우지 않음)
   oop stop                   터미널이 띄운 서버를 멈춥니다 (앱이 쓰는 서버는 멈추지 않음)

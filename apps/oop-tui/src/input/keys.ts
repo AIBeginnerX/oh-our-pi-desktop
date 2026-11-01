@@ -27,7 +27,9 @@ export type KeyEvent =
       readonly alt: boolean;
       readonly shift: boolean;
     }
-  | { readonly type: "ctrl"; readonly letter: string };
+  | { readonly type: "ctrl"; readonly letter: string }
+  /** The terminal window gained or lost focus (needs focus reporting, `ESC [ ? 1004 h`). */
+  | { readonly type: "focus"; readonly focused: boolean };
 
 const key = (
   name: KeyName,
@@ -218,6 +220,9 @@ export class KeyParser {
       const named = CSI_FINAL[final];
       if (named !== undefined) {
         return { events: [key(named, mods)], length };
+      }
+      if ((final === "I" || final === "O") && end === 2) {
+        return { events: [{ type: "focus", focused: final === "I" }], length };
       }
       if (final === "~") {
         const tilde = TILDE_KEYS[String(first)];

@@ -9,7 +9,7 @@ const WORDMARK_MIN_COLUMNS = 80;
 const GAP = "   ";
 
 /** Four rows of half blocks, drawn for this app: O, O, P. */
-const WORDMARK: ReadonlyArray<string> = [
+export const WORDMARK: ReadonlyArray<string> = [
   " ▄██▄   ▄██▄   ████▄ ",
   "██  ██ ██  ██  ██  ██",
   "██  ██ ██  ██  ████▀ ",
@@ -29,9 +29,10 @@ export interface BannerInput {
   readonly compact?: boolean;
 }
 
-const oneLine = (value: string): string => sanitizeForTerminal(value).replace(/\s+/gu, " ").trim();
+export const oneLine = (value: string): string =>
+  sanitizeForTerminal(value).replace(/\s+/gu, " ").trim();
 
-const homeRelative = (path: string, home: string | null): string => {
+export const homeRelative = (path: string, home: string | null): string => {
   if (home === null || home === "") return path;
   if (path === home) return "~";
   const next = path.charAt(home.length);

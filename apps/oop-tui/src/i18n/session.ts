@@ -154,13 +154,13 @@ export const session = defineMessages(
     "session.c.help.wfAgents":
       "/dag-agents shows this turn's agents (tasks and subagents) in the same panel • if the panel is open it switches instead of closing",
     "session.c.help.wfOpen":
-      "/dag-workflow opens the workflow panel on the right and closes it when typed again (needs 100+ columns)",
+      "/dag-workflow opens the workflow panel on the right and closes it when typed again (needs 100+ columns) • it opens by itself with the first conversation when the terminal is wide enough, and a closed panel stays closed next time (oop config set workflow true|false)",
     "session.c.help.wfPick":
       "/dag-workflow <number>|next|prev picks a flow • live follows the newest flow",
     "session.c.help.wfTasks":
       "/tasks shows this thread's task list at the bottom left and closes it when typed again (needs 16+ rows) • it works independently of the right panel",
     "session.c.help.sidebar":
-      "/sidebar (or Ctrl-O) shows this project's threads in a column on the left, or at the bottom in a narrow terminal, and closes it when typed again • Tab moves into it, ↑/↓ pick, Enter opens that thread, Esc returns to the input • it works with the right panel and /tasks • the choice is remembered (oop config set sidebar true|false)",
+      "/sidebar (or Ctrl-O) shows this project's threads in a column on the left, or at the bottom in a narrow terminal, and closes it when typed again (it opens by itself with the first conversation) • Tab moves into it, ↑/↓ pick, Enter opens that thread, Esc returns to the input • it works with the right panel and /tasks • the choice is remembered (oop config set sidebar true|false)",
     "session.c.helpLanguage":
       "Display language: oop config set language en|ko (by default it follows your locale)",
     "session.c.helpSettings": "Settings",
@@ -193,6 +193,8 @@ export const session = defineMessages(
       "The message is {over} characters over the {limit}-character limit. Shorten it or split it into several messages.",
     "session.c.modelLabel": "Model",
     "session.c.modelUnusable": "The selected model cannot be used. Pick another with /model.",
+    "session.c.lastModelGone":
+      "The model you used last ({model}) is not available; using the default. Change it with /model.",
     "session.c.moreAtLeast": "{left}+ earlier messages · /history",
     "session.c.moreExact": "{left} earlier message(s) · /history",
     "session.c.moreReleases": "and {count} more release(s)",
@@ -591,12 +593,12 @@ export const session = defineMessages(
     "session.c.help.wfAgents":
       "/dag-agents 로 같은 창에 이번 턴의 에이전트(작업·서브에이전트)를 보입니다 • 창이 열려 있으면 닫지 않고 바꿉니다",
     "session.c.help.wfOpen":
-      "/dag-workflow 로 오른쪽에 작업 흐름 창을 열고, 다시 치면 닫습니다 (폭 100칸 이상)",
+      "/dag-workflow 로 오른쪽에 작업 흐름 창을 열고, 다시 치면 닫습니다 (폭 100칸 이상) • 터미널이 충분히 넓으면 첫 대화와 함께 저절로 열리고, 닫아 두면 다음에도 닫힌 채로 시작합니다 (oop config set workflow true|false)",
     "session.c.help.wfPick": "/dag-workflow <번호>|next|prev 흐름 고르기 • live 최신 흐름 따라가기",
     "session.c.help.wfTasks":
       "/tasks 로 왼쪽 아래에 이 스레드의 작업 목록을 보이고, 다시 치면 닫습니다 (높이 16줄 이상) • 오른쪽 창과 따로 쓸 수 있습니다",
     "session.c.help.sidebar":
-      "/sidebar (또는 Ctrl-O) 로 이 프로젝트의 스레드를 왼쪽 열에 보이고(좁은 터미널에서는 아래쪽), 다시 치면 닫습니다 • Tab 으로 목록에 들어가 ↑/↓ 로 고르고 Enter 로 그 스레드를 열며 Esc 로 입력창으로 돌아옵니다 • 오른쪽 창, /tasks 와 함께 쓸 수 있습니다 • 선택은 기억됩니다 (oop config set sidebar true|false)",
+      "/sidebar (또는 Ctrl-O) 로 이 프로젝트의 스레드를 왼쪽 열에 보이고(좁은 터미널에서는 아래쪽), 다시 치면 닫습니다 (첫 대화와 함께 저절로 열립니다) • Tab 으로 목록에 들어가 ↑/↓ 로 고르고 Enter 로 그 스레드를 열며 Esc 로 입력창으로 돌아옵니다 • 오른쪽 창, /tasks 와 함께 쓸 수 있습니다 • 선택은 기억됩니다 (oop config set sidebar true|false)",
     "session.c.helpLanguage":
       "표시 언어: oop config set language en|ko (설정하지 않으면 로캘을 따릅니다)",
     "session.c.helpSettings": "설정",
@@ -629,6 +631,8 @@ export const session = defineMessages(
       "메시지가 상한({limit}자)보다 {over}자 깁니다. 줄이거나 나눠서 보내세요.",
     "session.c.modelLabel": "모델",
     "session.c.modelUnusable": "선택한 모델을 쓸 수 없습니다. /model 로 다시 고르세요.",
+    "session.c.lastModelGone":
+      "마지막에 쓴 모델({model})을 쓸 수 없어 기본 모델로 시작합니다. /model 로 바꿀 수 있습니다.",
     "session.c.moreAtLeast": "더 이전 메시지 {left}개 이상 · /history",
     "session.c.moreExact": "더 이전 메시지 {left}개 · /history",
     "session.c.moreReleases": "외 {count}개 릴리스",

@@ -45,6 +45,18 @@ describe("settingsFilePath", () => {
   });
 });
 
+describe("workflow and pet settings", () => {
+  it("are on by default and read only booleans from the file", () => {
+    expect(resolveSettings({}, {}).settings).toMatchObject({ workflow: true, pet: true });
+    NodeFS.writeFileSync(file, JSON.stringify({ workflow: false, pet: false }));
+    expect(readSettings(file).values).toEqual({ workflow: false, pet: false });
+    NodeFS.writeFileSync(file, JSON.stringify({ workflow: "no", pet: 1 }));
+    const read = readSettings(file);
+    expect(read.values).toEqual({});
+    expect(read.warnings).toHaveLength(2);
+  });
+});
+
 describe("sidebar setting", () => {
   it("is on by default, takes true or false, and warns about anything else", () => {
     NodeFS.writeFileSync(file, JSON.stringify({ sidebar: true }));
@@ -124,6 +136,8 @@ describe("resolveSettings", () => {
         notify: true,
         language: null,
         sidebar: true,
+        workflow: true,
+        pet: true,
       },
       fromEnv: [],
     });
@@ -318,6 +332,13 @@ describe("runConfigCommand", () => {
     return { code, out, err };
   };
 
+  it("sets and gets the workflow and pet settings", () => {
+    expect(run({ action: "set", key: "pet", value: "off" }).out).toEqual(["pet = false"]);
+    expect(run({ action: "set", key: "workflow", value: "off" }).out).toEqual(["workflow = false"]);
+    expect(run({ action: "get", key: "pet" }).out).toEqual(["false"]);
+    expect(run({ action: "set", key: "pet", value: "maybe" }).code).toBe(2);
+  });
+
   it("prints the settings file path", () => {
     expect(run({ action: "path" })).toEqual({ code: 0, out: [file], err: [] });
   });
@@ -334,6 +355,8 @@ describe("runConfigCommand", () => {
       "statusLine = auto",
       "notify = true",
       "sidebar = true",
+      "workflow = true",
+      "pet = true",
       "language = (기본)",
     ]);
   });

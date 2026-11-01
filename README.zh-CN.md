@@ -200,7 +200,7 @@ _Usage：各提供商的 token 和估算费用历史。_
 _终端应用（`oop`）：在终端中对话的屏幕录制。_
 
 - **应用关闭时也能工作。** 桌面应用没有运行时，`oop` 会把应用自带的服务器作为后台进程启动。你打开应用后，应用会接管该服务器，`oop` 自动重新连接。两者使用同一个数据文件夹（`~/.oop-desktop`），因此线程是共享的。应用接管的那一刻正在运行的回合会被中断。关闭 `oop` 后服务器仍在运行，用 `oop stop` 结束它。
-- **斜杠命令。** 输入 `/` 会弹出菜单：`/model`、`/mode`、`/plan`、`/implement`、`/goal`、`/diff`、`/undo`、`/history`、`/tasks`、`/dag-agents`、`/dag-workflow` 等。`/diff` 显示一个回合改了什么，`/undo` 回退上一个回合，`/tasks` 和 `/dag-agents` 在对话旁显示任务列表和当前回合的智能体。
+- **斜杠命令。** 输入 `/` 会弹出菜单：`/model`、`/mode`、`/plan`、`/implement`、`/goal`、`/diff`、`/undo`、`/history`、`/tasks`、`/dag-agents`、`/dag-workflow` 等。`/diff` 显示一个回合改了什么，`/undo` 回退上一个回合，`/tasks` 和 `/dag-agents` 在对话旁显示任务列表和当前回合的智能体。终端足够宽时，任务列表和 `/dag-workflow` 面板会自动打开，徽标、状态和一只小宠物固定在对话上方；`oop config set workflow false` 和 `oop config set pet false` 可关闭面板和宠物。
 - **消息队列。** 回合运行期间发送的消息按线程排队等待。队列只在 `oop` 打开期间保留。
 - **终端响铃。** 回合结束，或在等待审批或回答时会响铃。用 `oop config set notify false` 关闭。
 - **英语和韩语。** 终端应用遵循 `language` 设置；设置为空时遵循系统区域设置（`oop config set language en` 或 `ko`）。
