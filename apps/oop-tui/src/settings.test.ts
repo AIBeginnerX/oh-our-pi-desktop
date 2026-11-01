@@ -45,6 +45,18 @@ describe("settingsFilePath", () => {
   });
 });
 
+describe("sidebar setting", () => {
+  it("is on by default, takes true or false, and warns about anything else", () => {
+    NodeFS.writeFileSync(file, JSON.stringify({ sidebar: true }));
+    expect(readSettings(file).values).toEqual({ sidebar: true });
+    NodeFS.writeFileSync(file, JSON.stringify({ sidebar: "yes" }));
+    const read = readSettings(file);
+    expect(read.values).toEqual({});
+    expect(read.warnings).toHaveLength(1);
+    expect(resolveSettings({}, {}).settings.sidebar).toBe(true);
+  });
+});
+
 describe("readSettings", () => {
   it("has nothing to say about a missing file", () => {
     expect(readSettings(file)).toEqual({ values: {}, warnings: [], damaged: false });
@@ -111,6 +123,7 @@ describe("resolveSettings", () => {
         statusLine: "auto",
         notify: true,
         language: null,
+        sidebar: true,
       },
       fromEnv: [],
     });
@@ -320,6 +333,7 @@ describe("runConfigCommand", () => {
       "banner = false",
       "statusLine = auto",
       "notify = true",
+      "sidebar = true",
       "language = (기본)",
     ]);
   });

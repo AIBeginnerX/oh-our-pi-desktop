@@ -160,6 +160,12 @@ try {
     if (-not (Get-Content -LiteralPath $command -Raw).Contains("rem oop-desktop-terminal-launcher")) { throw "The repository terminal command was not replaced." }
     Write-Host "PASS the repository's own terminal command is replaced"
 
+    # What install-terminal.ps1 writes is ours to replace too.
+    [IO.File]::WriteAllText($command, "@echo off`r`nrem oop-terminal-launcher (written by install-terminal.ps1; safe to delete)`r`n")
+    & $script
+    if (-not (Get-Content -LiteralPath $command -Raw).Contains("rem oop-desktop-terminal-launcher")) { throw "The terminal-only command was not replaced." }
+    Write-Host "PASS the terminal-only command from install-terminal.ps1 is replaced"
+
     # cmd.exe reads a batch file in the console's code page, so a non-ASCII user folder must reach
     # it as %LOCALAPPDATA%, never as text. The characters are built here to keep this file ASCII.
     $hangul = [string][char]0xD55C + [char]0xAE00

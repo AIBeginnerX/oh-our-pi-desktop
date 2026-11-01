@@ -1,6 +1,7 @@
 import { stripControlSequences, visibleWidth } from "../text/width.ts";
 import { truncateStyled, wrapStyled } from "../text/wrap.ts";
 import type { RegionFrame, Scheduler, TerminalOutput } from "./liveRegion.ts";
+import { MIN_NAV_CONVERSATION, navBottomRows, navColumns, navUnavailable } from "./navPane.ts";
 import { tasksUnavailable } from "./tasksPane.ts";
 import { t } from "../i18n/index.ts";
 
@@ -35,6 +36,8 @@ const RESET = "\u001b[0m";
 const LINE_BREAK = /\r\n|\r|\n/gu;
 
 export interface SplitLayout {
+  /** Cells of the thread list on the far left; 0 when it is not in that column. */
+  readonly nav: number;
   /** Cells of the conversation column, the one next to the divider included. */
   readonly left: number;
   /** Cells of the side panel; 0 while the panel is closed. */
@@ -42,15 +45,24 @@ export interface SplitLayout {
 }
 
 /**
- * The conversation takes the left, then the divider (one cell), then the panel; the last column is
- * left empty so a full row never sits in a pending-wrap state. With the panel closed the
- * conversation takes everything but that last column.
+ * The thread list (when it is in the left column) takes the far left, then a divider; the
+ * conversation follows, then a divider and the panel; the last column is left empty so a full row
+ * never sits in a pending-wrap state. With the panel closed the conversation takes everything but
+ * that last column.
  */
-export const splitLayout = (columns: number, side = true): SplitLayout => {
-  if (!side) return { left: Math.max(10, columns - 1), panel: 0 };
-  const panel = Math.min(72, Math.max(36, Math.floor(columns * 0.38)));
-  return { left: Math.max(10, columns - 2 - panel), panel };
+export const splitLayout = (columns: number, side = true, nav = 0): SplitLayout => {
+  const used = nav > 0 ? nav + 1 : 0;
+  if (!side) return { nav, left: Math.max(10, columns - 1 - used), panel: 0 };
+  const panel = Math.min(72, Math.max(36, Math.floor((columns - used) * 0.38)));
+  return { nav, left: Math.max(10, columns - 2 - panel - used), panel };
 };
+
+/**
+ * Where the thread list sits: in a column of its own on the left when the conversation keeps a
+ * usable width beside it (the side panel counted), else under the conversation.
+ */
+export const navPlacement = (columns: number, side: boolean): "left" | "bottom" =>
+  splitLayout(columns, side, navColumns(columns)).left >= MIN_NAV_CONVERSATION ? "left" : "bottom";
 
 /** What the alternate screen is asked to show; each part has its own least size. */
 export interface SplitParts {
@@ -58,6 +70,8 @@ export interface SplitParts {
   readonly panel: boolean;
   /** The task list under the conversation (`/tasks`). */
   readonly tasks: boolean;
+  /** The thread list (`/sidebar`), on the left or, in a narrow terminal, under the conversation. */
+  readonly nav?: boolean;
 }
 
 /** Why the alternate screen cannot show `parts` at this size; null when it can. */
@@ -74,6 +88,10 @@ export const splitUnavailable = (
       return t("render.split.tooShort", { min: MIN_SPLIT_ROWS, now: rows });
     }
   }
+  if (parts.nav) {
+    const why = navUnavailable(columns, rows);
+    if (why !== null) return why;
+  }
   return parts.tasks ? tasksUnavailable(columns, rows) : null;
 };
 
@@ -86,6 +104,8 @@ interface HistoryEntry {
 interface Painted {
   readonly left: ReadonlyArray<string>;
   readonly panel: ReadonlyArray<string>;
+  readonly nav: ReadonlyArray<string>;
+  readonly navCols: number;
   readonly divider: string;
   readonly side: boolean;
   readonly cursor: { readonly row: number; readonly col: number } | null;
@@ -120,6 +140,8 @@ export class SplitRegion {
   private side = true;
   /** The task list under the conversation; none when empty. */
   private taskLines: ReadonlyArray<string> = [];
+  /** The thread list; null while it is off. */
+  private navLines: ReadonlyArray<string> | null = null;
   private history: HistoryEntry[] = [];
   /** Entries before this one were scrolled out of view with Ctrl-L; `leave` still hands them back. */
   private viewFrom = 0;
@@ -158,24 +180,59 @@ export class SplitRegion {
     return this.mode === "suspended";
   }
 
+  /** Whether the thread list is in a column of its own, and not under the conversation. */
+  private navLeft(columns: number): boolean {
+    return this.navLines !== null && navPlacement(columns, this.side) === "left";
+  }
+
+  /** Rows under the conversation: the thread list when it sits there, then the task list. */
+  private bottomRows(columns: number): number {
+    const nav = this.navLines !== null && !this.navLeft(columns) ? this.navLines.length : 0;
+    return nav + this.taskLines.length;
+  }
+
+  private layout(columns: number): SplitLayout {
+    return splitLayout(columns, this.side, this.navLeft(columns) ? navColumns(columns) : 0);
+  }
+
   /** Tallest live frame the left column can hold; the viewport keeps a few rows above it. */
   maxRows(): number {
-    return Math.max(3, this.out.rows() - this.taskLines.length - MIN_VIEWPORT_ROWS);
+    const columns = this.out.columns();
+    return Math.max(3, this.out.rows() - this.bottomRows(columns) - MIN_VIEWPORT_ROWS);
   }
 
   /** Columns a line of the conversation may use. */
   usableColumns(): number {
-    return Math.max(10, splitLayout(this.out.columns(), this.side).left - 1);
+    return Math.max(10, this.layout(this.out.columns()).left - 1);
   }
 
   /** Size of the side panel, for what is drawn in it. */
   panelSize(): { readonly columns: number; readonly rows: number } {
-    return { columns: splitLayout(this.out.columns(), this.side).panel, rows: this.out.rows() };
+    return { columns: this.layout(this.out.columns()).panel, rows: this.out.rows() };
+  }
+
+  /** Where the thread list goes at this size and how big it is, for what is drawn in it. */
+  navSize(): {
+    readonly placement: "left" | "bottom";
+    readonly columns: number;
+    readonly rows: number;
+  } {
+    const columns = this.out.columns();
+    const rows = this.out.rows();
+    if (navPlacement(columns, this.side) === "left") {
+      return { placement: "left", columns: navColumns(columns), rows };
+    }
+    const layout = splitLayout(columns, this.side);
+    return {
+      placement: "bottom",
+      columns: Math.max(10, layout.left - 1),
+      rows: navBottomRows(rows, this.taskLines.length > 0),
+    };
   }
 
   /** What the alternate screen shows now, for the size check on a resize. */
   parts(): SplitParts {
-    return { panel: this.side, tasks: this.taskLines.length > 0 };
+    return { panel: this.side, tasks: this.taskLines.length > 0, nav: this.navLines !== null };
   }
 
   /** Switches to the alternate screen. */
@@ -211,6 +268,7 @@ export class SplitRegion {
     this.panelLines = [];
     this.side = true;
     this.taskLines = [];
+    this.navLines = null;
     return lines;
   }
 
@@ -284,6 +342,29 @@ export class SplitRegion {
       return;
     }
     this.taskLines = next;
+    this.requestPaint();
+  }
+
+  /**
+   * Replaces the thread list; null turns it off, and any list turns it on, which changes the width
+   * of the conversation and so draws the whole screen again. The same lines cause no paint.
+   */
+  setNav(lines: ReadonlyArray<string> | null): void {
+    const next =
+      lines === null
+        ? null
+        : lines.map((line) => stripControlSequences(line.replace(LINE_BREAK, " ")));
+    const before = this.navLines;
+    if (
+      next !== null &&
+      before !== null &&
+      next.length === before.length &&
+      next.every((l, i) => l === before[i])
+    ) {
+      return;
+    }
+    if (next === null || before === null) this.stale = true;
+    this.navLines = next;
     this.requestPaint();
   }
 
@@ -394,10 +475,16 @@ export class SplitRegion {
     const columns = this.out.columns();
     const rows = this.out.rows();
     const side = this.side;
-    const layout = splitLayout(columns, side);
+    const layout = this.layout(columns);
+    const navCols = layout.nav;
+    const x0 = navCols > 0 ? navCols + 1 : 0;
     const leftLimit = Math.max(10, layout.left - 1);
-    // The task list sits at the foot of the left column; the conversation and its live frame have what is above it.
-    const tasks = this.taskLines.slice(0, Math.max(0, rows - MIN_VIEWPORT_ROWS - 1));
+    // The thread list (when it is not in its own column) and the task list sit at the foot of the
+    // conversation column; the conversation and its live frame have what is above them.
+    const tasks = [
+      ...(this.navLines !== null && navCols === 0 ? this.navLines : []),
+      ...this.taskLines,
+    ].slice(0, Math.max(0, rows - MIN_VIEWPORT_ROWS - 1));
     const leftRows = rows - tasks.length;
     let lines = this.frame.lines.map((line) => truncateStyled(line, leftLimit));
     let cursor = this.frame.cursor;
@@ -413,18 +500,24 @@ export class SplitRegion {
       ...[...this.viewport(top, leftLimit), ...lines].slice(-leftRows),
       ...tasks.map((line) => truncateStyled(line, leftLimit)),
     ].map((line) => cell(line, layout.left));
+    const nav =
+      navCols > 0
+        ? Array.from({ length: rows }, (_, row) =>
+            cell(truncateStyled(this.navLines?.[row] ?? "", navCols), navCols),
+          )
+        : [];
     const panel = side
       ? Array.from({ length: rows }, (_, row) =>
           cell(truncateStyled(this.panelLines[row] ?? "", layout.panel), layout.panel),
         )
       : [];
-    const divider = side ? this.divider() : "";
+    const divider = navCols > 0 || side ? this.divider() : "";
     const place =
       cursor === null
         ? null
         : {
             row: Math.min(leftRows - 1, top + cursor.row),
-            col: Math.min(layout.left - 1, cursor.col),
+            col: x0 + Math.min(layout.left - 1, cursor.col),
           };
 
     const before = this.painted;
@@ -434,28 +527,39 @@ export class SplitRegion {
       this.stale ||
       before.columns !== columns ||
       before.rows !== rows ||
-      before.side !== side
+      before.side !== side ||
+      before.navCols !== navCols
     ) {
       text += CLEAR_SCREEN;
       for (let row = 0; row < rows; row += 1) {
-        text += at(row, 0) + (left[row] as string) + RESET;
+        if (navCols > 0) {
+          text += at(row, 0) + (nav[row] as string) + RESET;
+          text += at(row, navCols) + divider + RESET;
+        }
+        text += at(row, x0) + (left[row] as string) + RESET;
         if (!side) continue;
-        text += at(row, layout.left) + divider + RESET;
-        text += at(row, layout.left + 1) + (panel[row] as string) + RESET;
+        text += at(row, x0 + layout.left) + divider + RESET;
+        text += at(row, x0 + layout.left + 1) + (panel[row] as string) + RESET;
       }
     } else {
       for (let row = 0; row < rows; row += 1) {
-        if (left[row] !== before.left[row]) text += at(row, 0) + (left[row] as string) + RESET;
+        if (navCols > 0 && nav[row] !== before.nav[row]) {
+          text += at(row, 0) + (nav[row] as string) + RESET;
+        }
+        if (navCols > 0 && divider !== before.divider) {
+          text += at(row, navCols) + divider + RESET;
+        }
+        if (left[row] !== before.left[row]) text += at(row, x0) + (left[row] as string) + RESET;
         if (!side) continue;
-        if (divider !== before.divider) text += at(row, layout.left) + divider + RESET;
+        if (divider !== before.divider) text += at(row, x0 + layout.left) + divider + RESET;
         if (panel[row] !== before.panel[row]) {
-          text += at(row, layout.left + 1) + (panel[row] as string) + RESET;
+          text += at(row, x0 + layout.left + 1) + (panel[row] as string) + RESET;
         }
       }
     }
     const sameCursor =
       before !== null && before.cursor?.row === place?.row && before.cursor?.col === place?.col;
-    this.painted = { left, panel, divider, side, cursor: place, columns, rows };
+    this.painted = { left, panel, nav, navCols, divider, side, cursor: place, columns, rows };
     this.stale = false;
     if (text === "" && sameCursor) return;
     const finish = place === null ? HIDE_CURSOR : at(place.row, place.col) + SHOW_CURSOR;

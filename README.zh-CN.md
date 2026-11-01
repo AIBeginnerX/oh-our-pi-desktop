@@ -1,17 +1,23 @@
 # OOP (oh-our-pi)
 
-**一个桌面应用，统一控制你已经在用的编码智能体，还可以在其上叠加可选的多模型团队。**
+**一个桌面应用，搞定所有编码智能体。**
 
-[English](README.md) | [한국어](README.ko.md) | 简体中文 | [日本語](README.ja.md) | [Español](README.es.md)
+开源 · MIT · 本地优先。在一个对话式工作区里控制你已经在用的编码智能体，还可以在其上叠加可选的多模型团队。
+
+[English](README.md) | [한국어](README.ko.md) | 简体中文 | [日本語](README.ja.md) | [Español](README.es.md) | [网站](https://oop-desktop.github.io/)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Platform: macOS arm64 tested](https://img.shields.io/badge/platform-macOS%20arm64%20tested-lightgrey)
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
-![Status: early](https://img.shields.io/badge/status-early-orange)
+[![Release](https://img.shields.io/github/v/release/AIBeginnerX/oh-our-pi-desktop)](https://github.com/AIBeginnerX/oh-our-pi-desktop/releases)
+[![Website](https://img.shields.io/badge/website-oop--desktop.github.io-blue)](https://oop-desktop.github.io/)
 
-OOP 运行在你自己的电脑上，封装你已经装好的编码智能体 CLI（Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code），并为它们提供一个统一的对话式工作区。你可以通过桌面应用、浏览器或手机来使用它。它**不是**托管服务：订阅和 API 密钥都用你自己的，代码始终留在你的电脑上。
+OOP 运行在你自己的电脑上，封装你已经装好的编码智能体 CLI（Codex、Claude Code、Cursor、Grok Build、OpenCode、Antigravity、ZCode、MiniMax Code），并为它们提供一个统一的对话式工作区。你可以通过桌面应用、浏览器、手机或终端来使用它。它**不是**托管服务：订阅和 API 密钥都用你自己的，代码始终留在你的电脑上。
 
 OOP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT 许可）的分支，基于上游 v0.0.44。当前的 OOP 版本见 [`OOP_RELEASE.json`](OOP_RELEASE.json)。非常感谢 T3 Code 团队：这里几乎所有的基础工作都出自他们之手。
+
+[![OOP 导览：桌面应用的简短动态导览（点击打开网站）](docs/screenshots/tour.webp)](https://oop-desktop.github.io/)
+_由真实屏幕录制制作的 OOP 简短导览。点击图片打开网站。_
 
 ## 目录
 
@@ -22,6 +28,7 @@ OOP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 - [平台支持](#平台支持)
 - [环境要求](#环境要求)
 - [安装桌面应用](#安装桌面应用)
+- [仅安装终端应用](#仅安装终端应用)
 - [安装 / 从源码构建](#安装--从源码构建)
 - [从手机连接](#从手机连接)
 - [更新机制](#更新机制)
@@ -38,11 +45,13 @@ OOP 是 T3 Tools Inc. 的 [T3 Code](https://github.com/pingdotgg/t3code)（MIT �
 - **让多个模型分担同一项任务。** OOP Crew 让一个“brain”（大脑）模型把日常工作交给更便宜的 worker，把难题交给 expert，并由 auditor 审查结果。
 - **始终掌控全局。** 四种权限模式、带可恢复检查点的 diff 面板，以及让费用不再出人意料的用量页面。
 - **离开键盘也能工作。** 把手机与运行智能体的电脑配对，随时关注（或指挥）耗时较长的任务。
+- **终端里也能用。** `oop` 以全屏终端应用打开同样的线程。桌面应用关闭时它也能工作，并与桌面应用共用同一个数据文件夹。
 - **一切留在本地。** 项目、提供商登录和智能体的工作都留在你的电脑上。没有 OOP 账号，也没有 OOP 服务器。
 
-适合已经订阅一个或多个编码智能体服务或 API 套餐、能接受早期且未签名的桌面应用，
-并希望使用统一控制界面的开发者。如果你想要一个打磨精良、已签名、可自动更新的产品，
-目前上游项目更合适。
+适合已经订阅一个或多个编码智能体服务或 API 套餐、能接受仍在积极开发中且未签名的桌面应用，
+并希望使用统一控制界面的开发者。已安装的 macOS 和 Windows 应用会自动更新。构建产物
+没有代码签名，也没有经过公证，因此首次启动时系统可能会发出警告；如果你需要已签名、
+已公证的安装程序，OOP 目前不提供。
 
 ### 30 秒速览
 
@@ -62,7 +71,7 @@ _主聊天视图：选择提供商和模型，设置权限模式，并跟进线�
 
 主工作区。每个项目有若干线程；每个线程是与一个提供商、一个模型的对话。输入框里包含模型选择器、权限模式，以及 Crew 和 Goal 控件。
 
-**打开方式：** 添加项目，然后从侧边栏新建线程。
+**打开方式：** 添加项目，然后从侧边栏新建线程。 **Stop** 在结束仍在运行的后台智能体之前会先确认：桌面应用会先询问，终端应用则需要在四秒内按两次 Stop。
 
 ![带有输入框、模型选择器和权限模式的主聊天界面](docs/screenshots/chat.png)
 _聊天：线程时间线下方是带模型选择器和权限模式的输入框。_
@@ -71,7 +80,7 @@ _聊天：线程时间线下方是带模型选择器和权限模式的输入框�
 
 一个聊天，多个模型。聊天自身的模型就是 **brain**（大脑），负责规划并与你交流。**worker** 承担日常工作（搜索、编辑、测试），**expert** 承担高难度的实现，**auditor** 审查改动过文件的轮次。预设有 **OOP pick**（OOP 精选）、**Speed**（速度）、**Quality**（质量）和 **Budget**（预算），也可以按角色单独指定模型。如果某个 crew 模型出错（例如额度用完），OOP 会把任务交给另一个同级别且已登录的模型。20 行及以内、且测试通过的小改动不会被审查。
 
-**适用场景：** 较大的任务，希望大部分工作用便宜的模型完成，再由强模型把关。**打开方式：** 输入框中模型选择器旁边的 **Crew**。Crew 的工作会实时显示在右侧面板的 **Workflows** 和 **Agents** 下。
+**适用场景：** 较大的任务，希望大部分工作用便宜的模型完成，再由强模型把关。**打开方式：** 输入框中模型选择器旁边的 **Crew**。Crew 的工作会实时显示在右侧面板的 **Workflows** 和 **Agents** 下。 **Agents** 看板会显示每个 crew 任务处于已报告、已测试还是已审计，以及它的 token 和费用，并可以停止、打开或重试它。crew 任务可以声明自己可修改的文件，并行任务的范围重叠时 OOP 会发出警告。
 
 ![OOP Crew 看板，展示 brain 模型把任务分派给 worker 和 auditor](docs/screenshots/crew.png)
 _OOP Crew：一个聊天，多个模型，并有实时看板显示谁在做什么。_
@@ -104,7 +113,7 @@ _添加提供商：通过 OpenCode 运行的 Z.AI 和 MiniMax 预设。_
 
 准确查看智能体在某个线程中改了什么，进行审查，并可从每轮结束时创建的检查点恢复。检查点是隐藏的 git 引用，不会弄乱你的分支。
 
-**打开方式：** 右侧面板中的 **Diff** 标签页（位于 git 仓库中的服务器线程）。
+**打开方式：** 右侧面板中的 **Diff** 标签页（位于 git 仓库中的服务器线程）。 在 Diff 面板中，`]` 和 `[` 在文件间切换，`v` 将文件标记为已查看。
 
 ![Diff 面板，显示智能体在线程中所做的改动](docs/screenshots/diff.png)
 _Diff 面板：审查智能体改了什么，并可从检查点恢复。_
@@ -140,12 +149,14 @@ _权限模式：从 Supervised 到 Full access。_
 
 **打开方式：** 输入框中 **Crew** 旁边的 **Goal**。使用 **Stop goal** 结束目标。
 
+两个默认关闭的可选设置对长时间运行有帮助：**继续未完成的计划**会在智能体留着未完成的计划就停下时最多再发送两次后续消息，**安静回合提醒**会在运行中的回合沉默十分钟时通知你。
+
 ![输入框中的 Goal 控件，显示已使用的继续次数](docs/screenshots/goal.png)
 _线程目标：聊天会一直继续，直到目标完成、受阻或被停止。_
 
 ### 聊天中的报告
 
-当回答包含数字或流程时，智能体可以用图表、关键数据卡片、进度条和流程图来呈现，而不是一大段文字。每个图都有 **Source** 按钮，可查看背后的数据。
+当回答包含数字或流程时，智能体可以用图表、关键数据卡片、进度条和流程图来呈现，而不是一大段文字。每个图都有 **Source** 按钮，可查看背后的数据。 图表类型包括柱状、折线、环形、堆叠面积、阶梯线、迷你折线、斜率图、bump 图和流图，每日活动还可以显示为日历热力图。
 
 **试一试：** 让智能体画一张图表或流程图。
 
@@ -170,9 +181,40 @@ _Workflows 面板：实时跟进智能体的工作。_
 ![Usage 页面，显示各提供商的 token 和估算费用历史](docs/screenshots/usage.png)
 _Usage：各提供商的 token 和估算费用历史。_
 
+### 终端应用
+
+`oop` 是在终端里使用的 OOP：在全屏终端应用中选择项目和线程，与智能体对话并回应它的审批请求。它显示与桌面应用相同的线程、提供商和设置。需要 OOP 桌面版 0.0.129 或更高版本，或[仅安装终端应用](#仅安装终端应用)，详见 [`docs/user/terminal-app.md`](docs/user/terminal-app.md)。
+
+它与下面的**内置终端**部分是两回事。内置终端是线程里的 shell，而 `oop` 是在你自己的终端窗口中运行的对话客户端。
+
+**打开方式：** 桌面安装程序会在 macOS 和 Windows 上一并安装 `oop` 命令（Linux AppImage 不包含）。在项目文件夹中打开新的终端窗口并运行 `oop`。如果 shell 找不到它，请把安装文件夹加入 `PATH`（见 [INSTALL.md](INSTALL.md)）。没有桌面应用时，请使用[仅安装终端应用](#仅安装终端应用)。
+
+| 命令 | 作用 |
+| --- | --- |
+| `oop` | 选择项目和线程，然后开始对话。 |
+| `oop --continue` | 继续当前文件夹所属项目的最近一个线程。 |
+| `oop "your message"` | 在当前文件夹所属项目中新建线程并立即发送消息。 |
+| `oop update` | 检查是否有新版本（不会安装任何东西）。 |
+
+![在终端窗口中运行的终端应用（oop）](docs/screenshots/terminal-tour.webp)
+_终端应用（`oop`）：在终端中对话的屏幕录制。_
+
+- **应用关闭时也能工作。** 桌面应用没有运行时，`oop` 会把应用自带的服务器作为后台进程启动。你打开应用后，应用会接管该服务器，`oop` 自动重新连接。两者使用同一个数据文件夹（`~/.oop-desktop`），因此线程是共享的。应用接管的那一刻正在运行的回合会被中断。关闭 `oop` 后服务器仍在运行，用 `oop stop` 结束它。
+- **斜杠命令。** 输入 `/` 会弹出菜单：`/model`、`/mode`、`/plan`、`/implement`、`/goal`、`/diff`、`/undo`、`/history`、`/tasks`、`/dag-agents`、`/dag-workflow` 等。`/diff` 显示一个回合改了什么，`/undo` 回退上一个回合，`/tasks` 和 `/dag-agents` 在对话旁显示任务列表和当前回合的智能体。
+- **消息队列。** 回合运行期间发送的消息按线程排队等待。队列只在 `oop` 打开期间保留。
+- **终端响铃。** 回合结束，或在等待审批或回答时会响铃。用 `oop config set notify false` 关闭。
+- **英语和韩语。** 终端应用遵循 `language` 设置；设置为空时遵循系统区域设置（`oop config set language en` 或 `ko`）。
+- **状态与桌面应用一致。** macOS Apple Silicon 是已测试的目标；Windows 为实验性。
+
+![终端应用的工作流视图](docs/screenshots/terminal-tui-workflow.png)
+_终端应用：工作流视图。_
+
+![显示一个回合所做更改的终端应用 diff](docs/screenshots/terminal-tui-diff.png)
+_终端应用：用 `/diff` 查看一个回合改了什么。_
+
 ### 内置终端
 
-每个线程一个终端，运行在服务器所在的机器上，服务器端保留最多 5,000 行（8 MiB）的回滚内容，因此重新连接后依然存在。
+每个线程一个终端，运行在服务器所在的机器上，服务器端保留最多 5,000 行（8 MiB）的回滚内容，因此重新连接后依然存在。 它与上面的[终端应用](#终端应用)（`oop`）是分开的。
 
 ![聊天线程旁边的内置终端](docs/screenshots/terminal.png)
 _与聊天并排的内置终端。_
@@ -214,6 +256,8 @@ _Settings → Connections：远程访问与配对（配对码已打码）。_
 | 一键安装 / 更新提供商  | 在提供商卡片上安装或更新提供商 CLI                                                    | Settings → Providers                         | Added in OOP（与上游的具体差异未核实）           |
 | Verify macOS build     | 在服务器所在的 Mac 上检查 OOP `.dmg` 的完整性、严格代码签名和启动情况                 | 聊天标题栏 → Verify macOS build              | Added in OOP                                     |
 | 手机连接对话框         | 桌面应用中一键生成手机配对二维码，可选自有中继                                        | 侧边栏 → Connect mobile                      | Added in OOP（仅桌面应用）                       |
+| 终端应用（`oop`） | 面向相同线程的全屏终端应用：斜杠命令、消息队列、响铃；桌面应用关闭时也能工作 | 运行 `oop`（macOS / Windows 桌面安装程序，或仅终端安装程序） | Added in OOP |
+| 界面语言 | 界面支持英语、韩语、日语、简体中文和西班牙语；菜单语言可跟随系统 | Settings，语言选择 | Added in OOP |
 | 自有 Cloudflare 中继   | 你自行部署的 Worker，让手机可以从任何网络访问你的桌面                                 | `infra/oop-relay`                            | Added in OOP，早期                               |
 | 本地文件夹更新器       | 打包后的 OOP 可以从你指定的文件夹中获取更新的安装包                                   | 打包的 macOS / Windows 版本                  | Added in OOP，早期，未经他人测试                 |
 | 多提供商会话           | 跨提供商的线程、轮次和检查点                                                          | 各处                                         | Upstream                                     |
@@ -250,10 +294,10 @@ _Settings → Connections：远程访问与配对（配对码已打码）。_
 
 | 平台                         | 状态                                                          |
 | ---------------------------- | ------------------------------------------------------------- |
-| macOS，Apple Silicon (arm64) | **已测试。** 这是主要目标平台。                               |
-| Windows x64                  | **实验性。** 由维护者构建；未在干净的机器上验证。             |
+| macOS, Apple Silicon (arm64) | **已测试。** 这是主要目标平台。发布工作流在附加 `.dmg` 之前还会安装并启动它。 |
+| Windows x64 | **实验性。** 发布工作流在 Windows 运行器上构建，并安装、启动它；未在干净的机器上手动验证。 |
 | macOS Intel                  | 本分支未测试。macOS 构建脚本会拒绝在 Intel 上运行。           |
-| Linux                        | 本分支未测试。仓库中有上游的打包代码，但不作任何承诺。        |
+| Linux | **未手动验证。** 发布工作流会构建 AppImage，并在无界面环境中安装、启动；但 Linux GUI 本身没有在真实桌面上检查过。不作任何承诺。 |
 | iOS / Android 原生应用       | 本分支未测试。参见[原生应用还是浏览器](#原生应用还是浏览器)。 |
 | 手机浏览器（访问 Web 界面）  | 已按手机尺寸检查 Web 界面；参见[从手机连接](#从手机连接)。    |
 
@@ -291,6 +335,31 @@ curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/
 安装位置、更新、安全和发布前提请参阅简明的[桌面安装指南](INSTALL.md)。v0.0.106
 及更早的源码发布版本均不含二进制文件。请使用 v0.0.107 或更高版本，并确认相应安装程序及
 `.sha256` 文件列在发布页的 **Assets** 中。
+
+在 macOS 和 Windows 上，安装程序还会一并安装 `oop` 终端命令，详见[终端应用](#终端应用)。
+
+## 仅安装终端应用
+
+无需桌面应用。它会安装 `oop` 命令、自带的后台服务器和一份 OOP 专用的 Node.js，不会在系统中安装 Node.js、pnpm 或 git。
+
+**macOS（Apple Silicon）和 Linux（x64 或 arm64，glibc）**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh
+```
+
+**Windows（PowerShell，x64）**
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex
+```
+
+- 安装程序会在安装前校验下载文件的 SHA-256。它安装到你的用户文件夹（`~/.local/share/oop-terminal` 和 `~/.local/bin/oop`；Windows 为 `%LOCALAPPDATA%\oop-terminal`），不会覆盖并非由 OOP 创建的 `oop`，也不会修改 `PATH`：找不到 `oop` 时，它会打印需要添加的确切一行。
+- 下一步：先登录某个提供商 CLI（例如 Claude Code 或 Codex），然后在项目文件夹中运行 `oop`。`oop provider` 会显示哪些提供商已就绪。
+- 更新：再次运行同一条命令，然后运行 `oop stop`，让新的后台服务器启动。`oop update` 只检查新版本，不会安装任何内容。卸载：先运行 `oop stop`，再删除上面两个位置；`~/.oop-desktop` 中的数据会保留。详见 [INSTALL.md](INSTALL.md)。
+- Intel Mac、Windows on ARM 和 musl Linux（例如 Alpine）不受支持，会给出提示后停止。终端压缩包会附在 **Assets** 中列有 `OOP-terminal-…` 文件的发布版本上。
+- **如实说明：** 只有 macOS 路径经过手动试用。Linux 和 Windows 压缩包由发布工作流在 CI 运行器上构建并启动，但没有在真实机器上手动试过。
+- 如果同时安装了桌面应用，二者共用数据文件夹 `~/.oop-desktop`；最后运行的安装程序决定 `oop` 启动哪一份。
 
 ## 安装 / 从源码构建
 
@@ -477,11 +546,11 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
 - **API 密钥**保存在服务器端，也就是你的机器上。Antigravity 的 Gemini API 密钥在设置中以**明文**保存。
 - **切勿提交 `.env` 文件或密钥**，也不要把它们粘贴到 issue 或日志中。
 - **上游安装程序安装的是上游应用，而不是 OOP：** `t3.codes` 的安装脚本、`npx t3`、Homebrew `t3-code`、winget `T3Tools.T3Code`，以及 App Store / Play 商店页面，都属于上游项目。请使用上面的 OOP 桌面安装程序，或从本仓库构建 OOP。
-- **CLI 仍然叫 `t3`**，可能与上游的安装冲突。
+- **服务器 CLI 仍然叫 `t3`**（终端应用是 `oop`），可能与上游的安装冲突。
 - **源码构建产物是临时签名的**，没有 Developer ID，也未经公证。二进制安装程序会验证 SHA-256，不会绕过 Gatekeeper 隔离属性或 SmartScreen。
 - **本地文件夹更新器**信任任何能写入更新文件夹的人；它的 SHA-256 校验只能检测数据损坏。
 
-**遥测。** OOP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（OOP 未内置任何项目密钥）；OOP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true` 以及你自己的 PostHog 项目密钥 `T3CODE_POSTHOG_KEY`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。
+**遥测。** OOP 没有服务器，维护者不会从你的应用收到任何内容。继承自上游的服务器代码中包含一个匿名的 PostHog 使用情况上报器（OOP 未内置任何项目密钥）；OOP **默认将其关闭**，因此除非你主动开启，否则不会发送任何数据。如需开启，请在服务器启动前在其环境中设置 `T3CODE_TELEMETRY_ENABLED=true` 以及你自己的 PostHog 项目密钥 `T3CODE_POSTHOG_KEY`（参见 [`docs/user/telemetry.md`](docs/user/telemetry.md)）。开启后，事件涵盖提供商、模型、推理强度、权限模式、轮次结果、耗时以及主智能体的 token 总量，并与经过哈希的账号或安装标识符关联；据文档所述，其中绝不包含提示词、响应、文件内容、认证令牌或对话 ID。 OOP 启动智能体 CLI 时会关闭它们自带的遥测和错误上报，但 Claude Code 例外：它默认保留自带遥测（Settings 中的开关可将其关闭）；Codex、Grok 和 ZCode 在 Settings → Providers 下各有一个遥测开关。
 
 如需报告安全漏洞，请参见 [SECURITY.md](SECURITY.md)。
 
@@ -511,7 +580,7 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
 OOP 的服务器状态（线程、设置、本地数据库）位于 `~/.oop-desktop/userdata`。桌面二进制程序与这些数据分开安装。提供商的登录信息保存在各提供商 CLI 自己的文件夹中，不在这里。
 
 **如何更新二进制安装版本？**
-退出 OOP，然后重新运行对应的安装命令。用户数据会保留。
+macOS 和 Windows 上已安装的副本（0.0.111 及以后）会自动更新，见[更新机制](#更新机制)。在 Linux 上，或从更旧的版本升级时，请退出 OOP 并重新运行对应的安装命令。用户数据会保留。
 
 **如何重置 OOP？**
 退出应用，然后把 `~/.oop-desktop/userdata` 移到一边（在确定之前不要删除）。OOP 下次启动时会是全新状态。你的项目文件夹不会受影响。
@@ -542,7 +611,7 @@ OOP 本身免费。它所运行的提供商使用你自己的订阅或 API 额�
 
 ## 状态与路线图说明
 
-OOP 尚处于**早期**。难免有 bug。本分支实际测试过的平台只有 macOS Apple Silicon；Windows 是实验性的；Intel Mac、Linux、原生移动应用、推送通知以及付费的 Z.AI / MiniMax 请求均未测试。没有承诺的路线图：维护者修复自己遇到的问题，并在准备就绪时发布新版本。
+OOP **正在积极开发中**：发布持续进行，已安装的 macOS 和 Windows 应用会自动更新。但仍可能有 bug。本分支真正手动测试的平台只有 macOS Apple Silicon；Windows 是实验性的；Intel Mac、Linux、原生手机应用、推送通知以及付费的 Z.AI / MiniMax 请求都未测试。桌面构建没有代码签名，也没有经过公证。没有承诺的路线图：维护者修复自己遇到的问题，并在准备好时发布版本。
 
 ## 贡献
 

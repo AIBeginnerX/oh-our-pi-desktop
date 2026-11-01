@@ -79,6 +79,6 @@ describe("the commands for modes, effort and goals", () => {
 
   it("keeps the menu's order among commands matched by the same kind of match", () => {
     expect(names("pl")[0]).toBe("plan");
-    expect(names("스레드")).toEqual(["goal", "new", "threads", "stats"]);
+    expect(names("스레드")).toEqual(["goal", "new", "threads", "stats", "sidebar"]);
   });
 });

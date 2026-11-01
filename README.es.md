@@ -1,17 +1,23 @@
 # OOP (oh-our-pi)
 
-**Una app de escritorio para controlar los agentes de programación que ya usas, con un equipo opcional de varios modelos por encima.**
+**Una app de escritorio para todos tus agentes de programación.**
 
-[English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | Español
+Código abierto · MIT · Local primero. Controla los agentes de programación que ya usas desde un único espacio de trabajo en forma de chat, con un equipo opcional de varios modelos por encima.
+
+[English](README.md) | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | Español | [Sitio web](https://oop-desktop.github.io/)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Platform: macOS arm64 tested](https://img.shields.io/badge/platform-macOS%20arm64%20tested-lightgrey)
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
-![Status: early](https://img.shields.io/badge/status-early-orange)
+[![Release](https://img.shields.io/github/v/release/AIBeginnerX/oh-our-pi-desktop)](https://github.com/AIBeginnerX/oh-our-pi-desktop/releases)
+[![Website](https://img.shields.io/badge/website-oop--desktop.github.io-blue)](https://oop-desktop.github.io/)
 
-OOP se ejecuta en tu propio ordenador, envuelve las CLI de agentes de programación que ya tienes (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) y les da un único espacio de trabajo en forma de chat. Lo usas desde una app de escritorio, un navegador o tu teléfono. **No** es un servicio alojado: traes tus propias suscripciones y claves de API, y tu código se queda en tu máquina.
+OOP se ejecuta en tu propio ordenador, envuelve las CLI de agentes de programación que ya tienes (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) y les da un único espacio de trabajo en forma de chat. Lo usas desde una app de escritorio, un navegador, tu teléfono o una terminal. **No** es un servicio alojado: traes tus propias suscripciones y claves de API, y tu código se queda en tu máquina.
 
 OOP es un fork de [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc. (licencia MIT), basado en la versión upstream v0.0.44. La versión actual de OOP está en [`OOP_RELEASE.json`](OOP_RELEASE.json). Muchas gracias al equipo de T3 Code: casi toda la base de este proyecto es obra suya.
+
+[![Recorrido de OOP: un breve recorrido animado de la app de escritorio (abre el sitio web)](docs/screenshots/tour.webp)](https://oop-desktop.github.io/)
+_Un breve recorrido por OOP hecho con grabaciones de pantalla reales. Haz clic en la imagen para abrir el sitio web._
 
 ## Contenido
 
@@ -22,6 +28,7 @@ OOP es un fork de [T3 Code](https://github.com/pingdotgg/t3code) de T3 Tools Inc
 - [Plataformas compatibles](#plataformas-compatibles)
 - [Requisitos](#requisitos)
 - [Instalar la app de escritorio](#instalar-la-app-de-escritorio)
+- [Instalar solo la app de terminal](#instalar-solo-la-app-de-terminal)
 - [Instalación / compilación desde el código fuente](#instalación--compilación-desde-el-código-fuente)
 - [Conectar desde tu teléfono](#conectar-desde-tu-teléfono)
 - [Cómo funcionan las actualizaciones](#cómo-funcionan-las-actualizaciones)
@@ -38,12 +45,14 @@ Los agentes de programación son buenos, pero cada uno vive en su propia termina
 - **Deja que varios modelos compartan una tarea.** OOP Crew permite que un modelo "brain" (cerebro) delegue el trabajo rutinario en workers más baratos y el trabajo difícil en un expert, y que un auditor revise el resultado.
 - **Mantén el control.** Cuatro modos de permisos, un panel de diff con checkpoints que puedes restaurar y una página de uso para que los costes no te sorprendan.
 - **Trabaja lejos del teclado.** Empareja tu teléfono con el ordenador que ejecuta los agentes y vigila (o dirige) las tareas largas.
+- **También desde una terminal.** `oop` abre los mismos hilos en una app de terminal a pantalla completa. Funciona con la app de escritorio cerrada y comparte con ella una única carpeta de datos.
 - **Todo en local.** Los proyectos, los inicios de sesión de los proveedores y el trabajo de los agentes se quedan en tu máquina. No hay cuenta de OOP ni servidor de OOP.
 
 Para desarrolladores que ya pagan una o más suscripciones o planes de API de agentes de
-programación, aceptan una aplicación de escritorio temprana y sin firma, y quieren una única
-superficie de control. Si buscas un producto pulido, firmado y con actualización automática, hoy
-encaja mejor el proyecto original (upstream).
+programación, aceptan una aplicación de escritorio sin firma que se desarrolla activamente, y quieren
+una única superficie de control. Las apps instaladas en macOS y Windows se actualizan solas. Las
+compilaciones no están firmadas ni notarizadas, así que tu sistema puede mostrar un aviso en el
+primer arranque; si necesitas instaladores firmados y notarizados, OOP no los ofrece.
 
 ### Recorrido de 30 segundos
 
@@ -63,7 +72,7 @@ Todas las capturas proceden de un perfil de demostración aislado, sin datos per
 
 El espacio de trabajo principal. Cada proyecto tiene hilos; cada hilo es una conversación con un proveedor y un modelo. El compositor contiene el selector de modelo, el modo de permisos y los controles de Crew y Goal.
 
-**Cómo abrirlo:** añade un proyecto y empieza un hilo desde la barra lateral.
+**Cómo abrirlo:** añade un proyecto y empieza un hilo desde la barra lateral. **Stop** comprueba antes de terminar los agentes en segundo plano que siguen en marcha: la app de escritorio pregunta primero, y la app de terminal pide pulsar Stop dos veces en cuatro segundos.
 
 ![Chat principal con compositor, selector de modelo y modo de permisos](docs/screenshots/chat.png)
 _Chat: compositor con selector de modelo y modo de permisos bajo la línea de tiempo del hilo._
@@ -72,7 +81,7 @@ _Chat: compositor con selector de modelo y modo de permisos bajo la línea de ti
 
 Un chat, varios modelos. El modelo propio del chat es el **brain** (cerebro); planifica y habla contigo. Un **worker** (trabajador) se encarga del trabajo rutinario (búsquedas, ediciones, pruebas), un **expert** (experto) se encarga de la implementación difícil y un **auditor** revisa los turnos que modificaron archivos. Los ajustes preestablecidos son **OOP pick**, **Speed** (velocidad), **Quality** (calidad) y **Budget** (presupuesto), y puedes cambiar el modelo de cada rol. Si un modelo del crew falla (por ejemplo, por quedarse sin crédito), OOP pasa la tarea a otro modelo con sesión iniciada del mismo nivel. Los cambios pequeños de 20 líneas o menos que pasan las pruebas no se auditan.
 
-**Cuándo usarlo:** tareas grandes en las que quieres modelos baratos para el grueso del trabajo y un modelo potente para la revisión. **Cómo abrirlo:** **Crew**, junto al selector de modelo en el compositor. El trabajo del Crew se muestra en vivo en **Workflows** y **Agents** en el panel derecho.
+**Cuándo usarlo:** tareas grandes en las que quieres modelos baratos para el grueso del trabajo y un modelo potente para la revisión. **Cómo abrirlo:** **Crew**, junto al selector de modelo en el compositor. El trabajo del Crew se muestra en vivo en **Workflows** y **Agents** en el panel derecho. El tablero **Agents** muestra si cada tarea del crew está informada, probada o auditada, con sus tokens y su coste, y permite detenerla, abrirla o reintentarla. Las tareas del crew pueden declarar los archivos que pueden modificar, y OOP avisa cuando las tareas en paralelo se solapan.
 
 ![Tablero de OOP Crew con un modelo brain delegando en workers y un auditor](docs/screenshots/crew.png)
 _OOP Crew: un chat, varios modelos, con un tablero en vivo de quién hace qué._
@@ -105,7 +114,7 @@ _Add provider: presets de Z.AI y MiniMax que se ejecutan a través de OpenCode._
 
 Mira exactamente qué cambió el agente en un hilo, revísalo y restaura desde el checkpoint creado al final de cada turno. Los checkpoints son referencias de git ocultas, así que no ensucian tus ramas.
 
-**Cómo abrirlo:** la pestaña **Diff** del panel derecho (hilos del servidor en un repositorio git).
+**Cómo abrirlo:** la pestaña **Diff** del panel derecho (hilos del servidor en un repositorio git). En el panel de diff, `]` y `[` pasan de un archivo a otro y `v` marca un archivo como visto.
 
 ![Panel de diff con los cambios hechos por un agente en un hilo](docs/screenshots/diff.png)
 _Panel de diff: revisa lo que cambió el agente y restaura desde los checkpoints._
@@ -141,12 +150,14 @@ Describe qué debe ser cierto cuando el chat termine. Mientras el objetivo siga 
 
 **Cómo abrirlo:** **Goal**, junto a **Crew** en el compositor. Usa **Stop goal** para terminarlo.
 
+Dos ajustes opcionales, ambos desactivados por defecto, ayudan en ejecuciones largas: **Continue unfinished plans** envía hasta dos mensajes de seguimiento cuando un agente se detiene con su plan sin terminar, y **Quiet turn notice** te avisa cuando un turno en curso lleva diez minutos en silencio.
+
 ![Control Goal en el compositor mostrando las continuaciones usadas](docs/screenshots/goal.png)
 _Objetivo del hilo: el chat sigue adelante hasta que el objetivo se cumple, se bloquea o se detiene._
 
 ### Informes en el chat
 
-Cuando una respuesta incluye cifras o un proceso, el agente puede dibujarlo como gráficos, tarjetas de cifras clave, barras de progreso y diagramas de flujo en lugar de un muro de texto. Cada figura tiene un botón **Source** que muestra los datos que hay detrás.
+Cuando una respuesta incluye cifras o un proceso, el agente puede dibujarlo como gráficos, tarjetas de cifras clave, barras de progreso y diagramas de flujo en lugar de un muro de texto. Cada figura tiene un botón **Source** que muestra los datos que hay detrás. Los tipos de gráfico incluyen barras, líneas, anillo, áreas apiladas, línea escalonada, sparkline, pendiente, bump y streamgraph, además de un mapa de calor de calendario para la actividad diaria.
 
 **Pruébalo:** pídele al agente un gráfico o un diagrama.
 
@@ -171,9 +182,40 @@ Uso de tokens, ahorro de caché, desgloses por modelo y coste **estimado** equiv
 ![Página Usage con el historial de tokens y coste estimado por proveedor](docs/screenshots/usage.png)
 _Usage: historial de tokens y coste estimado por proveedor._
 
+### App de terminal
+
+`oop` es OOP en una terminal: una app de terminal a pantalla completa en la que eliges un proyecto y un hilo, conversas con un agente y respondes a sus solicitudes de aprobación. Muestra los mismos hilos, proveedores y ajustes que la app de escritorio. Requiere OOP de escritorio 0.0.129 o posterior, o la [instalación solo de la app de terminal](#instalar-solo-la-app-de-terminal); consulta [`docs/user/terminal-app.md`](docs/user/terminal-app.md).
+
+No es lo mismo que la sección **Terminal integrada** de más abajo. Esa es un shell dentro de un hilo; `oop` es un cliente de chat que se ejecuta en tu propia ventana de terminal.
+
+**Cómo abrirla:** el instalador de escritorio añade el comando `oop` en macOS y Windows (el AppImage de Linux no lo incluye). Abre una ventana de terminal nueva en la carpeta de un proyecto y ejecuta `oop`. Si el shell no lo encuentra, añade la carpeta de instalación a tu `PATH` (consulta [INSTALL.md](INSTALL.md)). Sin la app de escritorio, usa la [instalación solo de la app de terminal](#instalar-solo-la-app-de-terminal).
+
+| Comando | Qué hace |
+| --- | --- |
+| `oop` | Elige un proyecto y un hilo, y luego conversa. |
+| `oop --continue` | Retoma el hilo más reciente del proyecto de esta carpeta. |
+| `oop "your message"` | Abre un hilo nuevo en el proyecto de esta carpeta y envía el mensaje de inmediato. |
+| `oop update` | Comprueba si hay una versión nueva (no instala nada). |
+
+![App de terminal (oop) en una ventana de terminal](docs/screenshots/terminal-tour.webp)
+_La app de terminal (`oop`): una grabación de pantalla de un chat en la terminal._
+
+- **Funciona con la app cerrada.** Si la app de escritorio no está en marcha, `oop` inicia en segundo plano el servidor que viene con ella. Cuando abres la app, esta toma el control de ese servidor y `oop` se reconecta. Ambos usan la misma carpeta de datos (`~/.oop-desktop`), así que los hilos se comparten. Un turno en curso en el momento en que la app toma el control se interrumpe. Cerrar `oop` deja el servidor en marcha; `oop stop` lo detiene.
+- **Comandos con barra.** Escribe `/` para ver un menú: `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-agents`, `/dag-workflow` y más. `/diff` muestra lo que cambió un turno, `/undo` deshace el último turno, y `/tasks` y `/dag-agents` muestran la lista de tareas y los agentes del turno actual junto a la conversación.
+- **Cola de mensajes.** Los mensajes que envías mientras corre un turno esperan en una cola por hilo. La cola solo existe mientras `oop` está abierto.
+- **Campana de la terminal.** Suena cuando un turno termina o espera una aprobación o una respuesta. `oop config set notify false` la desactiva.
+- **Inglés y coreano.** La app de terminal sigue el ajuste `language`, o la configuración regional del sistema cuando el ajuste está vacío (`oop config set language en` o `ko`).
+- **Mismo estado que la app de escritorio.** macOS Apple Silicon es el destino probado; Windows es experimental.
+
+![App de terminal, vista de workflow](docs/screenshots/terminal-tui-workflow.png)
+_App de terminal: vista de workflow._
+
+![App de terminal mostrando el diff de lo que cambió un turno](docs/screenshots/terminal-tui-diff.png)
+_App de terminal: `/diff` muestra lo que cambió un turno._
+
 ### Terminal integrada
 
-Una terminal por hilo en la máquina que ejecuta el servidor, con hasta 5.000 líneas (8 MiB) de historial guardadas en el servidor, así que sobrevive a las reconexiones.
+Una terminal por hilo en la máquina que ejecuta el servidor, con hasta 5.000 líneas (8 MiB) de historial guardadas en el servidor, así que sobrevive a las reconexiones. Es independiente de la [App de terminal](#app-de-terminal) (`oop`) de más arriba.
 
 ![Terminal integrada junto a un hilo de chat](docs/screenshots/terminal.png)
 _Terminal integrada junto al chat._
@@ -215,6 +257,8 @@ _Settings → Connections: acceso remoto y emparejamiento (códigos ocultos)._
 | Instalación / actualización de proveedores con un clic | Instala o actualiza las CLI de los proveedores desde la tarjeta del proveedor                             | Settings → Providers                                  | Added in OOP (diferencia exacta con el upstream sin verificar) |
 | Verify macOS build                                     | Comprueba la integridad de un `.dmg` de OOP, la firma de código estricta y el arranque en el Mac servidor | Encabezado del chat → Verify macOS build              | Added in OOP                                                   |
 | Diálogo de conexión del teléfono                       | QR de emparejamiento del teléfono con un clic para la app de escritorio, con relay propio opcional        | Barra lateral → Connect mobile                        | Added in OOP (solo app de escritorio)                          |
+| App de terminal (`oop`) | App de terminal a pantalla completa para los mismos hilos: comandos con barra, cola de mensajes, campana; funciona con la app de escritorio cerrada | Ejecuta `oop` (instaladores de escritorio de macOS / Windows, o el instalador solo de terminal) | Added in OOP |
+| Idiomas de la interfaz | Interfaz en inglés, coreano, japonés, chino simplificado y español; el idioma del menú puede seguir al sistema | Settings, selector de idioma | Added in OOP |
 | Relay propio en Cloudflare                             | Un Worker que despliegas tú mismo para que un teléfono llegue a tu escritorio desde cualquier red         | `infra/oop-relay`                                     | Added in OOP, temprano                                         |
 | Actualizador desde carpeta local                       | Las compilaciones empaquetadas de OOP pueden recoger paquetes más nuevos de una carpeta que les indiques  | Compilaciones empaquetadas de macOS / Windows         | Added in OOP, temprano, sin probar por terceros                |
 | Sesiones multiproveedor                                | Hilos, turnos y checkpoints entre proveedores                                                             | Por todas partes                                      | Upstream                                                   |
@@ -251,10 +295,10 @@ Instala al menos una CLI de proveedor e inicia sesión antes de empezar un hilo.
 
 | Plataforma                                   | Estado                                                                                                             |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| macOS, Apple Silicon (arm64)                 | **Probada.** Es el objetivo principal.                                                                             |
-| Windows x64                                  | **Experimental.** Compilada por el mantenedor; no verificada en máquinas limpias.                                  |
+| macOS, Apple Silicon (arm64) | **Probado.** Es el destino principal. El workflow de publicación también instala y arranca el `.dmg` antes de adjuntarlo. |
+| Windows x64 | **Experimental.** El workflow de publicación lo compila en un runner de Windows y además lo instala y lo arranca; no verificado a mano en máquinas limpias. |
 | macOS Intel                                  | Sin probar por este fork. El script de compilación de macOS se niega a ejecutarse en Intel.                        |
-| Linux                                        | Sin probar por este fork. El código de empaquetado del upstream está en el repositorio, sin promesas.              |
+| Linux | **No verificado a mano.** El workflow de publicación compila un AppImage y lo instala y arranca sin pantalla; la GUI de Linux en sí no se ha comprobado en un escritorio real. Sin promesas. |
 | App nativa de iOS / Android                  | Sin probar por este fork. Consulta [app nativa o navegador](#app-nativa-o-navegador).                              |
 | Navegador del teléfono (con la interfaz web) | Interfaz web comprobada en tamaño de teléfono; consulta [Conectar desde tu teléfono](#conectar-desde-tu-teléfono). |
 
@@ -293,6 +337,31 @@ Consulta la [guía breve de instalación de escritorio](INSTALL.md) para ver las
 actualizaciones, la seguridad y los requisitos de publicación. La versión v0.0.106 y las
 publicaciones anteriores que solo contienen código fuente no incluyen binarios. Usa v0.0.107 o una
 versión posterior que muestre el instalador correspondiente y su archivo `.sha256` en **Assets**.
+
+En macOS y Windows el instalador también añade el comando de terminal `oop`; consulta [App de terminal](#app-de-terminal).
+
+## Instalar solo la app de terminal
+
+No necesitas la app de escritorio. Esto instala el comando `oop` junto con su propio servidor en segundo plano y una copia privada de Node.js. No instala Node.js, pnpm ni git en tu sistema.
+
+**macOS (Apple Silicon) y Linux (x64 o arm64, glibc)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh
+```
+
+**Windows (PowerShell, x64)**
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex
+```
+
+- El instalador comprueba el SHA-256 de la descarga antes de instalar nada. Instala en tu carpeta de usuario (`~/.local/share/oop-terminal` y `~/.local/bin/oop`, o `%LOCALAPPDATA%\oop-terminal` en Windows), nunca sobrescribe un `oop` que OOP no haya creado y nunca modifica tu `PATH`: si no se encuentra `oop`, muestra la línea exacta que debes añadir.
+- Siguiente paso: inicia sesión en una CLI de proveedor (por ejemplo Claude Code o Codex) y ejecuta `oop` en la carpeta de un proyecto. `oop provider` muestra qué proveedores están listos.
+- Actualizar: ejecuta el mismo comando otra vez y luego `oop stop` para que arranque el nuevo servidor en segundo plano. `oop update` solo comprueba si hay una versión nueva y no instala nada. Desinstalar: `oop stop` y borra las dos ubicaciones anteriores; tus datos en `~/.oop-desktop` se conservan. Consulta [INSTALL.md](INSTALL.md).
+- Los Mac Intel, Windows en ARM y Linux con musl (por ejemplo Alpine) no son compatibles y se detienen con un mensaje. Los archivos de la app de terminal se adjuntan a las versiones que muestran archivos `OOP-terminal-…` en **Assets**.
+- **Estado real:** solo se ha probado a mano la ruta de macOS. Los archivos de Linux y Windows los compila e inicia el flujo de publicación en ejecutores de CI, pero no se han probado a mano en equipos reales.
+- Si la app de escritorio también está instalada, ambas comparten la carpeta de datos `~/.oop-desktop`; el último instalador ejecutado decide qué copia inicia `oop`.
 
 ## Instalación / compilación desde el código fuente
 
@@ -479,11 +548,11 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
 - **Las claves de API** se guardan en el lado del servidor, en tu máquina. La clave de API de Gemini de Antigravity se guarda **en texto plano** en los ajustes.
 - **No subas nunca archivos `.env` ni claves a un commit**, y no los pegues en issues ni en registros.
 - **Los instaladores upstream instalan la app upstream, no OOP:** los scripts de instalación de `t3.codes`, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code` y las fichas de App Store / Play pertenecen al proyecto upstream. Usa el instalador de escritorio de OOP de arriba o compila OOP desde este repositorio.
-- **La CLI sigue llamándose `t3`**, lo que puede chocar con una instalación upstream.
+- **La CLI del servidor sigue llamándose `t3`** (la app de terminal es `oop`), lo que puede chocar con una instalación upstream.
 - **Las compilaciones desde el código fuente están firmadas ad hoc**, sin Developer ID y sin notarización. El instalador binario verifica SHA-256 y no elude la cuarentena de Gatekeeper ni SmartScreen.
 - **El actualizador desde carpeta local** confía en quien pueda escribir en la carpeta de actualización; su comprobación SHA-256 solo detecta corrupción.
 
-**Telemetría.** OOP no tiene servidores y los mantenedores no reciben nada de tu app. El código del servidor heredado del upstream contiene un reportero anónimo de uso con PostHog (OOP no incluye ninguna clave de proyecto); OOP lo deja **desactivado por defecto**, así que no se envía nada salvo que lo actives. Para activarlo, define `T3CODE_TELEMETRY_ENABLED=true` y tu propia clave de proyecto de PostHog en `T3CODE_POSTHOG_KEY` en el entorno del servidor antes de que arranque (consulta [`docs/user/telemetry.md`](docs/user/telemetry.md)). Cuando está activado, los eventos cubren proveedor, modelo, esfuerzo de razonamiento, modo de permisos, resultado del turno, duración y totales de tokens del agente principal, asociados a un identificador de cuenta o instalación con hash, y según la documentación nunca incluyen prompts, respuestas, contenido de archivos, tokens de autenticación ni IDs de conversación.
+**Telemetría.** OOP no tiene servidores y los mantenedores no reciben nada de tu app. El código del servidor heredado del upstream contiene un reportero anónimo de uso con PostHog (OOP no incluye ninguna clave de proyecto); OOP lo deja **desactivado por defecto**, así que no se envía nada salvo que lo actives. Para activarlo, define `T3CODE_TELEMETRY_ENABLED=true` y tu propia clave de proyecto de PostHog en `T3CODE_POSTHOG_KEY` en el entorno del servidor antes de que arranque (consulta [`docs/user/telemetry.md`](docs/user/telemetry.md)). Cuando está activado, los eventos cubren proveedor, modelo, esfuerzo de razonamiento, modo de permisos, resultado del turno, duración y totales de tokens del agente principal, asociados a un identificador de cuenta o instalación con hash, y según la documentación nunca incluyen prompts, respuestas, contenido de archivos, tokens de autenticación ni IDs de conversación. OOP inicia las CLI de los agentes con su propia telemetría y sus informes de errores desactivados, salvo Claude Code, que mantiene su propia telemetría por defecto (un interruptor en Settings la desactiva); Codex, Grok y ZCode tienen cada uno un interruptor de telemetría en Settings → Providers.
 
 Para informar de una vulnerabilidad, consulta [SECURITY.md](SECURITY.md).
 
@@ -513,7 +582,7 @@ Necesitas Node.js 24.x, 24.13.1 o posterior, y pnpm 11.10.0. Se rechazan otras v
 El estado del servidor de OOP (hilos, ajustes, la base de datos local) está en `~/.oop-desktop/userdata`. El binario de escritorio se instala por separado de estos datos. Los inicios de sesión de los proveedores viven en las carpetas propias de la CLI de cada proveedor, no aquí.
 
 **¿Cómo actualizo una instalación binaria?**
-Cierra OOP y vuelve a ejecutar el comando de instalación correspondiente. Tus datos de usuario se conservan.
+Las copias instaladas en macOS y Windows (0.0.111 y posteriores) se actualizan solas; consulta [Cómo funcionan las actualizaciones](#cómo-funcionan-las-actualizaciones). En Linux, o desde una versión anterior, cierra OOP y vuelve a ejecutar el comando de instalación correspondiente. Los datos de usuario se conservan.
 
 **¿Cómo restablezco OOP?**
 Cierra la app y aparta `~/.oop-desktop/userdata` (no lo borres hasta estar seguro). OOP empezará de cero la próxima vez. Las carpetas de tus proyectos no se tocan.
@@ -544,7 +613,7 @@ Consulta [`AGENTS.md`](AGENTS.md) para ver cómo está organizado el código y q
 
 ## Estado y honestidad sobre la hoja de ruta
 
-OOP está en fase **temprana**. Espera errores. macOS con Apple Silicon es la única plataforma que el fork prueba de verdad; Windows es experimental; Mac Intel, Linux, la app móvil nativa, las notificaciones push y las solicitudes de pago de Z.AI / MiniMax están sin probar. No hay una hoja de ruta prometida: el mantenedor arregla lo que se encuentra y publica versiones cuando están listas.
+OOP está **en desarrollo activo**: las versiones se publican con regularidad y las apps instaladas en macOS y Windows se actualizan solas. Aun así, espera errores. macOS Apple Silicon es la única plataforma que el fork prueba realmente a mano; Windows es experimental; Intel Mac, Linux, la app móvil nativa, las notificaciones push y las solicitudes de pago de Z.AI / MiniMax no se han probado. Las compilaciones de escritorio no están firmadas ni notarizadas. No hay hoja de ruta prometida: el mantenedor arregla lo que le toca y publica versiones cuando están listas.
 
 ## Contribuir
 

@@ -1819,18 +1819,20 @@
 
         <p class="hint reveal">
           <span lang="en"
-            >Needs OOP desktop 0.0.129 or newer. The desktop installer adds the
-            <code>oop</code> command on macOS and Windows; see <a href="#install">Install</a>. The
-            terminal app follows the desktop app's status: macOS Apple Silicon is the tested target
-            and Windows is experimental. Its language follows your locale (Korean if it starts with
+            >Needs OOP desktop 0.0.129 or newer, or the terminal-only install. The desktop installer
+            adds the <code>oop</code> command on macOS and Windows, and each platform tab under
+            <a href="#install">Install</a> has a one-line terminal-only command. The terminal app
+            follows the desktop app's status: macOS Apple Silicon is the tested target and Windows
+            is experimental. Its language follows your locale (Korean if it starts with
             <code>ko</code>, English otherwise); set it with
             <code>oop config set language en</code> or <code>ko</code>.</span
           ><span lang="ko"
-            >OOP 데스크톱 0.0.129 이상이 필요합니다. 데스크톱 설치 스크립트가 macOS와 Windows에서
-            <code>oop</code> 명령을 함께 설치합니다. <a href="#install">설치</a>를 참고하세요.
-            터미널 앱도 데스크톱 앱의 상태를 따릅니다. macOS Apple Silicon이 검증 대상이고 Windows는
-            실험 단계입니다. 화면 언어는 로캘을 따르며(<code>ko</code>로 시작하면 한국어, 아니면
-            영어), <code>oop config set language en</code> 또는 <code>ko</code>로 정합니다.</span
+            >OOP 데스크톱 0.0.129 이상 또는 터미널 전용 설치가 필요합니다. 데스크톱 설치 스크립트가
+            macOS와 Windows에서 <code>oop</code> 명령을 함께 설치하며, <a href="#install">설치</a>의
+            각 플랫폼 탭에 터미널 전용 한 줄 명령이 있습니다. 터미널 앱도 데스크톱 앱의 상태를
+            따릅니다. macOS Apple Silicon이 검증 대상이고 Windows는 실험 단계입니다. 화면 언어는
+            로캘을 따르며(<code>ko</code>로 시작하면 한국어, 아니면 영어),
+            <code>oop config set language en</code> 또는 <code>ko</code>로 정합니다.</span
           >
         </p>
       </section>
@@ -3202,6 +3204,42 @@
                 쓰세요.</span
               >
             </p>
+
+            <p class="platform" style="margin-top: 28px">
+              <b
+                ><span lang="en">Terminal app only (no desktop app)</span
+                ><span lang="ko">터미널 앱만 (데스크톱 앱 없이)</span></b
+              >
+              <span class="badge ok"
+                ><span lang="en">tested</span><span lang="ko">검증됨</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >Installs the <code>oop</code> command, its own background server and a private copy
+                of Node.js under <code>~/.local/share/oop-terminal</code> and
+                <code>~/.local/bin/oop</code>. No Node, pnpm or git needed. If <code>oop</code> is
+                not found, the installer prints the line to add to your <code>PATH</code>. Then sign
+                in to a provider CLI and run <code>oop</code>. To update, run it again and then
+                <code>oop stop</code>; to uninstall, run <code>oop stop</code> and delete those two
+                locations. Intel Macs are not supported.</span
+              >
+              <span lang="ko"
+                ><code>oop</code> 명령과 전용 백그라운드 서버, 전용 Node.js 사본을
+                <code>~/.local/share/oop-terminal</code>과 <code>~/.local/bin/oop</code>에
+                설치합니다. Node, pnpm, git이 필요 없습니다. <code>oop</code>을 찾지 못하면
+                <code>PATH</code>에 추가할 줄을 알려 줍니다. 그다음 provider CLI에 로그인하고
+                <code>oop</code>을 실행하세요. 업데이트는 다시 실행한 뒤 <code>oop stop</code>,
+                삭제는 <code>oop stop</code> 후 위 두 위치를 지우면 됩니다. Intel Mac은 지원하지
+                않습니다.</span
+              >
+            </p>
           </div>
 
           <div class="panel" role="tabpanel" id="inst-win" aria-labelledby="itab-win" hidden>
@@ -3231,6 +3269,42 @@
                 않았습니다.</span
               >
             </p>
+
+            <p class="platform" style="margin-top: 28px">
+              <b
+                ><span lang="en">Terminal app only (no desktop app)</span
+                ><span lang="ko">터미널 앱만 (데스크톱 앱 없이)</span></b
+              >
+              <span class="badge warn"
+                ><span lang="en">not verified</span><span lang="ko">미검증</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >Run in PowerShell, Windows x64 only. Installs <code>oop.cmd</code> and a private
+                copy of Node.js under <code>%LOCALAPPDATA%\oop-terminal</code>; no Node, pnpm or git
+                needed. If <code>oop</code> is not found, the installer prints the command that adds
+                the folder to your user <code>PATH</code>. Run <code>oop stop</code> before
+                updating, because Windows does not replace files in use. To uninstall, run
+                <code>oop stop</code> and delete that folder. Windows on ARM is not supported. Not
+                yet verified on a real Windows machine.</span
+              >
+              <span lang="ko"
+                >PowerShell에서 실행하세요(Windows x64만 지원). <code>oop.cmd</code>와 전용 Node.js
+                사본을 <code>%LOCALAPPDATA%\oop-terminal</code>에 설치하며 Node, pnpm, git이 필요
+                없습니다. <code>oop</code>을 찾지 못하면 사용자 <code>PATH</code>에 폴더를 추가하는
+                명령을 알려 줍니다. 사용 중인 파일은 Windows가 바꾸지 못하므로 업데이트 전에
+                <code>oop stop</code>을 실행하세요. 삭제는 <code>oop stop</code> 후 그 폴더를 지우면
+                됩니다. Windows on ARM은 지원하지 않습니다. 실제 Windows 컴퓨터에서는 아직 검증되지
+                않았습니다.</span
+              >
+            </p>
           </div>
 
           <div class="panel" role="tabpanel" id="inst-linux" aria-labelledby="itab-linux" hidden>
@@ -3256,6 +3330,42 @@
                 >AppImage를 <code>~/.local/share/oop-desktop</code>에, 실행 파일을
                 <code>~/.local/bin/oop-desktop</code>에, 메뉴 항목을 함께 설치합니다. GTK와 NSS
                 런타임 라이브러리가 필요하며, Linux GUI는 아직 검증되지 않았습니다.</span
+              >
+            </p>
+
+            <p class="platform" style="margin-top: 28px">
+              <b
+                ><span lang="en">Terminal app only (no desktop app)</span
+                ><span lang="ko">터미널 앱만 (데스크톱 앱 없이)</span></b
+              >
+              <span class="badge warn"
+                ><span lang="en">not verified</span><span lang="ko">미검증</span></span
+              >
+            </p>
+            <div class="code">
+              <pre><code>curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh</code></pre>
+              <button type="button" class="copy" data-copy>
+                <span lang="en">Copy</span><span lang="ko">복사</span>
+              </button>
+            </div>
+            <p class="hint">
+              <span lang="en"
+                >x64 and arm64, glibc distributions only (it needs <code>libatomic1</code>; Alpine
+                is not supported). Installs the <code>oop</code> command, its own background server
+                and a private copy of Node.js under <code>~/.local/share/oop-terminal</code> and
+                <code>~/.local/bin/oop</code>. No Node, pnpm or git needed. Then sign in to a
+                provider CLI and run <code>oop</code>. To update, run it again and then
+                <code>oop stop</code>; to uninstall, run <code>oop stop</code> and delete those two
+                locations. Not yet verified on a real Linux machine.</span
+              >
+              <span lang="ko"
+                >x64와 arm64, glibc 배포판만 지원합니다(<code>libatomic1</code> 필요, Alpine은
+                미지원). <code>oop</code> 명령과 전용 백그라운드 서버, 전용 Node.js 사본을
+                <code>~/.local/share/oop-terminal</code>과 <code>~/.local/bin/oop</code>에 설치하며
+                Node, pnpm, git이 필요 없습니다. 그다음 provider CLI에 로그인하고 <code>oop</code>을
+                실행하세요. 업데이트는 다시 실행한 뒤 <code>oop stop</code>, 삭제는
+                <code>oop stop</code> 후 위 두 위치를 지우면 됩니다. 실제 Linux 컴퓨터에서는 아직
+                검증되지 않았습니다.</span
               >
             </p>
           </div>

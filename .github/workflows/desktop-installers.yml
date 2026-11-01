@@ -353,3 +353,257 @@ jobs:
           else
             echo "Every asset was already attached."
           fi
+
+  # The terminal app (`oop` without the desktop app) is built, verified and attached by jobs of its
+  # own. Nothing above waits for them and they wait for nothing above except `preflight`, so a failure
+  # here never holds back the desktop installers. "Re-run failed jobs" then repeats only what failed,
+  # with the artifacts the other jobs already uploaded.
+  terminal-build:
+    name: Build terminal app ${{ matrix.label }}
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-14
+            platform: mac
+            arch: arm64
+            monitor: t3-resource-monitor
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-macos-arm64.tar.gz
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            monitor: t3-resource-monitor
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-linux-x64.tar.gz
+          - label: Linux arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            monitor: t3-resource-monitor
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-linux-arm64.tar.gz
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            arch: x64
+            monitor: t3-resource-monitor.exe
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-windows-x64.zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: ${{ matrix.platform != 'win' }}
+          run-install: false
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      # The native packages the server keeps external may build from source on Windows.
+      - name: Install Spectre-mitigated Windows runtime
+        if: matrix.platform == 'win'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = & $vswhere -products * -latest -property installationPath
+          if (-not $installPath) { throw "Visual Studio installation not found." }
+          $setup = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+          $process = Start-Process -FilePath $setup -ArgumentList @(
+            "modify", "--installPath", "`"$installPath`"",
+            "--add", "Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre",
+            "--quiet", "--norestart"
+          ) -Wait -PassThru -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Visual Studio Installer failed with exit code $($process.ExitCode)." }
+
+      # scripts/build-terminal-archive.ts imports build-cli-archive.ts, so the scripts package
+      # is part of the filter along with the server and the terminal app.
+      - name: Install terminal app dependencies
+        run: vp install --filter=t3... --filter=oop-tui... --filter=@t3tools/scripts...
+
+      - name: Build the server and the terminal app
+        run: vp run --filter t3 --filter oop-tui build
+
+      - name: Build the resource monitor
+        shell: bash
+        run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml
+
+      # The archive carries the official Node.js that built it (checked against nodejs.org's
+      # SHASUMS256.txt), oop.mjs, the server bundle, and the native packages the server loads.
+      - name: Package the terminal app
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          MONITOR: ${{ matrix.monitor }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          node scripts/build-terminal-archive.ts \
+            --platform "$PLATFORM" \
+            --arch "$ARCH" \
+            --version "$VERSION" \
+            --node-version "$(node -p 'process.versions.node')" \
+            --resource-monitor "native/resource-monitor/target/release/$MONITOR" \
+            --output-dir terminal-out
+          test -s "terminal-out/$ASSET"
+          test -s "terminal-out/$ASSET.sha256"
+          ls -l terminal-out
+
+      - name: Upload terminal archive between jobs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: terminal-${{ matrix.platform }}-${{ matrix.arch }}
+          path: terminal-out/
+          if-no-files-found: error
+          retention-days: 7
+
+  terminal-verify:
+    name: Install and run terminal app ${{ matrix.label }}
+    needs: [preflight, terminal-build]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS arm64
+            runner: macos-14
+            platform: mac
+            arch: arm64
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-macos-arm64.tar.gz
+          - label: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+            arch: x64
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-linux-x64.tar.gz
+          - label: Linux arm64
+            runner: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-linux-arm64.tar.gz
+          - label: Windows x64
+            runner: windows-2025
+            platform: win
+            arch: x64
+            asset: OOP-terminal-${{ needs.preflight.outputs.version }}-windows-x64.zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1
+        with:
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Download the terminal archive built for this release
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: terminal-${{ matrix.platform }}-${{ matrix.arch }}
+          path: verify-input
+
+      # Runs install-terminal.sh / .ps1 against a local mirror of this exact archive, then
+      # `oop --version`, the bundled server (started like `oop` starts it, answering over HTTP, handing
+      # out a pairing token), a reinstall, and removal. Nothing is attached unless every platform passes.
+      - name: Verify install, run, reinstall, and uninstall
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          ASSET: ${{ matrix.asset }}
+        run: |
+          set -euo pipefail
+          node scripts/verify-terminal-install.mjs --archive "verify-input/$ASSET" --version "$VERSION"
+
+  terminal-publish:
+    name: Verify and attach terminal archives
+    needs: [preflight, terminal-build, terminal-verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.preflight.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Download all terminal archives
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: terminal-*
+          path: terminal-input
+          merge-multiple: true
+
+      # Exactly the four expected archives, each with a checksum file that matches its bytes.
+      - name: Check the final release assets
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd terminal-input
+          expected=(
+            "OOP-terminal-$VERSION-macos-arm64.tar.gz"
+            "OOP-terminal-$VERSION-linux-x64.tar.gz"
+            "OOP-terminal-$VERSION-linux-arm64.tar.gz"
+            "OOP-terminal-$VERSION-windows-x64.zip"
+          )
+          for name in "${expected[@]}"; do
+            test -s "$name"
+            sha256sum -c "$name.sha256"
+          done
+          [[ "$(find . -maxdepth 1 -type f | wc -l)" -eq 8 ]] || { echo "Unexpected files in terminal-input." >&2; ls -l; exit 1; }
+
+      # A retry only fills in what is missing: an asset already attached must match these bytes
+      # exactly, and one that differs is never replaced.
+      - name: Verify release and attach missing assets without overwriting
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/tags/v$VERSION:refs/tags/v$VERSION"
+          [[ "$(git rev-list -n 1 "v$VERSION")" == "$SOURCE_SHA" ]] || {
+            echo "Tag v$VERSION moved after the build started; refusing to publish." >&2
+            exit 1
+          }
+          gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null
+          attached="$(gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          mkdir -p attached-assets
+          missing=()
+          for file in terminal-input/*; do
+            name="$(basename "$file")"
+            if grep -Fxq -- "$name" <<<"$attached"; then
+              gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir attached-assets
+              if ! cmp -s "$file" "attached-assets/$name"; then
+                echo "$name is already attached with different bytes; refusing to overwrite." >&2
+                exit 1
+              fi
+              echo "$name is already attached with identical bytes."
+            else
+              missing+=("$file")
+            fi
+          done
+          if ((${#missing[@]} > 0)); then
+            gh release upload "v$VERSION" "${missing[@]}" --repo "$GITHUB_REPOSITORY"
+          else
+            echo "Every terminal asset was already attached."
+          fi

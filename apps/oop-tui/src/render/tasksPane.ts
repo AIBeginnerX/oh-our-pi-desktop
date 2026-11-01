@@ -39,7 +39,7 @@ const oneLine = (value: string): string => sanitizeForTerminal(value).replace(/\
  * take a row each for `… 위로 N개` and `… 아래로 N개`, so a window that touches an end gives its
  * marker row back to the steps.
  */
-const windowOf = (count: number, focus: number, room: number) => {
+export const windowOf = (count: number, focus: number, room: number) => {
   if (count <= room) return { start: 0, size: count };
   const inner = Math.max(1, room - 2);
   const start = Math.max(0, Math.min(focus - Math.floor((inner - 1) / 2), count - inner));

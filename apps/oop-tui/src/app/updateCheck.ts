@@ -1,3 +1,4 @@
+import { hostPlatform } from "../host.ts";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
@@ -33,10 +34,31 @@ const DATE = /^\d{4}-\d{2}-\d{2}$/u;
 /** Whether a string from a server or the network is a plain dotted version such as `0.0.127`. */
 export const isReleaseVersion = (value: string): boolean => VERSION.test(value);
 
-/** How to update the desktop app, in the words of its own menu and buttons. */
-export const updateHowTo = (): string => t("cli.update.howTo");
-/** What to run, in a source checkout, to bring the terminal app up to the version of the desktop app. */
-export const REINSTALL_COMMAND = "sh apps/oop-tui/install.sh";
+/** Whether `oop` runs from the terminal-only install, whose launcher sets this; there is no desktop app there. */
+export const runsFromTerminalInstall = (): boolean => process.env.OOP_TERMINAL_INSTALL === "1";
+
+/** The one-line install command of this platform, which is also how a terminal-only install updates. */
+export const terminalInstallCommand = (platform: NodeJS.Platform = hostPlatform()): string =>
+  platform === "win32"
+    ? "irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex"
+    : "curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh";
+
+/** How to update: the desktop app in the words of its own menu and buttons, a terminal-only install by reinstalling. */
+export const updateHowTo = (terminalInstall: boolean = runsFromTerminalInstall()): string =>
+  terminalInstall
+    ? t("cli.update.howToTerminal", { command: terminalInstallCommand() })
+    : t("cli.update.howTo");
+/**
+ * What to run, from any folder, to bring an older `oop` up to the desktop app: the desktop installer
+ * on macOS and Windows (it also replaces a standalone `oop` with the launcher of the app), the
+ * terminal installer elsewhere.
+ */
+export const reinstallCommand = (platform: NodeJS.Platform = hostPlatform()): string =>
+  platform === "darwin"
+    ? "curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh"
+    : platform === "win32"
+      ? "irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex"
+      : terminalInstallCommand(platform);
 
 /** Whether this process is the desktop app's own runtime, which is how the bundled `oop` is started. */
 export const runsInDesktopApp = (): boolean => process.versions.electron !== undefined;
@@ -322,8 +344,8 @@ export const terminalIsBehind = (terminal: string, app: string | null): boolean 
   app !== null && compareReleaseVersions(terminal, app) < 0;
 
 /**
- * The bundled terminal app is replaced by an app update; only a copy built from a checkout is
- * reinstalled by hand.
+ * The bundled terminal app is replaced by an app update; a copy run any other way is reinstalled
+ * by hand.
  */
 export const terminalBehindText = (
   terminal: string,
@@ -335,7 +357,9 @@ export const terminalBehindText = (
     app,
     fix: inDesktopApp
       ? t("cli.update.behindInApp")
-      : t("cli.update.behindReinstall", { command: REINSTALL_COMMAND }),
+      : t("cli.update.behindReinstall", {
+          command: runsFromTerminalInstall() ? terminalInstallCommand() : reinstallCommand(),
+        }),
   });
 
 /** Most releases the full listings (`/update`, `oop update`) spell out. */

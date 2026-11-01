@@ -38,12 +38,12 @@
         if ($executable -and (Test-Path -LiteralPath $executable -PathType Leaf)) { return $executable }
         return $null
     }
-    # True for a launcher this script wrote, or the oop.cmd that the repository's own terminal
-    # installer writes (it runs a sibling oop.mjs with node).
+    # True for a launcher this script or install-terminal.ps1 wrote, or the oop.cmd that the
+    # repository's own terminal installer writes (it runs a sibling oop.mjs with node).
     function Test-OurOopCommand([string]$path) {
         $text = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
         if (-not $text) { return $false }
-        return $text.Contains("rem $launcherMark") -or ($text.Contains('node "%~dp0oop.mjs" %*'))
+        return $text.Contains("rem $launcherMark") -or $text.Contains("rem oop-terminal-launcher") -or ($text.Contains('node "%~dp0oop.mjs" %*'))
     }
     # The path as a batch file may spell it, or $null when that would need a non-ASCII character.
     # In a batch file % is doubled, except where a variable is meant.

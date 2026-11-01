@@ -1,17 +1,23 @@
 # OOP (oh-our-pi)
 
-**One desktop app to control the coding agents you already use, with an optional multi-model team on top.**
+**One desktop app for every coding agent.**
 
-English | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md)
+Open source · MIT · Local-first. Control the coding agents you already use from one chat-style workspace, with an optional multi-model team on top.
+
+English | [한국어](README.ko.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Website](https://oop-desktop.github.io/)
 
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 ![Platform: macOS arm64 tested](https://img.shields.io/badge/platform-macOS%20arm64%20tested-lightgrey)
 ![Node 24](https://img.shields.io/badge/node-24.x-brightgreen)
-![Status: early](https://img.shields.io/badge/status-early-orange)
+[![Release](https://img.shields.io/github/v/release/AIBeginnerX/oh-our-pi-desktop)](https://github.com/AIBeginnerX/oh-our-pi-desktop/releases)
+[![Website](https://img.shields.io/badge/website-oop--desktop.github.io-blue)](https://oop-desktop.github.io/)
 
-OOP runs on your own computer, wraps the coding-agent CLIs you already have (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) and gives them one chat-style workspace. You use it from a desktop app, a browser, or your phone. It is **not** a hosted service: you bring your own subscriptions and API keys, and your code stays on your machine.
+OOP runs on your own computer, wraps the coding-agent CLIs you already have (Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode, MiniMax Code) and gives them one chat-style workspace. You use it from a desktop app, a browser, your phone, or a terminal. It is **not** a hosted service: you bring your own subscriptions and API keys, and your code stays on your machine.
 
 OOP is a fork of [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc. (MIT licensed), based on upstream v0.0.44. The current OOP version is in [`OOP_RELEASE.json`](OOP_RELEASE.json). Big thanks to the T3 Code team: almost all of the foundation here is their work.
+
+[![OOP tour: a short motion tour of the desktop app (opens the website)](docs/screenshots/tour.webp)](https://oop-desktop.github.io/)
+_A short tour of OOP built from real screen recordings. Click the image to open the website._
 
 ## Contents
 
@@ -22,6 +28,7 @@ OOP is a fork of [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools Inc.
 - [Platform support](#platform-support)
 - [Requirements](#requirements)
 - [Install the desktop app](#install-the-desktop-app)
+- [Install the terminal app only](#install-the-terminal-app-only)
 - [Install / build from source](#install--build-from-source)
 - [Connect from your phone](#connect-from-your-phone)
 - [How updates work](#how-updates-work)
@@ -38,11 +45,13 @@ Coding agents are good, but each one lives in its own terminal or app, with its 
 - **Let several models share a task.** OOP Crew lets one "brain" model hand routine work to cheaper workers, hard work to an expert, and have an auditor review the result.
 - **Stay in control.** Four permission modes, a diff panel with checkpoints you can restore, and a usage page so costs do not surprise you.
 - **Work away from the keyboard.** Pair your phone to the computer that runs the agents and keep an eye on (or steer) long tasks.
+- **Use it from a terminal too.** `oop` opens the same threads in a full-screen terminal app. It works with the desktop app closed and shares one data folder with it.
 - **Keep it local.** Projects, provider logins and agent work stay on your machine. There is no OOP account and no OOP server.
 
 Who it is for: developers who already pay for one or more coding-agent subscriptions or API plans,
-accept an early unsigned desktop app, and want one control surface. If you want a polished, signed,
-auto-updating product, the upstream project is the better fit today.
+are fine with an unsigned desktop app that is under active development, and want one control surface.
+Installed macOS and Windows apps update themselves. The builds are not code-signed or notarized, so your OS
+may warn you on first launch; if you need signed, notarized installers, OOP does not provide them.
 
 ### 30-second tour
 
@@ -62,7 +71,7 @@ All screenshots come from an isolated demo profile with no personal data.
 
 The main workspace. Each project has threads; each thread is a conversation with one provider and model. The composer holds the model picker, the permission mode and the Crew and Goal controls.
 
-**Open it:** add a project, then start a thread from the sidebar.
+**Open it:** add a project, then start a thread from the sidebar. **Stop** checks before it ends background agents that are still running: the desktop app asks first, and the terminal app asks you to press Stop twice within four seconds.
 
 ![Main chat with composer, model picker and permission mode](docs/screenshots/chat.png)
 _Chat: composer with model picker and permission mode below the thread timeline._
@@ -71,7 +80,7 @@ _Chat: composer with model picker and permission mode below the thread timeline.
 
 One chat, several models. The chat's own model is the **brain**; it plans and talks to you. A **worker** takes routine work (searches, edits, tests), an **expert** takes hard implementation, and an **auditor** reviews turns that changed files. Presets are **OOP pick**, **Speed**, **Quality** and **Budget**, and you can override the model per role. If a crew model fails (for example, out of credit), OOP hands the task to another signed-in model of the same level. Small, test-passing changes of 20 lines or fewer are not audited.
 
-**When to use it:** larger tasks where you want cheap models for the bulk and a strong model for review. **Open it:** **Crew** next to the model picker in the composer. Crew work shows live under **Workflows** and **Agents** in the right panel.
+**When to use it:** larger tasks where you want cheap models for the bulk and a strong model for review. **Open it:** **Crew** next to the model picker in the composer. Crew work shows live under **Workflows** and **Agents** in the right panel. The **Agents** board shows whether each crew task is reported, tested or audited, with its tokens and cost, and lets you stop, open or retry it. Crew tasks can declare the files they may change, and OOP warns when parallel tasks overlap.
 
 ![OOP Crew board showing a brain model delegating to workers and an auditor](docs/screenshots/crew.png)
 _OOP Crew: one chat, several models, with a live board of who is doing what._
@@ -104,7 +113,7 @@ _Add provider: Z.AI and MiniMax presets that run through OpenCode._
 
 See exactly what the agent changed in a thread, review it, and restore from the checkpoint taken at the end of each turn. Checkpoints are hidden git refs, so they do not clutter your branches.
 
-**Open it:** the **Diff** tab in the right panel (server threads in a git repository).
+**Open it:** the **Diff** tab in the right panel (server threads in a git repository). In the diff panel, `]` and `[` move between files and `v` marks a file as viewed.
 
 ![Diff panel showing changes made by an agent in a thread](docs/screenshots/diff.png)
 _Diff panel: review what the agent changed, and restore from checkpoints._
@@ -140,12 +149,14 @@ Describe what should be true when the chat is done. While the goal is open, OOP 
 
 **Open it:** **Goal** next to **Crew** in the composer. Use **Stop goal** to end it.
 
+Two optional settings, both off by default, help with long runs: **Continue unfinished plans** sends up to two follow-ups when an agent stops with its plan unfinished, and **Quiet turn notice** tells you when a running turn has been silent for ten minutes.
+
 ![Goal control in the composer showing continuations used](docs/screenshots/goal.png)
 _Thread goal: the chat keeps going until the goal is done, blocked or stopped._
 
 ### Reports in chat
 
-When an answer carries numbers or a process, the agent can draw it as charts, key-figure cards, progress bars and flow diagrams instead of a wall of text. Each figure has a **Source** button showing the data behind it.
+When an answer carries numbers or a process, the agent can draw it as charts, key-figure cards, progress bars and flow diagrams instead of a wall of text. Each figure has a **Source** button showing the data behind it. Chart types include bar, line, donut, stacked area, step line, sparkline, slope, bump and streamgraph, plus a calendar heatmap for daily activity.
 
 **Try it:** ask the agent for a chart or a diagram.
 
@@ -170,9 +181,40 @@ Token use, cache savings, model breakdowns and **estimated** API-equivalent cost
 ![Usage page with token and estimated cost history per provider](docs/screenshots/usage.png)
 _Usage: token and estimated cost history per provider._
 
+### Terminal app
+
+`oop` is OOP in a terminal: a full-screen terminal app where you pick a project and a thread, chat with an agent and answer its approval requests. It shows the same threads, providers and settings as the desktop app. It needs OOP desktop 0.0.129 or newer, or the [terminal-only install](#install-the-terminal-app-only); see [`docs/user/terminal-app.md`](docs/user/terminal-app.md).
+
+This is a different thing from the **Built-in terminal** section below. That one is a shell inside a thread; `oop` is a chat client that runs in your own terminal window.
+
+**Open it:** the desktop installer adds the `oop` command on macOS and Windows (the Linux AppImage does not include it). Open a new terminal window in a project folder and run `oop`. If the shell cannot find it, add the install folder to your `PATH` (see [INSTALL.md](INSTALL.md)). Without the desktop app, use the [terminal-only install](#install-the-terminal-app-only).
+
+| Command | What it does |
+| --- | --- |
+| `oop` | Pick a project and a thread, then chat. |
+| `oop --continue` | Resume the latest thread of the project in this folder. |
+| `oop "your message"` | Open a new thread in this folder's project and send the message at once. |
+| `oop update` | Check for a new release (installs nothing). |
+
+![Terminal app (oop) running in a terminal window](docs/screenshots/terminal-tour.webp)
+_The terminal app (`oop`): a screen recording of a chat in the terminal._
+
+- **Works with the app closed.** If the desktop app is not running, `oop` starts the server bundled with it as a background process. When you open the app, it takes that server over and `oop` reconnects. Both use the same data folder (`~/.oop-desktop`), so threads are shared. A turn running at the moment the app takes over is interrupted. Closing `oop` leaves its server running; `oop stop` ends it.
+- **Slash commands.** Type `/` for a menu: `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-agents`, `/dag-workflow` and more. `/diff` shows what a turn changed, `/undo` rewinds the last turn, and `/tasks` and `/dag-agents` show the task list and the current turn's agents next to the conversation.
+- **Message queue.** Messages you send while a turn runs wait in a queue per thread. The queue lives only while `oop` is open.
+- **Terminal bell.** The bell rings when a turn finishes or waits for an approval or an answer. `oop config set notify false` turns it off.
+- **English and Korean.** The terminal app follows the `language` setting, or your system locale when the setting is empty (`oop config set language en` or `ko`).
+- **Same status as the desktop app.** macOS Apple Silicon is the tested target; Windows is experimental.
+
+![Terminal app, workflow view](docs/screenshots/terminal-tui-workflow.png)
+_Terminal app: workflow view._
+
+![Terminal app showing a diff of what a turn changed](docs/screenshots/terminal-tui-diff.png)
+_Terminal app: `/diff` shows what a turn changed._
+
 ### Built-in terminal
 
-A terminal per thread on the machine that runs the server, with up to 5,000 lines (8 MiB) of scrollback kept on the server, so it survives reconnects.
+A terminal per thread on the machine that runs the server, with up to 5,000 lines (8 MiB) of scrollback kept on the server, so it survives reconnects. It is separate from the [Terminal app](#terminal-app) (`oop`) above.
 
 ![Built-in terminal next to a chat thread](docs/screenshots/terminal.png)
 _Built-in terminal alongside the chat._
@@ -214,6 +256,8 @@ _Settings → Connections: remote access and pairing (codes masked)._
 | One-click provider install / update   | Install or update provider CLIs from the provider card                                     | Settings → Providers                              | Added in OOP (exact delta from upstream unverified) |
 | Verify macOS build                    | Checks an OOP `.dmg` for integrity, strict code signature and startup on the server Mac    | Chat header → Verify macOS build                  | Added in OOP                                        |
 | Phone connect dialog                  | One-click phone pairing QR for the desktop app, optional own relay                         | Sidebar → Connect mobile                          | Added in OOP (desktop app only)                     |
+| Terminal app (`oop`) | Full-screen terminal app for the same threads: slash commands, message queue, bell; works with the desktop app closed | Run `oop` (desktop installers on macOS / Windows, or the terminal-only installer) | Added in OOP |
+| Interface languages | Interface in English, Korean, Japanese, Simplified Chinese and Spanish; the menu language can follow the system | Settings, language picker | Added in OOP |
 | Own Cloudflare relay                  | A Worker you deploy yourself so a phone can reach your desktop from any network            | `infra/oop-relay`                                 | Added in OOP, early                                 |
 | Local-folder updater                  | Packaged OOP builds can pick up newer packages from a folder you point them at             | Packaged macOS / Windows builds                   | Added in OOP, early, untested by others             |
 | Multi-provider sessions               | Threads, turns, checkpoints across providers                                               | Everywhere                                        | Upstream                                        |
@@ -250,10 +294,10 @@ Install at least one provider CLI and sign in before starting a thread.
 
 | Platform                           | Status                                                                                             |
 | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
-| macOS, Apple Silicon (arm64)       | **Tested.** This is the main target.                                                               |
-| Windows x64                        | **Experimental.** Built by the maintainer; not verified on clean machines.                         |
+| macOS, Apple Silicon (arm64) | **Tested.** This is the main target. The release workflow also installs and launches the `.dmg` before attaching it. |
+| Windows x64 | **Experimental.** Built on a Windows runner by the release workflow, which also installs and launches it; not verified by hand on clean machines. |
 | macOS Intel                        | Untested by this fork. The macOS build script refuses to run on Intel.                             |
-| Linux                              | Binary installer Linux GUI not verified; upstream packaging code is in the repo, with no promises. |
+| Linux | **Not verified by hand.** The release workflow builds an AppImage and installs and launches it headless; the Linux GUI itself has not been checked on a real desktop. No promises. |
 | iOS / Android native app           | Untested by this fork. See [native app vs browser](#native-app-or-browser).                        |
 | Phone browser (against the web UI) | Web UI checked at phone size; see [Connect from your phone](#connect-from-your-phone).             |
 
@@ -291,6 +335,31 @@ curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/
 See the concise [desktop installation guide](INSTALL.md) for installation locations, updates,
 security, and release prerequisites. v0.0.106 and earlier source-only releases lack binaries; use
 v0.0.107 or a later release that lists the matching installer and `.sha256` file under **Assets**.
+
+On macOS and Windows the installer also adds the `oop` terminal command; see [Terminal app](#terminal-app).
+
+## Install the terminal app only
+
+No desktop app needed. This installs the `oop` command together with its own background server and a private copy of Node.js. It does not install Node.js, pnpm or git on your system.
+
+**macOS (Apple Silicon) and Linux (x64 or arm64, glibc)**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh
+```
+
+**Windows (PowerShell, x64)**
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex
+```
+
+- The installer checks the download's SHA-256 before it installs anything. It installs into your user folder (`~/.local/share/oop-terminal` and `~/.local/bin/oop`, or `%LOCALAPPDATA%\oop-terminal` on Windows), never overwrites an `oop` that OOP did not create, and never edits your `PATH`: if `oop` is not found it prints the exact line to add.
+- Next: sign in to a provider CLI (for example Claude Code or Codex), then run `oop` in a project folder. `oop provider` shows which providers are ready.
+- Update: run the same command again, then `oop stop` so the new background server starts. `oop update` only checks for a new release and installs nothing. Uninstall: `oop stop`, then delete the two locations above; your data in `~/.oop-desktop` stays. See [INSTALL.md](INSTALL.md).
+- Intel Macs, Windows on ARM and musl Linux (for example Alpine) are not supported and stop with a message. The terminal archives are attached to releases that list `OOP-terminal-…` files under **Assets**.
+- **Honest status:** only the macOS path has been tried by hand. The Linux and Windows archives are built and started by the release workflow on CI runners, but not tried by hand on real machines.
+- If the desktop app is installed too, both share the data folder `~/.oop-desktop`; whichever installer ran last decides which copy `oop` starts.
 
 ## Install / build from source
 
@@ -477,11 +546,11 @@ node scripts/build-oop-update-pkg.mjs --dmg release/macos/OOP-$V-arm64.dmg \
 - **API keys** are stored on the server side, on your machine. The Antigravity Gemini API key is stored **in plain text** in settings.
 - **Never commit `.env` files or keys**, and do not paste them into issues or logs.
 - **Upstream installers install the upstream app, not OOP:** the `t3.codes` install scripts, `npx t3`, Homebrew `t3-code`, winget `T3Tools.T3Code`, and the App Store / Play listings all belong to the upstream project. Use the OOP desktop installer above or build OOP from this repo.
-- **The CLI is still named `t3`**, which can clash with an upstream install.
+- **The server CLI is still named `t3`** (the terminal app is `oop`), which can clash with an upstream install.
 - **Source builds are ad hoc signed**, with no Developer ID and no notarization. The binary installer verifies SHA-256 and does not bypass Gatekeeper quarantine or SmartScreen.
 - **The local-folder updater** trusts whoever can write to the update folder; its SHA-256 check only detects corruption.
 
-**Telemetry.** OOP has no servers and the maintainers receive nothing from your app. The server code inherited from upstream contains an anonymous PostHog usage reporter (OOP ships without a project key); OOP turns it **off by default**, so nothing is sent unless you opt in. To opt in, set `T3CODE_TELEMETRY_ENABLED=true` and your own PostHog project key in `T3CODE_POSTHOG_KEY` in the server's environment before it starts (see [`docs/user/telemetry.md`](docs/user/telemetry.md)). When enabled, events cover provider, model, reasoning effort, permission mode, turn result, duration and main-agent token totals, tied to a hashed account or installation identifier, and per the docs never include prompts, responses, file contents, authentication tokens or conversation IDs.
+**Telemetry.** OOP has no servers and the maintainers receive nothing from your app. The server code inherited from upstream contains an anonymous PostHog usage reporter (OOP ships without a project key); OOP turns it **off by default**, so nothing is sent unless you opt in. To opt in, set `T3CODE_TELEMETRY_ENABLED=true` and your own PostHog project key in `T3CODE_POSTHOG_KEY` in the server's environment before it starts (see [`docs/user/telemetry.md`](docs/user/telemetry.md)). When enabled, events cover provider, model, reasoning effort, permission mode, turn result, duration and main-agent token totals, tied to a hashed account or installation identifier, and per the docs never include prompts, responses, file contents, authentication tokens or conversation IDs. OOP starts agent CLIs with their own telemetry and error reporting turned off, except Claude Code, which keeps its own telemetry by default (a switch in Settings turns it off); Codex, Grok and ZCode each have a telemetry switch under Settings → Providers.
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
@@ -511,7 +580,7 @@ You need Node.js 24.x, 24.13.1 or newer, and pnpm 11.10.0. Other Node majors are
 OOP's server state (threads, settings, the local database) is in `~/.oop-desktop/userdata`. The desktop binary is installed separately from this data. Provider logins live in each provider CLI's own folders, not here.
 
 **How do I update a binary install?**
-Quit OOP, then rerun the matching install command. User data is preserved.
+Installed copies on macOS and Windows (0.0.111 and later) update themselves; see [How updates work](#how-updates-work). On Linux, or from an older version, quit OOP and rerun the matching install command. User data is preserved.
 
 **How do I reset OOP?**
 Quit the app, then move `~/.oop-desktop/userdata` aside (do not delete it until you are sure). OOP starts fresh next time. Your project folders are untouched.
@@ -542,7 +611,7 @@ See [`AGENTS.md`](AGENTS.md) for how the codebase is organized and the conventio
 
 ## Status and roadmap honesty
 
-OOP is **early**. Expect bugs. macOS Apple Silicon is the only platform the fork actually tests; Windows is experimental; Intel Mac, Linux, the native mobile app, push notifications and paid Z.AI / MiniMax requests are untested. There is no promised roadmap: the maintainer fixes what they hit and publishes releases when they are ready.
+OOP is **under active development**: releases ship regularly, and installed macOS and Windows apps update themselves. Expect bugs all the same. macOS Apple Silicon is the only platform the fork actually tests by hand; Windows is experimental; Intel Mac, Linux, the native mobile app, push notifications and paid Z.AI / MiniMax requests are untested. Desktop builds are not code-signed or notarized. There is no promised roadmap: the maintainer fixes what they hit and publishes releases when they are ready.
 
 ## Contributing
 

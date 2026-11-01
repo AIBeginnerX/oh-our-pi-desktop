@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { CheckUpdate, LatestRelease } from "./updateCheck.ts";
 import { runUpdateCommand } from "./updateCommand.ts";
+
+const host = vi.hoisted(() => ({ platform: null as NodeJS.Platform | null }));
+vi.mock("../host.ts", async (original) => {
+  const actual = await original<typeof import("../host.ts")>();
+  return { ...actual, hostPlatform: () => host.platform ?? actual.hostPlatform() };
+});
 
 const INFO: LatestRelease = {
   latest: "0.0.130",
@@ -87,12 +93,15 @@ describe("oop update", () => {
   });
 
   it("measures from the app's version when it answers, and says when the terminal app is older", async () => {
+    host.platform = "darwin";
     const result = await run({ app: "0.0.129", terminal: "0.0.120" });
+    host.platform = null;
     expect(result.out[0]).toBe("현재 버전: 0.0.129");
     expect(result.out[2]).toBe("업데이트 있음: 0.0.129 → 0.0.130");
     expect(result.out.at(-1)).toBe(
-      "터미널 앱 0.0.120 이 앱 0.0.129 보다 오래되었습니다 — 다시 설치: sh apps/oop-tui/install.sh",
+      "터미널 앱 0.0.120 이 앱 0.0.129 보다 오래되었습니다 — 다시 설치: curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh",
     );
+    expect(result.out.join("\n")).not.toContain("apps/oop-tui/install.sh");
     const current = await run({
       app: "0.0.130",
       terminal: "0.0.120",

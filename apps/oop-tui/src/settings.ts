@@ -20,6 +20,7 @@ export const SETTING_KEYS = [
   "banner",
   "statusLine",
   "notify",
+  "sidebar",
   "language",
 ] as const;
 
@@ -36,6 +37,8 @@ export interface Settings {
   readonly notify: boolean;
   /** Null until the user picks one; the locale then decides. */
   readonly language: Language | null;
+  /** The thread list on the left (`/sidebar`) opens by itself with the first conversation; on unless turned off. */
+  readonly sidebar: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -46,6 +49,7 @@ export const DEFAULT_SETTINGS: Settings = {
   statusLine: "auto",
   notify: true,
   language: null,
+  sidebar: true,
 };
 
 const SYMBOL_VALUES: ReadonlySet<string> = new Set(["auto", "unicode", "ascii"]);
@@ -62,6 +66,7 @@ const VALIDATORS: { readonly [K in SettingKey]: (raw: unknown) => Settings[K] | 
     typeof raw === "string" && STATUS_LINE_VALUES.has(raw) ? (raw as StatusLineSetting) : undefined,
   notify: (raw) => (typeof raw === "boolean" ? raw : undefined),
   language: (raw) => (isLanguage(raw) ? raw : undefined),
+  sidebar: (raw) => (typeof raw === "boolean" ? raw : undefined),
 };
 
 const EXPECTED: { readonly [K in SettingKey]: () => string } = {
@@ -72,6 +77,7 @@ const EXPECTED: { readonly [K in SettingKey]: () => string } = {
   statusLine: () => "auto | full | compact | minimal",
   notify: () => "true | false",
   language: () => "en | ko",
+  sidebar: () => "true | false",
 };
 
 const isSettingKey = (key: string): key is SettingKey =>

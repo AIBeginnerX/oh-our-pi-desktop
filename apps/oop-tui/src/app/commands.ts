@@ -7,7 +7,7 @@ import {
   type ModelSelection,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
-  type ProjectId,
+  ProjectId,
   ProviderInstanceId,
   type RuntimeMode,
   type ServerConfig,
@@ -270,6 +270,18 @@ export const interruptCommand = (
 ): ClientOrchestrationCommand => ({
   type: "thread.turn.interrupt",
   threadId,
+  ...stamp(context),
+});
+
+/** Registers a folder as a project; the title is the folder's name. */
+export const projectCreateCommand = (
+  context: CommandContext,
+  input: { readonly projectId: ProjectId; readonly title: string; readonly workspaceRoot: string },
+): ClientOrchestrationCommand => ({
+  type: "project.create",
+  projectId: input.projectId,
+  title: input.title,
+  workspaceRoot: input.workspaceRoot,
   ...stamp(context),
 });
 

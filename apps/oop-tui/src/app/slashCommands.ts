@@ -168,6 +168,17 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     },
   },
   {
+    name: "sidebar",
+    get note() {
+      return t("session.slash.sidebar.note");
+    },
+    aliases: [],
+    takesArgument: true,
+    get usage() {
+      return t("session.slash.sidebar.usage");
+    },
+  },
+  {
     name: "history",
     get note() {
       return t("session.slash.history.note");

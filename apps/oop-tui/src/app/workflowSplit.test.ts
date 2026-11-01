@@ -8,8 +8,10 @@ import {
   emptyThreadMirror,
   type ThreadMirrorState,
 } from "../link/threadMirror.ts";
+import { setLanguage } from "../i18n/index.ts";
 import { LiveRegion, type Scheduler } from "../render/liveRegion.ts";
 import { RegionSwitch } from "../render/regionSwitch.ts";
+import { navBottomRows, navColumns } from "../render/navPane.ts";
 import { SplitRegion, splitLayout } from "../render/splitRegion.ts";
 import { tasksPaneRows } from "../render/tasksPane.ts";
 import { makeStyle, type Style } from "../render/style.ts";
@@ -43,6 +45,7 @@ vi.mock("@t3tools/client-runtime/agent-flow", async (importOriginal) => {
 
 const online: LinkStatus = { phase: "online", attempt: 0, retryAt: null, detail: null };
 const text = (value: string): KeyEvent => ({ type: "text", text: value });
+const ctrl = (letter: string): KeyEvent => ({ type: "ctrl", letter });
 const key = (name: KeyName): KeyEvent => ({
   type: "key",
   name,
@@ -59,6 +62,9 @@ interface Options {
   readonly startup?: boolean;
   /** Builds the controller without the split layout, as a caller that cannot have one would. */
   readonly noSplit?: boolean;
+  /** Settings `sidebar`, and what remembers `/sidebar on|off`. */
+  readonly sidebar?: boolean;
+  readonly saveSidebar?: (on: boolean) => void;
 }
 
 /**
@@ -126,6 +132,8 @@ const harness = (options: Options = {}) => {
     link,
     region,
     ...(options.noSplit ? {} : { split: region }),
+    ...(options.sidebar === undefined ? {} : { sidebar: options.sidebar }),
+    ...(options.saveSidebar === undefined ? {} : { saveSidebar: options.saveSidebar }),
     style: options.style ?? makeStyle(false),
     ...(options.symbols ? { symbols: options.symbols } : {}),
     ticker: (run) => {
@@ -749,7 +757,7 @@ describe("/dag-agents", () => {
     h.press(text("/dag"));
     expect(h.screen()).toContain("dag-agents");
     expect(h.screen()).toContain("dag-workflow");
-    const helped = harness();
+    const helped = harness({ rows: 60 });
     helped.openNewest();
     helped.run("/help");
     expect(helped.screen()).toContain("/dag-agents");
@@ -1517,5 +1525,441 @@ describe("/tasks", () => {
     expect(screen).toContain("-- 작업 1/2");
     expect(screen).toContain("[x] 단계 1");
     expect(screen).toContain("[~] 단계 2");
+  });
+});
+
+describe("/sidebar", () => {
+  type H = ReturnType<typeof harness>;
+  /** The text of the first `width` cells of every row (a wide character is one string, two cells). */
+  const leftEdge = (h: H, width: number) =>
+    Array.from({ length: h.term.rows }, (_, row) => h.term.text(row, 0, width));
+  /** The row of the list that holds `title`, cut to `width` cells; the conversation's own mentions are not it. */
+  const listRow = (h: H, title: string, width = h.term.columns) =>
+    leftEdge(h, width).find((row) => new RegExp(`^[❯ ][◆ ][◐▲ ] ${title}`, "u").test(row)) ?? "";
+  const ruleRow = (h: H, title: string) =>
+    leftEdge(h, h.term.columns).findIndex((row) => row.startsWith(`── ${title}`));
+  const thread = (id: string, title: string, over: Record<string, unknown> = {}) =>
+    makeThreadShell({ id, title, updatedAt: "2026-10-30T08:00:00.000Z", ...over });
+  const ready = (id: string, over: Record<string, unknown> = {}) =>
+    makeThread({ id, session: makeSession("ready", { threadId: id }), ...over });
+
+  it("stays off until asked for, and is a command only where there is a split layout", () => {
+    const h = harness();
+    h.openNewest();
+    expect(h.term.altScreen).toBe(false);
+    h.press(text("/side"));
+    expect(h.screen()).toContain("/sidebar");
+    const bare = harness({ noSplit: true });
+    bare.openNewest();
+    bare.press(text("/side"));
+    expect(bare.screen()).not.toContain("/sidebar");
+  });
+
+  it("puts the project's threads in a full-height left column beside the conversation", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    expect(h.term.altScreen).toBe(true);
+    const width = navColumns(140);
+    // The divider runs the whole height, right after the column.
+    for (let row = 0; row < 40; row += 1) expect(h.term.cell(row, width)).toBe("│");
+    expect(h.term.text(0, 0, width)).toContain("── 스레드");
+    // Newest first; the thread on screen carries the mark of the current one.
+    expect(listRow(h, "최근 스레드", width)).not.toBe("");
+    expect(listRow(h, "최근 스레드", width)).toMatch(/^ ◆ {2}최근 스레드/u);
+    expect(listRow(h, "오래된 스레드", width)).toMatch(/^ {4}오래된 스레드/u);
+    expect(listRow(h, "새 스레드", width)).toMatch(/^ {4}새 스레드/u);
+    // The conversation is to the right of the divider and the cursor is in it.
+    const right = Array.from({ length: 40 }, (_, row) => h.term.text(row, width + 1)).join("\n");
+    expect(right).toContain("예: hello.ts");
+    expect(h.term.cursor.col).toBeGreaterThan(width);
+  });
+
+  it("closes when typed again, and with off, and says what is already so", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.run("/sidebar on");
+    expect(h.screen()).toContain("이미 열려 있습니다");
+    h.run("/sidebar");
+    expect(h.term.altScreen).toBe(false);
+    h.run("/sidebar off");
+    expect(h.screen()).toContain("열려 있지 않습니다");
+    h.run("/sidebar maybe");
+    expect(h.screen()).toContain("사용법: /sidebar [on|off]");
+    expect(h.term.altScreen).toBe(false);
+  });
+
+  it("opens and closes with Ctrl-O too, and remembers the choice", () => {
+    const saved: boolean[] = [];
+    const h = harness({ columns: 140, rows: 40, saveSidebar: (on) => void saved.push(on) });
+    h.openNewest();
+    h.press(ctrl("o"));
+    expect(h.term.altScreen).toBe(true);
+    h.press(ctrl("o"));
+    expect(h.term.altScreen).toBe(false);
+    h.run("/sidebar on");
+    expect(saved).toEqual([true, false, true]);
+  });
+
+  it("opens by itself with the first conversation when the setting is on, if the terminal has room", () => {
+    const h = harness({ columns: 140, rows: 40, sidebar: true });
+    h.openNewest();
+    expect(h.term.altScreen).toBe(true);
+    expect(h.term.text(0, 0, navColumns(140))).toContain("── 스레드");
+    // Closing it by hand is not undone by the next conversation.
+    h.press(ctrl("o"));
+    expect(h.term.altScreen).toBe(false);
+    const narrow = harness({ columns: 28, rows: 40, sidebar: true });
+    narrow.openNewest();
+    expect(narrow.term.altScreen).toBe(false);
+  });
+
+  it("gives the keys to the list with Tab, picks with the arrows, and Esc goes back to the input", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.press(text("draft words"));
+    const width = navColumns(140);
+    expect(h.screen()).toContain("Tab 으로 선택");
+    h.press(key("tab"));
+    expect(h.screen()).toContain("↑↓ Enter Esc");
+    expect(h.term.cursorVisible).toBe(false);
+    // The pick starts on the thread on screen.
+    expect(listRow(h, "최근 스레드", width)).toMatch(/^❯◆ {2}최근 스레드/u);
+    h.press(key("down"));
+    expect(listRow(h, "오래된 스레드", width)).toMatch(/^❯ {3}오래된 스레드/u);
+    // The list ends there: the pick stays on the last row.
+    h.press(key("down"), key("down"));
+    expect(listRow(h, "오래된 스레드", width)).toMatch(/^❯ {3}오래된 스레드/u);
+    h.press(key("home"));
+    expect(listRow(h, "새 스레드", width)).toMatch(/^❯/u);
+    h.press(key("escape"));
+    expect(h.screen()).toContain("Tab 으로 선택");
+    expect(h.term.cursorVisible).toBe(true);
+    // The words in the composer are still there, and typing goes on in them.
+    h.press(text("!"));
+    expect(h.screen()).toContain("draft words!");
+    // Tab again, and Tab leaves; typing a letter leaves too and is typed.
+    h.press(key("tab"), key("tab"));
+    expect(h.screen()).toContain("Tab 으로 선택");
+    h.press(key("tab"), text("x"));
+    expect(h.screen()).toContain("draft words!x");
+    expect(h.screen()).toContain("Tab 으로 선택");
+  });
+
+  it("opens the picked thread with Enter, and what is typed next goes to that thread", async () => {
+    const h = harness({ columns: 140, rows: 40 });
+    const opened = vi.spyOn(h.link, "openThread");
+    const dispatched = vi.spyOn(h.link, "dispatch");
+    h.openNewest();
+    opened.mockClear();
+    h.run("/sidebar");
+    h.press(key("tab"), key("down"), key("enter"));
+    expect(opened).toHaveBeenCalledWith("thread-old");
+    // The list is still up, the keys are back in the input, and the old thread is marked.
+    const width = navColumns(140);
+    expect(h.term.altScreen).toBe(true);
+    expect(listRow(h, "오래된 스레드", width)).toMatch(/^ ◆ {2}오래된 스레드/u);
+    expect(listRow(h, "최근 스레드", width)).toMatch(/^ {4}최근 스레드/u);
+    expect(h.screen()).toContain("Tab 으로 선택");
+    h.deliver(ready("thread-old", { title: "오래된 스레드" }));
+    h.press(text("다음 질문입니다"));
+    h.press(key("enter"));
+    await Promise.resolve();
+    await Promise.resolve();
+    const calls = dispatched.mock.calls as unknown as Array<
+      [{ type: string; threadId?: string; message?: { text: string } }]
+    >;
+    const sent = calls
+      .map(([command]) => command)
+      .filter((command) => command.type === "thread.turn.start");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.threadId).toBe("thread-old");
+    expect(sent[0]?.message?.text).toBe("다음 질문입니다");
+  });
+
+  it("starts the opened thread on a clean view, and the earlier lines still reach the scrollback", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.run("/help");
+    const width = navColumns(140);
+    const right = () =>
+      Array.from({ length: 40 }, (_, row) => h.term.text(row, width + 1)).join("\n");
+    expect(right()).toContain("표시 언어");
+    h.press(key("tab"), key("down"), key("enter"));
+    // The opened thread begins with its own header, and the help is out of its view.
+    expect(right()).toContain("· 오래된 스레드");
+    expect(right()).not.toContain("표시 언어");
+    // Nothing is lost: leaving the layout hands both conversations to the scrollback.
+    h.press(ctrl("o"));
+    const all = h.term.normalText().join("\n");
+    expect(all).toContain("표시 언어");
+    expect(all).toContain("· 오래된 스레드");
+  });
+
+  it("starts a new thread from its row", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    const closed = vi.spyOn(h.link, "closeThread");
+    h.openNewest();
+    h.run("/sidebar");
+    h.press(key("tab"), key("home"), key("enter"));
+    expect(closed).toHaveBeenCalled();
+    const width = navColumns(140);
+    expect(listRow(h, "새 스레드", width)).toMatch(/^ ◆ {2}새 스레드/u);
+    expect(listRow(h, "최근 스레드", width)).toMatch(/^ {4}최근 스레드/u);
+  });
+
+  it("shows pinned threads first with a mark, and running and waiting threads by state", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    const pinned = {
+      pinnedAt: "2026-10-02T00:00:00.000Z",
+      pinOrderKey: "g",
+      updatedAt: "2026-10-01T08:00:00.000Z",
+    };
+    const shellOf = (over: { old?: object; pin?: object } = {}) =>
+      makeSnapshot(
+        [makeProject()],
+        [
+          thread("thread-old", "오래된 스레드", {
+            updatedAt: "2026-10-28T09:00:00.000Z",
+            ...over.old,
+          }),
+          thread("thread-new", "최근 스레드"),
+          thread("thread-pin", "고정한 스레드", { ...pinned, ...over.pin }),
+        ],
+      );
+    h.link.shell = shellOf();
+    h.openNewest();
+    h.run("/sidebar");
+    const width = navColumns(140);
+    const order = leftEdge(h, width)
+      .filter((row) => /^[❯ ][◆ ][◐▲ ] /u.test(row))
+      .map((row) => row.slice(4).trim());
+    expect(order).toEqual(["새 스레드", "고정한 스레드 고정", "최근 스레드", "오래된 스레드"]);
+    // A thread starts running while the list is up: its row changes, and nothing is cleared.
+    h.link.shell = shellOf({
+      old: { session: makeSession("running", { threadId: "thread-old" }) },
+      pin: { hasPendingApprovals: true },
+    });
+    const mark = h.writes();
+    h.controller.onShell();
+    h.settle();
+    expect(listRow(h, "오래된 스레드", width)).toMatch(/^ {2}◐ /u);
+    // The pinned thread is the one on screen, so it carries both marks.
+    expect(listRow(h, "고정한 스레드", width)).toMatch(/^ ◆▲ /u);
+    expect(h.since(mark)).not.toContain("\u001b[2J");
+  });
+
+  it("writes nothing while idle, and does not redraw the list when only the conversation changes", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.deliver(ready("thread-new"));
+    const mark = h.writes();
+    h.controller.render();
+    h.controller.render();
+    h.settle();
+    expect(h.writes()).toBe(mark);
+    h.run("/help");
+    h.deliver(ready("thread-new", { title: "최근 스레드 (제목 바뀜)" }), 4);
+    const after = h.writes();
+    h.controller.render();
+    h.settle();
+    expect(h.writes()).toBe(after);
+  });
+
+  it("falls back to the same list under the conversation when the terminal is too narrow", () => {
+    const h = harness({ columns: 60, rows: 24 });
+    const opened = vi.spyOn(h.link, "openThread");
+    h.openNewest();
+    opened.mockClear();
+    h.run("/sidebar");
+    expect(h.term.altScreen).toBe(true);
+    const top = ruleRow(h, "스레드");
+    expect(top).toBe(24 - navBottomRows(24, false));
+    // Full width, no divider column.
+    for (let row = 0; row < 24; row += 1) expect(h.term.cell(row, navColumns(60))).not.toBe("│");
+    expect(listRow(h, "최근 스레드")).toMatch(/^ ◆ {2}최근 스레드/u);
+    h.press(key("tab"), key("down"), key("enter"));
+    expect(opened).toHaveBeenCalledWith("thread-old");
+    expect(listRow(h, "오래된 스레드")).toMatch(/^ ◆ {2}오래된 스레드/u);
+    // The composer is above the list: it keeps its place and its cursor.
+    h.press(text("a"));
+    expect(h.term.cursor.row).toBeLessThan(top);
+  });
+
+  it("moves between the column and the bottom as the terminal is resized", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.press(key("tab"), key("down"));
+    h.region.hold();
+    h.term.resize(60, 24);
+    h.region.release();
+    h.controller.render();
+    h.settle();
+    expect(h.term.altScreen).toBe(true);
+    expect(ruleRow(h, "스레드")).toBe(24 - navBottomRows(24, false));
+    // The pick survives the move.
+    expect(listRow(h, "오래된 스레드")).toMatch(/^❯/u);
+    h.region.hold();
+    h.term.resize(140, 40);
+    h.region.release();
+    h.controller.render();
+    h.settle();
+    expect(ruleRow(h, "스레드")).toBe(0);
+    expect(listRow(h, "오래된 스레드", navColumns(140))).toMatch(/^❯/u);
+  });
+
+  it("closes itself in a terminal too small for it, and says why", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.region.hold();
+    h.term.resize(28, 40);
+    h.region.release();
+    h.settle();
+    expect(h.term.altScreen).toBe(false);
+    // The notice is folded and cut to the width of the terminal.
+    const said = () => h.screen().replace(/\s+/gu, "");
+    expect(said()).toContain("분리창을닫았습니다:터미널폭이30칸미만이라스레드목록을");
+    h.run("/sidebar");
+    expect(h.term.altScreen).toBe(false);
+    expect(said()).toContain("30칸미만");
+  });
+
+  it("works with the side panel: three columns where they fit, the list under the conversation where they do not", () => {
+    const wide = harness({ columns: 160, rows: 40 });
+    wide.openNewest();
+    wide.run("/sidebar");
+    wide.run("/dag-agents");
+    const nav = navColumns(160);
+    const layout = splitLayout(160, true, nav);
+    expect(wide.term.cell(5, nav)).toBe("│");
+    expect(wide.term.cell(5, nav + 1 + layout.left)).toBe("│");
+    expect(listRow(wide, "최근 스레드", nav)).not.toBe("");
+    wide.press(key("tab"), key("down"), key("enter"));
+    expect(listRow(wide, "오래된 스레드", nav)).toMatch(/^ ◆ {2}오래된 스레드/u);
+    // Closing the panel leaves the list, and the other way round.
+    wide.run("/dag-agents");
+    expect(wide.term.altScreen).toBe(true);
+    expect(ruleRow(wide, "스레드")).toBe(0);
+    wide.run("/sidebar");
+    expect(wide.term.altScreen).toBe(false);
+    const tight = harness({ columns: 104, rows: 40 });
+    tight.openNewest();
+    tight.run("/dag-agents");
+    tight.run("/sidebar");
+    expect(ruleRow(tight, "스레드")).toBe(40 - navBottomRows(40, false));
+    tight.press(key("tab"), key("down"), key("enter"));
+    expect(listRow(tight, "오래된 스레드")).toMatch(/^ ◆ {2}오래된 스레드/u);
+  });
+
+  it("works with /tasks: the task list stays under the conversation, the list in its column", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/tasks");
+    h.run("/sidebar");
+    expect(ruleRow(h, "스레드")).toBe(0);
+    const nav = navColumns(140);
+    const task = Array.from({ length: 40 }, (_, row) => h.term.text(row, nav + 1)).findIndex(
+      (row) => row.startsWith("── 작업"),
+    );
+    expect(task).toBe(40 - tasksPaneRows(40));
+    h.run("/tasks");
+    expect(h.screen()).not.toContain("── 작업");
+    expect(ruleRow(h, "스레드")).toBe(0);
+  });
+
+  it("with /tasks in a narrow terminal stacks both under the conversation, the list first", () => {
+    const h = harness({ columns: 60, rows: 30 });
+    h.openNewest();
+    h.run("/tasks");
+    h.run("/sidebar");
+    const nav = ruleRow(h, "스레드");
+    const task = ruleRow(h, "작업");
+    expect(nav).toBeGreaterThan(0);
+    expect(task).toBeGreaterThan(nav);
+    h.press(key("tab"), key("down"), key("enter"));
+    expect(listRow(h, "오래된 스레드")).toMatch(/^ ◆ {2}오래된 스레드/u);
+  });
+
+  it("keeps the list when only the task list no longer fits", () => {
+    const h = harness({ columns: 160, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.run("/tasks");
+    h.region.hold();
+    h.term.resize(160, 14);
+    h.region.release();
+    h.controller.render();
+    h.settle();
+    expect(h.term.altScreen).toBe(true);
+    expect(h.screen()).toContain("작업 목록을 닫았습니다");
+    expect(ruleRow(h, "스레드")).toBe(0);
+  });
+
+  it("leaves the alternate screen once when the program ends with the list up", () => {
+    const h = harness({ columns: 140, rows: 40 });
+    h.openNewest();
+    h.run("/sidebar");
+    h.region.restore();
+    expect(h.term.altScreen).toBe(false);
+    expect(h.term.modes.filter((mode) => mode === "?1049l")).toHaveLength(1);
+  });
+
+  it("draws in ASCII: a plain divider and only ASCII marks", () => {
+    const h = harness({ columns: 140, rows: 40, symbols: ASCII_SYMBOLS });
+    h.openNewest();
+    h.run("/sidebar");
+    h.press(key("tab"));
+    const nav = navColumns(140);
+    const left = leftEdge(h, nav).join("\n");
+    expect(left).toContain("-- 스레드");
+    expect(left).not.toMatch(/[─│◆◐▲❯]/u);
+    expect(h.term.cell(5, nav)).toBe("|");
+  });
+
+  it("speaks English with no Korean of its own when the language is English", () => {
+    setLanguage("en");
+    try {
+      const h = harness({ columns: 140, rows: 40 });
+      h.link.shell = makeSnapshot(
+        [makeProject()],
+        [thread("thread-a", "Fix login"), thread("thread-b", "Add tests")],
+      );
+      h.openNewest();
+      h.run("/sidebar");
+      const nav = navColumns(140);
+      const chrome = leftEdge(h, nav).join("\n");
+      expect(chrome).toContain("── Threads");
+      expect(chrome).toContain("New thread");
+      expect(chrome).toContain("Tab to pick");
+      expect(chrome).not.toMatch(/[가-힣]/u);
+      h.press(key("tab"));
+      expect(h.term.text(39, 0, nav)).toBe("↑↓ Enter Esc");
+      h.press(key("escape"));
+      h.run("/sidebar");
+      h.run("/sidebar off");
+      const notice =
+        h
+          .screen()
+          .split("\n")
+          .find((row) => row.includes("The thread list")) ?? "";
+      expect(notice).toContain("The thread list is not open.");
+      expect(notice).not.toMatch(/[가-힣]/u);
+    } finally {
+      setLanguage("ko");
+    }
+  });
+
+  it("is in /help", () => {
+    const h = harness({ rows: 70 });
+    h.openNewest();
+    h.run("/help");
+    expect(h.screen()).toContain("/sidebar");
+    expect(h.screen()).toContain("Ctrl-O");
   });
 });

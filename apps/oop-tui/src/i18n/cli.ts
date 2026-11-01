@@ -15,7 +15,7 @@ Usage
   oop pair <link or token>   Connect to a server on another computer (not needed on this one)
   oop config                 Show settings
   oop config get <key>       Show one setting
-  oop config set <key> <value>  Change a setting (theme, symbols, animations, banner, statusLine, notify, language)
+  oop config set <key> <value>  Change a setting (theme, symbols, animations, banner, statusLine, notify, language, sidebar)
   oop config path            Show where the settings file is
   oop doctor                 Check terminal colors, symbols, settings, server and credentials (does not start the app)
   oop stop                   Stop the server the terminal started (never the one the app uses)
@@ -80,6 +80,7 @@ the app it takes the server over and oop reconnects by itself; a turn in progres
       "Stopped. If an oop window is still open it restarts the server after 5 seconds, so close it first.",
     "cli.update.howTo":
       "How to update: app menu 'Check for Updates...' → 'Prepare Update' → 'Open Installer'",
+    "cli.update.howToTerminal": "How to update: run {command}, then oop stop",
     "cli.update.tooLarge": "Response too large",
     "cli.update.timeout": "Timed out",
     "cli.update.cancelled": "Cancelled",
@@ -107,7 +108,7 @@ the app it takes the server over and oop reconnects by itself; a turn in progres
   oop pair <링크 또는 토큰>   다른 컴퓨터의 서버에 연결합니다 (이 컴퓨터는 필요 없음)
   oop config                 설정 보기
   oop config get <키>        설정 값 하나 보기
-  oop config set <키> <값>   설정 바꾸기 (theme, symbols, animations, banner, statusLine, notify, language)
+  oop config set <키> <값>   설정 바꾸기 (theme, symbols, animations, banner, statusLine, notify, language, sidebar)
   oop config path            설정 파일 위치
   oop doctor                 터미널 색·심볼·설정·서버·자격증명 파일을 점검합니다 (앱을 띄우지 않음)
   oop stop                   터미널이 띄운 서버를 멈춥니다 (앱이 쓰는 서버는 멈추지 않음)
@@ -171,6 +172,7 @@ Provider 옵션 (oop provider add / remove 에서만)
       "멈췄습니다. 열려 있는 oop 창이 있으면 5초 뒤 서버를 다시 띄우니, 먼저 창을 닫으세요.",
     "cli.update.howTo":
       "업데이트 방법: 앱 메뉴 '업데이트 확인...' → '업데이트 준비' → '설치 프로그램 열기'",
+    "cli.update.howToTerminal": "업데이트 방법: {command} 실행 후 oop stop",
     "cli.update.tooLarge": "응답이 너무 큽니다",
     "cli.update.timeout": "시간 초과",
     "cli.update.cancelled": "취소됨",

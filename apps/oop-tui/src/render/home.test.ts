@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { ReleaseView, UpdateReport } from "../app/updateCheck.ts";
 import { stripAnsi, visibleWidth } from "../text/width.ts";
@@ -6,6 +6,12 @@ import { composeHome, fitHome, homeNaturalRows, type HomeInput } from "./home.ts
 import { LiveRegion } from "./liveRegion.ts";
 import { ASCII_SYMBOLS, UNICODE_SYMBOLS } from "./symbols.ts";
 import { BUILTIN_THEMES, createTheme } from "./theme.ts";
+
+const host = vi.hoisted(() => ({ platform: null as NodeJS.Platform | null }));
+vi.mock("../host.ts", async (original) => {
+  const actual = await original<typeof import("../host.ts")>();
+  return { ...actual, hostPlatform: () => host.platform ?? actual.hostPlatform() };
+});
 
 const release = (version: string, ...highlights: string[]): ReleaseView => ({
   version,
@@ -105,11 +111,14 @@ describe("fitHome", () => {
   });
 
   it("adds the reinstall line only when the terminal app is older than the app", () => {
+    host.platform = "darwin";
     const behind = plain(
       fitHome(input({ banner: null, versions: { terminal: "0.0.120", app: "0.0.127" } }), 10),
     );
+    host.platform = null;
     expect(behind.join("\n")).toContain("터미널 앱 0.0.120 이 앱 0.0.127 보다 오래되었습니다");
-    expect(behind.join("\n")).toContain("sh apps/oop-tui/install.sh");
+    expect(behind.join("\n")).toContain("install-desktop.sh");
+    expect(behind.join("\n")).not.toContain("apps/oop-tui/install.sh");
     const same = plain(fitHome(input({ banner: null }), 10)).join("\n");
     expect(same).not.toContain("터미널 앱");
     const unknown = plain(

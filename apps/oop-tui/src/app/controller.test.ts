@@ -7,7 +7,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 import { TurnId } from "@t3tools/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import type { KeyEvent, KeyName } from "../input/keys.ts";
 import type { LinkStatus } from "../link/client.ts";
@@ -40,6 +40,12 @@ import type { ThemeSwitcher } from "../settings.ts";
 import { AppController, type ControllerLink } from "./controller.ts";
 import type { CheckUpdate, LatestRelease } from "./updateCheck.ts";
 import { linkNotice } from "./view.ts";
+
+const host = vi.hoisted(() => ({ platform: null as NodeJS.Platform | null }));
+vi.mock("../host.ts", async (original) => {
+  const actual = await original<typeof import("../host.ts")>();
+  return { ...actual, hostPlatform: () => host.platform ?? actual.hostPlatform() };
+});
 
 const online: LinkStatus = { phase: "online", attempt: 0, retryAt: null, detail: null };
 
@@ -304,7 +310,8 @@ describe("starting up", () => {
     h.start();
     expect(h.screen()).toContain("프로젝트");
     expect(h.screen()).toContain("내 프로젝트");
-    h.press(key("enter"));
+    // The first row adds this folder; the project below it is the second.
+    h.press(key("down"), key("enter"));
     expect(h.screen()).toContain("스레드를 고르세요");
     expect(h.screen()).toContain("새 스레드");
     expect(h.screen()).toContain("최근 스레드");
@@ -360,6 +367,148 @@ describe("starting up", () => {
     });
     h.start();
     expect(h.screen()).toContain("이어갈 스레드가 없어 새 대화를 엽니다.");
+  });
+});
+
+describe("adding this folder as a project", () => {
+  type Created = Extract<ClientOrchestrationCommand, { type: "project.create" }>;
+  const emptyServer = () => makeSnapshot([], []);
+  /** A server that lists the project once it has been told to create it. */
+  const answering =
+    (h: () => ReturnType<typeof harness>, fail?: string) =>
+    async (command: ClientOrchestrationCommand) => {
+      if (fail !== undefined) throw new Error(fail);
+      const created = command as Created;
+      const view = h();
+      view.dispatched.push(command);
+      if (created.type !== "project.create") return;
+      view.link.shell = makeSnapshot(
+        [
+          makeProject({
+            id: created.projectId,
+            title: created.title,
+            workspaceRoot: created.workspaceRoot,
+          }),
+        ],
+        [],
+      );
+      view.controller.onShell();
+    };
+  const open = (over: Options = {}, fail?: string) => {
+    let view: ReturnType<typeof harness>;
+    view = harness({
+      cwd: "/work/new-app",
+      shell: emptyServer(),
+      dispatch: answering(() => view, fail),
+      ...over,
+    });
+    return view;
+  };
+
+  it("offers the folder first on an empty server, and does not send people to the desktop app", () => {
+    const h = open();
+    h.start();
+    expect(h.screen()).toContain("프로젝트를 고르세요");
+    expect(h.screen()).toContain("이 폴더 추가 (/work/new-app)");
+    expect(h.screen()).not.toContain("데스크톱");
+  });
+
+  it("offers it ahead of the projects that exist, and not when the folder is one, or words are typed", () => {
+    const other = open({ shell: makeSnapshot([makeProject()], []) });
+    other.start();
+    expect(other.screen()).toContain("이 폴더 추가");
+    expect(other.screen()).toContain("내 프로젝트");
+    other.typeText("내");
+    expect(other.screen()).not.toContain("이 폴더 추가");
+    const inside = open({ cwd: "/work/app/src", shell: makeSnapshot([makeProject()], []) });
+    inside.start();
+    expect(inside.screen()).not.toContain("이 폴더 추가");
+  });
+
+  it("creates the project on Enter and opens its new-thread chat when the shell lists it", async () => {
+    const h = open();
+    h.start();
+    h.press(key("enter"));
+    await flushMicrotasks();
+    const created = h.dispatched.filter((c) => c.type === "project.create") as Created[];
+    expect(created).toHaveLength(1);
+    expect(created[0]).toMatchObject({ title: "new-app", workspaceRoot: "/work/new-app" });
+    expect(created[0]?.commandId).toBeTruthy();
+    expect(created[0]?.createdAt).toBeTruthy();
+    expect(h.screen()).not.toContain("프로젝트를 고르세요");
+    expect(h.commits.join("\n")).toContain("OOP  new-app · 새 스레드");
+    expect(h.screen()).toContain("메시지");
+  });
+
+  it("waits for the shell, not for a timer: the chat opens on the update, once", async () => {
+    let held: (() => void) | null = null;
+    const h = open({
+      dispatch: async (command) => {
+        h.dispatched.push(command);
+        await new Promise<void>((resolve) => void (held = resolve));
+      },
+    });
+    h.start();
+    h.press(key("enter"));
+    expect(h.screen()).toContain("프로젝트로 추가하는 중");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    expect(h.dispatched).toHaveLength(1);
+    expect(h.screen()).toContain("프로젝트를 고르세요");
+    const created = h.dispatched[0] as Created;
+    h.link.shell = makeSnapshot(
+      [makeProject({ id: created.projectId, title: "new-app", workspaceRoot: "/work/new-app" })],
+      [],
+    );
+    h.controller.onShell();
+    expect(h.screen()).not.toContain("프로젝트를 고르세요");
+    expect(h.commits.join("\n")).toContain("OOP  new-app · 새 스레드");
+    (held as (() => void) | null)?.();
+    await flushMicrotasks();
+    expect(h.commits.join("\n").split("OOP  new-app · 새 스레드")).toHaveLength(2);
+  });
+
+  it('keeps the message of oop "prompt" and sends it to the new project', async () => {
+    const h = open({ prompt: "처음 해볼 일" });
+    h.start();
+    await flushMicrotasks();
+    expect(h.screen()).toContain("이 폴더에는 프로젝트가 없습니다");
+    expect(h.screen()).toContain("첫 줄로 추가");
+    expect(h.dispatched).toEqual([]);
+    h.press(key("enter"));
+    await flushMicrotasks();
+    const created = h.dispatched.find((c) => c.type === "project.create") as Created;
+    const turn = h.dispatched.find((c) => c.type === "thread.turn.start") as Extract<
+      ClientOrchestrationCommand,
+      { type: "thread.turn.start" }
+    >;
+    expect(turn.message.text).toBe("처음 해볼 일");
+    expect(turn.bootstrap?.createThread).toMatchObject({ projectId: created.projectId });
+  });
+
+  it("says why when the server refuses, stays on the list, and lets Enter try again", async () => {
+    const h = open({}, "denied");
+    h.start();
+    h.press(key("enter"));
+    await flushMicrotasks();
+    expect(h.screen()).toContain("폴더를 프로젝트로 추가하지 못했습니다: denied");
+    expect(h.screen()).toContain("프로젝트를 고르세요");
+    h.press(key("enter"));
+    await flushMicrotasks();
+    expect(h.screen()).toContain("denied");
+  });
+
+  it("speaks English in English", async () => {
+    setLanguage("en");
+    try {
+      const h = open();
+      h.start();
+      expect(h.screen()).toContain("Add this folder (/work/new-app)");
+      expect(h.screen()).not.toContain("desktop app");
+      expect(h.screen()).not.toMatch(/[가-힣]/u);
+    } finally {
+      setLanguage("ko");
+    }
   });
 });
 
@@ -447,7 +596,7 @@ describe("oop with a message to start with", () => {
     expect(h.screen()).toContain("프로젝트를 고르세요");
     expect(h.screen()).toContain("이 폴더에는 프로젝트가 없습니다");
     expect(h.dispatched).toEqual([]);
-    h.press(key("enter"));
+    h.press(key("down"), key("enter"));
     await flushMicrotasks();
     expect(h.dispatched).toHaveLength(1);
     const command = h.dispatched[0] as TurnStart;
@@ -460,7 +609,7 @@ describe("oop with a message to start with", () => {
   it("sends --continue's message to the latest thread of the project that was picked", async () => {
     const h = harness({ prompt: "이어서", continueLast: true, cwd: "/elsewhere" });
     h.start();
-    h.press(key("enter"));
+    h.press(key("down"), key("enter"));
     h.deliver([threadSnapshotItem(makeThread({ id: "thread-new" }), 3)]);
     await flushMicrotasks();
     expect((h.dispatched[0] as TurnStart).threadId).toBe("thread-new");
@@ -1463,7 +1612,7 @@ describe("moving around", () => {
   it("the first row of the thread list starts a new thread, and Ctrl-C quits", () => {
     const h = harness({ cwd: "/elsewhere" });
     h.start();
-    h.press(key("enter"));
+    h.press(key("down"), key("enter"));
     expect(h.screen()).toContain("스레드를 고르세요");
     h.press(key("enter"));
     expect(h.commits.join("\n")).toContain("OOP  내 프로젝트 · 새 스레드");
@@ -1523,7 +1672,7 @@ describe("searching and pinning in the lists", () => {
     const h = harness({ cwd: "/elsewhere", shell: threadsShell(), ...over });
     h.start();
     // The project list: "내 프로젝트" is the newest, so its threads come next.
-    h.press(key("enter"));
+    h.press(key("down"), key("enter"));
     return h;
   };
 
@@ -2379,6 +2528,7 @@ describe("text from the server cannot break the screen", () => {
     const paint = () => pending.splice(0).forEach((run) => run());
     controller.onShell();
     paint();
+    controller.handleKey({ type: "key", name: "down", ctrl: false, alt: false, shift: false });
     controller.handleKey({ type: "key", name: "enter", ctrl: false, alt: false, shift: false });
     paint();
     controller.handleKey({ type: "key", name: "down", ctrl: false, alt: false, shift: false });
@@ -4218,7 +4368,7 @@ describe("the rail", () => {
     it("leaves what was picked as done steps, closes the setup rail and starts the thread's own", () => {
       const h = harness({ cwd: "/elsewhere" });
       h.start();
-      h.press(key("enter"));
+      h.press(key("down"), key("enter"));
       h.press(key("enter"));
       const commits = h.commits.map(stripAnsi);
       expect(commits).toContain("◇  프로젝트");
@@ -7815,10 +7965,14 @@ describe("the start screen", () => {
         config: makeConfig({ environment: { serverVersion: "0.0.129" } }),
       });
       h.controller.onLatestRelease(NEWER);
+      host.platform = "darwin";
       h.start();
-      expect(h.screen()).toContain("업데이트 있음: 0.0.129 → 0.0.130");
-      expect(h.screen()).toContain("터미널 앱 0.0.120 이 앱 0.0.129 보다 오래되었습니다");
-      expect(h.screen()).toContain("sh apps/oop-tui/install.sh");
+      const screen = h.screen();
+      host.platform = null;
+      expect(screen).toContain("업데이트 있음: 0.0.129 → 0.0.130");
+      expect(screen).toContain("터미널 앱 0.0.120 이 앱 0.0.129 보다 오래되었습니다");
+      expect(screen).toContain("install-desktop.sh");
+      expect(screen).not.toContain("apps/oop-tui/install.sh");
     });
 
     it("falls back to the terminal's version when the server does not say, but waits while connecting", () => {

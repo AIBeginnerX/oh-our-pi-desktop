@@ -1,6 +1,38 @@
 {
   "versions": [
     {
+      "version": "0.0.133",
+      "date": "2026-11-01",
+      "highlights": [
+        {
+          "en": "When the terminal app is older than the desktop app, it now shows an install command that works from any folder.",
+          "ko": "터미널 앱이 데스크톱 앱보다 오래되었을 때 어느 폴더에서나 실행할 수 있는 설치 명령을 안내합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.132",
+      "date": "2026-11-01",
+      "highlights": [
+        {
+          "en": "The terminal app now shows a thread list in a left column, on by default. Press Tab to enter it, pick a thread with the arrow keys and Enter to keep working there, or use /sidebar or Ctrl-O to show or hide it. In narrow terminals it moves under the conversation.",
+          "ko": "터미널 앱 왼쪽에 스레드 목록이 기본으로 표시됩니다. Tab으로 들어가 방향키와 Enter로 스레드를 고르면 그 스레드에서 이어서 작업합니다. /sidebar나 Ctrl-O로 켜고 끌 수 있고, 좁은 터미널에서는 대화 아래로 내려갑니다."
+        },
+        {
+          "en": "Added one-line terminal-only installers for macOS, Linux and Windows that install the oop command with its own server and Node.js, without the desktop app. macOS is tested; Linux and Windows are not yet verified on real machines.",
+          "ko": "데스크톱 앱 없이 oop 명령과 전용 서버, Node.js를 함께 설치하는 터미널 전용 한 줄 설치 명령을 macOS, Linux, Windows용으로 추가했습니다. macOS는 시험을 마쳤고, Linux와 Windows는 아직 실제 기기에서 확인하지 못했습니다."
+        },
+        {
+          "en": "The terminal app can add the current folder as a project from the project picker, and oop update explains how to update a terminal-only install.",
+          "ko": "터미널 앱의 프로젝트 선택 화면에서 현재 폴더를 바로 프로젝트로 추가할 수 있고, oop update가 터미널 전용 설치의 업데이트 방법을 안내합니다."
+        },
+        {
+          "en": "The project page now matches the website: it has a motion tour, a terminal app section with screenshots, and current install and update instructions in five languages.",
+          "ko": "프로젝트 소개 페이지를 웹사이트에 맞췄습니다. 모션 투어와 터미널 앱 소개를 추가하고, 설치와 업데이트 안내를 5개 언어 모두 최신 내용으로 고쳤습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.131",
       "date": "2026-11-01",
       "highlights": [

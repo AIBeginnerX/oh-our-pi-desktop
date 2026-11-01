@@ -1,3 +1,5 @@
+import * as NodePath from "node:path";
+
 import {
   DEFAULT_THREAD_GOAL_MAX_CONTINUES,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
@@ -55,7 +57,8 @@ import {
 } from "../input/editor.ts";
 import type { KeyEvent } from "../input/keys.ts";
 import type { RegionFrame, Scheduler } from "../render/liveRegion.ts";
-import type { SplitControl } from "../render/regionSwitch.ts";
+import type { ClosedPart, SplitControl } from "../render/regionSwitch.ts";
+import { renderNavPane, type NavRow } from "../render/navPane.ts";
 import { renderTasksPane, tasksPaneRows, type TasksContent } from "../render/tasksPane.ts";
 import {
   defaultApprovalOptions,
@@ -116,6 +119,7 @@ import {
   type ModelChoice,
   newThreadId,
   pinCommand,
+  projectCreateCommand,
   revertCommand,
   runtimeModeCommand,
   turnStartCommand,
@@ -298,6 +302,9 @@ export interface ControllerLink {
   }) => Promise<string>;
 }
 
+/** What the row that starts a new thread is picked by in the thread list; no thread id looks like it. */
+const NAV_NEW = "new:";
+
 export interface ControllerRegion {
   readonly set: (frame: RegionFrame) => void;
   readonly commit: (lines: ReadonlyArray<string>) => void;
@@ -324,6 +331,10 @@ export interface ControllerDeps {
   readonly animations?: boolean;
   /** Settings `statusLine`; "auto" when absent. */
   readonly statusLine?: StatusLineSetting;
+  /** Settings `sidebar`: the thread list opens by itself with the first conversation. */
+  readonly sidebar?: boolean;
+  /** Remembers `/sidebar on|off` for the next start (settings `sidebar`). */
+  readonly saveSidebar?: (on: boolean) => void;
   /** Settings `notify`: ring the terminal bell when a turn finishes or waits for an approval or an answer. */
   readonly notify?: boolean;
   /** Repeats a call while a turn runs; the spinner and the elapsed time hang off it. */
@@ -519,6 +530,36 @@ export class AppController {
   private panelOpen = false;
   /** `/tasks`: the task list is shown under the conversation. */
   private tasksOn = false;
+  /** The folder is being added as a project: its id, until the shell lists it. */
+  private addingProject: ProjectId | null = null;
+  /** `/sidebar`: the thread list is shown, at the left or (narrow terminal) under the conversation. */
+  private navOn = false;
+  /** The thread list has the keys: arrows pick, Enter opens, Esc gives them back to the composer. */
+  private navFocus = false;
+  /** The thread the pick is on (null is the row for a new thread); kept by id so a reordering does not move it. */
+  private navPick: string | null = null;
+  /** `deps.sidebar` is acted on once, with the first conversation. */
+  private navAutoOpened = false;
+  /** The rows for the thread list last built, so a repaint while text streams sorts nothing again. */
+  private navMemo: {
+    readonly threads: unknown;
+    readonly projectId: string;
+    readonly threadId: string;
+    readonly rows: ReadonlyArray<NavRow>;
+  } | null = null;
+  /** The thread list for the inputs last drawn, so an identical one is not built again. */
+  private navDrawn: {
+    readonly rows: ReadonlyArray<NavRow>;
+    readonly pick: string | null;
+    readonly focus: boolean;
+    readonly placement: string;
+    readonly columns: number;
+    readonly height: number;
+    readonly theme: unknown;
+    readonly symbols: unknown;
+    readonly loading: boolean;
+    readonly lines: ReadonlyArray<string>;
+  } | null = null;
   /** The task list for the activities last read, so a repaint does not sort them all again. */
   private activePlanMemo: {
     readonly activities: unknown;
@@ -711,6 +752,7 @@ export class AppController {
 
   onShell(): void {
     if (this.screen.kind === "loading") this.navigateFromStart();
+    else if (this.addingProject !== null && this.finishAddFolder()) return;
     else if (this.screen.kind === "threads") this.followPinned(this.screen);
     else if (this.screen.kind === "chat") {
       this.reconcileDraft(this.screen);
@@ -1032,7 +1074,68 @@ export class AppController {
         )
       : 0;
     this.screen = { kind: "projects", selected, query: "" };
+    // The row that adds this folder leads the list, so a pick by position moves down one.
+    if (matched && this.canAddFolder(this.screen)) this.screen.selected += 1;
     this.render();
+  }
+
+  /** Whether the project list offers "Add this folder": the folder is in no project, and no words are typed. */
+  private canAddFolder(screen: Extract<Screen, { kind: "projects" }>): boolean {
+    const shell = this.deps.link.shell;
+    return (
+      shell !== null &&
+      screen.query === "" &&
+      projectForDirectory(shell.projects, this.deps.cwd, this.deps.platform, (path) =>
+        this.canonical(path),
+      ) === undefined
+    );
+  }
+
+  /**
+   * Enter on "Add this folder": the folder becomes a project on the server, and the conversation
+   * opens as soon as the server's shell lists it (`onShell`). A refusal is said in the notice.
+   */
+  private async addFolderAsProject(): Promise<void> {
+    if (this.addingProject !== null) return;
+    const { cwd, context } = this.deps;
+    const projectId = ProjectId.make(context.uuid());
+    const title = NodePath.basename(cwd) || cwd;
+    this.addingProject = projectId;
+    this.notice = t("session.c.addingFolder");
+    this.render();
+    try {
+      await this.deps.link.dispatch(
+        projectCreateCommand(context, { projectId, title, workspaceRoot: cwd }),
+      );
+    } catch (cause) {
+      this.addingProject = null;
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      this.notice = t("session.c.addFolderFailed", {
+        detail: sanitizeForTerminal(detail).split("\n")[0] ?? "",
+      });
+      this.render();
+      return;
+    }
+    // The shell may have said so before the answer came; if not, `onShell` finishes it.
+    if (this.finishAddFolder()) this.render();
+  }
+
+  /** The new project is in the shell: its first conversation opens, with the prompt the program started with. */
+  private finishAddFolder(): boolean {
+    const id = this.addingProject;
+    const shell = this.deps.link.shell;
+    const project =
+      id === null ? undefined : shell?.projects.find((candidate) => candidate.id === id);
+    if (id === null || project === undefined) return false;
+    this.addingProject = null;
+    this.notice = null;
+    this.hold(this.answered({ label: t("session.c.projectLabel"), value: project.title }));
+    if (this.startPrompt !== null) this.openWithPrompt(project.id);
+    else {
+      this.endSetup(null);
+      this.openChat(project.id, null, true);
+    }
+    return true;
   }
 
   private showThreads(projectId: ProjectId): void {
@@ -1115,6 +1218,7 @@ export class AppController {
     else this.emit(header);
     if (!draft) link.openThread(id);
     if (abandoned !== null) void this.dropDraftGoal(abandoned);
+    this.autoOpenNav();
     this.render();
   }
 
@@ -1505,6 +1609,7 @@ export class AppController {
     if (this.screen.kind === "chat") this.trackPanel(this.screen);
     // The task list takes rows from the conversation, so it is sized before the frame is built.
     this.syncTasks();
+    this.syncNavState();
     const columns = region.usableColumns() + 1;
     const rows = region.maxRows();
     const now = this.deps.now();
@@ -1513,8 +1618,10 @@ export class AppController {
       this.landing === null
         ? this.buildFrame(columns, rows, banner, now)
         : this.buildHomeFrame(columns, rows, banner, now);
-    region.set(frame);
+    // While the thread list has the keys the composer's cursor would point at the wrong place.
+    region.set(this.navFocus ? { ...frame, cursor: null } : frame);
     this.syncPanel();
+    this.syncNav();
     this.syncAnimation();
     this.syncStartWait();
     this.syncTitle();
@@ -1725,10 +1832,13 @@ export class AppController {
     }
     if (screen.kind === "projects") {
       const projects = this.visibleProjects(screen);
-      const items: PickerItem[] = projects.map((project) => ({
-        label: project.title,
-        note: project.workspaceRoot,
-      }));
+      const items: PickerItem[] = [
+        // This folder is not a project yet: the first row makes it one.
+        ...(this.canAddFolder(screen)
+          ? [{ label: t("session.c.addFolder", { folder: this.deps.cwd }) }]
+          : []),
+        ...projects.map((project) => ({ label: project.title, note: project.workspaceRoot })),
+      ];
       return renderPicker(
         {
           title: t("session.c.pickProject"),
@@ -1909,7 +2019,8 @@ export class AppController {
         (command.name !== "update" || this.deps.startup !== undefined) &&
         ((command.name !== "dag-workflow" &&
           command.name !== "dag-agents" &&
-          command.name !== "tasks") ||
+          command.name !== "tasks" &&
+          command.name !== "sidebar") ||
           this.deps.split !== undefined),
     );
   }
@@ -3341,8 +3452,10 @@ export class AppController {
     const projects = screen.kind === "projects" ? this.visibleProjects(screen) : [];
     const threads = screen.kind === "threads" ? this.visibleThreads(screen) : [];
     // The "New thread" row leads the thread list until words are typed.
-    const lead = screen.kind === "threads" && screen.query === "" ? 1 : 0;
-    const count = screen.kind === "projects" ? projects.length : lead + threads.length;
+    // The project list leads with "Add this folder" when the folder is not a project yet.
+    const lead =
+      screen.kind === "threads" ? (screen.query === "" ? 1 : 0) : this.canAddFolder(screen) ? 1 : 0;
+    const count = lead + (screen.kind === "projects" ? projects.length : threads.length);
     const move = (delta: number) => {
       screen.selected = Math.max(0, Math.min(count - 1, screen.selected + delta));
     };
@@ -3473,7 +3586,12 @@ export class AppController {
   ): void {
     if (this.deps.link.shell === null) return;
     if (screen.kind === "projects") {
-      const project = projects[screen.selected];
+      const lead = this.canAddFolder(screen) ? 1 : 0;
+      if (lead === 1 && screen.selected === 0) {
+        void this.addFolderAsProject();
+        return;
+      }
+      const project = projects[screen.selected - lead];
       if (project) {
         this.hold(this.answered({ label: t("session.c.projectLabel"), value: project.title }));
         if (this.startPrompt !== null) this.openWithPrompt(project.id);
@@ -3500,6 +3618,20 @@ export class AppController {
   private handleChatKey(screen: ChatScreen, event: KeyEvent): void {
     if (event.type === "ctrl" && event.letter === "c") {
       this.onCtrlC(screen);
+      return;
+    }
+    // Ctrl-O opens or closes the thread list wherever the composer would have the key.
+    if (
+      event.type === "ctrl" &&
+      event.letter === "o" &&
+      this.deps.split !== undefined &&
+      !this.screenOverlayOpen()
+    ) {
+      this.toggleNav();
+      return;
+    }
+    if (this.navFocus) {
+      this.handleNavKey(screen, event);
       return;
     }
     if (this.picker !== null) {
@@ -3590,6 +3722,12 @@ export class AppController {
           return;
         }
       }
+    }
+    // Tab hands the keys to the thread list when it is open and the composer has no use for Tab.
+    if (event.type === "key" && event.name === "tab" && this.navOn && this.deps.split?.active()) {
+      this.navFocus = true;
+      this.navPick = null;
+      return;
     }
     if (event.type === "key" && event.name === "escape") {
       if (question?.dismissible) this.dismissQuestion(screen, question.requestId);
@@ -4370,6 +4508,10 @@ export class AppController {
         if (this.deps.split === undefined) return false;
         this.runTasksCommand(args);
         break;
+      case "sidebar":
+        if (this.deps.split === undefined) return false;
+        this.runSidebarCommand(args);
+        break;
       case "theme": {
         if (this.deps.themes === undefined) return false;
         this.runThemeCommand(this.deps.themes, args[0]);
@@ -4817,7 +4959,7 @@ export class AppController {
     }
     if (move === "none") return;
     if (move === "open") {
-      const why = split.unavailable({ panel: true, tasks: this.tasksOn });
+      const why = split.unavailable({ panel: true, tasks: this.tasksOn, nav: this.navOn });
       if (why !== null) {
         this.notice = why;
         return;
@@ -4833,28 +4975,32 @@ export class AppController {
   }
 
   /**
-   * The alternate screen is up while the side panel or the task list is wanted, and is left when
-   * neither is. The task list alone gives the conversation the whole width.
+   * The alternate screen is up while the side panel, the task list or the thread list is wanted,
+   * and is left when none is. The task list alone gives the conversation the whole width.
    */
   private applyLayout(): void {
     const split = this.deps.split;
     if (split === undefined) return;
-    if (!this.panelOpen && !this.tasksOn) {
+    if (!this.panelOpen && !this.tasksOn && !this.navOn) {
       split.leave();
       return;
     }
     if (!split.active()) split.enter();
     split.setSide(this.panelOpen);
     if (!this.tasksOn) split.setTasks([]);
+    // On or off is settled before the next draw sizes the conversation; the rows come with it.
+    if (!this.navOn) split.setNav(null);
+    else this.syncNav();
   }
 
   /**
    * The terminal became too small for the split layout. It was closed, or, for `tasks`, only the
    * task list was folded and the side panel stays.
    */
-  onSplitClosed(reason: string, part: "all" | "tasks" = "all"): void {
+  onSplitClosed(reason: string, part: ClosedPart = "all"): void {
     if (part === "all") this.panelOpen = false;
-    this.tasksOn = false;
+    if (part !== "nav") this.tasksOn = false;
+    if (part === "all" || part === "nav" || part === "tasksNav") this.navOn = false;
     this.notice = reason;
     this.render();
   }
@@ -4876,7 +5022,7 @@ export class AppController {
       return;
     }
     if (wanted) {
-      const why = split.unavailable({ panel: this.panelOpen, tasks: true });
+      const why = split.unavailable({ panel: this.panelOpen, tasks: true, nav: this.navOn });
       if (why !== null) {
         this.notice = why;
         return;
@@ -4922,6 +5068,245 @@ export class AppController {
         symbols: this.symbols,
       }),
     );
+  }
+
+  // ---- the thread list ---------------------------------------------------------------------
+
+  /**
+   * `/sidebar`: shows or hides the project's threads in a column on the left (under the
+   * conversation in a terminal too narrow for the column), with or without the other panes. The
+   * choice is remembered for the next start.
+   */
+  private runSidebarCommand(args: ReadonlyArray<string>): void {
+    const word = args[0]?.toLowerCase();
+    if (args.length > 1 || (word !== undefined && word !== "on" && word !== "off")) {
+      this.notice = t("session.c.sidebarUsage");
+      return;
+    }
+    const wanted = word === undefined ? !this.navOn : word === "on";
+    if (wanted === this.navOn) {
+      this.notice = wanted ? t("session.c.sidebarOpen") : t("session.c.sidebarClosed");
+      return;
+    }
+    if (!this.setNavOn(wanted)) return;
+    this.deps.saveSidebar?.(wanted);
+  }
+
+  /** Turns the thread list on or off; false, with the reason said, when the terminal is too small. */
+  private setNavOn(wanted: boolean): boolean {
+    const split = this.deps.split;
+    if (split === undefined) return false;
+    if (wanted) {
+      const why = split.unavailable({ panel: this.panelOpen, tasks: this.tasksOn, nav: true });
+      if (why !== null) {
+        this.notice = why;
+        return false;
+      }
+      // The start screen is over once the conversation moves to a layout of its own.
+      this.endHome();
+    }
+    this.navOn = wanted;
+    if (!wanted) this.navFocus = false;
+    this.applyLayout();
+    return true;
+  }
+
+  /** With `deps.sidebar` set, the list opens with the first conversation if the terminal has room. */
+  private autoOpenNav(): void {
+    if (this.navAutoOpened || this.deps.sidebar !== true || this.deps.split === undefined) return;
+    this.navAutoOpened = true;
+    const why = this.deps.split.unavailable({
+      panel: this.panelOpen,
+      tasks: this.tasksOn,
+      nav: true,
+    });
+    if (why === null) this.setNavOn(true);
+  }
+
+  /** Ctrl-O: the thread list opens, or closes. */
+  private toggleNav(): void {
+    if (this.deps.split === undefined) return;
+    if (this.setNavOn(!this.navOn)) this.deps.saveSidebar?.(this.navOn);
+  }
+
+  /** The key a row is picked by: its thread, or one word for the row that starts a new thread. */
+  private navKey(row: NavRow | undefined): string | null {
+    return row === undefined ? null : (row.id ?? NAV_NEW);
+  }
+
+  /** The threads of the project on screen as rows, the one that starts a new thread first. */
+  private navRowsOf(screen: Screen): {
+    readonly rows: ReadonlyArray<NavRow>;
+    readonly loading: boolean;
+  } {
+    const shell = this.deps.link.shell;
+    if (screen.kind !== "chat" && screen.kind !== "threads") return { rows: [], loading: false };
+    if (shell === null) return { rows: [], loading: true };
+    const threadId = screen.kind === "chat" ? screen.threadId : "";
+    const memo = this.navMemo;
+    if (
+      memo !== null &&
+      memo.threads === shell.threads &&
+      memo.projectId === screen.projectId &&
+      memo.threadId === threadId
+    ) {
+      return { rows: memo.rows, loading: false };
+    }
+    const { rows: threads, listed } = threadRows(shell.threads, screen.projectId, "");
+    const rows: NavRow[] = [
+      {
+        id: null,
+        label: t("render.nav.new"),
+        status: "idle",
+        pinned: false,
+        current: screen.kind === "chat" && screen.isDraft,
+      },
+      ...threads.map((thread) => ({
+        id: thread.id as string,
+        label: threadRowLabel(thread, listed),
+        status:
+          listed.waiting.has(thread.id) || thread.hasPendingApprovals || thread.hasPendingUserInput
+            ? ("waiting" as const)
+            : isThreadRunning(thread)
+              ? ("running" as const)
+              : ("idle" as const),
+        pinned: isPinned(thread),
+        current: thread.id === threadId,
+      })),
+    ];
+    this.navMemo = { threads: shell.threads, projectId: screen.projectId, threadId, rows };
+    return { rows, loading: false };
+  }
+
+  /** Index of the pick: the row picked, else the thread on screen, else the first. */
+  private navIndex(rows: ReadonlyArray<NavRow>): number {
+    const picked = rows.findIndex((row) => this.navKey(row) === this.navPick);
+    if (picked >= 0) return picked;
+    return Math.max(
+      0,
+      rows.findIndex((row) => row.current),
+    );
+  }
+
+  /** The keys go back to the composer whenever the list is not in view or the screen is not a chat. */
+  private syncNavState(): void {
+    if (this.navFocus && (!this.navOn || this.screen.kind !== "chat")) {
+      this.navFocus = false;
+      this.navPick = null;
+    }
+  }
+
+  /** Draws the thread list while it is on; the same inputs draw nothing new. */
+  private syncNav(): void {
+    const split = this.deps.split;
+    if (split === undefined || !this.navOn || !split.active()) return;
+    const size = split.navSize();
+    const { theme } = this.deps.style;
+    const { rows, loading } = this.navRowsOf(this.screen);
+    const pick = this.navFocus ? this.navKey(rows[this.navIndex(rows)]) : null;
+    const last = this.navDrawn;
+    if (
+      last !== null &&
+      last.rows === rows &&
+      last.pick === pick &&
+      last.focus === this.navFocus &&
+      last.placement === size.placement &&
+      last.columns === size.columns &&
+      last.height === size.rows &&
+      last.theme === theme &&
+      last.symbols === this.symbols &&
+      last.loading === loading
+    ) {
+      split.setNav(last.lines);
+      return;
+    }
+    const lines = renderNavPane(rows, {
+      columns: size.columns,
+      rows: size.rows,
+      theme,
+      symbols: this.symbols,
+      focused: this.navFocus,
+      selected: this.navIndex(rows),
+      loading,
+    });
+    this.navDrawn = {
+      rows,
+      pick,
+      focus: this.navFocus,
+      placement: size.placement,
+      columns: size.columns,
+      height: size.rows,
+      theme,
+      symbols: this.symbols,
+      loading,
+      lines,
+    };
+    split.setNav(lines);
+  }
+
+  /** Keys while the thread list has them: arrows pick, Enter opens the thread, Esc and Tab leave. */
+  private handleNavKey(screen: ChatScreen, event: KeyEvent): void {
+    if (event.type === "text" || event.type === "paste") {
+      // Typing means the composer was meant: the keys go back to it and this one is typed there.
+      this.navFocus = false;
+      this.navPick = null;
+      this.handleChatKey(screen, event);
+      return;
+    }
+    if (event.type !== "key") return;
+    const { rows } = this.navRowsOf(screen);
+    const at = this.navIndex(rows);
+    const move = (to: number) => {
+      this.navPick = this.navKey(rows[Math.max(0, Math.min(rows.length - 1, to))]);
+    };
+    switch (event.name) {
+      case "up":
+        move(at - 1);
+        return;
+      case "down":
+        move(at + 1);
+        return;
+      case "pageup":
+        move(at - 5);
+        return;
+      case "pagedown":
+        move(at + 5);
+        return;
+      case "home":
+        move(0);
+        return;
+      case "end":
+        move(rows.length - 1);
+        return;
+      case "escape":
+      case "tab":
+      case "backtab":
+        this.navFocus = false;
+        this.navPick = null;
+        return;
+      case "enter":
+        this.navFocus = false;
+        this.navPick = null;
+        this.openNavRow(screen, rows[at]);
+        return;
+      default:
+        return;
+    }
+  }
+
+  /** Moves the conversation to the thread picked in the list (or to a new one) and keeps working there. */
+  private openNavRow(screen: ChatScreen, row: NavRow | undefined): void {
+    if (row === undefined || row.current) return;
+    // What is on screen is scrolled out of view, as with Ctrl-L: the thread opened starts clean,
+    // and the old lines still reach the scrollback when the layout is left.
+    this.deps.region.abandon();
+    if (row.id === null) {
+      this.deps.link.closeThread();
+      this.openChat(screen.projectId, null, true);
+      return;
+    }
+    const thread = this.deps.link.shell?.threads.find((candidate) => candidate.id === row.id);
+    if (thread !== undefined) this.openChat(thread.projectId, thread.id, false);
   }
 
   // ---- older conversation --------------------------------------------------------------------
@@ -5156,6 +5541,7 @@ export class AppController {
         t("session.c.help.wfPick"),
         t("session.c.help.wfAgents"),
         t("session.c.help.wfTasks"),
+        t("session.c.help.sidebar"),
       ]),
       "",
       heading("Provider"),

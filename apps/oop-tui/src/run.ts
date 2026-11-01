@@ -68,6 +68,7 @@ import {
   runConfigCommand,
   type ConfigAction,
   settingsFilePath,
+  writeSetting,
 } from "./settings.ts";
 import { debounced, watchSignals } from "./signals.ts";
 import { guardTerminal } from "./terminalGuard.ts";
@@ -462,6 +463,8 @@ export const runInteractive = async (input: {
     animations: settings.animations,
     statusLine: settings.statusLine,
     notify: settings.notify,
+    sidebar: settings.sidebar,
+    saveSidebar: (on) => void writeSetting(settingsFilePath(paths), "sidebar", on),
     home: NodeOS.homedir(),
     server: hostOf(resolved.origin),
     terminal: createTerminalHooks((text) => void stdout.write(text), {

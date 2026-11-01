@@ -74,11 +74,13 @@ fi
 # app again at every start, so moving or updating OOP.app does not break it.
 launcher_mark='oop-desktop-terminal-launcher'
 sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
-# True when the file is a launcher this script wrote, or the "oop" the repository's own terminal
-# installer builds (a node bundle that starts with an env-node shebang and names oop-tui).
+# True when the file is a launcher this script wrote or install-terminal.sh wrote, or the "oop" the
+# repository's own terminal installer builds (a node bundle that starts with an env-node shebang and
+# names oop-tui).
 is_our_oop() {
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   grep -q "^# $launcher_mark" "$1" 2>/dev/null && return 0
+  grep -q '^# oop-terminal-launcher' "$1" 2>/dev/null && return 0
   [ "$(head -n 1 "$1" 2>/dev/null)" = '#!/usr/bin/env node' ] && grep -q 'oop-tui' "$1" 2>/dev/null
 }
 install_terminal_command() {

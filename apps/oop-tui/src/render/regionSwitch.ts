@@ -2,6 +2,9 @@ import type { LiveRegion, RegionFrame, TerminalOutput } from "./liveRegion.ts";
 import { splitUnavailable, type SplitParts, type SplitRegion } from "./splitRegion.ts";
 import { t } from "../i18n/index.ts";
 
+/** What a resize took out of the side-by-side layout: all of it, or only the optional parts. */
+export type ClosedPart = "all" | "tasks" | "nav" | "tasksNav";
+
 /** What the controller can do with the side-by-side layout. */
 export interface SplitControl {
   readonly active: () => boolean;
@@ -20,6 +23,14 @@ export interface SplitControl {
   readonly leftSize: () => { readonly columns: number; readonly rows: number };
   /** The task list under the conversation; none when empty. */
   readonly setTasks: (lines: ReadonlyArray<string>) => void;
+  /** Where the thread list goes at this size (a left column, or under the conversation) and how big it is. */
+  readonly navSize: () => {
+    readonly placement: "left" | "bottom";
+    readonly columns: number;
+    readonly rows: number;
+  };
+  /** The thread list; null turns it off. */
+  readonly setNav: (lines: ReadonlyArray<string> | null) => void;
 }
 
 /**
@@ -33,13 +44,13 @@ export class RegionSwitch implements SplitControl {
   private readonly inline: LiveRegion;
   private readonly split: SplitRegion;
   private readonly out: TerminalOutput;
-  private readonly onClosed: (reason: string, part: "all" | "tasks") => void;
+  private readonly onClosed: (reason: string, part: ClosedPart) => void;
 
   constructor(
     inline: LiveRegion,
     split: SplitRegion,
     out: TerminalOutput,
-    options: { readonly onClosed: (reason: string, part: "all" | "tasks") => void },
+    options: { readonly onClosed: (reason: string, part: ClosedPart) => void },
   ) {
     this.inline = inline;
     this.split = split;
@@ -108,16 +119,41 @@ export class RegionSwitch implements SplitControl {
   }
 
   /**
-   * Whether the layout fits the size now. When only the task list is too big for it and the side
-   * panel fits, the task list is folded and the panel stays; otherwise the layout is left.
+   * Whether the layout fits the size now. When only the task list or the thread list is too big
+   * for it and something else the layout shows still fits, that part is folded and the rest stays;
+   * otherwise the layout is left.
    */
   private fits(): boolean {
     const parts = this.split.parts();
     const reason = this.unavailable(parts);
     if (reason === null) return true;
-    if (parts.tasks && this.unavailable({ ...parts, tasks: false }) === null && parts.panel) {
-      this.split.setTasks([]);
-      this.onClosed(t("render.region.tasksClosed", { reason }), "tasks");
+    const folds: ReadonlyArray<{
+      readonly tasks: boolean;
+      readonly nav: boolean;
+      readonly part: ClosedPart;
+    }> = [
+      { tasks: true, nav: false, part: "tasks" },
+      { tasks: false, nav: true, part: "nav" },
+      { tasks: true, nav: true, part: "tasksNav" },
+    ];
+    for (const fold of folds) {
+      if ((fold.tasks && !parts.tasks) || (fold.nav && parts.nav !== true)) continue;
+      const rest = {
+        panel: parts.panel,
+        tasks: parts.tasks && !fold.tasks,
+        nav: parts.nav === true && !fold.nav,
+      };
+      if (!rest.panel && !rest.tasks && !rest.nav) continue;
+      if (this.unavailable(rest) !== null) continue;
+      if (fold.tasks) this.split.setTasks([]);
+      if (fold.nav) this.split.setNav(null);
+      const key =
+        fold.part === "tasks"
+          ? "render.region.tasksClosed"
+          : fold.part === "nav"
+            ? "render.region.navClosed"
+            : "render.region.splitClosed";
+      this.onClosed(t(key, { reason }), fold.part);
       return true;
     }
     this.leave();
@@ -165,6 +201,18 @@ export class RegionSwitch implements SplitControl {
 
   setTasks(lines: ReadonlyArray<string>): void {
     this.split.setTasks(lines);
+  }
+
+  navSize(): {
+    readonly placement: "left" | "bottom";
+    readonly columns: number;
+    readonly rows: number;
+  } {
+    return this.split.navSize();
+  }
+
+  setNav(lines: ReadonlyArray<string> | null): void {
+    this.split.setNav(lines);
   }
 
   // ---- the ways out of the program -----------------------------------------------------------

@@ -3,6 +3,9 @@ import { defineMessages } from "./define.ts";
 export const session = defineMessages(
   {
     "session.c.allAuto": "All Auto",
+    "session.c.addFolder": "Add this folder ({folder})",
+    "session.c.addFolderFailed": "Could not add the folder as a project: {detail}",
+    "session.c.addingFolder": "Adding this folder as a project…",
     "session.c.alreadyEffort": "Already {value}.",
     "session.c.alreadyMode": "Already in {label} mode.",
     "session.c.alreadyPlan": "Already in {label}.",
@@ -156,6 +159,8 @@ export const session = defineMessages(
       "/dag-workflow <number>|next|prev picks a flow • live follows the newest flow",
     "session.c.help.wfTasks":
       "/tasks shows this thread's task list at the bottom left and closes it when typed again (needs 16+ rows) • it works independently of the right panel",
+    "session.c.help.sidebar":
+      "/sidebar (or Ctrl-O) shows this project's threads in a column on the left, or at the bottom in a narrow terminal, and closes it when typed again • Tab moves into it, ↑/↓ pick, Enter opens that thread, Esc returns to the input • it works with the right panel and /tasks • the choice is remembered (oop config set sidebar true|false)",
     "session.c.helpLanguage":
       "Display language: oop config set language en|ko (by default it follows your locale)",
     "session.c.helpSettings": "Settings",
@@ -209,11 +214,11 @@ export const session = defineMessages(
       "There is no plan to implement. Turn on plan mode with /plan and make a request to get one.",
     "session.c.noPlanSupport": "This provider does not support plan mode.",
     "session.c.noProjectContinue":
-      "This folder has no project. Pick one and your message goes to its latest thread.",
+      "This folder has no project. Add it with the first row, or pick one and your message goes to its latest thread.",
     "session.c.noProjectMatch": "No matching projects. Press Esc to clear the search.",
     "session.c.noProjectNew":
-      "This folder has no project. Pick one and your message goes to a new thread.",
-    "session.c.noProjects": "No projects yet. Add one in the desktop app.",
+      "This folder has no project. Add it with the first row, or pick one and your message goes to a new thread.",
+    "session.c.noProjects": "No projects yet.",
     "session.c.noThemes": "No themes.",
     "session.c.noThreadList": "There is no thread to continue, so the list is opened.",
     "session.c.noThreadMatch": "No matching threads. Press Esc to clear the search.",
@@ -268,6 +273,9 @@ export const session = defineMessages(
     "session.c.tasksClosed": "The task list is not open.",
     "session.c.tasksOpen": "The task list is already open.",
     "session.c.tasksUsage": "Usage: /tasks [on|off]",
+    "session.c.sidebarClosed": "The thread list is not open.",
+    "session.c.sidebarOpen": "The thread list is already open.",
+    "session.c.sidebarUsage": "Usage: /sidebar [on|off]",
     "session.c.themeLabel": "Theme",
     "session.c.threadDeleted": "This thread was deleted.",
     "session.c.threadLabel": "Thread",
@@ -391,6 +399,8 @@ export const session = defineMessages(
     "session.slash.stats.note": "This thread's tool usage stats",
     "session.slash.tasks.note": "Open or close the task list at the bottom left",
     "session.slash.tasks.usage": "[on|off]",
+    "session.slash.sidebar.note": "Open or close the thread list on the left",
+    "session.slash.sidebar.usage": "[on|off]",
     "session.slash.theme.note": "View or change the color theme",
     "session.slash.theme.usage": "[name]",
     "session.slash.threads.note": "Thread list",
@@ -437,6 +447,9 @@ export const session = defineMessages(
   },
   {
     "session.c.allAuto": "모두 Auto",
+    "session.c.addFolder": "이 폴더 추가 ({folder})",
+    "session.c.addFolderFailed": "폴더를 프로젝트로 추가하지 못했습니다: {detail}",
+    "session.c.addingFolder": "이 폴더를 프로젝트로 추가하는 중…",
     "session.c.alreadyEffort": "이미 {value} 입니다.",
     "session.c.alreadyMode": "이미 {label} 모드입니다.",
     "session.c.alreadyPlan": "이미 {label}입니다.",
@@ -582,6 +595,8 @@ export const session = defineMessages(
     "session.c.help.wfPick": "/dag-workflow <번호>|next|prev 흐름 고르기 • live 최신 흐름 따라가기",
     "session.c.help.wfTasks":
       "/tasks 로 왼쪽 아래에 이 스레드의 작업 목록을 보이고, 다시 치면 닫습니다 (높이 16줄 이상) • 오른쪽 창과 따로 쓸 수 있습니다",
+    "session.c.help.sidebar":
+      "/sidebar (또는 Ctrl-O) 로 이 프로젝트의 스레드를 왼쪽 열에 보이고(좁은 터미널에서는 아래쪽), 다시 치면 닫습니다 • Tab 으로 목록에 들어가 ↑/↓ 로 고르고 Enter 로 그 스레드를 열며 Esc 로 입력창으로 돌아옵니다 • 오른쪽 창, /tasks 와 함께 쓸 수 있습니다 • 선택은 기억됩니다 (oop config set sidebar true|false)",
     "session.c.helpLanguage":
       "표시 언어: oop config set language en|ko (설정하지 않으면 로캘을 따릅니다)",
     "session.c.helpSettings": "설정",
@@ -635,11 +650,11 @@ export const session = defineMessages(
       "구현할 계획이 없습니다. /plan 으로 계획 모드를 켜고 요청하면 계획이 나옵니다.",
     "session.c.noPlanSupport": "이 제공자는 계획 모드를 지원하지 않습니다.",
     "session.c.noProjectContinue":
-      "이 폴더에는 프로젝트가 없습니다. 프로젝트를 고르면 최근 스레드로 메시지를 보냅니다.",
+      "이 폴더에는 프로젝트가 없습니다. 첫 줄로 추가하거나, 다른 프로젝트를 고르면 최근 스레드로 메시지를 보냅니다.",
     "session.c.noProjectMatch": "일치하는 프로젝트가 없습니다. Esc로 검색어를 지우세요.",
     "session.c.noProjectNew":
-      "이 폴더에는 프로젝트가 없습니다. 프로젝트를 고르면 새 스레드로 메시지를 보냅니다.",
-    "session.c.noProjects": "프로젝트가 없습니다. 데스크톱 앱에서 프로젝트를 추가하세요.",
+      "이 폴더에는 프로젝트가 없습니다. 첫 줄로 추가하거나, 다른 프로젝트를 고르면 새 스레드로 메시지를 보냅니다.",
+    "session.c.noProjects": "아직 프로젝트가 없습니다.",
     "session.c.noThemes": "테마가 없습니다.",
     "session.c.noThreadList": "이어갈 스레드가 없어 목록을 엽니다.",
     "session.c.noThreadMatch": "일치하는 스레드가 없습니다. Esc로 검색어를 지우세요.",
@@ -692,6 +707,9 @@ export const session = defineMessages(
     "session.c.tasksClosed": "작업 목록이 열려 있지 않습니다.",
     "session.c.tasksOpen": "작업 목록이 이미 열려 있습니다.",
     "session.c.tasksUsage": "사용법: /tasks [on|off]",
+    "session.c.sidebarClosed": "스레드 목록이 열려 있지 않습니다.",
+    "session.c.sidebarOpen": "스레드 목록이 이미 열려 있습니다.",
+    "session.c.sidebarUsage": "사용법: /sidebar [on|off]",
     "session.c.themeLabel": "테마",
     "session.c.threadDeleted": "이 스레드는 삭제되었습니다.",
     "session.c.threadLabel": "스레드",
@@ -810,6 +828,8 @@ export const session = defineMessages(
     "session.slash.stats.note": "이 스레드의 도구 사용 통계",
     "session.slash.tasks.note": "왼쪽 아래에 작업 목록 열기·닫기",
     "session.slash.tasks.usage": "[on|off]",
+    "session.slash.sidebar.note": "왼쪽에 스레드 목록 열기·닫기",
+    "session.slash.sidebar.usage": "[on|off]",
     "session.slash.theme.note": "색 테마 보기·바꾸기",
     "session.slash.theme.usage": "[이름]",
     "session.slash.threads.note": "스레드 목록",

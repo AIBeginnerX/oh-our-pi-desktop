@@ -302,6 +302,21 @@ test(
 );
 
 test(
+  "macOS installer replaces the oop that install-terminal.sh wrote",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin", terminal: true });
+    const bin = path.join(setup.home, ".local", "bin");
+    await fs.mkdir(bin, { recursive: true });
+    const command = path.join(bin, "oop");
+    await fs.writeFile(command, "#!/bin/sh\n# oop-terminal-launcher (written by install-terminal.sh; safe to delete)\n", { mode: 0o755 });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    assert.match(await fs.readFile(command, "utf8"), /^# oop-desktop-terminal-launcher/m);
+  },
+);
+
+test(
   "macOS installer makes no oop command for an app without the terminal app",
   { skip: process.platform !== "darwin", timeout: 60_000 },
   async (t) => {

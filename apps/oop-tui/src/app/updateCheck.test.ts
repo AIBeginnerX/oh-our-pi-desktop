@@ -3,11 +3,13 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { releaseNotes } from "@t3tools/shared/releaseNotes";
-import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { hostPlatform } from "../host.ts";
 import { setLanguage } from "../i18n/index.ts";
 import {
+  terminalInstallCommand,
+  updateHowTo,
   buildUpdateReport,
   CACHE_TTL_MS,
   isReleaseVersion,
@@ -22,6 +24,12 @@ import {
   type FetchLike,
   type LatestRelease,
 } from "./updateCheck.ts";
+
+const host = vi.hoisted(() => ({ platform: null as NodeJS.Platform | null }));
+vi.mock("../host.ts", async (original) => {
+  const actual = await original<typeof import("../host.ts")>();
+  return { ...actual, hostPlatform: () => host.platform ?? actual.hostPlatform() };
+});
 
 const NOTES = {
   versions: [
@@ -419,6 +427,10 @@ describe("terminalIsBehind", () => {
 });
 
 describe("terminalBehindText", () => {
+  afterEach(() => {
+    host.platform = null;
+  });
+
   it("sends a terminal run by the desktop app to the app update, not to a reinstall", () => {
     const text = terminalBehindText("0.0.120", "0.0.127", true);
     expect(text).toBe(
@@ -427,9 +439,35 @@ describe("terminalBehindText", () => {
     expect(text).not.toContain("install.sh");
   });
 
-  it("keeps the checkout reinstall for a terminal run any other way", () => {
-    expect(terminalBehindText("0.0.120", "0.0.127", false)).toBe(
-      "터미널 앱 0.0.120 이 앱 0.0.127 보다 오래되었습니다 — 다시 설치: sh apps/oop-tui/install.sh",
-    );
+  it("names an installer that runs from any folder for a terminal run any other way", () => {
+    const behind = "터미널 앱 0.0.120 이 앱 0.0.127 보다 오래되었습니다 — 다시 설치: ";
+    const cases: ReadonlyArray<readonly [NodeJS.Platform, string]> = [
+      [
+        "darwin",
+        "curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh",
+      ],
+      [
+        "win32",
+        "irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex",
+      ],
+      ["linux", terminalInstallCommand("linux")],
+    ];
+    for (const [platform, command] of cases) {
+      host.platform = platform;
+      const text = terminalBehindText("0.0.120", "0.0.127", false);
+      expect(text).toBe(behind + command);
+      expect(text).not.toContain("apps/oop-tui/install.sh");
+    }
+  });
+});
+
+describe("updating a terminal-only install", () => {
+  it("names the install command of the platform instead of the app menu", () => {
+    setLanguage("en");
+    expect(updateHowTo(true)).toContain("install-terminal");
+    expect(updateHowTo(true)).toContain("oop stop");
+    expect(updateHowTo(false)).toContain("Check for Updates");
+    expect(terminalInstallCommand("win32")).toMatch(/^irm .*install-terminal\.ps1 \| iex$/u);
+    expect(terminalInstallCommand("linux")).toMatch(/^curl .*install-terminal\.sh \| sh$/u);
   });
 });

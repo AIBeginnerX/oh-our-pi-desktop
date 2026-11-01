@@ -84,6 +84,18 @@ export const render = defineMessages(
     "render.split.scrolling": "↑ Scrolling · PageDown or Shift+PageDown to go down",
     "render.region.tasksClosed": "Task list closed: {reason}",
     "render.region.splitClosed": "Split pane closed: {reason}",
+    "render.region.navClosed": "Thread list closed: {reason}",
+    "render.nav.title": "Threads",
+    "render.nav.new": "New thread",
+    "render.nav.empty": "No threads yet",
+    "render.nav.loading": "Loading…",
+    "render.nav.pinned": "pinned",
+    "render.nav.hintIdle": "Tab to pick",
+    "render.nav.hintFocus": "↑↓ Enter Esc",
+    "render.nav.tooShort":
+      "Terminal is shorter than {min} rows, so the thread list is unavailable (now {now})",
+    "render.nav.tooNarrow":
+      "Terminal is narrower than {min} columns, so the thread list is unavailable (now {now})",
     "render.markdown.chart": "chart",
     "render.markdown.mermaid": "mermaid diagram",
     "render.markdown.visualBlock":
@@ -236,6 +248,18 @@ export const render = defineMessages(
     "render.split.scrolling": "↑ 스크롤 중 · PageDown 또는 Shift+PageDown 으로 아래로",
     "render.region.tasksClosed": "작업 목록을 닫았습니다: {reason}",
     "render.region.splitClosed": "분리 창을 닫았습니다: {reason}",
+    "render.region.navClosed": "스레드 목록을 닫았습니다: {reason}",
+    "render.nav.title": "스레드",
+    "render.nav.new": "새 스레드",
+    "render.nav.empty": "아직 스레드가 없습니다",
+    "render.nav.loading": "불러오는 중…",
+    "render.nav.pinned": "고정",
+    "render.nav.hintIdle": "Tab 으로 선택",
+    "render.nav.hintFocus": "↑↓ Enter Esc",
+    "render.nav.tooShort":
+      "터미널 높이가 {min}줄 미만이라 스레드 목록을 쓸 수 없습니다 (지금 {now}줄)",
+    "render.nav.tooNarrow":
+      "터미널 폭이 {min}칸 미만이라 스레드 목록을 쓸 수 없습니다 (지금 {now}칸)",
     "render.markdown.chart": "차트",
     "render.markdown.mermaid": "mermaid 다이어그램",
     "render.markdown.visualBlock":
