@@ -9,6 +9,7 @@ import {
   AUTO_BUILD_TASK_NAME,
   autoBuildDecision,
   autoBuildSource,
+  buildDriveSource,
   copyRunnerLog,
   driveRootCandidates,
   moveTaskToRunner,
@@ -252,6 +253,41 @@ NodeTest.test("the runner's script copies load on their own", async () => {
     NodeFS.rmSync(runner, { recursive: true, force: true });
   }
 });
+
+NodeTest.test(
+  "a failed build of a Drive source still leaves the runner with that source's scripts",
+  async () => {
+    // 0.0.129 failed on every attempt because the runner's older windows.mjs, which installs a
+    // narrower workspace, was only replaced after a success.
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oop-drive-build-"));
+    try {
+      const extracted = NodePath.join(root, "extracted");
+      const cacheRoot = NodePath.join(root, "cache");
+      NodeFS.mkdirSync(NodePath.join(extracted, "scripts"), { recursive: true });
+      for (const name of RUNNER_SCRIPTS) {
+        NodeFS.writeFileSync(NodePath.join(extracted, "scripts", name), `new ${name}`);
+      }
+      await NodeAssert.rejects(
+        buildDriveSource({
+          extracted,
+          cacheRoot,
+          build: async () => {
+            throw new Error("build failed");
+          },
+        }),
+        /build failed/u,
+      );
+      for (const name of RUNNER_SCRIPTS) {
+        NodeAssert.equal(
+          NodeFS.readFileSync(NodePath.join(cacheRoot, "runner", "scripts", name), "utf8"),
+          `new ${name}`,
+        );
+      }
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 NodeTest.test("trims a long log to its last lines", () => {
   NodeAssert.equal(trimLog("short\n", 100, 10), "short\n");

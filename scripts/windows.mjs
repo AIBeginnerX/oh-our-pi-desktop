@@ -635,8 +635,8 @@ async function extractDriveSource(driveRoot, info, cacheRoot) {
   return source;
 }
 
-/** Copies the runner scripts to the runner folder and writes its launcher. */
-async function installRunner(scriptsDirectory, cacheRoot) {
+/** Copies the runner scripts to the runner folder. */
+export async function copyRunnerScripts(scriptsDirectory, cacheRoot) {
   const runner = NodePath.join(cacheRoot, RUNNER_FOLDER);
   await NodeFSP.mkdir(NodePath.join(runner, "scripts"), { recursive: true });
   for (const name of RUNNER_SCRIPTS) {
@@ -645,6 +645,24 @@ async function installRunner(scriptsDirectory, cacheRoot) {
       NodePath.join(runner, "scripts", name),
     );
   }
+  return runner;
+}
+
+/**
+ * Builds the extracted Drive source after refreshing the runner scripts from it. The runner
+ * installs the build steps (pnpm filters, build order) that run for a source, so a copy older than
+ * the source it builds fails every attempt of that source; refreshing only after a success could
+ * never replace such a copy. The next run, which is not held back by the failure because the
+ * script changed, then builds with the source's own steps.
+ */
+export async function buildDriveSource({ extracted, cacheRoot, build }) {
+  await copyRunnerScripts(NodePath.join(extracted, "scripts"), cacheRoot);
+  await build(extracted);
+}
+
+/** Copies the runner scripts to the runner folder and writes its launcher. */
+async function installRunner(scriptsDirectory, cacheRoot) {
+  const runner = await copyRunnerScripts(scriptsDirectory, cacheRoot);
   const launcher = NodePath.join(runner, "windows-auto-build.cmd");
   await writeAtomically(launcher, runnerLauncherScript());
   return launcher;
@@ -746,10 +764,18 @@ async function autoBuild(sourceRoot, arch) {
           return;
         }
         // The NAS keeps getting installers while devices still read it; see docs/user/install.md.
-        await packageInstaller(extracted, arch, {
-          releaseDirectories: [publishedDirectory, ...(nasRelease === null ? [] : [nasRelease])],
-          nasReleaseDirectory: nasRelease,
-          requireShare: false,
+        await buildDriveSource({
+          extracted,
+          cacheRoot,
+          build: (root) =>
+            packageInstaller(root, arch, {
+              releaseDirectories: [
+                publishedDirectory,
+                ...(nasRelease === null ? [] : [nasRelease]),
+              ],
+              nasReleaseDirectory: nasRelease,
+              requireShare: false,
+            }),
         });
         await installRunner(NodePath.join(extracted, "scripts"), cacheRoot);
         built = true;

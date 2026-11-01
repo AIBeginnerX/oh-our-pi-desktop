@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.0.131",
+      "date": "2026-11-01",
+      "highlights": [
+        {
+          "en": "Fixed the Windows build, which had stopped at 0.0.128 because the terminal app could not be packaged, so Windows gets the terminal app and the latest updates again.",
+          "ko": "터미널 앱을 묶지 못해 0.0.128에서 멈췄던 Windows 빌드를 고쳐, Windows에서도 터미널 앱과 최신 업데이트를 다시 받을 수 있습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.130",
       "date": "2026-11-01",
       "highlights": [
