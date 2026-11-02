@@ -1,3 +1,10 @@
+import {
+  DragState,
+  droppedSpaces,
+  highlightCells,
+  selectionText,
+  type SelectedRow,
+} from "../terminal/selection.ts";
 import { stripControlSequences, visibleWidth } from "../text/width.ts";
 import { truncateStyled, wrapStyled } from "../text/wrap.ts";
 import type { RegionFrame, Scheduler, TerminalOutput } from "./liveRegion.ts";
@@ -28,13 +35,17 @@ const ALT_SCROLL_SAVE = "\u001b[?1007s";
 const ALT_SCROLL_OFF = "\u001b[?1007l";
 const ALT_SCROLL_RESTORE = "\u001b[?1007h\u001b[?1007r";
 /**
- * Mouse reporting in SGR form (1006) for the wheel. 1000 is the lightest level that reports the
- * wheel at all (press and release, no motion), so no drag or hover traffic reaches the program. While
- * it is on the terminal no longer selects text by itself: most terminals select again with Shift (or
- * Option on macOS) held. It is turned off together with the alternate screen on every way out.
+ * Mouse reporting in SGR form (1006) for the wheel and for selecting text in the conversation. 1000
+ * reports presses, releases and the wheel; 1002 adds motion while a button is held, which a drag
+ * needs (hover alone is never reported). 1002 is set after 1000, so a terminal that does not know it
+ * keeps the wheel and only loses the drag. While it is on the terminal no longer selects text by
+ * itself: most terminals select again with Shift (or Option on macOS) held. It is turned off together
+ * with the alternate screen on every way out.
  */
-const MOUSE_ON = "\u001b[?1000h\u001b[?1006h";
-const MOUSE_OFF = "\u001b[?1006l\u001b[?1000l";
+export const MOUSE_ON = "\u001b[?1000h\u001b[?1006h\u001b[?1002h";
+export const MOUSE_OFF = "\u001b[?1002l\u001b[?1006l\u001b[?1000l";
+/** Milliseconds between two rows of scrolling while a drag is held past the top or bottom edge. */
+export const EDGE_SCROLL_MS = 60;
 /** Rows one wheel notch moves the conversation. */
 export const WHEEL_ROWS = 3;
 const HIDE_CURSOR = "\u001b[?25l";
@@ -111,6 +122,23 @@ interface HistoryEntry {
   rows: string[] | null;
 }
 
+/** A cell of the conversation: row `row` of the fold of a history line, and a column of it. */
+interface SelectionPoint {
+  readonly entry: HistoryEntry;
+  readonly row: number;
+  readonly col: number;
+}
+
+/** Which row of which history line a row of the viewport shows. */
+interface ViewRow {
+  readonly entry: HistoryEntry;
+  readonly index: number;
+  readonly row: number;
+}
+
+const samePoint = (left: SelectionPoint, right: SelectionPoint): boolean =>
+  left.entry === right.entry && left.row === right.row && left.col === right.col;
+
 /** The pinned header of the conversation column: `lead` rows and the pet's `track` beside them. */
 export interface PinnedHeader {
   readonly lead: ReadonlyArray<string>;
@@ -180,6 +208,23 @@ export class SplitRegion {
   private wantOlder = false;
   /** Whether the wheel is reported while the layout is on (`/mouse`, `OOP_MOUSE=off`). */
   private mouse: boolean;
+  /** The press that is down on the conversation, if any; its anchor and head are `SelectionPoint`s. */
+  private readonly drag = new DragState<SelectionPoint>(samePoint);
+  /** What is highlighted, and what a release copies: kept after the button is up until the next press. */
+  private selected: { readonly anchor: SelectionPoint; readonly head: SelectionPoint } | null =
+    null;
+  /** What each row of the viewport showed at the last paint (null for a blank or the "scrolling" row). */
+  private viewMap: ReadonlyArray<ViewRow | null> = [];
+  /** Where the viewport was on screen at the last paint; null before the first. */
+  private conversation: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly rows: number;
+  } | null = null;
+  /** The pointer is held past the top (1) or bottom (-1) of the viewport, and at this column of it. */
+  private pull: { readonly direction: 1 | -1; readonly col: number } | null = null;
+  private stopRepeat: (() => void) | null = null;
   private olderListener: (() => void) | null = null;
   private wrapWidth = 0;
   private dirty = false;
@@ -191,16 +236,26 @@ export class SplitRegion {
   private readonly out: TerminalOutput;
   private readonly schedule: Scheduler;
   private readonly divider: () => string;
+  private readonly repeat: ((run: () => void) => () => void) | null;
 
+  /**
+   * `repeat` calls `run` every `EDGE_SCROLL_MS` until the function it returns is called; with it a
+   * drag held still past an edge keeps scrolling, without it only the pointer's own moves do.
+   */
   constructor(
     out: TerminalOutput,
     schedule: Scheduler,
-    options: { readonly divider: () => string; readonly mouse?: boolean },
+    options: {
+      readonly divider: () => string;
+      readonly mouse?: boolean;
+      readonly repeat?: (run: () => void) => () => void;
+    },
   ) {
     this.mouse = options.mouse ?? true;
     this.out = out;
     this.schedule = schedule;
     this.divider = options.divider;
+    this.repeat = options.repeat ?? null;
   }
 
   isOn(): boolean {
@@ -295,6 +350,7 @@ export class SplitRegion {
    */
   leave(): string[] {
     this.cancelScheduled();
+    this.selectClear();
     if (this.mode === "on") this.out.write(MOUSE_OFF + ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
     const lines = this.history.map((entry) => entry.raw);
     if (this.header?.scrollback !== undefined) lines.unshift(...this.header.scrollback);
@@ -322,6 +378,7 @@ export class SplitRegion {
   /** The process is being stopped: the normal screen comes back, the conversation is kept. */
   suspend(): void {
     this.cancelScheduled();
+    this.selectClear();
     if (this.mode !== "on") return;
     this.out.write(MOUSE_OFF + ALT_SCROLL_RESTORE + ALT_OFF + SHOW_CURSOR);
     this.mode = "suspended";
@@ -393,6 +450,7 @@ export class SplitRegion {
   setMouse(on: boolean): void {
     if (on === this.mouse) return;
     this.mouse = on;
+    if (!on) this.selectClear();
     if (this.mode === "on") this.out.write(on ? MOUSE_ON : MOUSE_OFF);
   }
 
@@ -415,6 +473,210 @@ export class SplitRegion {
       this.scroll = Math.max(0, this.scroll + rows);
     }
     this.requestPaint();
+  }
+
+  // ---- selecting text with the mouse ------------------------------------------------------------
+  //
+  // A press, a drag and a release inside the conversation select its text. The ends are kept as a
+  // history line, a row of its fold and a column, not as places on the screen, so the selection stays
+  // on its text while the view scrolls and while lines are added. It covers the viewport only: not
+  // the header, the side panels, the live frame with the composer, or the task list.
+
+  /** The pointer's row and column in the viewport, 0-based; either may lie outside it. */
+  private pointer(x: number, y: number): { readonly row: number; readonly col: number } | null {
+    const view = this.conversation;
+    return this.mode === "on" && view !== null
+      ? { row: y - 1 - view.y, col: x - 1 - view.x }
+      : null;
+  }
+
+  /**
+   * The point at viewport row `row`, column `col`. A row or column outside the text is brought to
+   * the nearest one: above the first line is its start, below the last is its end.
+   */
+  private pointAt(row: number, col: number): SelectionPoint | null {
+    const view = this.conversation;
+    if (view === null) return null;
+    const first = this.viewMap.findIndex((shown) => shown !== null);
+    const last = this.viewMap.findLastIndex((shown) => shown !== null);
+    if (first === -1) return null;
+    const shown = this.viewMap[Math.min(last, Math.max(first, row))] as ViewRow;
+    const column =
+      row < first ? 0 : row > last ? view.width - 1 : Math.min(view.width - 1, Math.max(0, col));
+    return { entry: shown.entry, row: shown.row, col: column };
+  }
+
+  /** The button went down at terminal cell (`x`, `y`), counted from 1. A press anywhere clears the last selection. */
+  selectStart(x: number, y: number): void {
+    const had = this.selected !== null;
+    this.selected = null;
+    this.stopPull();
+    const at = this.pointer(x, y);
+    const view = this.conversation;
+    const onText =
+      at !== null &&
+      view !== null &&
+      at.row >= 0 &&
+      at.row < view.rows &&
+      at.col >= 0 &&
+      at.col < view.width &&
+      this.viewMap[at.row] !== null;
+    this.drag.press(onText ? this.pointAt(at.row, at.col) : null);
+    if (had) this.requestPaint();
+  }
+
+  /** The pointer moved with the button down. Past the top or bottom of the conversation it scrolls. */
+  selectMove(x: number, y: number): void {
+    const at = this.pointer(x, y);
+    const view = this.conversation;
+    if (!this.drag.pressed || at === null || view === null) return;
+    const col = Math.min(view.width - 1, Math.max(0, at.col));
+    if (at.row < 0 || at.row >= view.rows) {
+      this.pull = { direction: at.row < 0 ? 1 : -1, col };
+      if (this.stopRepeat === null && this.repeat !== null) {
+        this.stopRepeat = this.repeat(() => this.pullStep());
+      }
+      this.pullStep();
+      return;
+    }
+    this.stopPull();
+    this.moveHead(this.pointAt(at.row, col));
+  }
+
+  /**
+   * The button came up. Returns the plain text of the selection for the clipboard; null for a click
+   * (which also clears the selection), for a press that began outside the conversation, and for an
+   * empty selection.
+   */
+  selectEnd(x: number, y: number): string | null {
+    const view = this.conversation;
+    const at = this.pointer(x, y);
+    if (this.drag.dragging && view !== null && at !== null && at.row >= 0 && at.row < view.rows) {
+      this.moveHead(this.pointAt(at.row, Math.min(view.width - 1, Math.max(0, at.col))));
+    }
+    this.stopPull();
+    const end = this.drag.release();
+    if (end.kind !== "select") {
+      if (this.selected !== null) {
+        this.selected = null;
+        this.requestPaint();
+      }
+      return null;
+    }
+    this.selected = { anchor: end.anchor, head: end.head };
+    this.requestPaint();
+    const text = this.selectedText();
+    return text === "" ? null : text;
+  }
+
+  /** Drops the selection and any press in progress. */
+  selectClear(): void {
+    this.drag.cancel();
+    this.stopPull();
+    if (this.selected === null) return;
+    this.selected = null;
+    this.requestPaint();
+  }
+
+  /** Whether a selection is shown or a press is down on the conversation. */
+  selecting(): boolean {
+    return this.selected !== null || this.drag.pressed;
+  }
+
+  private moveHead(head: SelectionPoint | null): void {
+    const anchor = this.drag.anchor;
+    if (head === null || anchor === null || !this.drag.move(head)) return;
+    this.selected = { anchor, head };
+    this.requestPaint();
+  }
+
+  /** One row of scrolling toward the edge the pointer is past; the end of the selection follows it. */
+  private pullStep(): void {
+    const pull = this.pull;
+    const view = this.conversation;
+    if (pull === null || view === null) return;
+    this.scrollBy(pull.direction);
+    // The map of the viewport is read next, so the scroll has to be drawn first.
+    this.flush();
+    this.moveHead(this.pointAt(pull.direction > 0 ? 0 : view.rows - 1, pull.col));
+  }
+
+  private stopPull(): void {
+    this.pull = null;
+    this.stopRepeat?.();
+    this.stopRepeat = null;
+  }
+
+  /** The selection from its earlier end to its later one, with the history line each lies in. */
+  private orderedSelection(): {
+    readonly start: SelectionPoint;
+    readonly end: SelectionPoint;
+    readonly first: number;
+    readonly last: number;
+  } | null {
+    const selected = this.selected;
+    if (selected === null) return null;
+    const a = this.history.indexOf(selected.anchor.entry);
+    const b = this.history.indexOf(selected.head.entry);
+    // A line that was dropped for age takes the selection with it.
+    if (a === -1 || b === -1) return null;
+    const anchorFirst =
+      a !== b
+        ? a < b
+        : selected.anchor.row !== selected.head.row
+          ? selected.anchor.row < selected.head.row
+          : selected.anchor.col <= selected.head.col;
+    return anchorFirst
+      ? { start: selected.anchor, end: selected.head, first: a, last: b }
+      : { start: selected.head, end: selected.anchor, first: b, last: a };
+  }
+
+  /** `view` with the selected cells in reverse video. */
+  private highlighted(view: string[]): string[] {
+    const range = this.orderedSelection();
+    if (range === null) return view;
+    const { start, end, first, last } = range;
+    return view.map((row, at) => {
+      const shown = this.viewMap[at];
+      if (shown === null || shown === undefined || shown.index < first || shown.index > last) {
+        return row;
+      }
+      let from = 0;
+      let to = Infinity;
+      if (shown.index === first) {
+        if (shown.row < start.row) return row;
+        if (shown.row === start.row) from = start.col;
+      }
+      if (shown.index === last) {
+        if (shown.row > end.row) return row;
+        if (shown.row === end.row) to = end.col + 1;
+      }
+      return highlightCells(row, from, to);
+    });
+  }
+
+  private selectedText(): string {
+    const range = this.orderedSelection();
+    if (range === null) return "";
+    const { start, end, first, last } = range;
+    const rows: SelectedRow[] = [];
+    for (let at = first; at <= last; at += 1) {
+      const entry = this.history[at] as HistoryEntry;
+      const folded = (entry.rows ??= wrapStyled(entry.raw, this.wrapWidth));
+      const spaces = droppedSpaces(entry.raw, folded);
+      const firstRow = at === first ? start.row : 0;
+      const lastRow = at === last ? end.row : folded.length - 1;
+      for (let row = firstRow; row <= lastRow; row += 1) {
+        rows.push({
+          styled: folded[row] ?? "",
+          line: entry,
+          from: at === first && row === start.row ? start.col : 0,
+          to: at === last && row === end.row ? end.col + 1 : Infinity,
+          spaceAfter: spaces[row] ?? false,
+        });
+      }
+    }
+    return selectionText(rows);
   }
 
   /** Home: as far back as the lines kept go. */
@@ -524,6 +786,7 @@ export class SplitRegion {
 
   /** Ctrl-L: what is in the viewport is scrolled out of view; `leave` still hands it back. */
   abandon(): void {
+    this.selectClear();
     this.viewFrom = this.history.length;
     this.scroll = 0;
     this.requestPaint();
@@ -597,8 +860,11 @@ export class SplitRegion {
     if (width !== this.wrapWidth) {
       this.wrapWidth = width;
       for (const entry of this.history) entry.rows = null;
+      // A selection names rows of the old fold.
+      this.selectClear();
     }
     const newestFirst: string[] = [];
+    const sources: ViewRow[] = [];
     const oldest = Math.max(this.viewFrom, this.history.length - VIEW_LIMIT);
     let index = this.history.length - 1;
     for (; index >= oldest && newestFirst.length < count + this.scroll; index -= 1) {
@@ -606,6 +872,7 @@ export class SplitRegion {
       entry.rows ??= wrapStyled(entry.raw, width);
       for (let row = entry.rows.length - 1; row >= 0; row -= 1) {
         newestFirst.push(entry.rows[row] as string);
+        sources.push({ entry, index, row });
       }
     }
     const reach = Math.max(0, newestFirst.length - count);
@@ -619,11 +886,17 @@ export class SplitRegion {
     }
     this.wantOlder = false;
     const rows = newestFirst.slice(this.scroll, this.scroll + count).toReversed();
+    const shown: Array<ViewRow | null> = sources
+      .slice(this.scroll, this.scroll + count)
+      .toReversed();
     if (this.scroll > 0 && rows.length > 0) {
       const key = this.unseen ? "render.split.newBelow" : "render.split.scrolling";
       rows[rows.length - 1] = truncateStyled(t(key), width);
+      shown[shown.length - 1] = null;
     }
-    return [...Array.from({ length: count - rows.length }, () => ""), ...rows];
+    const blank = count - rows.length;
+    this.viewMap = [...Array.from({ length: blank }, () => null), ...shown];
+    return [...Array.from({ length: blank }, () => ""), ...rows];
   }
 
   private paint(): void {
@@ -665,8 +938,10 @@ export class SplitRegion {
     }
     const top = Math.max(0, leftRows - lines.length);
     this.viewRows = top;
+    const view = this.viewport(top, leftLimit);
+    this.conversation = { x: x0, y: head, width: leftLimit, rows: top };
     const left = [
-      ...[...this.viewport(top, leftLimit), ...lines].slice(-leftRows),
+      ...[...this.highlighted(view), ...lines].slice(-leftRows),
       ...tasks.map((line) => truncateStyled(line, leftLimit)),
     ].map((line) => cell(line, layout.left));
     left.unshift(...Array.from({ length: head }, () => ""));

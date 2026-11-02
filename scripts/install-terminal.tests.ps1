@@ -88,6 +88,12 @@ try {
         "setlocal",
         "if not defined OOP_DAEMON_ENTRY set `"OOP_DAEMON_ENTRY=$rootText\apps\server\dist\bin.mjs`"",
         "`"$rootText\node.exe`" `"$rootText\oop.mjs`" %*",
+        "set `"OOP_TS_ENTRY=$rootText\oop.mjs`"",
+        "set `"OOP_TS_NODE=$rootText\node.exe`"",
+        "set `"OOP_TS_NODE_ELECTRON=`"",
+        "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
+        "if not exist `"$rootText\oop-rs.exe`" goto typescript",
+        "`"$rootText\oop-rs.exe`" %*",
         "exit /b %ERRORLEVEL%"
     )) {
         if (-not $launcher.Contains($expected)) { throw "The terminal command lacks: $expected" }

@@ -1,48 +1,78 @@
 import { visibleWidth } from "../text/width.ts";
+import { colorCodes, rgbToIndexed, type Color, type ColorLevel } from "./color.ts";
+import {
+  MOCHA,
+  MOCHA_ANSI16,
+  MOCHA_ANSI16_TONE,
+  MOCHA_HEIGHT,
+  MOCHA_LIQUID,
+  MOCHA_MINI_WIDTH,
+  MOCHA_PALETTE,
+  MOCHA_STATES,
+  MOCHA_STEAM_LIFT,
+  MOCHA_WIDTH,
+  type PetState,
+  type PetTone,
+} from "./mochaArt.ts";
 import { ASCII_SYMBOLS, type Symbols } from "./symbols.ts";
 import type { Theme } from "./theme.ts";
 
 /**
- * The header's pet: "Oo", a small creature that is the O of the OOP wordmark with a face in its
- * hole. Everything here is pure: what state it is in, which frame that state shows at a given
- * time, where it stands on its track, and how a frame is drawn. The controller owns the clock and
- * the one timer; nothing in this file keeps time or writes to the terminal.
+ * The header's pet: Mocha, a warm coffee mug. Her coffee and steam take the colour of the provider
+ * that answers (Claude, OpenAI, a local model, or plain coffee brown), she steams when she is idle,
+ * brews while the model thinks, bounces while text arrives, stirs a spoon for a tool, jumps and
+ * changes colour when the model is switched, falls asleep when you are away, and trembles at an error.
+ *
+ * Everything here is pure: what state she is in, which frame that state shows at a given time, and
+ * how a frame is drawn. The controller owns the clock and the one timer; nothing in this file keeps
+ * time or writes to the terminal. The pictures are the data of `mochaArt.ts`, the same ones the Rust
+ * app draws (`apps/oop-tui-rs/src/pet.rs`), frame for frame and cell for cell.
+ *
+ * She does not walk: a mug stays on her coaster. A bounce, a jump or a shake is drawn into the
+ * frames themselves, so the header repaints her strip and nothing else.
  */
 
-export type PetState =
-  | "idle"
-  | "working"
-  | "thinking"
-  | "tool"
-  | "waiting"
-  | "success"
-  | "error"
-  | "resting"
-  | "greeting";
+export type { PetState, PetTone };
+export { MOCHA_STATES as PET_STATES };
 
-export const PET_STATES: ReadonlyArray<PetState> = [
-  "idle",
-  "working",
-  "thinking",
-  "tool",
-  "waiting",
-  "success",
-  "error",
-  "resting",
-  "greeting",
-];
-
-/** Cells of the full pet: a 9-wide ring and one margin column on each side for marks. */
-export const PET_WIDTH = 11;
-export const PET_HEIGHT = 4;
-/** Cells of the one-line pet used by the compact header. */
-export const PET_MINI_WIDTH = 5;
+/**
+ * Cells of the full pet: 14 pixels wide and 10 tall, two pixels to a cell, so 14 cells by 5 rows.
+ * The header's strip is two cells wider: a gap before her and a free column next to the divider.
+ */
+export const PET_WIDTH = MOCHA_WIDTH;
+export const PET_HEIGHT = MOCHA_HEIGHT / 2;
+export const PET_TRACK_WIDTH = PET_WIDTH + 2;
+/** Cells of the one-line pet used by the compact header, and of its strip. */
+export const PET_MINI_WIDTH = MOCHA_MINI_WIDTH;
+export const PET_MINI_TRACK_WIDTH = PET_MINI_WIDTH + 2;
 
 /** Quiet this long, and an idle pet falls asleep. */
 export const REST_AFTER_MS = 90_000;
-/** How long the greeting at startup, and the happy face after a finished turn, last. */
+/** How long the greeting at startup, the happy look after a finished turn and a model switch last. */
 export const GREETING_MS = 4_000;
 export const SUCCESS_MS = 4_000;
+export const SWITCH_MS = 1_000;
+
+// ---- which colour ------------------------------------------------------------------------
+
+const LOCAL_HINT = /(?:^|[^a-z])(?:ollama|lm-?studio|llama[.-]?cpp|localai|local)(?:[^a-z]|$)/iu;
+
+/**
+ * The colour for the model that answers, decided per provider adapter: Claude's is terracotta and
+ * Codex's emerald; a driver or instance named for a local runtime (Ollama, LM Studio, llama.cpp) is
+ * violet, and so is an OpenCode model served by one (`ollama/llama3`). Cursor, Grok, Antigravity and
+ * every other OpenCode model keep the default coffee brown: their models are not one vendor's.
+ */
+export const toneOf = (driver: string | null, instanceId: string, model: string): PetTone => {
+  const kind = (driver ?? "").toLowerCase();
+  if (kind === "claudeagent" || kind === "claude") return "claude";
+  if (kind === "codex") return "openai";
+  if (LOCAL_HINT.test(kind) || (kind === "" && LOCAL_HINT.test(instanceId))) return "local";
+  if (kind === "opencode" && LOCAL_HINT.test(model.split("/")[0] ?? "")) return "local";
+  return "default";
+};
+
+// ---- mood --------------------------------------------------------------------------------
 
 /** What the app is doing, reduced to what decides the pet's mood. */
 export interface PetObservation {
@@ -54,6 +84,15 @@ export interface PetObservation {
   readonly streaming: boolean;
   /** The link to the server is up. */
   readonly online: boolean;
+  /** The model the next message goes to; null where there is none to tell. */
+  readonly model: PetModel | null;
+}
+
+/** The model on screen: `scope` is the thread it belongs to, so opening another thread is no switch. */
+export interface PetModel {
+  readonly scope: string;
+  readonly key: string;
+  readonly tone: PetTone;
 }
 
 /** What the pet remembers between observations: when it began, when things last happened. */
@@ -65,6 +104,11 @@ export interface PetMemory {
   readonly wasWorking: boolean;
   /** When a turn last ended without an error; null if none has since the pet woke. */
   readonly finishedAt: number | null;
+  /** The model last seen, and the colour the coffee was in before the last switch. */
+  readonly model: PetModel | null;
+  readonly from: PetTone;
+  /** When the model last changed in place; null if it has not. */
+  readonly switchedAt: number | null;
 }
 
 export const newPetMemory = (now: number): PetMemory => ({
@@ -72,7 +116,18 @@ export const newPetMemory = (now: number): PetMemory => ({
   activeAt: now,
   wasWorking: false,
   finishedAt: null,
+  model: null,
+  from: "default",
+  switchedAt: null,
 });
+
+const sameModel = (left: PetModel | null, right: PetModel | null): boolean =>
+  left === right ||
+  (left !== null &&
+    right !== null &&
+    left.scope === right.scope &&
+    left.key === right.key &&
+    left.tone === right.tone);
 
 /** Folds one observation into the memory. Returns the same object when nothing changed. */
 export const observePet = (
@@ -84,22 +139,44 @@ export const observePet = (
   const busy = working || observation.phase === "approval" || observation.phase === "input";
   const finished = memory.wasWorking && !working && observation.phase === "idle";
   const finishedAt = finished ? now : memory.finishedAt;
-  const activeAt = busy || finished || observation.phase === "error" ? now : memory.activeAt;
+  let activeAt = busy || finished || observation.phase === "error" ? now : memory.activeAt;
+  let { model, from, switchedAt } = memory;
+  const seen = observation.model;
+  if (seen !== null) {
+    if (model === null || model.scope !== seen.scope) {
+      // The first model, or another thread's: she takes its colour without a show.
+      model = seen;
+      from = seen.tone;
+    } else if (model.key !== seen.key) {
+      from = model.tone;
+      model = seen;
+      switchedAt = now;
+      activeAt = now;
+    } else {
+      model = seen;
+    }
+  }
   if (
     working === memory.wasWorking &&
     finishedAt === memory.finishedAt &&
-    activeAt === memory.activeAt
+    activeAt === memory.activeAt &&
+    switchedAt === memory.switchedAt &&
+    from === memory.from &&
+    sameModel(model, memory.model)
   ) {
     return memory;
   }
-  return { ...memory, wasWorking: working, finishedAt, activeAt };
+  return { ...memory, wasWorking: working, finishedAt, activeAt, model, from, switchedAt };
 };
 
 /** A key was pressed or the terminal came back into focus: a sleeping pet wakes. */
 export const touchPet = (memory: PetMemory, now: number): PetMemory =>
   memory.activeAt === now ? memory : { ...memory, activeAt: now };
 
-/** Maps the app's state to the pet's mood. A running turn beats everything; then the quiet states. */
+/**
+ * Maps the app's state to the pet's mood. A running turn beats everything; then the quiet states.
+ * `working` is the streaming mood: the model's text is arriving.
+ */
 export const petState = (memory: PetMemory, observation: PetObservation, now: number): PetState => {
   if (!observation.online) return "error";
   switch (observation.phase) {
@@ -113,249 +190,278 @@ export const petState = (memory: PetMemory, observation: PetObservation, now: nu
     default:
       break;
   }
+  if (memory.switchedAt !== null && now - memory.switchedAt < SWITCH_MS) return "switching";
   if (now - memory.startedAt < GREETING_MS && memory.finishedAt === null) return "greeting";
   if (memory.finishedAt !== null && now - memory.finishedAt < SUCCESS_MS) return "success";
   if (now - memory.activeAt >= REST_AFTER_MS) return "resting";
   return "idle";
 };
 
-// ---- frames ------------------------------------------------------------------------------
-
-type Where = number | "back" | "front";
-
-interface Mark {
-  readonly ch: string;
-  readonly row: number;
-  /** A column of the 11-wide cell, or the margin behind or in front of the way it is walking. */
-  readonly col: Where;
+/** The colours a state is drawn in: the coffee's own, and in a switch the one it is leaving. */
+export interface PetLook {
+  readonly tone: PetTone;
+  readonly from: PetTone;
 }
 
-interface Frame {
-  readonly eyes: readonly [string, string];
-  readonly mouth: string;
-  /** Which way the face is turned inside the hole; "dir" follows the way the pet walks. */
-  readonly look: -1 | 0 | 1 | "dir";
-  readonly marks: ReadonlyArray<Mark>;
-}
-
-const f = (
-  eyes: string,
-  mouth: string,
-  look: Frame["look"] = 0,
-  marks: ReadonlyArray<Mark> = [],
-): Frame => ({ eyes: [eyes.charAt(0), eyes.charAt(1)], mouth, look, marks });
-const m = (ch: string, row: number, col: Where): Mark => ({ ch, row, col });
-
-export const PET_FRAMES: Readonly<Record<PetState, ReadonlyArray<Frame>>> = {
-  // 0 open, 1 blink, 2 looks left, 3 looks right
-  idle: [f("oo", "_"), f("--", "_"), f("oo", "_", -1), f("oo", "_", 1)],
-  // typing while it walks: the mouth chews, speed lines trail behind
-  working: [f("oo", "-", "dir", [m("-", 1, "back")]), f("oo", "o", "dir", [m("-", 2, "back")])],
-  thinking: [f("oo", "-", "dir", [m("?", 0, 10)]), f("oo", "o", "dir", [m("?", 1, 10)])],
-  tool: [
-    f("><", "=", "dir", [m("*", 0, 0), m("+", 0, 10)]),
-    f("><", "-", "dir", [m("+", 0, 0), m("*", 0, 10)]),
-  ],
-  waiting: [f("OO", "o", 0, [m("!", 0, 10)]), f("OO", "o", 0, [m("!", 0, 0), m("!", 0, 10)])],
-  success: [
-    f("^^", "u", 0, [m("*", 0, 0), m("+", 1, 10)]),
-    f("^^", "u", 0, [m("+", 0, 10), m("*", 1, 0)]),
-  ],
-  error: [f(";;", "n", 0, [m("'", 1, 10)]), f("xx", "o", 0, [m("!", 0, 10)])],
-  resting: [
-    f("--", ".", 0, [m("z", 1, 10)]),
-    f("--", ".", 0, [m("Z", 0, 10)]),
-    f("--", "o", 0, [m("z", 1, 10), m("Z", 0, 10)]),
-  ],
-  greeting: [f("^^", "u", 0, [m("/", 1, 10)]), f("^^", "u", 0, [m("\\", 1, 10)])],
+export const petLook = (memory: PetMemory, state: PetState): PetLook => {
+  const tone = memory.model?.tone ?? "default";
+  return { tone, from: state === "switching" ? memory.from : tone };
 };
 
-interface Segment {
-  readonly frame: number;
-  readonly ms: number;
-}
-
-const seg = (frame: number, ms: number): Segment => ({ frame, ms });
-
-/**
- * How long each frame stays, in order, then round again. A running turn moves at four frames a
- * second at most; an idle pet changes every few seconds and only blinks for an instant.
- */
-export const PET_SCRIPTS: Readonly<Record<PetState, ReadonlyArray<Segment>>> = {
-  idle: [
-    seg(0, 4000),
-    seg(2, 2500),
-    seg(0, 3000),
-    seg(1, 200),
-    seg(0, 2500),
-    seg(3, 2500),
-    seg(0, 1300),
-  ],
-  working: [seg(0, 250), seg(1, 250)],
-  thinking: [seg(0, 500), seg(1, 500)],
-  tool: [seg(0, 250), seg(1, 250)],
-  waiting: [seg(0, 1000), seg(1, 1000)],
-  success: [seg(0, 500), seg(1, 500)],
-  error: [seg(0, 800), seg(1, 800)],
-  resting: [seg(0, 4000), seg(1, 4000), seg(2, 4000)],
-  greeting: [seg(0, 500), seg(1, 500)],
-};
-
-/** The states in which the pet walks along its track. */
-export const PET_WALKS: ReadonlySet<PetState> = new Set<PetState>(["working", "thinking", "tool"]);
+// ---- time --------------------------------------------------------------------------------
 
 export interface PetClockReading {
-  /** Index into `PET_FRAMES[state]`. */
+  /** Index into the state's frames. */
   readonly frame: number;
-  /** Counts every segment shown since time zero, so a walk can move once per segment. */
-  readonly step: number;
   /** Milliseconds until the frame changes. */
   readonly remaining: number;
 }
 
-/** Which frame the state shows at `now`, and how long until it changes. */
-export const petClock = (state: PetState, now: number): PetClockReading => {
-  const script = PET_SCRIPTS[state];
-  let cycle = 0;
-  for (const part of script) cycle += part.ms;
-  const lap = Math.floor(now / cycle);
-  const into = now - lap * cycle;
-  let end = 0;
-  for (let index = 0; index < script.length; index += 1) {
-    const part = script[index] as Segment;
-    end += part.ms;
-    if (into < end) {
-      return { frame: part.frame, step: lap * script.length + index, remaining: end - into };
-    }
-  }
-  return { frame: 0, step: lap * script.length, remaining: cycle };
-};
-
-// ---- motion ------------------------------------------------------------------------------
-
-export interface PetPose {
-  /** Cells from the left end of the track. */
-  readonly x: number;
-  readonly dir: 1 | -1;
-  /** The last step moved on, so two draws in one step move it once. */
-  readonly step: number;
-}
-
-export const INITIAL_POSE: PetPose = { x: 0, dir: 1, step: -1 };
-
 /**
- * Moves the pet one cell per step while the state walks, turning at the ends of the track; a pet
- * that does not walk stays where it is. `travel` is how many cells the track has beyond the pet.
+ * Which frame the state shows at `now`, and how long until it changes. A switch plays once from
+ * the moment of the change, so it is read from `memory.switchedAt`; every other state loops by the
+ * clock alone.
  */
-export const stepPose = (pose: PetPose, state: PetState, step: number, travel: number): PetPose => {
-  const limit = Math.max(0, travel);
-  const x = Math.min(pose.x, limit);
-  if (step === pose.step || !PET_WALKS.has(state) || limit === 0) {
-    return x === pose.x && step === pose.step ? pose : { ...pose, x, step };
+export const petClock = (state: PetState, now: number, memory?: PetMemory): PetClockReading => {
+  const script = MOCHA[state].script;
+  const since = state === "switching" ? (memory?.switchedAt ?? 0) : 0;
+  const at = now - since;
+  let cycle = 0;
+  for (const [, ms] of script) cycle += ms;
+  const into = ((at % cycle) + cycle) % cycle;
+  let end = 0;
+  for (const [frame, ms] of script) {
+    end += ms;
+    if (into < end) return { frame, remaining: end - into };
   }
-  let dir = pose.dir;
-  let next = x + dir;
-  if (next < 0 || next > limit) {
-    dir = dir === 1 ? -1 : 1;
-    next = x + dir;
-  }
-  return { x: next, dir, step };
+  return { frame: 0, remaining: cycle };
 };
 
 // ---- drawing -----------------------------------------------------------------------------
 
-const BODY_TOP = " ▄█████▄ ";
-const BODY_BOTTOM = " ▀█████▀ ";
-const BODY_SIDE = "██";
-type Kind = "body" | "face" | "mark" | "space";
-const BODY_CHARS = /[▄▀█]/gu;
+/**
+ * A colour of a cell: `-` the terminal's own, `#RRGGBB` truecolor, `i<n>` a slot of the 256-colour
+ * palette, `a<n>` one of the 16 colours. A string, so a cell can be compared and kept in a fixture.
+ */
+export type Ink = string;
 
-const cellOf = (frame: Frame, dir: 1 | -1, row: number): string => {
-  const look = frame.look === "dir" ? dir : frame.look;
-  const hole = [" ", " ", " ", " ", " "];
-  // Eyes sit at 1 and 3 of the 5-cell hole, the mouth between them; the look shifts all three.
-  if (row === 1) {
-    hole[1 + look] = frame.eyes[0];
-    hole[3 + look] = frame.eyes[1];
-  } else if (row === 2) {
-    hole[2 + look] = frame.mouth;
-  }
-  return `${BODY_SIDE}${hole.join("")}${BODY_SIDE}`;
+/** One cell of the drawing: a glyph, its foreground and the background it is packed over. */
+export interface PetCell {
+  readonly glyph: string;
+  readonly fg: Ink;
+  readonly bg: Ink;
+}
+
+export interface PetDraw {
+  readonly level: ColorLevel;
+  readonly ascii: boolean;
+}
+
+const NONE: Ink = "-";
+
+const rgbOf = (hex: string): { r: number; g: number; b: number } => {
+  const packed = Number.parseInt(hex.slice(1), 16);
+  return { r: (packed >> 16) & 255, g: (packed >> 8) & 255, b: packed & 255 };
 };
 
-/** The pet as `PET_HEIGHT` rows of exactly `PET_WIDTH` cells, in glyphs `symbols` can show. */
+const hexOf = (rgb: { r: number; g: number; b: number }): string =>
+  `#${[rgb.r, rgb.g, rgb.b].map((v) => v.toString(16).padStart(2, "0")).join("")}`.toUpperCase();
+
+/** The steam: the coffee's colour lifted toward white, so it still shows on a dark background. */
+const lifted = (hex: string): string => {
+  const rgb = rgbOf(hex);
+  const up = (v: number) => Math.round(v + (255 - v) * MOCHA_STEAM_LIFT);
+  return hexOf({ r: up(rgb.r), g: up(rgb.g), b: up(rgb.b) });
+};
+
+/** The truecolor of a pixel; null for nothing. `L S` are the old colour of a switch, `l s` the new. */
+const pixelHex = (ch: string, tone: PetTone, from: PetTone): string | null => {
+  switch (ch) {
+    case ".":
+      return null;
+    case "L":
+      return MOCHA_LIQUID[from];
+    case "l":
+      return MOCHA_LIQUID[tone];
+    case "S":
+      return lifted(MOCHA_LIQUID[from]);
+    case "s":
+      return lifted(MOCHA_LIQUID[tone]);
+    default:
+      return MOCHA_PALETTE[ch] ?? null;
+  }
+};
+
+/** The ink of a truecolor at a colour level (3 and 2 here; the 16 colours have their own table). */
+const inkOf = (hex: string, level: ColorLevel): Ink =>
+  level === 3 ? hex : level === 2 ? `i${rgbToIndexed(rgbOf(hex))}` : NONE;
+
+/** A pixel's ink in the flat renderer at 16 colours: its own table entry, the coffee's by provider. */
+const ansi16Of = (ch: string, tone: PetTone, from: PetTone): Ink => {
+  const index =
+    ch === "L" || ch === "S"
+      ? MOCHA_ANSI16_TONE[from]
+      : ch === "l" || ch === "s"
+        ? MOCHA_ANSI16_TONE[tone]
+        : MOCHA_ANSI16[ch];
+  return index === undefined ? NONE : `a${index}`;
+};
+
+/** Glyphs for the ASCII form, by pixel: both pixels of a cell, the upper one, the lower one. */
+const ASCII_GLYPHS: Readonly<Record<string, readonly [string, string, string]>> = {
+  L: ["=", '"', "_"],
+  l: ["=", '"', "_"],
+  S: [":", "'", "."],
+  s: [":", "'", "."],
+  Y: ["*", "*", "*"],
+  R: ["v", "v", "v"],
+  Z: ["z", "z", "z"],
+  M: ["~", "~", "~"],
+  T: ["|", "|", "|"],
+  o: ["o", "o", "o"],
+};
+const ASCII_BODY: readonly [string, string, string] = ["#", '"', "_"];
+
+/** In the flat renderer a cell of two different pixels shows the one that matters most. */
+const weight = (ch: string): number => (ch === "K" ? 2 : ch === "B" || ch === "H" ? 1 : 3);
+
+/**
+ * The pixel rows (two to a cell row) drawn as cells. Where the terminal gives a background (256
+ * colours or more, Unicode symbols) two pixels of different colours are one `▀` with a foreground
+ * and a background, so every pixel keeps its colour. Without one (16 colours, no colour, ASCII) a
+ * cell has one colour and the pixels only decide its shape (`▀ ▄ █`, or `" _ #`): the eyes are
+ * left unpainted, a hole in the cup, and where two pixels differ the more important one wins.
+ */
+export const mochaCells = (
+  pixels: ReadonlyArray<string>,
+  look: PetLook,
+  draw: PetDraw,
+): PetCell[][] => {
+  const { tone, from } = look;
+  const rich = !draw.ascii && draw.level >= 2;
+  const out: PetCell[][] = [];
+  for (let row = 0; row + 1 < pixels.length; row += 2) {
+    const upper = pixels[row] as string;
+    const lower = pixels[row + 1] as string;
+    const cells: PetCell[] = [];
+    for (let col = 0; col < upper.length; col += 1) {
+      const top = upper.charAt(col);
+      const bottom = lower.charAt(col);
+      if (rich) {
+        const a = pixelHex(top, tone, from);
+        const b = pixelHex(bottom, tone, from);
+        const fa = a === null ? NONE : inkOf(a, draw.level);
+        const fb = b === null ? NONE : inkOf(b, draw.level);
+        if (a === null && b === null) cells.push({ glyph: " ", fg: NONE, bg: NONE });
+        else if (b === null) cells.push({ glyph: "▀", fg: fa, bg: NONE });
+        else if (a === null) cells.push({ glyph: "▄", fg: fb, bg: NONE });
+        else if (fa === fb) cells.push({ glyph: "█", fg: fa, bg: NONE });
+        else cells.push({ glyph: "▀", fg: fa, bg: fb });
+        continue;
+      }
+      const onTop = top !== "." && top !== "E";
+      const onBottom = bottom !== "." && bottom !== "E";
+      if (!onTop && !onBottom) {
+        cells.push({ glyph: " ", fg: NONE, bg: NONE });
+        continue;
+      }
+      const shown =
+        onTop && onBottom ? (weight(top) > weight(bottom) ? top : bottom) : onTop ? top : bottom;
+      const glyphs = ASCII_GLYPHS[shown] ?? ASCII_BODY;
+      const glyph = draw.ascii
+        ? onTop && onBottom
+          ? glyphs[0]
+          : onTop
+            ? glyphs[1]
+            : glyphs[2]
+        : onTop && onBottom
+          ? "█"
+          : onTop
+            ? "▀"
+            : "▄";
+      const hex = pixelHex(shown, tone, from);
+      const fg =
+        draw.level === 1
+          ? ansi16Of(shown, tone, from)
+          : hex === null || draw.level === 0
+            ? NONE
+            : inkOf(hex, draw.level);
+      cells.push({ glyph, fg, bg: NONE });
+    }
+    out.push(cells);
+  }
+  return out;
+};
+
+const colorOfInk = (ink: Ink): Color | null => {
+  if (ink === NONE) return null;
+  if (ink.startsWith("#")) return { kind: "rgb", ...rgbOf(ink) };
+  const index = Number.parseInt(ink.slice(1), 10);
+  return ink.startsWith("i") ? { kind: "indexed", index } : { kind: "ansi", index };
+};
+
+/** Where a colour is already at the terminal's level, so it is written as is. */
+const sgr = (ink: Ink, background: boolean): string | null => {
+  const color = colorOfInk(ink);
+  return color === null ? null : colorCodes(color, 3, background);
+};
+
+/** A row of cells as one string: runs of equal colours share their escapes. */
+const paintCells = (cells: ReadonlyArray<PetCell>): string => {
+  let out = "";
+  let run = "";
+  let open = "";
+  const flush = () => {
+    if (run === "") return;
+    out += open === "" ? run : `\u001b[${open}m${run}\u001b[39;49m`;
+    run = "";
+  };
+  for (const cell of cells) {
+    const codes = [sgr(cell.fg, false), sgr(cell.bg, true)].filter((code) => code !== null);
+    const next = cell.glyph === " " ? "" : codes.join(";");
+    if (next !== open) {
+      flush();
+      open = next;
+    }
+    run += cell.glyph;
+  }
+  flush();
+  return out;
+};
+
+const drawOf = (theme: Theme, symbols: Symbols): PetDraw => ({
+  level: theme.level,
+  ascii: symbols === ASCII_SYMBOLS,
+});
+
+const frameOf = <T>(list: ReadonlyArray<T>, index: number): T => list[index % list.length] as T;
+
+/** The pet as `PET_HEIGHT` rows of exactly `PET_WIDTH` cells, in glyphs and colours the terminal can show. */
 export const petRows = (
   state: PetState,
   frameIndex: number,
-  dir: 1 | -1,
+  look: PetLook,
   theme: Theme,
   symbols: Symbols,
-): string[] => {
-  const frames = PET_FRAMES[state];
-  const frame = frames[frameIndex % frames.length] as Frame;
-  const ascii = symbols === ASCII_SYMBOLS;
-  const accent =
-    state === "error" ? theme.error : state === "waiting" ? theme.warning : theme.accent;
-  const rows: string[] = [];
-  for (let row = 0; row < PET_HEIGHT; row += 1) {
-    const body = row === 0 ? BODY_TOP : row === 3 ? BODY_BOTTOM : cellOf(frame, dir, row);
-    const cells = [" ", ...body, " "];
-    for (const mark of frame.marks) {
-      if (mark.row !== row) continue;
-      const col =
-        mark.col === "back"
-          ? dir === 1
-            ? 0
-            : 10
-          : mark.col === "front"
-            ? dir === 1
-              ? 10
-              : 0
-            : mark.col;
-      cells[col] = `\u0000${mark.ch}`;
-    }
-    let out = "";
-    let run = "";
-    let kind: Kind | null = null;
-    const paint = (which: Kind | null, text: string): string =>
-      which === "body"
-        ? theme.brand(text)
-        : which === "face"
-          ? theme.text.bold(text)
-          : which === "mark"
-            ? accent.bold(text)
-            : text;
-    for (const cell of cells) {
-      const isMark = cell.startsWith("\u0000");
-      const ch = isMark ? cell.slice(1) : cell;
-      const next: Kind = isMark
-        ? "mark"
-        : ch === " "
-          ? "space"
-          : BODY_CHARS.test(ch)
-            ? "body"
-            : "face";
-      BODY_CHARS.lastIndex = 0;
-      if (next !== kind && run !== "") {
-        out += paint(kind, run);
-        run = "";
-      }
-      kind = next;
-      run += ascii ? ch.replace(BODY_CHARS, "#") : ch;
-      BODY_CHARS.lastIndex = 0;
-    }
-    out += paint(kind, run);
-    rows.push(out);
-  }
-  return rows;
-};
+): string[] =>
+  mochaCells(frameOf(MOCHA[state].frames, frameIndex), look, drawOf(theme, symbols)).map(
+    paintCells,
+  );
 
-/** The one-line pet, `PET_MINI_WIDTH` cells: the same face inside brackets. */
-export const petMini = (state: PetState, frameIndex: number, theme: Theme): string => {
-  const frames = PET_FRAMES[state];
-  const frame = frames[frameIndex % frames.length] as Frame;
-  return `${theme.brand("(")}${theme.text.bold(frame.eyes[0] + frame.mouth + frame.eyes[1])}${theme.brand(")")}`;
-};
+/** The one-line pet, `PET_MINI_WIDTH` cells: a cup with her eyes and the state's mark. */
+export const petMini = (
+  state: PetState,
+  frameIndex: number,
+  look: PetLook,
+  theme: Theme,
+  symbols: Symbols,
+): string =>
+  paintCells(
+    mochaCells(frameOf(MOCHA[state].mini, frameIndex), look, drawOf(theme, symbols))[0] ?? [],
+  );
+
+/** How many pictures a state has. */
+export const petFrameCount = (state: PetState): number => MOCHA[state].frames.length;
 
 /** Cells a drawn pet row takes; for tests and the header's own bookkeeping. */
 export const petCells = (rows: ReadonlyArray<string>): number =>

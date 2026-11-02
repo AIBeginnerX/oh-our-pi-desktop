@@ -5,6 +5,8 @@
 # OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # OOP_INSTALL_DIR is the folder the terminal app is unpacked into (default ~/.local/share/oop-terminal);
 # OOP_BIN_DIR is where the "oop" command goes (default ~/.local/bin). PATH is never edited.
+# The command runs the Rust terminal client (oop-rs) when the archive has one for this computer and
+# the TypeScript terminal (oop.mjs, with the bundled Node.js) otherwise; OOP_TUI=ts forces the latter.
 # Running it again reinstalls (replaces the unpacked folder). An "oop" that OOP did not create is
 # never overwritten. To uninstall: oop stop; rm -rf ~/.local/share/oop-terminal ~/.local/bin/oop
 set -eu
@@ -107,6 +109,16 @@ printed="$("$new/node" "$new/oop.mjs" --version 2>&1)" ||
   fail "The downloaded terminal app does not run on this computer ($printed). On Linux it needs glibc and libatomic1; nothing was installed."
 [ "$(printf '%s\n' "$printed" | tail -n 1)" = "$version" ] ||
   fail "The downloaded terminal app reports \"$printed\", not $version; nothing was installed."
+# The Rust client is optional. One that does not run here (a missing system library) or reports another
+# version is left out, and the command falls back to the TypeScript terminal.
+if [ -f "$new/oop-rs" ]; then
+  chmod 755 "$new/oop-rs"
+  rust_printed="$("$new/oop-rs" --version 2>&1)" || rust_printed=''
+  if [ "$(printf '%s\n' "$rust_printed" | tail -n 1)" != "$version" ]; then
+    printf 'Note: the Rust terminal client does not run on this computer; installing the TypeScript terminal only.\n' >&2
+    rm -f "$new/oop-rs"
+  fi
+fi
 printf '%s\n' "$version" > "$new/$install_mark"
 
 # Replace the old folder in two renames and put it back if the second one fails. A running oop keeps
@@ -118,7 +130,10 @@ if ! mv "$new" "$root"; then
 fi
 
 # The command. The launcher points the terminal at the server that came with it (OOP_DAEMON_ENTRY),
-# which is how "oop" starts a background server when no desktop app is running.
+# which is how "oop" starts a background server when no desktop app is running, and at the
+# TypeScript terminal (OOP_TS_ENTRY) for the subcommands the Rust client lacks, which it runs with the
+# bundled Node.js (OOP_TS_NODE). The bundled Node.js also goes first on PATH for the Rust client,
+# which starts the server with "node".
 launcher_tmp="$(mktemp "$bin_dir/.oop.XXXXXX")" || fail "Could not write into $bin_dir."
 {
   printf '#!/bin/sh\n# %s (written by install-terminal.sh; safe to delete)\n' "$launcher_mark"
@@ -129,14 +144,24 @@ if [ ! -x "$root/node" ] || [ ! -f "$root/oop.mjs" ]; then
   exit 127
 fi
 OOP_DAEMON_ENTRY="${OOP_DAEMON_ENTRY:-$root/apps/server/dist/bin.mjs}"
+OOP_TS_ENTRY="$root/oop.mjs"
+OOP_TS_NODE="$root/node"
 OOP_TERMINAL_INSTALL=1
-export OOP_DAEMON_ENTRY OOP_TERMINAL_INSTALL
+# The bundled node is a plain node, never Electron.
+unset OOP_TS_NODE_ELECTRON
+export OOP_DAEMON_ENTRY OOP_TS_ENTRY OOP_TS_NODE OOP_TERMINAL_INSTALL
+if [ "${OOP_TUI:-}" != ts ] && [ -x "$root/oop-rs" ]; then
+  PATH="$root:$PATH"
+  export PATH
+  exec "$root/oop-rs" "$@"
+fi
 exec "$root/node" "$root/oop.mjs" "$@"
 BODY
 } > "$launcher_tmp" || { rm -f "$launcher_tmp"; fail "Could not write the oop command."; }
 chmod 755 "$launcher_tmp" && mv -f "$launcher_tmp" "$target" || { rm -f "$launcher_tmp"; fail "Could not install $target."; }
 
-printf 'Installed OOP terminal app %s in %s and the command %s.\n' "$version" "$root" "$target"
+if [ -x "$root/oop-rs" ]; then client="Rust"; else client="TypeScript"; fi
+printf 'Installed OOP terminal app %s (%s client) in %s and the command %s.\n' "$version" "$client" "$root" "$target"
 case ":$PATH:" in
   *":$bin_dir:"*) ;;
   *)

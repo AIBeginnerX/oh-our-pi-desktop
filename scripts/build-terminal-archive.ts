@@ -14,6 +14,7 @@
  *   node | node.exe               the official Node.js runtime, checksum-verified against nodejs.org
  *   NODE_LICENSE                  its license
  *   oop.mjs                       apps/oop-tui/dist/oop.mjs, a single file
+ *   oop-rs | oop-rs.exe           the Rust terminal client (apps/oop-tui-rs), when built for the platform
  *   apps/server/dist/             the server bundle, its web client and the resource monitor
  *   node_modules/                 the native packages the server bundle keeps external
  *
@@ -21,7 +22,12 @@
  * build-cli-archive.ts, so they are staged and signed exactly like the server archives.
  *
  *   node scripts/build-terminal-archive.ts --platform mac|linux|win --arch arm64|x64 \
- *     --version X.Y.Z [--output-dir DIR] [--node-version X.Y.Z] [--resource-monitor FILE]
+ *     --version X.Y.Z [--output-dir DIR] [--node-version X.Y.Z] [--resource-monitor FILE] \
+ *     [--oop-rs FILE]
+ *
+ * `--oop-rs` is the `cargo build --release` output of apps/oop-tui-rs for the same platform and
+ * architecture. The installers' `oop` command runs it and falls back to oop.mjs, which also runs
+ * the subcommands the Rust client lacks (OOP_TS_ENTRY). Without it the archive is TypeScript only.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -50,6 +56,10 @@ export function terminalArchiveName(
 ): string {
   return `OOP-terminal-${version}-${PLATFORM_LABEL[platform]}-${arch}.${platform === "win" ? "zip" : "tar.gz"}`;
 }
+
+/** The Rust terminal client's file name inside the archive. */
+export const rustClientName = (platform: TerminalPlatform): string =>
+  platform === "win" ? "oop-rs.exe" : "oop-rs";
 
 /** The nodejs.org file for a platform, and where the runtime and its license sit inside it. */
 export function nodeDistribution(
@@ -146,7 +156,8 @@ function signMacNativeFiles(contentDir: string): void {
       name.endsWith(".node") ||
       name.endsWith(".dylib") ||
       name === "spawn-helper" ||
-      name === "t3-resource-monitor"
+      name === "t3-resource-monitor" ||
+      name === "oop-rs"
     ) {
       run("codesign", ["--force", "--sign", "-", file]);
     }
@@ -163,6 +174,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       "output-dir": { type: "string", default: "terminal-release" },
       "node-version": { type: "string", default: process.versions.node },
       "resource-monitor": { type: "string" },
+      "oop-rs": { type: "string" },
       // Packaging only, for tests on a machine that cannot stage the native packages.
       "skip-externals": { type: "boolean", default: false },
     },
@@ -202,6 +214,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       const target = NodePath.join(contentDir, "apps/server/dist/resource-monitor", name);
       NodeFS.mkdirSync(NodePath.dirname(target), { recursive: true });
       NodeFS.copyFileSync(monitor, target);
+      if (platform !== "win") NodeFS.chmodSync(target, 0o755);
+    }
+    if (values["oop-rs"]) {
+      const target = NodePath.join(contentDir, rustClientName(platform));
+      NodeFS.copyFileSync(NodePath.resolve(values["oop-rs"]), target);
       if (platform !== "win") NodeFS.chmodSync(target, 0o755);
     }
     await stageNode({ nodeVersion, platform, arch, contentDir, scratch });

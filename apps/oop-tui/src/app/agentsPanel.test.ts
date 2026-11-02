@@ -1,6 +1,7 @@
 import type { OrchestrationThread, OrchestrationThreadActivity } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
+import { setLanguage } from "../i18n/index.ts";
 import { makeStyle } from "../render/style.ts";
 import { ASCII_SYMBOLS, UNICODE_SYMBOLS } from "../render/symbols.ts";
 import { makeSession, makeThread, makeThreadShell } from "../testing/fixtures.ts";
@@ -651,5 +652,53 @@ describe("AgentsPanel", () => {
     const first = panel.read(read);
     panel.reset();
     expect(panel.read(read)).not.toBe(first);
+  });
+});
+
+describe("the crew's roles in the roster", () => {
+  const crew = [
+    { role: "worker", model: "DeepSeek V4.1 Flash" },
+    { role: "expert", model: "Sonnet 5.5" },
+    { role: "auditor", model: null },
+  ] as const;
+  const draw = (over: Partial<AgentsSource> = {}, panel: Partial<AgentsPanelInput> = {}) =>
+    renderAgentsPanel(input(deriveAgentsView(source(busy(), over)), panel)).map(stripAnsi);
+
+  it("lists each role with the model it runs, above the agents, when the crew is on", () => {
+    const rows = draw({ crew });
+    const at = rows.findIndex((row) => row.trim() === "크루");
+    expect(at).toBeGreaterThan(-1);
+    expect(rows[at + 1]).toMatch(/^\s+worker\s+DeepSeek V4\.1 Flash/u);
+    expect(rows[at + 2]).toMatch(/^\s+expert\s+Sonnet 5\.5/u);
+    expect(rows[at + 3]).toMatch(/^\s+auditor\s+모델 없음/u);
+    expect(at).toBeLessThan(rows.findIndex((row) => row.trim() === "에이전트"));
+    setLanguage("en");
+    try {
+      const english = draw({ crew });
+      expect(english.some((row) => row.trim() === "Crew")).toBe(true);
+      expect(english.join("\n")).toMatch(/auditor\s+no model/u);
+    } finally {
+      setLanguage("ko");
+    }
+  });
+
+  it("is left out with the crew off, and never draws wider than the panel", () => {
+    expect(draw().join("\n")).not.toContain("DeepSeek");
+    expect(draw({ crew: null }).join("\n")).not.toContain("worker");
+    for (const columns of [24, 38, 50]) {
+      for (const row of draw({ crew }, { columns })) {
+        expect(stringWidth(row)).toBeLessThanOrEqual(columns);
+      }
+    }
+  });
+
+  it("reads again when a role's model changes", () => {
+    const panel = new AgentsPanel();
+    const base = source(busy(), { crew });
+    const first = panel.read(base);
+    expect(panel.read({ ...base, crew: crew.map((entry) => ({ ...entry })) })).toBe(first);
+    const changed = panel.read({ ...base, crew: [{ role: "worker", model: "Opus 5.5" }] });
+    expect(changed).not.toBe(first);
+    expect(panel.read({ ...base, crew: null })).not.toBe(changed);
   });
 });

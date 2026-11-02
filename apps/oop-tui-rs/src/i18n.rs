@@ -150,8 +150,8 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "먼저 프로젝트나 스레드를 고르세요.",
         ),
         "notice.unknownCommand" => pick(
-            "Unknown command. Try /model, /mode, /effort, /plan, /default or /exit.",
-            "알 수 없는 명령입니다. /model, /mode, /effort, /plan, /default, /exit를 쓸 수 있습니다.",
+            "Unknown command. Try /help.",
+            "알 수 없는 명령입니다. /help를 보세요.",
         ),
         "notice.adding" => pick("Adding this folder…", "이 폴더를 추가하는 중…"),
         "notice.deleted" => pick("this thread was deleted", "이 스레드가 삭제되었습니다"),
@@ -187,6 +187,59 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "이전 대화를 불러오지 못했습니다",
         ),
         "notice.theme" => pick("Theme", "테마"),
+        "header.crew" => pick("Crew ", "크루 "),
+        "notice.mouseUsage" => pick("Usage: /mouse [on|off]", "사용법: /mouse [on|off]"),
+        "notice.mouseOn" => pick(
+            "Mouse wheel scrolling and drag-to-copy are on.",
+            "마우스 휠 스크롤과 드래그 복사를 켰습니다.",
+        ),
+        "notice.mouseOff" => pick(
+            "Mouse wheel scrolling and drag-to-copy are off. The terminal selects text again.",
+            "마우스 휠 스크롤과 드래그 복사를 껐습니다. 터미널이 다시 글자를 직접 선택합니다.",
+        ),
+        "copy.done" => pick("Copied {count} characters.", "{count}자를 복사했습니다."),
+        "copy.terminal" => pick(
+            "Copied {count} characters through the terminal clipboard (OSC 52).",
+            "{count}자를 터미널 클립보드(OSC 52)로 복사했습니다.",
+        ),
+        "copy.toolFailed" => pick(
+            "Sent {count} characters to the terminal clipboard (OSC 52), but the clipboard tool ({tool}) did not take them ({why}); a terminal that ignores OSC 52 has not got them.",
+            "{count}자를 터미널 클립보드(OSC 52)로 보냈지만 클립보드 도구({tool})가 받지 못했습니다 ({why}). OSC 52 를 무시하는 터미널에는 복사되지 않았을 수 있습니다.",
+        ),
+        "copy.failed" => pick("Could not copy: {why}.", "복사하지 못했습니다: {why}."),
+        "copy.missing" => pick("not found", "찾을 수 없음"),
+        "copy.fail" => pick("failed", "실패"),
+        "copy.timeout" => pick("no answer", "응답 없음"),
+        "copy.tooLarge" => pick(
+            "the selection is too large for the terminal clipboard",
+            "선택한 글이 터미널 클립보드로 보내기에 너무 큽니다",
+        ),
+        "copy.noWay" => pick(
+            "this terminal has no way to take it",
+            "이 터미널로는 보낼 방법이 없습니다",
+        ),
+        "notice.petUsage" => pick("Usage: /pet [on|off]", "사용법: /pet [on|off]"),
+        "notice.petOn" => pick("Mocha is on.", "모카를 켰습니다."),
+        "notice.petOff" => pick("Mocha is off.", "모카를 껐습니다."),
+        "notice.sidebarUsage" => pick("Usage: /sidebar [on|off]", "사용법: /sidebar [on|off]"),
+        "notice.panelUsage" => pick(
+            "Usage: /dag-workflow [on|off], /agents [on|off]",
+            "사용법: /dag-workflow [on|off], /agents [on|off]",
+        ),
+        "notice.panelOn" => pick("The side panel is open.", "오른쪽 패널을 열었습니다."),
+        "notice.panelOff" => pick("The side panel is closed.", "오른쪽 패널을 닫았습니다."),
+        "notice.newThread" => pick(
+            "New thread. Type a message to start it.",
+            "새 스레드입니다. 메시지를 입력하면 시작합니다.",
+        ),
+        "notice.help" => pick(
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /dag-agents /new /threads /projects /stats /tasks /sidebar /mouse /pet /history /diff /undo /theme /update /help /exit",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /dag-agents /new /threads /projects /stats /tasks /sidebar /mouse /pet /history /diff /undo /theme /update /help /exit",
+        ),
+        "notice.unsupported" => pick(
+            "Not in oop-rs yet: use the TypeScript terminal for it.",
+            "oop-rs에는 아직 없습니다. 이 명령은 TypeScript 터미널에서 쓰세요.",
+        ),
         _ => "",
     }
 }

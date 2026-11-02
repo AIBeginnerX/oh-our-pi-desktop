@@ -5,6 +5,8 @@ import { stringWidth } from "../text/width.ts";
 import type { Scheduler } from "./liveRegion.ts";
 import {
   KEEP_LIMIT,
+  MOUSE_OFF,
+  MOUSE_ON,
   SplitRegion,
   VIEW_LIMIT,
   splitLayout,
@@ -14,7 +16,11 @@ import {
 const setup = (
   columns = 100,
   rows = 24,
-  options: { altScroll?: boolean; divider?: string } = {},
+  options: {
+    altScroll?: boolean;
+    divider?: string;
+    repeat?: (run: () => void) => () => void;
+  } = {},
 ) => {
   const divider = options.divider ?? "|";
   const term = new FakeTerminal(columns, rows, options);
@@ -26,7 +32,7 @@ const setup = (
   const region = new SplitRegion(
     { write: (text) => term.write(text), columns: () => term.columns, rows: () => term.rows },
     schedule,
-    { divider: () => divider },
+    { divider: () => divider, ...(options.repeat ? { repeat: options.repeat } : {}) },
   );
   /** Runs the paint a timer would. */
   const settle = () => queue.splice(0).forEach((run) => run());
@@ -554,6 +560,246 @@ describe("SplitRegion mouse wheel and older lines", () => {
     region.scrollBy(5);
     region.scrollTop();
     settle();
+    expect(term.writes).toEqual([]);
+  });
+});
+
+describe("SplitRegion selecting text with the mouse", () => {
+  const REVERSE = "\u001b[7m";
+  /** A terminal cell as the mouse reports it: 1-based. */
+  const at = (row: number, col: number) => [col + 1, row + 1] as const;
+  const lines = ["첫째 줄", "둘째 줄", "셋째 줄"];
+  /** 100 columns by 24 rows: the conversation is rows 0-22, 59 columns wide, the panel starts at column 61. */
+  const started = (options: Parameters<typeof setup>[2] = {}, history: string[] = lines) => {
+    const kit = setup(100, 24, options);
+    kit.region.enter();
+    kit.region.commit(history);
+    kit.region.set(frameOf("❯"));
+    kit.settle();
+    return kit;
+  };
+  const written = (term: FakeTerminal) => term.writes.join("");
+
+  it("asks for button-drag reports after the wheel's, and gives them all back, before the normal screen", () => {
+    expect(MOUSE_ON.indexOf("?1000h")).toBeLessThan(MOUSE_ON.indexOf("?1002h"));
+    expect(MOUSE_ON).toContain("?1006h");
+    for (const mode of ["?1000", "?1002", "?1006"]) expect(MOUSE_OFF).toContain(`${mode}l`);
+    const { term, region } = setup();
+    region.enter();
+    expect(written(term)).toContain(MOUSE_ON);
+    term.writes.length = 0;
+    region.leave();
+    expect(written(term).indexOf(MOUSE_OFF)).toBeLessThan(written(term).indexOf("\u001b[?1049l"));
+  });
+
+  it("selects from the press to the release and hands the plain text back on release", () => {
+    const { region, term, settle } = started();
+    region.selectStart(...at(20, 0));
+    region.selectMove(...at(21, 1));
+    region.selectMove(...at(22, 2));
+    settle();
+    // The highlight is on screen, and the text is unchanged by it.
+    expect(written(term)).toContain(REVERSE);
+    expect(term.text(20, 0, 6)).toBe("첫째 줄");
+    // The third row is cut in the middle of 째 (columns 2 and 3): the glyph is taken whole.
+    expect(region.selectEnd(...at(22, 2))).toBe("첫째 줄\n둘째 줄\n셋째");
+  });
+
+  it("selects backwards as well as forwards", () => {
+    const { region } = started();
+    region.selectStart(...at(22, 3));
+    region.selectMove(...at(20, 0));
+    expect(region.selectEnd(...at(20, 0))).toBe("첫째 줄\n둘째 줄\n셋째");
+  });
+
+  it("takes a Korean syllable whole whichever of its two cells the pointer is on", () => {
+    const { region } = started();
+    region.selectStart(...at(20, 1));
+    region.selectMove(...at(20, 2));
+    expect(region.selectEnd(...at(20, 2))).toBe("첫째");
+  });
+
+  it("copies nothing for a plain click, and clears what was selected before", () => {
+    const { region, term, settle } = started();
+    region.selectStart(...at(20, 0));
+    region.selectMove(...at(21, 2));
+    region.selectEnd(...at(21, 2));
+    settle();
+    expect(region.selecting()).toBe(true);
+    term.writes.length = 0;
+    region.selectStart(...at(21, 5));
+    expect(region.selectEnd(...at(21, 5))).toBeNull();
+    settle();
+    expect(region.selecting()).toBe(false);
+    // The rows that were highlighted are drawn again without it.
+    expect(written(term)).not.toContain(REVERSE);
+  });
+
+  it("copies nothing for a drag that came back to where it began", () => {
+    const { region } = started();
+    region.selectStart(...at(21, 3));
+    region.selectMove(...at(21, 5));
+    region.selectMove(...at(21, 3));
+    expect(region.selectEnd(...at(21, 3))).toBeNull();
+  });
+
+  it("ignores a press on the side panel, the live frame and the blank rows above the text", () => {
+    for (const [row, col] of [
+      [21, 70],
+      [23, 1],
+      [3, 1],
+    ] as const) {
+      const { region } = started();
+      region.selectStart(...at(row, col));
+      region.selectMove(...at(22, 3));
+      expect(region.selectEnd(...at(22, 3)), `${row},${col}`).toBeNull();
+      expect(region.selecting()).toBe(false);
+    }
+  });
+
+  it("does not follow the pointer into the panel: the selection ends at the end of the row", () => {
+    const { region } = started();
+    region.selectStart(...at(20, 0));
+    region.selectMove(...at(21, 80));
+    expect(region.selectEnd(...at(21, 80))).toBe("첫째 줄\n둘째 줄");
+  });
+
+  it("stays out of the header", () => {
+    const { term, region, settle } = setup(100, 24);
+    region.enter();
+    region.setHeader({ lead: ["OOP", "상태"], track: [], trackWidth: 0 });
+    region.commit(lines);
+    region.set(frameOf("❯"));
+    settle();
+    // Rows 0-1 are the header; the conversation's last line is at row 22.
+    expect(term.text(0, 0, 3)).toBe("OOP");
+    region.selectStart(...at(0, 1));
+    expect(region.selectEnd(...at(22, 3))).toBeNull();
+    // Dragging up into the header from the text stops at the first line instead.
+    region.selectStart(...at(22, 0));
+    region.selectMove(...at(0, 1));
+    expect(region.selectEnd(...at(0, 1))).toBe("첫째 줄\n둘째 줄\n셋");
+  });
+
+  it("joins the rows a long line is folded into, with its spaces back", () => {
+    const sentence = Array.from({ length: 30 }, (_, n) => `word${n}`).join(" ");
+    const { region, term } = started({}, [`│  ${sentence}`, "│  끝"]);
+    // The line is folded to 59 columns: at least three rows, then the last line.
+    expect(term.text(22, 0, 8)).toBe("│  끝");
+    region.selectStart(...at(18, 0));
+    region.selectMove(...at(22, 10));
+    expect(region.selectEnd(...at(22, 10))).toBe(`${sentence}\n끝`);
+  });
+
+  it("scrolls toward the edge the pointer is held past, and the selection follows", () => {
+    const history = Array.from({ length: 100 }, (_, n) => `줄 ${n}`);
+    let tick: () => void = () => undefined;
+    let stopped = 0;
+    const { region, settle } = started(
+      {
+        repeat: (run) => {
+          tick = run;
+          return () => void (stopped += 1);
+        },
+      },
+      history,
+    );
+    // The viewport shows 줄 77-줄 99; the press is on 줄 87.
+    region.selectStart(...at(10, 0));
+    region.selectMove(...at(0, 0));
+    region.selectMove(...at(-1, 0));
+    for (let n = 0; n < 3; n += 1) tick();
+    settle();
+    expect(region.isScrolled()).toBe(true);
+    // The pointer is above the first row; the button comes up there.
+    const text = region.selectEnd(...at(-1, 0)) as string;
+    expect(stopped).toBe(1);
+    const rows = text.split("\n");
+    // One row at the first move past the edge, one more for each of the three ticks.
+    expect(rows[0]).toBe("줄 73");
+    expect(rows.at(-1)).toBe("줄");
+    expect(rows).toHaveLength(87 - 73 + 1);
+  });
+
+  it("scrolls back down when held past the bottom edge", () => {
+    const history = Array.from({ length: 100 }, (_, n) => `줄 ${n}`);
+    const { region, settle } = started({}, history);
+    region.scrollBy(10);
+    settle();
+    region.selectStart(...at(5, 0));
+    region.selectMove(...at(23, 0));
+    settle();
+    expect(region.isScrolled()).toBe(true);
+    for (let n = 0; n < 10; n += 1) region.selectMove(...at(23, 0));
+    settle();
+    expect(region.isScrolled()).toBe(false);
+  });
+
+  it("keeps the selection on its text while the view scrolls and lines arrive", () => {
+    const { region, term, settle } = started();
+    region.selectStart(...at(21, 0));
+    region.selectMove(...at(21, 3));
+    region.selectEnd(...at(21, 3));
+    settle();
+    term.writes.length = 0;
+    region.commit(["넷째 줄"]);
+    settle();
+    // 둘째 줄 moved up a row and is still highlighted there.
+    expect(term.text(20, 0, 6)).toBe("둘째 줄");
+    expect(written(term)).toContain(REVERSE);
+    region.selectStart(...at(0, 0));
+    expect(region.selectEnd(...at(0, 0))).toBeNull();
+  });
+
+  it("is cleared by leaving, suspending, turning the mouse off and folding to another width", () => {
+    const select = (kit: ReturnType<typeof started>) => {
+      kit.region.selectStart(...at(20, 0));
+      kit.region.selectMove(...at(21, 3));
+      kit.region.selectEnd(...at(21, 3));
+      expect(kit.region.selecting()).toBe(true);
+    };
+    for (const end of [
+      (kit: ReturnType<typeof started>) => kit.region.leave(),
+      (kit: ReturnType<typeof started>) => kit.region.suspend(),
+      (kit: ReturnType<typeof started>) => kit.region.setMouse(false),
+      (kit: ReturnType<typeof started>) => kit.region.abandon(),
+      (kit: ReturnType<typeof started>) => {
+        kit.term.resize(120, 24);
+        kit.region.invalidate();
+        kit.settle();
+      },
+    ]) {
+      const kit = started();
+      select(kit);
+      end(kit);
+      expect(kit.region.selecting()).toBe(false);
+    }
+  });
+
+  it("copies a user's boxed message as its text alone, never the border of the box", () => {
+    // The box the renderer draws for a short message in a 58-column conversation: a top edge, one row
+    // of text and a bottom edge, against the right edge. The viewport shows them on rows 20 to 22.
+    const lead = " ".repeat(58 - 8);
+    const box = [`${lead}╭──────╮`, `${lead}│ 안녕 │`, `${lead}╰──────╯`];
+    const { region } = started({}, box);
+    // Select the whole box, from the left of its first row to the right of its last.
+    region.selectStart(...at(20, 0));
+    region.selectMove(...at(22, 57));
+    expect(region.selectEnd(...at(22, 57))).toBe("안녕");
+    // And a drag that covers only the text, border cells included, takes the text alone.
+    region.selectStart(...at(21, 50));
+    region.selectMove(...at(21, 57));
+    expect(region.selectEnd(...at(21, 57))).toBe("안녕");
+    // The edges alone hold nothing of the message, so there is nothing to copy.
+    region.selectStart(...at(20, 51));
+    region.selectMove(...at(20, 57));
+    expect(region.selectEnd(...at(20, 57))).toBeNull();
+  });
+
+  it("does nothing when the layout is not on", () => {
+    const { region, term } = setup();
+    region.selectStart(5, 5);
+    expect(region.selectEnd(5, 5)).toBeNull();
     expect(term.writes).toEqual([]);
   });
 });

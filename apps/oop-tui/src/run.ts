@@ -54,8 +54,9 @@ import { carriesServerAddress, pairFailureMessage, resolvePairTarget } from "./l
 import { resolveServer } from "./link/resolveServer.ts";
 import { localServer, plainHttpWarning, selectCredential } from "./link/selectCredential.ts";
 import { defaultScheduler, LiveRegion } from "./render/liveRegion.ts";
+import { createClipboard } from "./clipboard/clipboard.ts";
 import { RegionSwitch } from "./render/regionSwitch.ts";
-import { SplitRegion } from "./render/splitRegion.ts";
+import { EDGE_SCROLL_MS, MOUSE_OFF, SplitRegion } from "./render/splitRegion.ts";
 import { detectColorLevel } from "./render/color.ts";
 import { lastModelFilePath, readLastModel, writeLastModel } from "./lastModel.ts";
 import { makeStyle } from "./render/style.ts";
@@ -320,16 +321,7 @@ const BRACKETED_PASTE_OFF = "\u001b[?2004l";
 /** Focus reporting: the terminal sends `ESC [ I` and `ESC [ O` as its window gains and loses focus. */
 const FOCUS_REPORT_ON = "\u001b[?1004h";
 const FOCUS_REPORT_OFF = "\u001b[?1004l";
-const MOUSE_REPORT_OFF = "\u001b[?1006l\u001b[?1000l";
-
-/** `host:port` of a server address; the rest of it (user, path, query) is not something to print. */
-const hostOf = (origin: string): string | null => {
-  try {
-    return new URL(origin).host;
-  } catch {
-    return null;
-  }
-};
+const MOUSE_REPORT_OFF = MOUSE_OFF;
 
 type ResolvedServer = Exclude<Awaited<ReturnType<typeof findServer>>, { readonly error: string }>;
 
@@ -419,15 +411,18 @@ export const runInteractive = async (input: {
     rows: () => stdout.rows || 24,
   };
   // The inline layout, and the one with the workflow panel beside the conversation (`/dag-workflow`).
-  const region = new RegionSwitch(
-    new LiveRegion(screen),
-    new SplitRegion(screen, defaultScheduler, {
-      divider: () => style.theme.border(symbols.separator),
-      mouse: !/^(?:off|0|false|no)$/iu.test(process.env.OOP_MOUSE?.trim() ?? ""),
-    }),
-    screen,
-    { onClosed: (reason, part) => controller?.onSplitClosed(reason, part) },
-  );
+  const splitRegion = new SplitRegion(screen, defaultScheduler, {
+    divider: () => style.theme.border(symbols.separator),
+    mouse: !/^(?:off|0|false|no)$/iu.test(process.env.OOP_MOUSE?.trim() ?? ""),
+    // A drag held past an edge of the conversation keeps scrolling it.
+    repeat: (run) => {
+      const handle = setInterval(run, EDGE_SCROLL_MS);
+      return () => clearInterval(handle);
+    },
+  });
+  const region = new RegionSwitch(new LiveRegion(screen), splitRegion, screen, {
+    onClosed: (reason, part) => controller?.onSplitClosed(reason, part),
+  });
   let countdown: ReturnType<typeof setInterval> | null = null;
   const link = new LinkClient(
     makeEffectTransport({
@@ -463,6 +458,12 @@ export const runInteractive = async (input: {
     link,
     region,
     split: region,
+    selection: splitRegion,
+    clipboard: createClipboard({
+      write: (text) => void stdout.write(text),
+      env: process.env,
+      platform: hostPlatform(),
+    }),
     style,
     themes,
     symbols,
@@ -480,7 +481,6 @@ export const runInteractive = async (input: {
       save: (selection) => writeLastModel(lastModelFilePath(paths), selection),
     },
     home: NodeOS.homedir(),
-    server: hostOf(resolved.origin),
     terminal: createTerminalHooks((text) => void stdout.write(text), {
       colorLevel: level,
       term: process.env.TERM,

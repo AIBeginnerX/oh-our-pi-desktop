@@ -5,6 +5,7 @@
 
 use crate::app::{Active, App, Focus, LinkStatus, Modal, Row};
 use crate::i18n::tr;
+use crate::pet;
 use crate::sidebar::{Nav, Section, Status};
 use crate::text::{char_width, sanitize, truncate, width, wrap};
 use ratatui::Frame;
@@ -26,7 +27,11 @@ const HEADER_FULL_ROWS: u16 = 7;
 const HEADER_FULL_MIN_COLUMNS: u16 = 40;
 const HEADER_FULL_MIN_ROWS: u16 = 30;
 /// The list gives way below this width, as the TypeScript terminal's does.
-const SIDEBAR_MIN_COLUMNS: u16 = 60;
+pub const SIDEBAR_MIN_COLUMNS: u16 = 60;
+/// From this width the list and the panel are both on screen; below it they share one slot.
+const WIDE_COLUMNS: u16 = 120;
+/// The panel needs this many columns in all to be worth opening.
+const PANEL_MIN_COLUMNS: u16 = 90;
 const COMPOSER_MAX_ROWS: usize = 6;
 const PANEL_MAX_ROWS: u16 = 14;
 
@@ -48,6 +53,8 @@ fn header_kind(app: &App, area: Rect) -> Header {
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
+    app.width.set(area.width);
+    app.term_size.set((area.width, area.height));
     let header_kind = header_kind(app, area);
     let header_rows = if matches!(header_kind, Header::Full) {
         HEADER_FULL_ROWS
@@ -61,19 +68,32 @@ pub fn draw(frame: &mut Frame, app: &App) {
     ])
     .areas(area);
     draw_header(frame, header, app, &header_kind);
-    let main = if app.settings.sidebar && area.width >= SIDEBAR_MIN_COLUMNS {
-        let list_width = (area.width / 4).clamp(24, 38).min(area.width / 2);
-        let [list, main] =
-            Layout::horizontal([Constraint::Length(list_width), Constraint::Min(10)]).areas(body);
+    if let Some(screen) = &app.screen {
+        screen.draw(frame, body, app);
+        draw_status(frame, status, app);
+        return;
+    }
+    let (list, side, main) = split_body(app, body);
+    app.side_rect.set(side.unwrap_or_default());
+    *app.list_hits.borrow_mut() = (list.unwrap_or_default(), Vec::new());
+    if let Some(list) = list {
         draw_list(frame, list, app);
-        main
-    } else {
-        body
-    };
+    }
+    if let Some(side) = side {
+        crate::side::draw(frame, side, app);
+    }
     let bottom = bottom_height(app, main);
-    let [conversation, bottom_area] =
-        Layout::vertical([Constraint::Min(2), Constraint::Length(bottom)]).areas(main);
+    let tasks = crate::tasks_pane::rows_for(app, area, main);
+    let [conversation, tasks_area, bottom_area] = Layout::vertical([
+        Constraint::Min(2),
+        Constraint::Length(tasks),
+        Constraint::Length(bottom),
+    ])
+    .areas(main);
     draw_conversation(frame, conversation, app);
+    if tasks > 0 {
+        crate::tasks_pane::draw(frame, tasks_area, app);
+    }
     if app.approval().is_some() && app.focus == Focus::Composer {
         draw_approval(frame, bottom_area, app);
     } else if app.pending_input().is_some() && app.focus == Focus::Composer {
@@ -85,6 +105,39 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_modal(frame, conversation, app, modal);
     }
     draw_status(frame, status, app);
+}
+
+/// The body's columns: the thread list on the left, the conversation, the panel on the right.
+/// From `WIDE_COLUMNS` up both side columns fit; below it they share one slot, the list while it
+/// has the keys and the panel otherwise.
+fn split_body(app: &App, body: Rect) -> (Option<Rect>, Option<Rect>, Rect) {
+    let w = body.width;
+    let list_on = app.list_shown();
+    let panel_on = app.side_open && app.active != Active::None && w >= PANEL_MIN_COLUMNS;
+    let (list_on, panel_on) = if w >= WIDE_COLUMNS {
+        (list_on, panel_on)
+    } else if panel_on && !(list_on && app.focus == Focus::List) {
+        (false, true)
+    } else {
+        (list_on, false)
+    };
+    let list_w = if list_on {
+        (w / 4).clamp(24, 38).min(w / 2)
+    } else {
+        0
+    };
+    let side_w = if panel_on {
+        (w / 3).clamp(36, 72).min(w / 2)
+    } else {
+        0
+    };
+    let [list, main, side] = Layout::horizontal([
+        Constraint::Length(list_w),
+        Constraint::Min(10),
+        Constraint::Length(side_w),
+    ])
+    .areas(body);
+    (list_on.then_some(list), panel_on.then_some(side), main)
 }
 
 fn state_style(app: &App, key: &str) -> Style {
@@ -130,6 +183,154 @@ fn model_label(app: &App) -> String {
     }
 }
 
+fn spans_width(spans: &[Span]) -> usize {
+    spans.iter().map(|s| width(&s.content)).sum()
+}
+
+/// `spans` cut to `max` cells, a wide glyph that does not fit dropped whole.
+fn clip_spans(spans: Vec<Span<'static>>, max: usize) -> Vec<Span<'static>> {
+    let mut used = 0;
+    let mut out = Vec::new();
+    for span in spans {
+        let mut text = String::new();
+        for ch in span.content.chars() {
+            let w = char_width(ch);
+            if used + w > max {
+                break;
+            }
+            used += w;
+            text.push(ch);
+        }
+        let full = text.len() == span.content.len();
+        out.push(Span::styled(text, span.style));
+        if !full {
+            break;
+        }
+    }
+    out
+}
+
+fn pad_spans(mut spans: Vec<Span<'static>>, to: usize) -> Vec<Span<'static>> {
+    let w = spans_width(&spans);
+    if w < to {
+        spans.push(Span::raw(" ".repeat(to - w)));
+    }
+    spans
+}
+
+/// The crew as `Crew worker Haiku 5.5 · expert Opus 5.5 · …`, or a letter for each role where the
+/// room is short; empty with the crew off.
+fn crew_spans(app: &App, words: bool) -> Vec<Span<'static>> {
+    let t = &app.theme;
+    let thread = app.thread_id();
+    let current = app.current_model();
+    let brain = current
+        .as_ref()
+        .and_then(|m| Some((m["instanceId"].as_str()?, m["model"].as_str()?)));
+    let Some(roles) = crate::crew::roles_of(
+        &app.config,
+        thread.as_deref(),
+        brain,
+        app.active != Active::None,
+    ) else {
+        return Vec::new();
+    };
+    let dot = if app.settings.ascii { "|" } else { "·" };
+    let mut out = vec![Span::styled(tr("header.crew"), t.dim_style())];
+    for (i, role) in roles.iter().enumerate() {
+        if i > 0 {
+            out.push(Span::styled(format!(" {dot} "), t.dim_style()));
+        }
+        let word = if words {
+            role.role.to_string()
+        } else {
+            role.role.chars().take(1).collect()
+        };
+        out.push(Span::styled(format!("{word} "), t.muted_style()));
+        match &role.model {
+            Some(model) => out.push(Span::raw(sanitize(model).replace('\n', " "))),
+            None => out.push(Span::styled("-", t.dim_style())),
+        }
+    }
+    out
+}
+
+/// The folder with the crew after it on one row; the crew is what the row is for, so the folder is
+/// cut to make room, and left out when it would have too little.
+fn crew_beside(app: &App, folder: Vec<Span<'static>>, wide: usize) -> Vec<Span<'static>> {
+    const FOLDER_MIN: usize = 20;
+    let dim = app.theme.dim_style();
+    let dot = if app.settings.ascii { "|" } else { "·" };
+    let between = Span::styled(format!("  {dot}  "), dim);
+    let gap = width(&between.content);
+    let words = crew_spans(app, true);
+    if spans_width(&folder) + gap + spans_width(&words) <= wide {
+        let mut out = folder;
+        out.push(between);
+        out.extend(words);
+        return out;
+    }
+    let letters = crew_spans(app, false);
+    let room = wide.saturating_sub(gap + spans_width(&letters));
+    if room < FOLDER_MIN {
+        return clip_spans(letters, wide);
+    }
+    let mut out = clip_spans(folder, room);
+    out.push(between);
+    out.extend(letters);
+    out
+}
+
+/// Mocha's strip beside the header: how wide it is (0 when she is off or there is no room), and
+/// whether it holds her one-line form. The compact header always shows her so; the full header
+/// falls back to it on the first row where the strip beside the notes is too narrow for all five.
+struct PetStrip {
+    width: usize,
+    mini: bool,
+}
+
+fn pet_strip(app: &App, columns: u16, full: bool) -> PetStrip {
+    let columns = usize::from(columns);
+    let avail = if full {
+        columns.saturating_sub(23 + 14)
+    } else {
+        columns.saturating_sub(24)
+    };
+    if !app.settings.pet {
+        return PetStrip {
+            width: 0,
+            mini: !full,
+        };
+    }
+    if full && avail >= pet::PET_TRACK_WIDTH {
+        return PetStrip {
+            width: pet::PET_TRACK_WIDTH,
+            mini: false,
+        };
+    }
+    PetStrip {
+        width: if avail >= pet::PET_MINI_TRACK_WIDTH {
+            pet::PET_MINI_TRACK_WIDTH
+        } else {
+            0
+        },
+        mini: true,
+    }
+}
+
+/// The state and picture Mocha is drawn in; remembers them so the app repaints only on a change.
+fn pet_view(app: &App) -> (pet::PetState, usize, pet::Look, pet::Draw) {
+    let state = app.pet_state();
+    let frame = app.pet_frame(state);
+    let look = app.pet_look(state);
+    app.pet_shown.set(Some((state, frame, look.tone)));
+    let draw = pet::Draw {
+        level: app.misc.level,
+        ascii: app.settings.ascii,
+    };
+    (state, frame, look, draw)
+}
+
 fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
     let t = &app.theme;
     let dim = t.dim_style();
@@ -147,6 +348,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
         Style::new().fg(t.brand).add_modifier(Modifier::BOLD),
     );
     let model = Span::styled(model_label(app), t.muted_style());
+    let columns = usize::from(area.width);
     match kind {
         Header::Minimal => {
             let line = Line::from(vec![title, Span::styled(" · ", dim), state]);
@@ -154,53 +356,98 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
             return;
         }
         Header::Compact => {
-            let line = Line::from(vec![
-                title,
-                Span::styled(" · ", dim),
-                state,
-                Span::styled(" · ", dim),
-                model,
-                Span::styled(" · ", dim),
-                Span::styled(thread, dim),
-            ]);
-            frame.render_widget(Paragraph::new(line), area);
+            let track = pet_strip(app, area.width, false).width;
+            let room = columns.saturating_sub(track + 1);
+            let sep = Span::styled(if app.settings.ascii { " | " } else { " · " }, dim);
+            let mut facts = vec![title, sep.clone(), state, sep.clone(), model];
+            // The crew comes before the thread's title, which is the first to be cut; with less
+            // than a few cells it is left out whole rather than shown as a stub.
+            let crew = crew_spans(app, false);
+            let crew_room = room
+                .saturating_sub(spans_width(&facts))
+                .saturating_sub(width(&sep.content));
+            if !crew.is_empty() && crew_room >= 14 {
+                facts.push(sep.clone());
+                facts.extend(clip_spans(crew, crew_room));
+            }
+            facts.push(sep);
+            facts.push(Span::styled(thread, dim));
+            let mut spans = pad_spans(clip_spans(facts, room), room);
+            if track > 0 {
+                let (pet_state, frame_no, look, draw) = pet_view(app);
+                spans.extend(pet::mini(pet_state, frame_no, look, track, draw).spans);
+            }
+            frame.render_widget(Paragraph::new(Line::from(spans)), area);
             return;
         }
         Header::Full => {}
     }
-    let wide = usize::from(area.width.saturating_sub(1));
+    let wide = columns.saturating_sub(1);
+    let strip = pet_strip(app, area.width, true);
+    let track = strip.width;
+    let lead_width = if track == 0 {
+        columns.saturating_sub(1)
+    } else {
+        columns - track
+    };
     let notes = [
         Some(title),
         Some(state),
         Some(model),
         Some(Span::styled(mode_label(app), dim)),
     ];
+    debug_assert_eq!(WORDMARK[0].chars().count(), usize::from(LOGO_WIDTH));
+    let pet_rows = if track == 0 {
+        Vec::new()
+    } else {
+        let (pet_state, frame_no, look, draw) = pet_view(app);
+        if strip.mini {
+            vec![pet::mini(pet_state, frame_no, look, track, draw)]
+        } else {
+            pet::lines(pet_state, frame_no, look, track, draw)
+        }
+    };
     let mut lines: Vec<Line> = WORDMARK
         .iter()
         .zip(t.gradient)
         .zip(notes)
-        .map(|((row, color), note)| {
-            let mut spans = vec![Span::styled(*row, Style::new().fg(color)), Span::raw("  ")];
+        .enumerate()
+        .map(|(i, ((row, color), note))| {
+            let art = if app.settings.ascii {
+                row.replace(['▄', '▀', '█'], "#")
+            } else {
+                row.to_string()
+            };
+            let mut spans = vec![Span::styled(art, Style::new().fg(color)), Span::raw("  ")];
             spans.extend(note);
+            let mut spans = pad_spans(clip_spans(spans, lead_width), lead_width);
+            if let Some(pet_row) = pet_rows.get(i) {
+                spans.extend(pet_row.spans.clone());
+            }
             Line::from(spans)
         })
         .collect();
-    debug_assert_eq!(WORDMARK[0].chars().count(), usize::from(LOGO_WIDTH));
     let folder = home_relative(&sanitize(&app.cwd), &app.home);
-    let mut where_ = vec![
-        Span::styled(tr("header.folder"), dim),
-        Span::raw(truncate(&folder, wide / 2)),
-    ];
-    if let Some(server) = &app.server {
-        where_.push(Span::styled("  ·  ", dim));
-        where_.push(Span::styled(tr("header.server"), dim));
-        where_.push(Span::raw(sanitize(server)));
-    }
-    lines.push(Line::from(vec![
+    let folder_spans = vec![Span::styled(tr("header.folder"), dim), Span::raw(folder)];
+    // The thread row shares the strip with the pet's fifth row; its text stops before it.
+    let thread_row = vec![
         Span::styled(tr("header.thread"), dim),
-        Span::styled(truncate(&thread, wide.saturating_sub(10)), dim),
-    ]));
-    lines.push(Line::from(where_));
+        Span::styled(thread, dim),
+    ];
+    let mut thread_line = if let Some(pet_row) = pet_rows.get(WORDMARK.len()) {
+        let mut spans = pad_spans(clip_spans(thread_row, lead_width), lead_width);
+        spans.extend(pet_row.spans.clone());
+        spans
+    } else {
+        clip_spans(thread_row, wide)
+    };
+    lines.push(Line::from(std::mem::take(&mut thread_line)));
+    let crew_on = !crew_spans(app, false).is_empty();
+    lines.push(Line::from(if crew_on {
+        crew_beside(app, folder_spans, wide)
+    } else {
+        clip_spans(folder_spans, wide)
+    }));
     lines.push(Line::from(Span::styled(app.sym.rule.repeat(wide), dim)));
     frame.render_widget(Paragraph::new(lines), area);
 }
@@ -261,9 +508,11 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
         )));
     }
     let (mut selected_first, mut selected_last) = (0, 0);
+    let mut firsts: Vec<(usize, usize)> = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let selected = index == app.selected && app.focus == Focus::List;
         let first = lines.len();
+        firsts.push((first, index));
         let mut line_style = Style::new();
         let mut second: Option<String> = None;
         let text = match row {
@@ -350,8 +599,36 @@ fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
     }
     let height = usize::from(inner.height);
     let skip = selected_last.saturating_sub(height).min(selected_first);
+    // Where each row stands on the screen, for a click.
+    *app.list_hits.borrow_mut() = (
+        area,
+        firsts
+            .iter()
+            .filter(|(first, _)| *first >= skip && first - skip < height)
+            .map(|(first, index)| (inner.y + (first - skip) as u16, *index))
+            .collect(),
+    );
     let visible: Vec<Line> = lines.into_iter().skip(skip).take(height).collect();
     frame.render_widget(Paragraph::new(visible), inner);
+}
+
+/// The conversation already says this error: the server records it as a `runtime.error` activity
+/// and also keeps it as the session's `lastError`, so showing both would print it twice.
+fn error_in_transcript(app: &App, error: &str) -> bool {
+    let error = error.trim();
+    let says = |value: &serde_json::Value| {
+        // The server cuts the activity's copy of a long message and ends it with "...".
+        value.as_str().map(str::trim).is_some_and(|text| {
+            let stem = text.trim_end_matches(['.', '…']);
+            !stem.is_empty() && (error.contains(stem) || stem.contains(error))
+        })
+    };
+    app.conv.thread.activities.iter().any(|a| {
+        a.kind == "runtime.error"
+            && (a.summary.trim() == error
+                || says(&a.payload["message"])
+                || says(&a.payload["detail"]))
+    })
 }
 
 /// The lines under the transcript that change with the clock or the session, not the thread.
@@ -360,6 +637,7 @@ fn live_lines(app: &App, w: usize) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     if app.conv.session().is_some_and(|s| s.status == "error")
         && let Some(error) = app.conv.session().and_then(|s| s.last_error.as_deref())
+        && !error_in_transcript(app, error)
     {
         for (i, line) in wrap(&sanitize(error), w.saturating_sub(3))
             .into_iter()
@@ -402,17 +680,27 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
     let w = usize::from(area.width);
     let h = usize::from(area.height);
     app.page.set(h.saturating_sub(2).max(1));
-    let base = if placeholder(app).is_some() {
+    let transcript = if placeholder(app).is_some() {
         Default::default()
     } else {
         app.transcript(w)
     };
+    let base = &transcript.lines;
     let mut tail: Vec<Line<'static>> = match placeholder(app) {
-        Some(key) => vec![Line::from(Span::styled(
-            format!(" {}", tr(key)),
-            app.theme.dim_style(),
-        ))],
-        None => live_lines(app, w),
+        // Notes (`/update`, `/theme`, ...) still show where there is no conversation to put them under.
+        Some(key) => {
+            let mut lines = vec![Line::from(Span::styled(
+                format!(" {}", tr(key)),
+                app.theme.dim_style(),
+            ))];
+            lines.extend(crate::notes::lines(app, w));
+            lines
+        }
+        None => {
+            let mut lines = crate::notes::lines(app, w);
+            lines.extend(live_lines(app, w));
+            lines
+        }
     };
     if !base.is_empty() && !tail.is_empty() {
         tail.insert(0, Line::default());
@@ -444,6 +732,13 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
     let mut shown: Vec<Line> = vec![Line::default(); pad];
     shown.extend((start..end).map(at));
     frame.render_widget(Paragraph::new(shown), area);
+    app.geo.set(crate::app::Geo {
+        area,
+        pad,
+        start,
+        rows: base.len(),
+    });
+    highlight_selection(frame, area, app, &transcript, pad, start, end);
 
     let t = &app.theme;
     let mut hint = |row: u16, text: String| {
@@ -470,6 +765,39 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
             })
             .to_string(),
         );
+    }
+}
+
+/// Paints the selected cells in reverse video. Only the text is painted: a bubble's border and
+/// padding stay as they are, as they stay out of the copy.
+fn highlight_selection(
+    frame: &mut Frame,
+    area: Rect,
+    app: &App,
+    transcript: &crate::transcript::Transcript,
+    pad: usize,
+    start: usize,
+    end: usize,
+) {
+    let Some(range) = app.selection.range() else {
+        return;
+    };
+    let buffer = frame.buffer_mut();
+    for row in start.max(range.0.row)..end.min(range.1.row + 1).min(transcript.lines.len()) {
+        let meta = transcript.meta.get(row).copied().unwrap_or_default();
+        let Some((from, to)) = crate::selection::row_cells(range, row, &meta) else {
+            continue;
+        };
+        let line = &transcript.lines[row];
+        let Some((from, to)) = crate::selection::snap(line, from, to.min(line.width())) else {
+            continue;
+        };
+        let y = area.y + (pad + row - start) as u16;
+        for col in from..to.min(usize::from(area.width)) {
+            buffer[(area.x + col as u16, y)]
+                .modifier
+                .insert(Modifier::REVERSED);
+        }
     }
 }
 
@@ -693,6 +1021,11 @@ fn draw_modal(frame: &mut Frame, area: Rect, app: &App, modal: &Modal) {
                 .unwrap_or_default(),
             *cursor,
         ),
+        Modal::Pick(pick) => (
+            pick.title.as_str(),
+            pick.items.iter().map(|item| sanitize(item)).collect(),
+            pick.cursor,
+        ),
     };
     let filter = match modal {
         Modal::Models { filter, .. } => format!(
@@ -752,7 +1085,10 @@ fn draw_modal(frame: &mut Frame, area: Rect, app: &App, modal: &Modal) {
 
 fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let t = &app.theme;
-    let hint = if app.modal.is_some() {
+    let screen_hint = app.screen.as_ref().map(|screen| screen.hint());
+    let hint = if let Some(hint) = &screen_hint {
+        hint.as_str()
+    } else if app.modal.is_some() {
         tr(if matches!(app.modal, Some(Modal::Models { .. })) {
             "hint.modelPicker"
         } else {
@@ -783,17 +1119,30 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         (None, Some((text, color))) => (text, Style::new().fg(color)),
         (None, None) => (hint.to_string(), t.dim_style()),
     };
+    // The thread's goal, right-aligned, kept whole while the left text gives way.
+    let goal = crate::cmd_goal::goal_bar(app).map(|bar| format!(" {} ", sanitize(&bar)));
+    let goal_room = goal.as_ref().map_or(0, |bar| width(bar) + 1);
     let line = Line::from(Span::styled(
         format!(
             " {}",
             truncate(
                 &sanitize(&text).replace('\n', " "),
-                usize::from(area.width).saturating_sub(2)
+                usize::from(area.width).saturating_sub(2 + goal_room)
             )
         ),
         style,
     ));
     frame.render_widget(Paragraph::new(line), area);
+    if let Some(bar) = goal {
+        let room = u16::try_from(width(&bar))
+            .unwrap_or(u16::MAX)
+            .min(area.width);
+        let rect = Rect::new(area.right() - room, area.y, room, area.height.min(1));
+        frame.render_widget(
+            Paragraph::new(Span::styled(bar, Style::new().fg(t.brand))),
+            rect,
+        );
+    }
 }
 
 #[allow(dead_code)]
@@ -916,7 +1265,8 @@ mod tests {
 
     #[test]
     fn user_text_is_right_aligned_and_assistant_text_is_left() {
-        let app = open_conversation();
+        let mut app = open_conversation();
+        app.side_open = false;
         let rows = screen(&app, 140, 40);
         let user = rows
             .iter()
@@ -928,7 +1278,7 @@ mod tests {
             .expect("assistant line");
         let user_end = width(user.trim_end());
         assert!(
-            user_end >= 138,
+            user_end >= 138 && user.trim_end().ends_with('│'),
             "user plate ends at the right edge: {user_end} cells"
         );
         let left = width(&user[..user.find("안녕하세요").unwrap()]);
@@ -987,7 +1337,7 @@ mod tests {
     fn a_small_terminal_folds_the_header_to_one_line_and_hides_the_list() {
         let app = open_conversation();
         let rows = screen(&app, 50, 20);
-        assert!(rows[0].contains("OOP v9.9.9") && !rows[0].contains('█'));
+        assert!(rows[0].contains("OOP v9.9.9") && !rows[0].contains("██  ██"));
         assert!(!rows.iter().any(|r| r.contains(tr("list.new"))));
     }
 
@@ -1029,10 +1379,26 @@ mod tests {
     #[test]
     fn wide_characters_never_overflow_a_narrow_pane() {
         let app = open_conversation();
-        for line in app.transcript(12).iter() {
+        for line in app.transcript(12).lines.iter() {
             let cells: usize = line.spans.iter().map(|s| width(&s.content)).sum();
             assert!(cells <= 12, "{cells} cells: {line:?}");
         }
+    }
+
+    #[test]
+    fn a_note_shows_even_when_no_thread_is_open() {
+        let (tx, _rx) = unbounded_channel();
+        let mut app = App::new("9.9.9", "/Users/x/demo", "/Users/x", tx);
+        app.say(
+            crate::notes::Tone::Warning,
+            "the update feed did not answer",
+        );
+        let rows = screen(&app, 120, 30);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("the update feed did not answer"))
+        );
+        assert!(rows.iter().any(|r| r.contains(tr("conv.pick"))));
     }
 
     #[test]
@@ -1046,6 +1412,308 @@ mod tests {
                 .any(|r| r.contains("✗  Provider is not signed in"))
         );
         assert!(rows[1].contains(tr("state.error")));
+    }
+
+    #[test]
+    fn the_error_is_said_once_when_the_activity_already_says_it() {
+        let mut app = open_conversation();
+        let long = "Claude could not authenticate. For subscription login, run `claude auth login` on this environment's machine.";
+        app.conv.apply(
+            &json!({"kind": "event", "event": {"sequence": 3, "type": "thread.session-set",
+            "payload": {"session": {"status": "error", "lastError": long}}}}),
+        );
+        app.conv.apply(&json!({"kind": "event", "event": {"sequence": 4, "type": "thread.activity-appended", "payload": {"activity": {
+            "id": "e", "tone": "error", "kind": "runtime.error", "summary": "Runtime error", "createdAt": "2026-01-01T00:00:03.000Z",
+            "payload": {"message": "Claude could not authenticate. For subscription login, run `claude auth login` on this env..."}}}}}));
+        let rows = screen(&app, 140, 40);
+        let says = rows
+            .iter()
+            .filter(|r| r.contains("Claude could not"))
+            .count();
+        assert_eq!(says, 1, "{rows:#?}");
+    }
+
+    #[test]
+    fn user_text_sits_in_a_rounded_box_and_the_header_names_no_server() {
+        let mut app = open_conversation();
+        app.server = Some("127.0.0.1:4873".into());
+        let rows = screen(&app, 140, 40);
+        assert!(rows.iter().any(|r| r.contains('╭') && r.contains('╮')));
+        assert!(rows.iter().any(|r| r.contains("│ 안녕하세요 반갑습니다")));
+        assert!(rows.iter().any(|r| r.contains('╰') && r.contains('╯')));
+        assert!(
+            !rows
+                .iter()
+                .any(|r| r.contains("127.0.0.1") || r.contains("4873")),
+            "no address on the screen"
+        );
+        app.settings.ascii = true;
+        app.sym = crate::theme::Symbols::pick(true);
+        // another pane width, so the conversation is built again with the new symbols
+        let rows = screen(&app, 150, 40);
+        assert!(rows.iter().any(|r| r.contains("+--")), "{rows:#?}");
+        assert!(rows.iter().any(|r| r.contains("| 안녕하세요")));
+    }
+
+    #[test]
+    fn the_box_stays_with_no_colour() {
+        let mut app = open_conversation();
+        app.theme = app.theme.for_level(0);
+        let rows = screen(&app, 140, 40);
+        assert!(rows.iter().any(|r| r.contains('╭')) && rows.iter().any(|r| r.contains('╰')));
+    }
+
+    #[test]
+    fn mocha_stands_in_the_header_and_the_mini_one_in_the_short_header() {
+        let mut app = open_conversation();
+        app.pet_clock = Some(1_000_000);
+        let blocks = |row: &str| row.contains(['▀', '▄', '█']);
+        // Five rows: the wordmark's four and the thread row, whose text stops before her.
+        let rows = screen(&app, 140, 40);
+        assert!(
+            blocks(&rows[4]) && rows[4].contains("Thread"),
+            "{:#?}",
+            &rows[..6]
+        );
+        assert!(!blocks(&rows[5]) && !blocks(&rows[6]), "{:#?}", &rows[..7]);
+        for row in &rows[..5] {
+            assert!(row.trim_end().ends_with(['▀', '▄', '█']) || blocks(&row[row.len() - 24..]));
+        }
+        let rows = screen(&app, 90, 20);
+        assert!(
+            rows[0].contains("OOP v9.9.9") && blocks(&rows[0]),
+            "{}",
+            rows[0]
+        );
+        // no room for her five rows beside the notes: her one-line form stands on the first row
+        let rows = screen(&app, 50, 40);
+        assert!(blocks(&rows[0]) && !blocks(&rows[4]), "{:#?}", &rows[..5]);
+        app.settings.pet = false;
+        let rows = screen(&app, 140, 40);
+        assert!(!blocks(&rows[4]), "{:#?}", &rows[..5]);
+    }
+
+    #[test]
+    fn the_crew_line_follows_the_roles_and_is_absent_with_the_crew_off() {
+        let mut app = open_conversation();
+        let provider = json!({"instanceId": "codex", "driver": "codex", "displayName": "Codex", "enabled": true,
+            "installed": true, "status": "ready", "auth": {"status": "authenticated"},
+            "models": [{"slug": "gpt", "name": "GPT", "isDefault": true}]});
+        app.config = json!({"settings": {"crew": {"enabled": true}}, "providers": [provider]});
+        let rows = screen(&app, 140, 40);
+        let crew = rows
+            .iter()
+            .find(|r| r.contains(tr("header.crew").trim()))
+            .expect("crew line");
+        assert!(crew.contains("worker") && crew.contains("expert") && crew.contains("auditor"));
+        assert!(
+            crew.contains(tr("header.folder").trim()),
+            "the folder stays beside it"
+        );
+        // narrower: letters instead of words
+        let rows = screen(&app, 60, 40);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains(tr("header.crew").trim()) && r.contains("w GPT")),
+            "{rows:#?}"
+        );
+        app.config = json!({"settings": {"crew": {"enabled": false}}, "providers": []});
+        let rows = screen(&app, 140, 40);
+        assert!(!rows.iter().any(|r| r.contains(tr("header.crew").trim())));
+    }
+
+    #[test]
+    fn the_panel_opens_on_the_right_and_gives_way_to_the_list_on_a_medium_screen() {
+        let mut app = open_conversation();
+        let rows = screen(&app, 140, 40);
+        assert!(
+            rows.iter()
+                .any(|r| r.contains("Workflow") && r.contains("Agents"))
+        );
+        assert!(
+            rows.iter().any(|r| r.contains(tr("list.projects"))),
+            "the list stays"
+        );
+        // 100 columns: one side slot
+        let rows = screen(&app, 100, 40);
+        assert!(rows.iter().any(|r| r.contains("Workflow")));
+        assert!(!rows.iter().any(|r| r.contains(tr("list.projects"))));
+        press(&mut app, KeyCode::Tab);
+        let rows = screen(&app, 100, 40);
+        assert!(rows.iter().any(|r| r.contains(tr("list.projects"))));
+        assert!(!rows.iter().any(|r| r.contains("Workflow")));
+    }
+
+    fn mouse(app: &mut App, kind: ratatui::crossterm::event::MouseEventKind, x: u16, y: u16) {
+        app.handle(Msg::Term(Event::Mouse(
+            ratatui::crossterm::event::MouseEvent {
+                kind,
+                column: x,
+                row: y,
+                modifiers: KeyModifiers::NONE,
+            },
+        )));
+    }
+
+    /// The screen cell of the first glyph of `needle` in the drawn rows.
+    fn cell_of(rows: &[String], needle: &str) -> (u16, u16) {
+        let y = rows.iter().position(|r| r.contains(needle)).expect("row");
+        let x = width(&rows[y][..rows[y].find(needle).unwrap()]);
+        (x as u16, y as u16)
+    }
+
+    #[test]
+    fn dragging_over_boxed_text_copies_the_text_without_the_border() {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        let mut app = open_conversation();
+        app.side_open = false;
+        let rows = screen(&app, 140, 40);
+        let (x, y) = cell_of(&rows, "안녕하세요");
+        let (end_x, _) = cell_of(&rows, "반갑습니다");
+        // from the box's left border to its right border: the border is not text
+        let left = x - 2;
+        let right = end_x + 12 + 2;
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), left, y);
+        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), right, y);
+        assert!(
+            app.take_copy().is_none(),
+            "nothing is copied while the button is down"
+        );
+        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), right, y);
+        let job = app.take_copy().expect("a copy on release");
+        assert_eq!(job.text, "안녕하세요 반갑습니다");
+        assert!(
+            job.osc52
+                .as_deref()
+                .is_some_and(|s| s.starts_with("\u{1b}]52;c;") || s.starts_with("\u{1b}Ptmux;"))
+        );
+        // the selected cells are drawn reversed, the border is not
+        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert!(buffer[(x, y)].modifier.contains(Modifier::REVERSED));
+        assert!(!buffer[(left, y)].modifier.contains(Modifier::REVERSED));
+        // a key press puts the highlight away
+        press(&mut app, KeyCode::Char('x'));
+        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        assert!(
+            !terminal.backend().buffer()[(x, y)]
+                .modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn a_click_copies_nothing_and_a_click_on_a_list_row_opens_it() {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        let mut app = open_conversation();
+        let rows = screen(&app, 140, 40);
+        let (x, y) = cell_of(&rows, "안녕하세요");
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), x, y);
+        assert!(app.take_copy().is_none());
+        // the list row of the thread (not the conversation)
+        let (lx, ly) = cell_of(&rows[8..], "안녕 스레드");
+        let ly = ly + 8;
+        app.active = Active::None;
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), lx, ly);
+        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), lx, ly);
+        assert_eq!(app.active, Active::Thread("t".into()));
+    }
+
+    #[test]
+    fn wrapped_text_is_copied_as_the_line_that_was_typed() {
+        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
+        let mut app = open_conversation();
+        app.side_open = false;
+        load(
+            &mut app,
+            json!([{"id": "u", "role": "user", "text": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma", "streaming": false,
+            "createdAt": "2026-01-01T00:00:01.000Z"}]),
+        );
+        let rows = screen(&app, 70, 30);
+        let (x, y) = cell_of(&rows, "alpha");
+        let last = rows.iter().rposition(|r| r.contains("sigma")).unwrap() as u16;
+        let (ex, _) = cell_of(&rows[..], "sigma");
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            ex + 4,
+            last,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            ex + 4,
+            last,
+        );
+        let job = app.take_copy().expect("copy");
+        assert_eq!(
+            job.text,
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma"
+        );
+    }
+
+    #[test]
+    fn slash_commands_drive_the_panel_the_pet_the_list_and_the_mouse() {
+        let mut app = open_conversation();
+        let run = |app: &mut App, text: &str| {
+            for ch in text.chars() {
+                press(app, KeyCode::Char(ch));
+            }
+            press(app, KeyCode::Enter);
+        };
+        let rows = screen(&app, 140, 40);
+        assert!(rows.iter().any(|r| r.contains("Workflow")));
+        run(&mut app, "/dag-workflow");
+        let rows = screen(&app, 140, 40);
+        assert!(
+            !rows.iter().any(|r| r.contains("Workflow  ")) || !app.side_open,
+            "closed"
+        );
+        assert!(!app.side_open);
+        run(&mut app, "/dag-agents");
+        assert!(app.side_open && app.side_view == crate::app::Side::Agents);
+        run(&mut app, "/dag-workflow");
+        assert!(app.side_open && app.side_view == crate::app::Side::Workflow);
+        run(&mut app, "/dag-workflow off");
+        assert!(!app.side_open);
+        run(&mut app, "/pet off");
+        assert!(!app.settings.pet);
+        run(&mut app, "/pet");
+        assert!(app.settings.pet);
+        run(&mut app, "/mouse off");
+        assert!(!app.mouse);
+        run(&mut app, "/mouse");
+        assert!(app.mouse);
+        run(&mut app, "/sidebar off");
+        assert!(!app.settings.sidebar);
+        run(&mut app, "/sidebar on");
+        run(&mut app, "/new");
+        assert!(matches!(app.active, Active::Draft(_)));
+        run(&mut app, "/bogus");
+        assert_eq!(app.notice.as_deref(), Some(tr("notice.unknownCommand")));
+    }
+
+    #[test]
+    fn shift_tab_flips_the_panel_and_tab_still_takes_the_list() {
+        let mut app = open_conversation();
+        screen(&app, 140, 40);
+        assert_eq!(app.side_view, crate::app::Side::Workflow);
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(app.side_view, crate::app::Side::Agents);
+        press(&mut app, KeyCode::BackTab);
+        assert_eq!(app.side_view, crate::app::Side::Workflow);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, Focus::List);
+        // with the list off, Tab flips the panel as well
+        app.focus = Focus::Composer;
+        app.settings.sidebar = false;
+        screen(&app, 140, 40);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.side_view, crate::app::Side::Agents);
     }
 
     #[test]

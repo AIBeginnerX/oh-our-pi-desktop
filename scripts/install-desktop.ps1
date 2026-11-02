@@ -2,7 +2,9 @@
 # irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex
 # OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # The app also carries the terminal app; this script adds an "oop" command for it in OOP_BIN_DIR
-# (default %LOCALAPPDATA%\oop-terminal), unless an "oop" that is not ours is already there.
+# (default %LOCALAPPDATA%\oop-terminal), unless an "oop" that is not ours is already there. The
+# command runs the Rust terminal client (resources\oop\oop-rs.exe) when the app has one and the
+# TypeScript terminal otherwise; OOP_TUI=ts forces the latter.
 & {
     $ErrorActionPreference = "Stop"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -77,7 +79,8 @@
             # keeps a non-ASCII user folder out of the file; any other non-ASCII path gets no command.
             $exe = ConvertTo-CmdPath $executable
             $mjs = ConvertTo-CmdPath $bundle
-            if (-not $exe -or -not $mjs) {
+            $rustClient = ConvertTo-CmdPath (Join-Path (Split-Path -Parent $bundle) "oop-rs.exe")
+            if (-not $exe -or -not $mjs -or -not $rustClient) {
                 Write-Host "Note: OOP is installed at a path with non-ASCII characters outside %LOCALAPPDATA% and %ProgramFiles%, so the `"oop`" command was not created. The terminal app is $bundle."
                 return
             }
@@ -89,6 +92,15 @@
                 "  echo oop: OOP was not found. Install or update OOP Desktop. 1>&2",
                 "  exit /b 9009",
                 ")",
+                "rem oop-rs runs OOP_TS_ENTRY with OOP_TS_NODE; the app's own runtime is Electron acting as node",
+                "set `"OOP_TS_ENTRY=$mjs`"",
+                "set `"OOP_TS_NODE=$exe`"",
+                "set `"OOP_TS_NODE_ELECTRON=1`"",
+                "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
+                "if not exist `"$rustClient`" goto typescript",
+                "`"$rustClient`" %*",
+                "exit /b %ERRORLEVEL%",
+                ":typescript",
                 "set ELECTRON_RUN_AS_NODE=1",
                 "`"$exe`" `"$mjs`" %*",
                 "exit /b %ERRORLEVEL%"

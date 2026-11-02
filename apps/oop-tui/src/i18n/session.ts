@@ -140,7 +140,7 @@ export const session = defineMessages(
     "session.c.help.keyScroll":
       "In a split view, the mouse wheel or PageUp/PageDown scrolls the conversation back, and Home/End jump to the oldest and newest line (Home/End edit the input when it has text); reaching the top loads older turns • Shift+PageUp/PageDown if your terminal needs Shift",
     "session.c.help.keyMouse":
-      "The wheel is read by this app, so the terminal does not select text by itself: hold Shift (Option on macOS Terminal and iTerm2) while dragging to select, or /mouse off to select freely • /mouse on turns the wheel back on • OOP_MOUSE=off starts without it",
+      "In a split view, dragging over the conversation selects text and copies it when you let go (a click copies nothing; dragging past the top or bottom scrolls) • Over SSH and in tmux the copy goes through the terminal (OSC 52) and needs a terminal that allows it • Hold Shift (Option on macOS Terminal and iTerm2) while dragging to use the terminal's own selection, or /mouse off to select freely • /mouse on turns the mouse back on • OOP_MOUSE=off starts without it",
     "session.c.help.keySend": "Enter send • Ctrl-J / Alt-Enter new line",
     "session.c.help.keys": "Keys",
     "session.c.help.providerMain":
@@ -281,8 +281,20 @@ export const session = defineMessages(
     "session.c.sidebarOpen": "The thread list is already open.",
     "session.c.mouseUsage": "Usage: /mouse [on|off]",
     "session.c.mouseOn":
-      "Mouse wheel scrolling is on. Hold Shift (Option on macOS) to select text.",
-    "session.c.mouseOff": "Mouse wheel scrolling is off. The terminal selects text again.",
+      "Mouse wheel scrolling and drag-to-copy are on. Hold Shift (Option on macOS) to use the terminal's own selection.",
+    "session.c.mouseOff":
+      "Mouse wheel scrolling and drag-to-copy are off. The terminal selects text again.",
+    "session.c.copied": "Copied {count} characters.",
+    "session.c.copiedTerminal":
+      "Copied {count} characters through the terminal clipboard (OSC 52).",
+    "session.c.copiedTerminalToolFailed":
+      "Sent {count} characters to the terminal clipboard (OSC 52), but the clipboard tool ({tool}) did not take them ({why}); a terminal that ignores OSC 52 has not got them.",
+    "session.c.copyFailed": "Could not copy: {why}.",
+    "session.c.copyWhy.missing": "not found",
+    "session.c.copyWhy.failed": "failed",
+    "session.c.copyWhy.timeout": "no answer",
+    "session.c.copyWhy.tooLarge": "the selection is too large for the terminal clipboard",
+    "session.c.copyWhy.noWay": "this terminal has no way to take it",
     "session.c.sidebarUsage": "Usage: /sidebar [on|off]",
     "session.c.themeLabel": "Theme",
     "session.c.threadDeleted": "This thread was deleted.",
@@ -588,7 +600,7 @@ export const session = defineMessages(
     "session.c.help.keyScroll":
       "분리 창에서 마우스 휠 또는 PageUp/PageDown 으로 대화를 거슬러 올라가고, Home/End 로 가장 오래된·최신 줄로 이동 (입력창에 글이 있으면 Home/End 는 커서 이동) • 맨 위에 닿으면 이전 대화를 불러옵니다 • 터미널이 Shift 를 요구하면 Shift+PageUp/PageDown",
     "session.c.help.keyMouse":
-      "휠은 이 앱이 받으므로 터미널이 글자를 스스로 선택하지 않습니다: Shift(macOS 터미널·iTerm2 는 Option)를 누른 채 드래그하면 선택되고, /mouse off 로 끄면 자유롭게 선택 • /mouse on 으로 휠을 다시 켬 • OOP_MOUSE=off 로 시작하면 꺼진 채 열림",
+      "분리 창에서는 대화 위를 드래그하면 글자가 선택되고 손을 떼는 순간 복사됩니다 (클릭만 하면 복사 안 됨, 맨 위·아래 밖으로 끌면 스크롤) • SSH·tmux 에서는 터미널(OSC 52)을 거치므로 터미널이 허용해야 합니다 • 터미널 자체 선택을 쓰려면 Shift(macOS 터미널·iTerm2 는 Option)를 누른 채 드래그하거나 /mouse off 로 끄세요 • /mouse on 으로 마우스를 다시 켬 • OOP_MOUSE=off 로 시작하면 꺼진 채 열림",
     "session.c.help.keySend": "Enter 전송 • Ctrl-J / Alt-Enter 줄바꿈",
     "session.c.help.keys": "키",
     "session.c.help.providerMain":
@@ -725,8 +737,19 @@ export const session = defineMessages(
     "session.c.sidebarOpen": "스레드 목록이 이미 열려 있습니다.",
     "session.c.mouseUsage": "사용법: /mouse [on|off]",
     "session.c.mouseOn":
-      "마우스 휠 스크롤을 켰습니다. 글자 선택은 Shift(macOS 는 Option)를 누른 채 드래그하세요.",
-    "session.c.mouseOff": "마우스 휠 스크롤을 껐습니다. 터미널이 다시 글자를 직접 선택합니다.",
+      "마우스 휠 스크롤과 드래그 복사를 켰습니다. 터미널 자체 선택은 Shift(macOS 는 Option)를 누른 채 드래그하세요.",
+    "session.c.mouseOff":
+      "마우스 휠 스크롤과 드래그 복사를 껐습니다. 터미널이 다시 글자를 직접 선택합니다.",
+    "session.c.copied": "{count}자를 복사했습니다.",
+    "session.c.copiedTerminal": "{count}자를 터미널 클립보드(OSC 52)로 복사했습니다.",
+    "session.c.copiedTerminalToolFailed":
+      "{count}자를 터미널 클립보드(OSC 52)로 보냈지만 클립보드 도구({tool})가 받지 못했습니다 ({why}). OSC 52 를 무시하는 터미널에는 복사되지 않았을 수 있습니다.",
+    "session.c.copyFailed": "복사하지 못했습니다: {why}.",
+    "session.c.copyWhy.missing": "찾을 수 없음",
+    "session.c.copyWhy.failed": "실패",
+    "session.c.copyWhy.timeout": "응답 없음",
+    "session.c.copyWhy.tooLarge": "선택한 글이 터미널 클립보드로 보내기에 너무 큽니다",
+    "session.c.copyWhy.noWay": "이 터미널로는 보낼 방법이 없습니다",
     "session.c.sidebarUsage": "사용법: /sidebar [on|off]",
     "session.c.themeLabel": "테마",
     "session.c.threadDeleted": "이 스레드는 삭제되었습니다.",

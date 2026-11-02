@@ -6,14 +6,15 @@
 //! mid-word where there are no spaces to break at.
 
 use crate::text::{char_width, sanitize, width};
-use crate::theme::Theme;
+use crate::theme::{Symbols, Theme};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 type Styled = Vec<(char, Style)>;
 
-pub fn render(text: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
+pub fn render(text: &str, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'static>> {
     let w = w.max(8);
+    let ascii = sym.rule == "-";
     let text = sanitize(text);
     let lines: Vec<&str> = text.split('\n').collect();
     let mut out: Vec<Line<'static>> = Vec::new();
@@ -41,10 +42,10 @@ pub fn render(text: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
                 rows.push(lines[i].trim_start());
                 i += 1;
             }
-            out.extend(table(&rows, w, th));
+            out.extend(table(&rows, w, th, ascii));
             continue;
         }
-        out.extend(block_line(line, w, th));
+        out.extend(block_line(line, w, th, ascii));
         i += 1;
     }
     out
@@ -85,7 +86,7 @@ fn is_table_rule(trimmed: &str) -> bool {
 
 // --- blocks ---------------------------------------------------------------------------------
 
-fn block_line(line: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
+fn block_line(line: &str, w: usize, th: &Theme, ascii: bool) -> Vec<Line<'static>> {
     let trimmed = line.trim_start();
     let indent = line.len() - trimmed.len();
     let base = Style::new();
@@ -94,7 +95,7 @@ fn block_line(line: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
     }
     if is_rule(trimmed) {
         return vec![Line::from(Span::styled(
-            "─".repeat(w.min(60)),
+            (if ascii { "-" } else { "─" }).repeat(w.min(60)),
             th.dim_style(),
         ))];
     }
@@ -110,7 +111,10 @@ fn block_line(line: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
         return wrap_prefixed(&inline(rest, style, th), w, vec![], vec![]);
     }
     if let Some(rest) = trimmed.strip_prefix('>') {
-        let bar = vec![Span::styled("▎ ", Style::new().fg(th.brand_dim))];
+        let bar = vec![Span::styled(
+            if ascii { "| " } else { "▎ " },
+            Style::new().fg(th.brand_dim),
+        )];
         let content = inline(
             rest.trim_start(),
             Style::new().fg(th.muted).add_modifier(Modifier::ITALIC),
@@ -118,7 +122,7 @@ fn block_line(line: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
         );
         return wrap_prefixed(&content, w, bar.clone(), bar);
     }
-    if let Some((marker, rest)) = list_item(trimmed) {
+    if let Some((marker, rest)) = list_item(trimmed, ascii) {
         let pad = " ".repeat(indent.min(w / 2));
         let first = vec![
             Span::raw(pad.clone()),
@@ -141,14 +145,14 @@ fn heading(trimmed: &str) -> Option<(usize, &str)> {
     ((1..=6).contains(&level) && rest.starts_with(' ')).then(|| (level, rest.trim()))
 }
 
-/// `("•", rest)` for `- x`, `* x`, `+ x`; `("1.", rest)` for `1. x`.
-fn list_item(trimmed: &str) -> Option<(String, &str)> {
+/// `("•" or "*", rest)` for `- x`, `* x`, `+ x`; `("1.", rest)` for `1. x`.
+fn list_item(trimmed: &str, ascii: bool) -> Option<(String, &str)> {
     let mut chars = trimmed.chars();
     let first = chars.next()?;
     if matches!(first, '-' | '*' | '+') && trimmed[1..].starts_with(' ') {
         let rest = trimmed[1..].trim_start();
         // A task box keeps its brackets as text.
-        return Some(("•".to_string(), rest));
+        return Some((if ascii { "*" } else { "•" }.to_string(), rest));
     }
     let digits = trimmed.chars().take_while(|c| c.is_ascii_digit()).count();
     if (1..=9).contains(&digits) {
@@ -313,7 +317,7 @@ fn highlight(line: &str, lang: &str, plate: Style, th: &Theme) -> Styled {
     out
 }
 
-fn table(rows: &[&str], w: usize, th: &Theme) -> Vec<Line<'static>> {
+fn table(rows: &[&str], w: usize, th: &Theme, ascii: bool) -> Vec<Line<'static>> {
     let cells: Vec<Vec<String>> = rows
         .iter()
         .map(|r| {
@@ -337,7 +341,12 @@ fn table(rows: &[&str], w: usize, th: &Theme) -> Vec<Line<'static>> {
         let widest = (0..columns).max_by_key(|c| widths[*c]).unwrap_or(0);
         widths[widest] -= 1;
     }
-    let sep = Span::styled(" │ ", th.dim_style());
+    let (bar, rule, cross) = if ascii {
+        (" | ", "-", "-+-")
+    } else {
+        (" │ ", "─", "─┼─")
+    };
+    let sep = Span::styled(bar, th.dim_style());
     let mut out = Vec::new();
     for (r, row) in cells.iter().enumerate() {
         let mut spans: Vec<Span<'static>> = Vec::new();
@@ -357,8 +366,8 @@ fn table(rows: &[&str], w: usize, th: &Theme) -> Vec<Line<'static>> {
         }
         out.push(Line::from(spans));
         if r == 0 {
-            let rule: Vec<String> = widths.iter().map(|x| "─".repeat(*x)).collect();
-            out.push(Line::from(Span::styled(rule.join("─┼─"), th.dim_style())));
+            let rules: Vec<String> = widths.iter().map(|x| rule.repeat(*x)).collect();
+            out.push(Line::from(Span::styled(rules.join(cross), th.dim_style())));
         }
     }
     out
@@ -628,7 +637,7 @@ mod tests {
     fn headings_lists_quotes_and_rules() {
         let text =
             "# Title\n\n- one\n- two with `code`\n1. first\n> quoted\n---\nplain **bold** and *it*";
-        let out = render(text, 40, &LAVENDER);
+        let out = render(text, 40, &LAVENDER, &crate::theme::UNICODE);
         let rows = plain(&out);
         assert_eq!(rows[0], "Title");
         assert_eq!(rows[2], "• one");
@@ -649,6 +658,7 @@ mod tests {
             "```rust\nfn main() { let x = 1; }\n```\nafter",
             30,
             &LAVENDER,
+            &crate::theme::UNICODE,
         );
         let rows = plain(&done);
         assert!(rows[0].contains("rust"));
@@ -660,7 +670,7 @@ mod tests {
         );
         let keyword = done[1].spans.iter().find(|s| s.content == "fn").unwrap();
         assert_eq!(keyword.style.fg, Some(LAVENDER.keyword));
-        let open = render("```\nlet a = 1;", 30, &LAVENDER);
+        let open = render("```\nlet a = 1;", 30, &LAVENDER, &crate::theme::UNICODE);
         assert_eq!(plain(&open).len(), 1);
     }
 
@@ -670,6 +680,7 @@ mod tests {
             "안녕하세요 **반갑습니다 여러분** 오늘도 좋은 하루 되세요",
             14,
             &LAVENDER,
+            &crate::theme::UNICODE,
         );
         assert!(out.iter().all(|l| cells(l) <= 14), "{:?}", plain(&out));
         assert!(out.len() > 2);
@@ -688,6 +699,7 @@ mod tests {
             "| a | bb |\n|---|---|\n| 1 | 22 |\n\nsee [docs](https://x.y/z)",
             40,
             &LAVENDER,
+            &crate::theme::UNICODE,
         );
         let rows = plain(&out);
         assert_eq!(rows[0], "a │ bb");
@@ -702,13 +714,36 @@ mod tests {
             "a * b and 2*3 and snake_case_name \\*not\\*",
             60,
             &LAVENDER,
+            &crate::theme::UNICODE,
         ));
         assert_eq!(rows[0], "a * b and 2*3 and snake_case_name *not*");
     }
 
     #[test]
     fn terminal_escapes_in_a_reply_are_dropped() {
-        let rows = plain(&render("x\u{1b}[31my", 20, &LAVENDER));
+        let rows = plain(&render(
+            "x\u{1b}[31my",
+            20,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        ));
         assert_eq!(rows[0], "x[31my");
+    }
+
+    #[test]
+    fn ascii_mode_draws_no_non_ascii_marks() {
+        let out = render(
+            "- one\n> quote\n---\n| a | bb |\n|---|---|\n| 1 | 22 |",
+            40,
+            &LAVENDER,
+            &crate::theme::ASCII,
+        );
+        let rows = plain(&out);
+        assert!(rows.iter().all(|r| r.is_ascii()), "{rows:?}");
+        assert_eq!(rows[0], "* one");
+        assert_eq!(rows[1], "| quote");
+        assert!(rows[2].starts_with("---"));
+        assert_eq!(rows[3], "a | bb");
+        assert_eq!(rows[4], "--+---");
     }
 }

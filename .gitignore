@@ -36,6 +36,10 @@ apps/mobile/.generated/
 artifacts/app-store/screenshots/
 .github/pr-assets/
 native/**/target/
+# Rust terminal client and native terminal: cargo output and the bundled app.
+apps/oop-tui-rs/target/
+apps/oop-terminal/target/
+apps/oop-terminal/**/OOP Terminal.app/
 node_modules/
 .alchemy/
 *.log

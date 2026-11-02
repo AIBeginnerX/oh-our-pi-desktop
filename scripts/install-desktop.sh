@@ -5,8 +5,10 @@
 # OOP_INSTALL_DIR overrides ~/Applications (macOS) or ~/.local (Linux). On macOS an existing
 # /Applications/OOP.app is updated in place instead of adding a second copy; a location the
 # current user cannot change is replaced only after the macOS administrator approval dialog.
-# On macOS the app also carries the terminal app; this script adds an "oop" command for it in
-# OOP_BIN_DIR (default ~/.local/bin), unless an "oop" that is not ours is already there.
+# On macOS the app also carries the terminal app: OOP Terminal.app is installed beside OOP.app, and
+# this script adds an "oop" command in OOP_BIN_DIR (default ~/.local/bin), unless an "oop" that is
+# not ours is already there. The command runs the Rust terminal client (oop-rs) when the app has
+# one and the TypeScript terminal otherwise; OOP_TUI=ts forces the latter.
 set -eu
 
 fail() { printf 'OOP install: %s\n' "$1" >&2; exit 1; }
@@ -69,9 +71,12 @@ if [ "$platform" = mac ]; then
   fi
 fi
 
-# The command line "oop" for the terminal app inside OOP.app. The launcher runs the app's own
-# runtime as plain Node (ELECTRON_RUN_AS_NODE applies to that one process only) and looks for the
-# app again at every start, so moving or updating OOP.app does not break it.
+# The command line "oop" for the terminal app inside OOP.app. The launcher runs the Rust client
+# from the app when there is one, else the app's own runtime as plain Node (ELECTRON_RUN_AS_NODE
+# applies to that one process only) on oop.mjs, which OOP_TS_ENTRY also names for the subcommands
+# the Rust client lacks; OOP_TS_NODE (the app's runtime) with OOP_TS_NODE_ELECTRON=1 tells the Rust
+# client how to run it, since no "node" need be on PATH. It looks for the app again at every start, so moving or updating OOP.app
+# does not break it.
 launcher_mark='oop-desktop-terminal-launcher'
 sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # True when the file is a launcher this script wrote or install-terminal.sh wrote, or the "oop" the
@@ -101,8 +106,16 @@ install_terminal_command() {
     printf '#!/bin/sh\n# %s (written by OOP Desktop install-desktop.sh; safe to delete)\n' "$launcher_mark"
     printf 'for app in %s "$HOME/Applications/OOP.app" /Applications/OOP.app; do\n' "$(sh_quote "$app")"
     cat <<'BODY'
-  if [ -x "$app/Contents/MacOS/OOP" ] && [ -f "$app/Contents/Resources/oop/oop.mjs" ]; then
-    exec env ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/OOP" "$app/Contents/Resources/oop/oop.mjs" "$@"
+  res="$app/Contents/Resources/oop"
+  if [ -x "$app/Contents/MacOS/OOP" ] && [ -f "$res/oop.mjs" ]; then
+    # The node rule of oop-rs: OOP_TS_NODE runs OOP_TS_ENTRY, and OOP_TS_NODE_ELECTRON=1 says that
+    # node is the Electron binary, which then gets ELECTRON_RUN_AS_NODE=1 for that child only.
+    OOP_TS_ENTRY="$res/oop.mjs"
+    OOP_TS_NODE="$app/Contents/MacOS/OOP"
+    OOP_TS_NODE_ELECTRON=1
+    export OOP_TS_ENTRY OOP_TS_NODE OOP_TS_NODE_ELECTRON
+    if [ "${OOP_TUI:-}" != ts ] && [ -x "$res/oop-rs" ]; then exec "$res/oop-rs" "$@"; fi
+    exec env ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/OOP" "$res/oop.mjs" "$@"
   fi
 done
 echo "oop: OOP.app was not found, or it is too old to include the terminal app. Install or update OOP Desktop." >&2
@@ -172,6 +185,29 @@ if [ "$(id -u)" = 0 ] && [ -e "$dir/OOP.app" ]; then
 fi
 if [ -e "$dir/OOP.app" ]; then mv "$dir/OOP.app" "$staged/previous.app"; fi
 mv "$staged/OOP.app" "$dir/OOP.app"
+# OOP Terminal.app, the native terminal program carried inside OOP.app, is installed beside it. This
+# runs last and only warns on failure; a copy of another app with that name is left alone.
+install_terminal() {
+  from="$dir/OOP.app/Contents/Resources/oop/OOP Terminal.app"
+  to="$dir/OOP Terminal.app"
+  [ -d "$from" ] && [ ! -L "$from" ] || return 0
+  [ ! -L "$to" ] || return 1
+  srcId=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$from/Contents/Info.plist") || return 1
+  if [ -e "$to" ]; then
+    dstId=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$to/Contents/Info.plist" 2>/dev/null) || dstId=''
+    [ "$dstId" = "$srcId" ] || return 1
+  fi
+  ditto "$from" "$staged/OOP Terminal.app" || return 1
+  if [ "$(id -u)" = 0 ] && [ -e "$to" ]; then
+    chown -R "$(stat -f '%u:%g' "$to")" "$staged/OOP Terminal.app" || return 1
+  fi
+  if [ -e "$to" ]; then mv "$to" "$staged/previous-terminal.app" || return 1; fi
+  if ! mv "$staged/OOP Terminal.app" "$to"; then
+    if [ -e "$staged/previous-terminal.app" ]; then mv "$staged/previous-terminal.app" "$to" || true; fi
+    return 1
+  fi
+}
+install_terminal || echo 'Could not install OOP Terminal.app; the copy inside OOP.app still works.' >&2
 REPLACE
   if "$needs_admin"; then
     # The password goes only to the macOS authorization dialog; this script never sees it.
@@ -186,6 +222,9 @@ REPLACE
       fail "Could not install OOP.app; the existing app was not changed."
   fi
   printf 'Installed %s/OOP.app. Open it from Finder.\n' "$install_dir"
+  if [ -d "$install_dir/OOP Terminal.app" ]; then
+    printf 'Installed %s/OOP Terminal.app, the OOP terminal as an app of its own.\n' "$install_dir"
+  fi
   install_terminal_command "$install_dir" ||
     printf 'Note: the "oop" terminal command could not be set up; OOP.app itself is installed.\n'
   printf 'This unsigned/notarization-free build may require Privacy & Security > Open Anyway.\n'

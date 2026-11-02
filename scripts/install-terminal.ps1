@@ -3,6 +3,8 @@
 # Windows x64 only. OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # OOP_INSTALL_DIR is the folder the terminal app is unpacked into (default %LOCALAPPDATA%\oop-terminal\app);
 # OOP_BIN_DIR is where oop.cmd goes (default %LOCALAPPDATA%\oop-terminal). PATH is never edited.
+# The command runs the Rust terminal client (oop-rs.exe) when the archive has one and the TypeScript
+# terminal (oop.mjs, with the bundled Node.js) otherwise; OOP_TUI=ts forces the latter.
 # Running it again reinstalls (replaces the unpacked folder). An "oop" that OOP did not create is
 # never overwritten. To uninstall: oop stop; Remove-Item -Recurse -Force "$env:LOCALAPPDATA\oop-terminal"
 & {
@@ -106,6 +108,21 @@
         if ($check.ExitCode -ne 0) { throw "The downloaded terminal app does not run on this computer (exit code $($check.ExitCode)); nothing was installed." }
         $printed = (Get-Content -LiteralPath $versionFile | Select-Object -Last 1)
         if ($printed -ne $version) { throw "The downloaded terminal app reports `"$printed`", not $version; nothing was installed." }
+        # The Rust client is optional. One that does not run here or reports another version is left
+        # out, and the command falls back to the TypeScript terminal.
+        $rustExe = Join-Path $new "oop-rs.exe"
+        if (Test-Path -LiteralPath $rustExe -PathType Leaf) {
+            $rustFile = Join-Path $temp "rust-version.txt"
+            $rustPrinted = ""
+            try {
+                $rustCheck = Start-Process -FilePath $rustExe -ArgumentList "--version" -RedirectStandardOutput $rustFile -Wait -PassThru -NoNewWindow
+                if ($rustCheck.ExitCode -eq 0) { $rustPrinted = (Get-Content -LiteralPath $rustFile | Select-Object -Last 1) }
+            } catch { }
+            if ($rustPrinted -ne $version) {
+                Write-Host "Note: the Rust terminal client does not run on this computer; installing the TypeScript terminal only."
+                Remove-Item -LiteralPath $rustExe -Force
+            }
+        }
         Set-Content -LiteralPath (Join-Path $new $installMark) -Value $version -Encoding Ascii
 
         # Replace the old folder in two renames and put it back if the second one fails.
@@ -121,7 +138,10 @@
         }
 
         # The command. oop.cmd points the terminal at the server that came with it (OOP_DAEMON_ENTRY),
-        # which is how "oop" starts a background server when no desktop app is running.
+        # which is how "oop" starts a background server when no desktop app is running, and at the
+        # TypeScript terminal (OOP_TS_ENTRY) for the subcommands the Rust client lacks, which it runs with
+        # the bundled Node.js (OOP_TS_NODE, never Electron). The label-and-goto
+        # form keeps %PATH% (which may contain parentheses) out of any parenthesized block.
         $lines = @(
             "@echo off",
             "rem $launcherMark (written by install-terminal.ps1; safe to delete)",
@@ -131,7 +151,16 @@
             "  exit /b 9009",
             ")",
             "if not defined OOP_DAEMON_ENTRY set `"OOP_DAEMON_ENTRY=$cmdRoot\apps\server\dist\bin.mjs`"",
+            "set `"OOP_TS_ENTRY=$cmdRoot\oop.mjs`"",
+            "set `"OOP_TS_NODE=$cmdRoot\node.exe`"",
+            "set `"OOP_TS_NODE_ELECTRON=`"",
             "set `"OOP_TERMINAL_INSTALL=1`"",
+            "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
+            "if not exist `"$cmdRoot\oop-rs.exe`" goto typescript",
+            "set `"PATH=$cmdRoot;%PATH%`"",
+            "`"$cmdRoot\oop-rs.exe`" %*",
+            "exit /b %ERRORLEVEL%",
+            ":typescript",
             "`"$cmdRoot\node.exe`" `"$cmdRoot\oop.mjs`" %*",
             "exit /b %ERRORLEVEL%"
         )

@@ -29,7 +29,6 @@ export interface HomeInput {
   /** What the wordmark says beside it; null when the banner is turned off, which leaves the notice alone. */
   readonly banner: {
     readonly version: string;
-    readonly server: string | null;
     readonly cwd: string;
     readonly home: string | null;
   } | null;
@@ -124,7 +123,7 @@ const noticeRows = (input: HomeInput, room: number): string[] => {
 };
 
 /**
- * The top of the start screen, at most `budget` rows: the wordmark with the version, server and
+ * The top of the start screen, at most `budget` rows: the wordmark with the version and
  * folder, then the update notice. A short screen gives the notice its room first: the wordmark
  * shrinks to one line, then goes, before the notice is cut below three rows.
  */

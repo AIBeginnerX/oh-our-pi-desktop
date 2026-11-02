@@ -390,6 +390,10 @@ export async function doctor(paths) {
   const type = NodeOS.platform() === "darwin" ? fsType(cacheMount) : undefined;
   const problems = validateHost({ pnpmVersion: toolVersion("pnpm") });
   if (!toolVersion("rsync")) problems.push("rsync is required");
+  if (!skipsRust(process.env) && !toolVersion("cargo"))
+    problems.push(
+      "Rust (cargo) is required: https://rustup.rs (OOP_SKIP_RUST=1 skips the Rust terminal)",
+    );
   if (type && type.toLowerCase() !== "apfs")
     problems.push(`Cache must be on local APFS (found ${type})`);
   if (type === undefined && NodeOS.platform() === "darwin")
@@ -573,6 +577,124 @@ export async function build(paths, runner) {
     ["run", "build:desktop"],
     { cwd: paths.checkout, env: checkoutEnvironment(paths, process.env) },
   );
+}
+
+// The Rust terminal client (apps/oop-tui-rs, `oop-rs`) and the native terminal program
+// (apps/oop-terminal, `OOP Terminal.app`) are built here and handed to the artifact builder with
+// OOP_RS_BIN and OOP_TERMINAL_APP, which bundles them next to the TypeScript terminal app. The
+// build runs in the checkout, whose target/ folders the rsync neither copies nor deletes, so
+// repeated builds stay incremental. OOP_SKIP_RUST=1 ships the TypeScript terminal alone.
+export const RUST_CLIENT_DIR = "apps/oop-tui-rs";
+export const RUST_TERMINAL_DIR = "apps/oop-terminal";
+export const TERMINAL_APP_BUNDLE_NAME = "OOP Terminal.app";
+
+export function skipsRust(env) {
+  return SKIP_BUILD_TRUE.has(env.OOP_SKIP_RUST);
+}
+
+/** The release version reaches cargo as OOP_VERSION; ~/.cargo/bin is added for a rustup toolchain. */
+export function rustBuildEnvironment(baseEnv, version, home = NodeOS.homedir()) {
+  const env = packagingEnvironment(baseEnv);
+  env.OOP_VERSION = version;
+  env.PATH = [baseEnv.PATH, NodePath.join(home, ".cargo", "bin")]
+    .filter(Boolean)
+    .join(NodePath.delimiter);
+  return env;
+}
+
+export function cargoReleaseArgs({ locked }) {
+  return ["build", "--release", ...(locked ? ["--locked"] : [])];
+}
+
+/** The newest `OOP Terminal.app` the bundle script left below `root`, or undefined. */
+export async function findTerminalApp(root) {
+  let best;
+  const visit = async (directory, depth) => {
+    let entries;
+    try {
+      entries = await NodeFSP.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const full = NodePath.join(directory, entry.name);
+      if (entry.name === TERMINAL_APP_BUNDLE_NAME) {
+        const { mtimeMs } = await NodeFSP.stat(full);
+        if (best === undefined || mtimeMs > best.mtimeMs) best = { full, mtimeMs };
+      } else if (
+        depth < 4 &&
+        !["node_modules", "deps", "build", "incremental"].includes(entry.name)
+      ) {
+        await visit(full, depth + 1);
+      }
+    }
+  };
+  await visit(root, 0);
+  return best?.full;
+}
+
+async function exists(target) {
+  return NodeFSP.stat(target).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * `cargo build --release` for oop-rs, then, when apps/oop-terminal is in the source, for the
+ * terminal program and its scripts/bundle-macos.sh with OOP_RS_BIN naming the oop-rs it embeds.
+ * Returns the environment the artifact builder reads. oop-rs must print the release version, so a
+ * stale build cannot ship under a new version number.
+ */
+export async function buildRustClients(
+  paths,
+  runner,
+  version,
+  baseEnv = process.env,
+  printedVersion = (binary) =>
+    NodeChildProcess.execFileSync(binary, ["--version"], { encoding: "utf8" }).trim(),
+) {
+  if (skipsRust(baseEnv)) {
+    console.log("OOP_SKIP_RUST is set: the terminal stays TypeScript only.");
+    return {};
+  }
+  const cliDir = NodePath.join(paths.checkout, RUST_CLIENT_DIR);
+  if (!(await exists(NodePath.join(cliDir, "Cargo.toml")))) {
+    console.log(`No ${RUST_CLIENT_DIR} in this source: the terminal stays TypeScript only.`);
+    return {};
+  }
+  const env = rustBuildEnvironment(baseEnv, version);
+  const cargo = async (cwd) =>
+    runner("cargo", cargoReleaseArgs({ locked: await exists(NodePath.join(cwd, "Cargo.lock")) }), {
+      cwd,
+      env,
+    });
+  await cargo(cliDir);
+  const oopRs = NodePath.join(cliDir, "target", "release", "oop-rs");
+  const printed = printedVersion(oopRs);
+  if (printed !== version)
+    throw new Error(`oop-rs prints "${printed}", not ${version}; its build is out of date.`);
+  const result = { OOP_RS_BIN: oopRs };
+  const terminalDir = NodePath.join(paths.checkout, RUST_TERMINAL_DIR);
+  if (await exists(NodePath.join(terminalDir, "Cargo.toml"))) {
+    await cargo(terminalDir);
+    await runner("bash", ["scripts/bundle-macos.sh"], {
+      cwd: terminalDir,
+      env: { ...env, OOP_RS_BIN: oopRs },
+    });
+    const app = await findTerminalApp(terminalDir);
+    if (app === undefined)
+      throw new Error(
+        `scripts/bundle-macos.sh left no ${TERMINAL_APP_BUNDLE_NAME} below ${terminalDir}.`,
+      );
+    result.OOP_TERMINAL_APP = app;
+  } else {
+    console.log(
+      `No ${RUST_TERMINAL_DIR} in this source: no ${TERMINAL_APP_BUNDLE_NAME} is bundled.`,
+    );
+  }
+  return result;
 }
 
 async function sha256File(filePath) {
@@ -824,7 +946,10 @@ export async function main(
     );
     // The candidate builds inside the artifact step, which embeds and then verifies its own trust policy marker.
     if (!signing) await build(paths, runner);
-    if (command === "package") await packageDmg(paths, runner, appVersion, signing);
+    if (command === "package") {
+      const rust = await buildRustClients(paths, runner, appVersion);
+      await packageDmg(paths, runner, appVersion, signing, { ...process.env, ...rust });
+    }
   });
 }
 

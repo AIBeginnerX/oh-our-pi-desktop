@@ -19,6 +19,9 @@ import { developerIdRequirement } from "./macos.mjs";
 import { RELEASE_FILE_NAME, macUpdatePkgName } from "./oop-release-names.mjs";
 
 const APP_NAME = "OOP.app";
+// The native terminal program travels inside OOP.app and is copied to /Applications by the
+// postinstall script, so an update package installs it exactly like the DMG-less first install does.
+export const TERMINAL_APP_RELATIVE = "Contents/Resources/oop/OOP Terminal.app";
 const UPDATE_FEED_NAME = "oop-update.json";
 const SIGNING_MODE = "developer-id";
 const USAGE =
@@ -86,16 +89,26 @@ export function parseArgs(argv) {
   };
 }
 
-export function componentPlist() {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><array><dict>
-<key>RootRelativeBundlePath</key><string>Applications/OOP.app</string>
+function bundleEntry(relativePath) {
+  return `<dict>
+<key>RootRelativeBundlePath</key><string>${relativePath}</string>
 <key>BundleIsRelocatable</key><false/>
 <key>BundleIsVersionChecked</key><false/>
 <key>BundleHasStrictIdentifier</key><true/>
 <key>BundleOverwriteAction</key><string>upgrade</string>
-</dict></array></plist>
+</dict>`;
+}
+
+// A bundle nested in OOP.app (OOP Terminal.app) is listed too, not relocatable: Installer would
+// otherwise look for another copy of a relocatable bundle elsewhere on the disk and update that one.
+export function componentPlist({ terminalApp = false } = {}) {
+  const entries = [
+    "Applications/OOP.app",
+    ...(terminalApp ? [`Applications/OOP.app/${TERMINAL_APP_RELATIVE}`] : []),
+  ].map(bundleEntry);
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><array>${entries.join("")}</array></plist>
 `;
 }
 
@@ -119,7 +132,7 @@ export function welcomeHtml() {
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>OOP 설치</title></head><body>
 <h1>OOP 설치</h1>
-<p>이 설치 프로그램은 OOP를 /Applications/OOP.app에 설치합니다. 처음 설치할 때와 새 버전으로 업데이트할 때 모두 이 파일을 씁니다.</p>
+<p>이 설치 프로그램은 OOP를 /Applications/OOP.app에 설치합니다. 처음 설치할 때와 새 버전으로 업데이트할 때 모두 이 파일을 씁니다. 이 버전에 터미널 프로그램이 들어 있으면 /Applications/OOP Terminal.app도 함께 설치(업데이트)합니다.</p>
 <h2>설치 전에</h2>
 <ol>
 <li>OOP가 실행 중이면 Cmd+Q로 완전히 종료합니다. 창을 닫는 것만으로는 종료되지 않습니다.</li>
@@ -237,7 +250,51 @@ case "$owner" in
   *) /usr/sbin/chown -R "$owner":staff "$target" || echo 'Could not hand OOP to the current user; updates will ask for a password.' >&2 ;;
 esac
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$target" || exit 1
-exit 0
+${terminalAppInstall()}exit 0
+`;
+}
+
+// Shell fragment for postinstall: copies the native terminal program from inside OOP.app to
+// /Applications/OOP Terminal.app, the way the app itself was handed to the console user. It runs
+// last and only warns on failure, so the OOP.app install above never depends on it. It replaces
+// an existing copy only when that copy has the same bundle identifier, so an unrelated app of the
+// same name is left alone. Builds without the terminal program have nothing to copy. Tests pass
+// fake tool paths and another Applications folder; the installer script always uses the defaults.
+export function terminalAppInstall({
+  ditto = "/usr/bin/ditto",
+  codesign = "/usr/bin/codesign",
+  applications = "/Applications",
+} = {}) {
+  if (![ditto, codesign, applications].every((tool) => /^\/[\w./-]+$/u.test(tool)))
+    throw new Error("Invalid terminal app install path.");
+  return `install_terminal_app() {
+  src="$target/${TERMINAL_APP_RELATIVE}"
+  dst='${applications}/OOP Terminal.app'
+  new='${applications}/.OOP Terminal.app.new-'$$
+  old='${applications}/.OOP Terminal.app.old-'$$
+  [ -d "$src" ] && [ ! -L "$src" ] || return 0
+  srcId=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$src/Contents/Info.plist") || return 1
+  if [ -L "$dst" ]; then echo 'OOP Terminal install path is a symlink; leaving it alone.' >&2; return 1; fi
+  if [ -e "$dst" ]; then
+    dstId=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$dst/Contents/Info.plist" 2>/dev/null) || dstId=''
+    if [ "$dstId" != "$srcId" ]; then echo 'An app named OOP Terminal that is not ours is installed; leaving it alone.' >&2; return 1; fi
+  fi
+  /bin/rm -rf "$new" "$old"
+  ${ditto} "$src" "$new" || { /bin/rm -rf "$new"; return 1; }
+  ${codesign} --verify --deep --strict "$new" || { /bin/rm -rf "$new"; return 1; }
+  case "$owner" in
+    ''|root|loginwindow) ;;
+    *) /usr/sbin/chown -R "$owner":staff "$new" || echo 'Could not hand OOP Terminal to the current user.' >&2 ;;
+  esac
+  if [ -e "$dst" ]; then /bin/mv "$dst" "$old" || { /bin/rm -rf "$new"; return 1; }; fi
+  if ! /bin/mv "$new" "$dst"; then
+    if [ -e "$old" ]; then /bin/mv "$old" "$dst" || true; fi
+    /bin/rm -rf "$new"
+    return 1
+  fi
+  /bin/rm -rf "$old"
+}
+install_terminal_app || echo 'Could not install OOP Terminal.app; the copy inside OOP.app still works.' >&2
 `;
 }
 
@@ -816,7 +873,11 @@ async function buildPackage(input, dependencies, publishFeed, signed = undefined
     await NodeFSP.writeFile(NodePath.join(resourcesDir, "welcome.html"), welcomeHtml());
     const plistPath = NodePath.join(work, "components.plist");
     const distributionPath = NodePath.join(work, "Distribution.xml");
-    await NodeFSP.writeFile(plistPath, componentPlist());
+    const terminalApp = await NodeFSP.lstat(NodePath.join(stagedApp, TERMINAL_APP_RELATIVE)).then(
+      (stat) => stat.isDirectory(),
+      () => false,
+    );
+    await NodeFSP.writeFile(plistPath, componentPlist({ terminalApp }));
     await NodeFSP.writeFile(distributionPath, distributionXml(input.version));
     await runCommand("/usr/bin/plutil", ["-lint", plistPath], 10_000);
     await runCommand("/usr/bin/xmllint", ["--noout", distributionPath], 10_000);

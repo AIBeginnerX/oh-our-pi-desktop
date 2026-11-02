@@ -136,6 +136,10 @@ try {
     foreach ($expected in @(
         "rem oop-desktop-terminal-launcher",
         "setlocal",
+        "set `"OOP_TS_ENTRY=$bundleText`"",
+        "set `"OOP_TS_NODE=$appExeText`"",
+        "set `"OOP_TS_NODE_ELECTRON=1`"",
+        "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
         "set ELECTRON_RUN_AS_NODE=1",
         "`"$appExeText`" `"$bundleText`" %*",
         "exit /b %ERRORLEVEL%"
@@ -143,6 +147,7 @@ try {
         if (-not $launcher.Contains($expected)) { throw "The terminal command lacks: $expected" }
     }
     if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set ELECTRON_RUN_AS_NODE=1")) { throw "ELECTRON_RUN_AS_NODE is set outside setlocal." }
+    if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set `"OOP_TS_NODE=")) { throw "OOP_TS_NODE is set outside setlocal." }
     Write-Host "PASS terminal command runs the app's runtime on the bundled terminal app, scoped to that process"
 
     & $script

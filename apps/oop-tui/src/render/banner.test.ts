@@ -7,7 +7,6 @@ import { BUILTIN_THEMES, createTheme } from "./theme.ts";
 
 const input = (extra: Partial<BannerInput> = {}): BannerInput => ({
   version: "0.1.0",
-  server: "127.0.0.1:3773",
   cwd: "/home/me/work/app",
   home: "/home/me",
   columns: 100,
@@ -17,14 +16,14 @@ const input = (extra: Partial<BannerInput> = {}): BannerInput => ({
 });
 
 describe("renderBanner", () => {
-  it("draws a wordmark of at most five rows with version, server and folder beside it", () => {
+  it("draws a wordmark of at most five rows with version and folder beside it, and no address", () => {
     const lines = renderBanner(input());
     const rows = lines.filter((line) => line !== "");
     expect(rows.length).toBeGreaterThan(1);
     expect(rows.length).toBeLessThanOrEqual(5);
     const text = lines.map(stripAnsi).join("\n");
     expect(text).toContain("v0.1.0");
-    expect(text).toContain("127.0.0.1:3773");
+    expect(text).not.toMatch(/\d+\.\d+\.\d+\.\d+|:\d{4}|Server|서버/u);
     expect(text).toContain("~/work/app");
     expect(text).toMatch(/[█▄▀]/u);
     expect(lines.at(-1)).toBe("");
@@ -60,21 +59,14 @@ describe("renderBanner", () => {
     }
   });
 
-  it("leaves the server line out when there is none, and cleans control sequences", () => {
-    const text = renderBanner(input({ server: null }))
-      .map(stripAnsi)
-      .join("\n");
-    expect(text).not.toContain("서버");
-    const dirty = renderBanner(input({ server: "h\u001b[2Jost", cwd: "/w\u001b]0;x\u0007" })).join(
-      "\n",
-    );
-    expect(dirty).not.toContain("\u001b[2J");
+  it("cleans control sequences out of the folder", () => {
+    const dirty = renderBanner(input({ cwd: "/w\u001b]0;x\u0007" })).join("\n");
     expect(dirty).not.toContain("\u001b]0;");
   });
 });
 
 describe("renderBanner compact", () => {
-  it("is the one-line form at any width, with the version and no server or folder", () => {
+  it("is the one-line form at any width, with the version and no folder", () => {
     const lines = renderBanner(input({ compact: true, columns: 200 }));
     expect(lines.map(stripAnsi)).toEqual(["◆ OOP v0.1.0", ""]);
   });

@@ -5,7 +5,12 @@
 // them to Drive.
 // Run on the release Mac after `node scripts/macos.mjs package`:
 //
-//   node scripts/build-oop-cli-archives.mjs [--version X.Y.Z] [--skip-bundle] [--skip-smoke]
+//   node scripts/build-oop-cli-archives.mjs [--version X.Y.Z] [--skip-bundle] [--skip-smoke] [--terminal]
+//
+// --terminal also builds the terminal-only archives (OOP-terminal-<version>-<platform>-<arch>.tar.gz
+// and .sha256, which install-terminal.sh downloads) into release/terminal/v<version>/, each with the
+// Rust terminal client (apps/oop-tui-rs, `oop-rs`) for its platform: built in the same Debian
+// container as the resource monitor for Linux, with cargo on this Mac for macOS.
 //
 // Needs Docker (colima profile "ob" is started when Docker is not reachable) for the Linux Rust
 // resource monitor and start-up test, cargo for the Mac one, and GNU tar (brew install gnu-tar) for build-cli-archive.ts.
@@ -35,7 +40,7 @@ export const TARGETS = [
 ];
 
 export function parseArgs(argv) {
-  const options = { version: undefined, skipBundle: false, skipSmoke: false };
+  const options = { version: undefined, skipBundle: false, skipSmoke: false, terminal: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--version" && /^\d+\.\d+\.\d+$/u.test(argv[index + 1] ?? "")) {
@@ -43,6 +48,7 @@ export function parseArgs(argv) {
       index += 1;
     } else if (arg === "--skip-bundle") options.skipBundle = true;
     else if (arg === "--skip-smoke") options.skipSmoke = true;
+    else if (arg === "--terminal") options.terminal = true;
     else throw new Error(`Unknown option: ${arg}`);
   }
   return options;
@@ -165,6 +171,65 @@ function buildResourceMonitor(target, env) {
   return stage;
 }
 
+/**
+ * `docker run` arguments that build apps/oop-tui-rs for a Linux target. The source is read-only and
+ * the build output and registry live in the cache folders, like the resource monitor's. The release
+ * version reaches the build as OOP_VERSION.
+ */
+export function oopRsDockerArgs(target, { source, cargoTarget, registry, version }) {
+  return [
+    "run",
+    "--rm",
+    "--platform",
+    target.docker,
+    // One local tag serves every architecture; resolve it for this run's platform.
+    "--pull=always",
+    "-v",
+    `${source}:/src:ro`,
+    "-v",
+    `${cargoTarget}:/target`,
+    "-v",
+    `${registry}:/usr/local/cargo/registry`,
+    "-e",
+    "CARGO_TARGET_DIR=/target",
+    "-e",
+    `OOP_VERSION=${version}`,
+    "-w",
+    "/src/apps/oop-tui-rs",
+    "rust:1-bookworm",
+    "cargo",
+    "build",
+    "--release",
+    "--locked",
+  ];
+}
+
+/** Builds oop-rs for the target and returns the path of the binary. It must print the release version. */
+function buildOopRs(target, env, version) {
+  const cargoTarget = NodePath.join(CACHE, `cargo-target-oop-rs-${target.key}`);
+  const registry = NodePath.join(CACHE, `cargo-registry-${target.key}`);
+  NodeFS.mkdirSync(cargoTarget, { recursive: true });
+  NodeFS.mkdirSync(registry, { recursive: true });
+  if (target.docker === null) {
+    run("cargo", ["build", "--release", "--locked"], {
+      cwd: NodePath.join(ROOT, "apps", "oop-tui-rs"),
+      env: { ...process.env, CARGO_TARGET_DIR: cargoTarget, OOP_VERSION: version },
+    });
+  } else {
+    run("docker", oopRsDockerArgs(target, { source: ROOT, cargoTarget, registry, version }), {
+      env,
+    });
+  }
+  const binary = NodePath.join(cargoTarget, "release", "oop-rs");
+  if (target.docker === null) {
+    const printed = NodeChildProcess.execFileSync(binary, ["--version"], {
+      encoding: "utf8",
+    }).trim();
+    if (printed !== version) throw new Error(`oop-rs prints "${printed}", not ${version}.`);
+  }
+  return binary;
+}
+
 // Unpacks the archive in a stock Ubuntu of that architecture and waits for `serve` to answer.
 const SMOKE_SCRIPT = `set -eu
 apt-get -qq update >/dev/null && apt-get -qq install -y curl libatomic1 >/dev/null
@@ -254,13 +319,22 @@ export async function main(argv = process.argv.slice(2)) {
   const outDir = NodePath.join(ROOT, "release", "cli", `v${version}`);
   await NodeFSP.rm(outDir, { recursive: true, force: true });
   await NodeFSP.mkdir(outDir, { recursive: true });
+  const terminalDir = NodePath.join(ROOT, "release", "terminal", `v${version}`);
+  if (options.terminal) {
+    await NodeFSP.rm(terminalDir, { recursive: true, force: true });
+    await NodeFSP.mkdir(terminalDir, { recursive: true });
+  }
   const bin = NodePath.join(ROOT, "node_modules", ".bin");
   const basePath = `${bin}${NodePath.delimiter}${process.env.PATH}`;
   if (!options.skipBundle)
-    run("vp", ["run", "--filter", "t3", "build"], {
-      cwd: ROOT,
-      env: { ...process.env, PATH: basePath },
-    });
+    run(
+      "vp",
+      ["run", "--filter", "t3", ...(options.terminal ? ["--filter", "oop-tui"] : []), "build"],
+      {
+        cwd: ROOT,
+        env: { ...process.env, PATH: basePath },
+      },
+    );
   const node = seaNode();
   const docker = dockerEnv();
   ensureAmd64(docker);
@@ -297,6 +371,27 @@ export async function main(argv = process.argv.slice(2)) {
         env: { ...process.env, PATH: `${GNU_TAR_DIR}${NodePath.delimiter}${basePath}` },
       },
     );
+    if (options.terminal) {
+      run(
+        process.execPath,
+        [
+          "scripts/build-terminal-archive.ts",
+          "--platform",
+          target.platform,
+          "--arch",
+          target.arch,
+          "--version",
+          version,
+          "--resource-monitor",
+          NodePath.join(resourceMonitorDir, target.key, "t3-resource-monitor"),
+          "--oop-rs",
+          buildOopRs(target, docker, version),
+          "--output-dir",
+          terminalDir,
+        ],
+        { cwd: ROOT, env: { ...process.env, PATH: basePath } },
+      );
+    }
     const name = `t3-${version}-${target.key}.tar.gz`;
     if (!options.skipSmoke) await smokeTest(target, outDir, name, docker);
     const bytes = await NodeFSP.readFile(NodePath.join(outDir, name));
@@ -304,6 +399,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
   await NodeFSP.writeFile(NodePath.join(outDir, "SHA256SUMS"), checksumListing(entries));
   console.log(`Wrote ${entries.length} server archives and SHA256SUMS to ${outDir}`);
+  if (options.terminal) console.log(`Wrote the terminal-only archives to ${terminalDir}`);
 }
 
 if (

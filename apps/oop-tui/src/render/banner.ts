@@ -18,8 +18,6 @@ export const WORDMARK: ReadonlyArray<string> = [
 
 export interface BannerInput {
   readonly version: string;
-  /** Where the app is connected, as a host name; never a token or an address with credentials. */
-  readonly server: string | null;
   readonly cwd: string;
   readonly home: string | null;
   readonly columns: number;
@@ -43,7 +41,7 @@ export const homeRelative = (path: string, home: string | null): string => {
 
 /**
  * What is printed once into the scrollback when the app opens: the wordmark in the logo gradient
- * with the version, server and folder beside it, or one line where there is no room for that. The
+ * with the version and folder beside it, or one line where there is no room for that. The
  * block letters become `#` on a terminal that was given ASCII symbols.
  */
 export const renderBanner = (input: BannerInput): string[] => {
@@ -62,9 +60,6 @@ export const renderBanner = (input: BannerInput): string[] => {
   const notes: ReadonlyArray<string> = [
     "",
     `${theme.brand.bold(t("render.banner.title"))}  ${theme.muted(`v${version}`)}`,
-    ...(input.server === null
-      ? []
-      : [`${theme.dim(t("render.banner.server"))}${oneLine(input.server)}`]),
     `${theme.dim(t("render.banner.folder"))}${homeRelative(oneLine(input.cwd), input.home)}`,
   ];
   const lines = WORDMARK.map((row, index) => {

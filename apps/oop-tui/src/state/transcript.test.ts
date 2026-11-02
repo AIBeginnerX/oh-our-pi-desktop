@@ -21,11 +21,20 @@ const assistant = (text: string, streaming: boolean, second = 1) =>
   makeMessage({ id: "m-a", role: "assistant", text, streaming, createdAt: at(second) });
 
 /**
- * A user message with no colour: against the right edge of `width` columns, one space of padding on
- * the left of the text and a bar closing the row. `inner` is the width of the widest row of its block.
+ * A user message with no colour: a rounded box against the right edge of `width` columns, one space of
+ * padding inside the border on each side. `lines` are the rows inside the box and the box is as wide as
+ * the widest of them, so a message of several lines is one block of equal width.
  */
-const sent = (text: string, inner = stringWidth(text), width = 40) =>
-  `${" ".repeat(width - inner - 3)} ${text}${" ".repeat(inner - stringWidth(text))} │`;
+const sent = (lines: string | ReadonlyArray<string>, width = 40): string[] => {
+  const rows = typeof lines === "string" ? [lines] : lines;
+  const inner = rows.reduce((widest, row) => Math.max(widest, stringWidth(row)), 1);
+  const lead = " ".repeat(width - inner - 4);
+  return [
+    `${lead}╭${"─".repeat(inner + 2)}╮`,
+    ...rows.map((row) => `${lead}│ ${row}${" ".repeat(inner - stringWidth(row))} │`),
+    `${lead}╰${"─".repeat(inner + 2)}╯`,
+  ];
+};
 
 const plainRows = (rows: ReadonlyArray<string>) => rows.map(stripAnsi);
 
@@ -80,7 +89,7 @@ describe("TranscriptPrinter", () => {
       createdAt: at(1),
     });
     const first = transcript.sync(makeThread({ messages: [user] }));
-    expect(first.commit).toEqual(["│", sent("안녕하세요")]);
+    expect(first.commit).toEqual(["│", ...sent("안녕하세요")]);
     expect(transcript.sync(makeThread({ messages: [user] })).commit).toEqual([]);
   });
 
@@ -88,9 +97,7 @@ describe("TranscriptPrinter", () => {
     const user = makeMessage({ id: "m-u", role: "user", text: "하나\n\n셋", createdAt: at(1) });
     expect(printer().sync(makeThread({ messages: [user] })).commit).toEqual([
       "│",
-      sent("하나", 4),
-      sent("", 4),
-      sent("셋", 4),
+      ...sent(["하나", "", "셋"]),
     ]);
   });
 
@@ -107,11 +114,11 @@ describe("TranscriptPrinter", () => {
     );
     expect(synced.commit).toEqual([
       "│",
-      sent("하나"),
+      ...sent("하나"),
       "│",
       "│  답 하나",
       "│",
-      sent("둘"),
+      ...sent("둘"),
       "│",
       "│  답 둘",
     ]);
@@ -127,9 +134,9 @@ describe("TranscriptPrinter", () => {
       "│",
       "│  ... 이전 메시지 2개 · /history 로 보기",
       "│",
-      sent("메시지 3", 8, 80),
+      ...sent("메시지 3", 80),
       "│",
-      sent("메시지 4", 8, 80),
+      ...sent("메시지 4", 80),
     ]);
     const next = transcript.sync(
       makeThread({
@@ -139,7 +146,7 @@ describe("TranscriptPrinter", () => {
         ],
       }),
     );
-    expect(next.commit).toEqual(["│", sent("메시지 5", 8, 80)]);
+    expect(next.commit).toEqual(["│", ...sent("메시지 5", 80)]);
   });
 
   it("counts what the opening skipped, and says the server has more when it does", () => {
@@ -159,11 +166,11 @@ describe("TranscriptPrinter", () => {
     expect(whole.skippedMessages).toBe(0);
     expect(plainRows(printer(5, { width: 80 }).sync(makeThread({ messages })).commit)).toEqual([
       "│",
-      sent("메시지 1", 8, 80),
+      ...sent("메시지 1", 80),
       "│",
-      sent("메시지 2", 8, 80),
+      ...sent("메시지 2", 80),
       "│",
-      sent("메시지 3", 8, 80),
+      ...sent("메시지 3", 80),
     ]);
   });
 
@@ -200,7 +207,7 @@ describe("TranscriptPrinter", () => {
     );
     expect(synced.commit).toEqual([
       "│",
-      sent("실행"),
+      ...sent("실행"),
       "│",
       "✗  프로바이더 오류 - 연결 끊김",
       "│",
@@ -547,33 +554,47 @@ describe("messages in colour", () => {
     const rows = coloured(3).sync(makeThread({ messages: [userAt(1, "안녕\n둘째 줄")] })).commit;
     expect(rows[0]).toBe(theme.dim("│"));
     const block = rows.slice(1);
-    expect(block).toHaveLength(2);
+    // A border above and below the text, and the widest row of it sets the width of them all.
+    expect(block).toHaveLength(4);
     for (const row of block) {
       expect(row).toContain(";48;2;30;36;51m");
       // The block ends at the last column of the conversation.
       expect(visibleWidth(row)).toBe(40);
     }
-    expect(plainRows(block).map((row) => row.trimStart())).toEqual(["안녕    ", "둘째 줄 "]);
+    expect(plainRows(block).map((row) => row.trimStart())).toEqual([
+      "╭─────────╮",
+      "│ 안녕    │",
+      "│ 둘째 줄 │",
+      "╰─────────╯",
+    ]);
   });
 
   it("wraps a long user message inside a block of at most four fifths of the width, with wide characters counted as two", () => {
     const rows = printer().sync(makeThread({ messages: [userAt(1, "가나다 ".repeat(20))] })).commit;
-    expect(rows.length).toBeGreaterThan(3);
-    for (const row of rows.slice(1)) {
-      expect(row.endsWith("│")).toBe(true);
-      expect(visibleWidth(row)).toBe(40);
+    expect(rows.length).toBeGreaterThan(4);
+    expect(rows[1]).toMatch(/^ +╭─+╮$/u);
+    expect(rows.at(-1)).toMatch(/^ +╰─+╯$/u);
+    // Every row of the box ends in the same column, at the right edge of the conversation.
+    for (const row of rows.slice(1)) expect(visibleWidth(row)).toBe(40);
+    for (const row of rows.slice(2, -1)) {
+      expect(row.endsWith(" │")).toBe(true);
       expect(row.trimStart().length).toBeLessThan(40);
     }
     for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(40);
     // The text keeps every character; only the layout around it changed.
     const text = rows
-      .slice(1)
-      .map((row) => row.replace(/^ +/u, "").replace(/ │$/u, "").trim())
+      .slice(2, -1)
+      .map((row) =>
+        row
+          .replace(/^ +│ /u, "")
+          .replace(/ +│$/u, "")
+          .trim(),
+      )
       .join(" ");
     expect(text.replace(/\s+/gu, " ")).toBe("가나다 ".repeat(20).trim());
   });
 
-  it("right-aligns a user message in the ASCII preset with an ASCII bar, and leaves the reply on the left", () => {
+  it("right-aligns a user message in the ASCII preset in an ASCII box, and leaves the reply on the left", () => {
     const rows = printer(20, { symbols: ASCII_SYMBOLS }).sync(
       makeThread({
         messages: [
@@ -582,7 +603,15 @@ describe("messages in colour", () => {
         ],
       }),
     ).commit;
-    expect(rows).toEqual(["|", `${" ".repeat(40 - 10 - 3)} hello 안녕 |`, "|", "|  reply"]);
+    const lead = " ".repeat(40 - 10 - 4);
+    expect(rows).toEqual([
+      "|",
+      `${lead}+------------+`,
+      `${lead}| hello 안녕 |`,
+      `${lead}+------------+`,
+      "|",
+      "|  reply",
+    ]);
     expect(rows.join("\n")).toMatch(/^[\n -~가-힣]+$/u);
   });
 
@@ -1018,5 +1047,61 @@ describe("proposed plans in the transcript", () => {
     });
     const rows = plainRows(printer().sync(makeThread({ messages: [build] })).commit);
     expect(rows).toEqual(["│", "◇  계획 구현 · 로그인 계획"]);
+  });
+});
+
+describe("the colour of the user's messages on every path", () => {
+  const marked = themeAt(3).userFg("x");
+  const USER_FG = marked.slice(0, marked.indexOf("m") + 1);
+  const user = (id: string, text: string, second: number) =>
+    makeMessage({ id, role: "user", text, createdAt: at(second) });
+  /** A row of the user's box, border and all, painted in the user's own colour. */
+  const isUserRow = (row: string) => row.includes(USER_FG);
+  const boxRows = (rows: ReadonlyArray<string>) =>
+    rows.filter((row) => stripAnsi(row).trim() !== "│");
+
+  it("paints a message sent live, one replayed when a thread is opened, and one on a later sync", () => {
+    const transcript = coloured(3);
+    const opened = transcript.sync(makeThread({ messages: [user("u1", "열 때 보이는 말", 1)] }));
+    const box = boxRows(opened.commit);
+    // The whole box, its border included, is the user's colour.
+    expect(box).toHaveLength(3);
+    expect(box.every(isUserRow)).toBe(true);
+    const live = transcript.sync(
+      makeThread({ messages: [user("u1", "열 때 보이는 말", 1), user("u2", "방금 보낸 말", 2)] }),
+    );
+    expect(boxRows(live.commit).every(isUserRow)).toBe(true);
+    expect(live.commit.map(stripAnsi).join("\n")).toContain("방금 보낸 말");
+  });
+
+  it("paints every message of a page of older turns, written by a printer of its own", () => {
+    const older = coloured(3).sync(
+      makeThread({ messages: [user("o1", "옛날 말 하나", 1), user("o2", "옛날 말 둘", 3)] }),
+    );
+    const rows = boxRows(older.commit);
+    expect(rows).toHaveLength(6);
+    expect(rows.every(isUserRow)).toBe(true);
+  });
+
+  it("paints in 256 colours and in 16, where there is no fill but the box's own border", () => {
+    const at256 = coloured(2).sync(makeThread({ messages: [user("u", "안녕", 1)] })).commit;
+    expect(at256.join("")).toContain("38;5;221");
+    const at16 = coloured(1).sync(makeThread({ messages: [user("u", "안녕", 1)] })).commit;
+    const row = at16.find((entry) => stripAnsi(entry).includes("안녕")) as string;
+    expect(row).not.toContain("48;");
+    expect(stripAnsi(row).endsWith("│")).toBe(true);
+  });
+
+  it("keeps the box and plain text when colour is off", () => {
+    const rows = printer()
+      .sync(makeThread({ messages: [user("u", "안녕", 1)] }))
+      .commit.slice(1);
+    expect(rows).toEqual(sent("안녕"));
+    expect(rows.join("")).not.toContain("\u001b");
+  });
+
+  it("leaves an agent's reply without the user's colour", () => {
+    const reply = coloured(3).sync(makeThread({ messages: [assistant("답", false)] })).commit;
+    expect(reply.join("")).not.toContain(USER_FG);
   });
 });

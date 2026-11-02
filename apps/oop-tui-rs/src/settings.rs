@@ -20,6 +20,10 @@ pub struct Settings {
     /// `en | ko`; `None` lets the locale decide.
     pub language: Option<String>,
     pub sidebar: bool,
+    /// The right-hand panel (workflow and agents) opens with the first conversation.
+    pub workflow: bool,
+    /// The pet in the pinned header.
+    pub pet: bool,
 }
 
 impl Default for Settings {
@@ -32,6 +36,8 @@ impl Default for Settings {
             status_line: "auto".into(),
             language: None,
             sidebar: true,
+            workflow: true,
+            pet: true,
         }
     }
 }
@@ -85,6 +91,8 @@ pub fn read_settings(path: &Path) -> (Settings, Vec<String>) {
     flag("animations", &mut settings.animations);
     flag("banner", &mut settings.banner);
     flag("sidebar", &mut settings.sidebar);
+    flag("workflow", &mut settings.workflow);
+    flag("pet", &mut settings.pet);
     match object.get("theme") {
         None => {}
         Some(Value::String(name)) if safe_name(name) => settings.theme = Some(name.clone()),
@@ -134,23 +142,24 @@ pub fn read_last_model(path: &Path) -> Option<Value> {
 
 /// Replaces the file whole; a failed save is ignored (the pick still works for this session).
 pub fn write_last_model(path: &Path, selection: &Value) {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
     let Some(directory) = path.parent() else {
         return;
     };
     let temporary = path.with_extension(format!("json.{}.tmp", std::process::id()));
     let write = || -> std::io::Result<()> {
         use std::io::Write;
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(directory)?;
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&temporary)?;
+        let mut directories = std::fs::DirBuilder::new();
+        directories.recursive(true);
+        let mut file = std::fs::OpenOptions::new();
+        file.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+            directories.mode(0o700);
+            file.mode(0o600);
+        }
+        directories.create(directory)?;
+        let mut out = file.open(&temporary)?;
         let text = serde_json::to_string_pretty(selection).map_err(std::io::Error::other)?;
         out.write_all(format!("{text}\n").as_bytes())?;
         std::fs::rename(&temporary, path)

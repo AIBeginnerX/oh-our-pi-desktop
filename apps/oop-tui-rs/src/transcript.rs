@@ -5,7 +5,7 @@
 //! the approval and question panels (they wait for the user; `ui.rs` draws them).
 
 use crate::markdown;
-use crate::text::{parse_iso_ms, sanitize, truncate, width, wrap};
+use crate::text::{Join, parse_iso_ms, sanitize, truncate, width, wrap, wrap_flow};
 use crate::theme::{Symbols, Theme};
 use crate::thread::{Activity, Role, Thread};
 use ratatui::style::{Modifier, Style};
@@ -18,7 +18,39 @@ const DETAIL_COLUMNS: usize = 90;
 /// Changed files named under a file edit before the rest are counted.
 const FILES_LISTED: usize = 3;
 
+/// What a row of the conversation lets a selection take: the cells `[from, to)` hold the text (a
+/// bubble's border and padding, a bullet, a rail are layout, not text), and `join` says whether the
+/// row continues the one above it, so wrapped text copies as the lines that were typed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RowMeta {
+    pub from: usize,
+    pub to: usize,
+    pub join: Join,
+}
+
+impl Default for RowMeta {
+    fn default() -> Self {
+        RowMeta {
+            from: 0,
+            to: usize::MAX,
+            join: Join::New,
+        }
+    }
+}
+
+/// The conversation's rows and, for each, what a selection may take of it.
+#[derive(Default)]
+pub struct Transcript {
+    pub lines: Vec<Line<'static>>,
+    pub meta: Vec<RowMeta>,
+}
+
+#[cfg(test)]
 pub fn lines(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'static>> {
+    build(thread, w, th, sym).lines
+}
+
+pub fn build(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Transcript {
     let w = w.max(10);
     enum Item<'a> {
         Message(&'a crate::thread::Message),
@@ -48,13 +80,17 @@ pub fn lines(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'
     items.sort_by(|a, b| a.0.cmp(b.0));
 
     let mut out: Vec<Line<'static>> = Vec::new();
+    let mut meta: Vec<RowMeta> = Vec::new();
     let mut starts: HashMap<String, i64> = HashMap::new();
     // A run of tool lines and notices stays together; everything else is a block with a gap after.
     let mut in_run = false;
     for (_, item) in items {
-        let (block, run): (Vec<Line<'static>>, bool) = match item {
-            Item::Message(message) => (message_lines(message, w, th, sym), false),
-            Item::Plan(plan) => (plan_lines(&plan.plan_markdown, w, th), false),
+        let (block, rows, run): (Vec<Line<'static>>, Option<Vec<RowMeta>>, bool) = match item {
+            Item::Message(message) => {
+                let (lines, rows) = message_lines(message, w, th, sym);
+                (lines, Some(rows), false)
+            }
+            Item::Plan(plan) => (plan_lines(&plan.plan_markdown, w, th, sym), None, false),
             Item::Activity(activity) => {
                 let id = activity.payload["toolCallId"].as_str().map(str::to_string);
                 if activity.kind == "tool.started" {
@@ -67,7 +103,7 @@ pub fn lines(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'
                     .and_then(|id| starts.remove(&id))
                     .zip(parse_iso_ms(&activity.created_at))
                     .map(|(start, end)| end - start);
-                (activity_lines(activity, elapsed, w, th, sym), true)
+                (activity_lines(activity, elapsed, w, th, sym), None, true)
             }
         };
         if block.is_empty() {
@@ -75,11 +111,13 @@ pub fn lines(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'
         }
         if !out.is_empty() && !(run && in_run) {
             out.push(Line::default());
+            meta.push(RowMeta::default());
         }
+        meta.extend(rows.unwrap_or_else(|| vec![RowMeta::default(); block.len()]));
         out.extend(block);
         in_run = run;
     }
-    out
+    Transcript { lines: out, meta }
 }
 
 fn message_lines(
@@ -87,14 +125,24 @@ fn message_lines(
     w: usize,
     th: &Theme,
     sym: &Symbols,
-) -> Vec<Line<'static>> {
+) -> (Vec<Line<'static>>, Vec<RowMeta>) {
+    let plain = |lines: Vec<Line<'static>>, from: usize| {
+        let meta = vec![
+            RowMeta {
+                from,
+                ..RowMeta::default()
+            };
+            lines.len()
+        ];
+        (lines, meta)
+    };
     match m.role {
-        Role::User => user_lines(&m.text, w, th),
+        Role::User => user_lines(&m.text, w, th, sym),
         Role::Assistant => {
             if m.text.trim().is_empty() {
-                return Vec::new();
+                return (Vec::new(), Vec::new());
             }
-            markdown::render(&m.text, w.saturating_sub(2), th)
+            let lines = markdown::render(&m.text, w.saturating_sub(2), th, sym)
                 .into_iter()
                 .enumerate()
                 .map(|(i, mut line)| {
@@ -106,50 +154,118 @@ fn message_lines(
                     line.spans.insert(0, lead);
                     line
                 })
-                .collect()
+                .collect();
+            plain(lines, 2)
         }
-        Role::Reasoning => wrap(&sanitize(&m.text), w.saturating_sub(3))
-            .into_iter()
-            .map(|l| {
-                Line::from(Span::styled(
-                    format!("  {l}"),
-                    th.dim_style().add_modifier(Modifier::ITALIC),
-                ))
-            })
-            .collect(),
-        Role::System => wrap(&sanitize(&m.text), w.saturating_sub(3))
-            .into_iter()
-            .map(|l| Line::from(Span::styled(format!("  {l}"), Style::new().fg(th.warning))))
-            .collect(),
+        Role::Reasoning => plain(
+            wrap(&sanitize(&m.text), w.saturating_sub(3))
+                .into_iter()
+                .map(|l| {
+                    Line::from(Span::styled(
+                        format!("  {l}"),
+                        th.dim_style().add_modifier(Modifier::ITALIC),
+                    ))
+                })
+                .collect(),
+            2,
+        ),
+        Role::System => plain(
+            wrap(&sanitize(&m.text), w.saturating_sub(3))
+                .into_iter()
+                .map(|l| Line::from(Span::styled(format!("  {l}"), Style::new().fg(th.warning))))
+                .collect(),
+            2,
+        ),
     }
 }
 
-/// The user's own message: right-aligned on a plate, like a chat bubble.
-fn user_lines(text: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
-    let bubble = (w * 7 / 10).max(12).min(w.saturating_sub(2).max(1));
-    let wrapped = wrap(&sanitize(text), bubble.saturating_sub(2));
-    let inner = wrapped.iter().map(|l| width(l)).max().unwrap_or(0);
-    let plate = Style::new().fg(th.user_fg).bg(th.user_bg);
-    wrapped
-        .into_iter()
-        .map(|line| {
-            let fill = " ".repeat(inner - width(&line));
-            Line::from(vec![
-                Span::styled(format!(" {line}{fill} "), plate),
-                Span::raw(" "),
-            ])
-            .right_aligned()
+/// Least cells of text a user's box gets, whatever the room.
+const MIN_INNER: usize = 8;
+
+/// The user's own message: a block against the right edge of the `w`-column conversation, in the
+/// theme's `user_fg` inside a rounded box, so it is told apart from the agent's text on the left. The
+/// box is as wide as its longest row plus a border and a space on each side, and never wider than
+/// four fifths of the room (width rules of apps/oop-tui/src/render/userBubble.ts), so a long message
+/// wraps inside it. Every width is a display width: a Korean syllable takes two cells and every row
+/// ends in the same column. Where the terminal can fill behind text the box also carries the
+/// `user_bg` tint; with no colour at all the box itself is what sets the message apart. Only the text
+/// cells are selectable, so copying a message gives the message without the border.
+fn user_lines(
+    text: &str,
+    w: usize,
+    th: &Theme,
+    sym: &Symbols,
+) -> (Vec<Line<'static>>, Vec<RowMeta>) {
+    // A border and a space of padding on each side.
+    let frame = 4;
+    let most = w
+        .saturating_sub(frame)
+        .min(MIN_INNER.max((w * 8 / 10).saturating_sub(frame)))
+        .max(1);
+    let clean = sanitize(text);
+    let rows: Vec<(String, Join)> = clean
+        .split('\n')
+        .flat_map(|line| {
+            if line.is_empty() {
+                vec![(String::new(), Join::New)]
+            } else {
+                wrap_flow(line, most)
+            }
         })
-        .collect()
+        .map(|(row, join)| (row.trim_end().to_string(), join))
+        .collect();
+    let inner = rows.iter().map(|(r, _)| width(r)).max().unwrap_or(1).max(1);
+    let lead = " ".repeat(w.saturating_sub(inner + frame));
+    let [tl, tr, bl, br] = sym.corners;
+    let tint = if th.fills_user() {
+        Style::new().bg(th.user_bg)
+    } else {
+        Style::new()
+    };
+    let ink = tint.fg(th.user_fg);
+    let edge = |left: &str, right: &str| {
+        Line::from(vec![
+            Span::raw(lead.clone()),
+            Span::styled(format!("{left}{}{right}", sym.rule.repeat(inner + 2)), ink),
+        ])
+    };
+    let mut lines = vec![edge(tl, tr)];
+    let mut meta = vec![RowMeta::default()];
+    let from = lead.chars().count() + 2;
+    for (row, join) in rows {
+        let fill = " ".repeat(inner - width(&row));
+        lines.push(Line::from(vec![
+            Span::raw(lead.clone()),
+            Span::styled(format!("{} ", sym.bar), ink),
+            Span::styled(format!("{row}{fill}"), ink),
+            Span::styled(format!(" {}", sym.bar), ink),
+        ]));
+        meta.push(RowMeta {
+            from,
+            to: from + inner,
+            join,
+        });
+    }
+    lines.push(edge(bl, br));
+    meta.push(RowMeta::default());
+    // The border rows are not text: nothing of them is taken.
+    for index in [0, meta.len() - 1] {
+        meta[index] = RowMeta {
+            from: usize::MAX,
+            to: usize::MAX,
+            join: Join::New,
+        };
+    }
+    (lines, meta)
 }
 
-fn plan_lines(markdown_text: &str, w: usize, th: &Theme) -> Vec<Line<'static>> {
+fn plan_lines(markdown_text: &str, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'static>> {
     let mut out = vec![Line::from(Span::styled(
         format!("  {}", crate::i18n::tr("transcript.plan")),
         Style::new().fg(th.brand).add_modifier(Modifier::BOLD),
     ))];
     out.extend(
-        markdown::render(markdown_text, w.saturating_sub(2), th)
+        markdown::render(markdown_text, w.saturating_sub(2), th, sym)
             .into_iter()
             .map(|mut l| {
                 l.spans.insert(0, Span::raw("  "));
@@ -237,7 +353,7 @@ fn format_tokens(n: u64) -> String {
 }
 
 /// The first non-empty line of a server string, cleaned for the terminal; "" for anything else.
-fn first_line(value: &Value) -> String {
+pub(crate) fn first_line(value: &Value) -> String {
     value
         .as_str()
         .map(|s| {
@@ -297,7 +413,7 @@ pub fn format_duration(ms: f64) -> Option<String> {
     })
 }
 
-fn tool_title(a: &Activity) -> String {
+pub(crate) fn tool_title(a: &Activity) -> String {
     [
         first_line(&a.payload["title"]),
         first_line(&Value::String(a.summary.clone())),
@@ -308,12 +424,12 @@ fn tool_title(a: &Activity) -> String {
     .unwrap_or_else(|| "tool".into())
 }
 
-fn tool_failed(a: &Activity) -> bool {
+pub(crate) fn tool_failed(a: &Activity) -> bool {
     a.kind == "tool.denied" || matches!(a.payload["status"].as_str(), Some("failed" | "declined"))
 }
 
 /// The one line of output the server keeps for a finished tool, or why it failed.
-fn result_summary(data: &Value, failed: bool) -> String {
+pub(crate) fn result_summary(data: &Value, failed: bool) -> String {
     let item = &data["item"];
     let error = if item["error"].is_string() {
         &item["error"]

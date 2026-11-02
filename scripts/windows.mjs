@@ -7,6 +7,7 @@
 // The only robocopy /MIR target is a checkout folder this script owns under %LOCALAPPDATA%.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -22,7 +23,10 @@ import {
 import {
   MIN_NODE_VERSION,
   PACKAGE_MANAGER_VERSION,
+  RUST_CLIENT_DIR,
+  cargoReleaseArgs,
   releaseVersion,
+  skipsRust,
   sourceKey,
   upstreamVersion,
 } from "./macos.mjs";
@@ -324,6 +328,40 @@ async function writeAtomically(destination, content) {
  * `releaseDirectories`. The app it builds looks in Google Drive first and, when the build runs
  * against the NAS, falls back to the share's release\\windows.
  */
+/**
+ * Best-effort `cargo build --release` of the Rust terminal client (apps/oop-tui-rs). The Windows
+ * release must never depend on it: a missing toolchain, a crate that does not build for Windows
+ * (today it uses Unix-only APIs), or a binary that prints another version leaves the installer
+ * with the TypeScript terminal alone. OOP_SKIP_RUST=1 skips the attempt. Returns the environment
+ * the artifact builder reads (OOP_RS_BIN), or nothing.
+ */
+export function buildRustClient(checkout, env, version, io = {}) {
+  const {
+    runCargo = (args, options) => run("cargo", args, options),
+    probe = (command, args) => capture(command, args).trim(),
+    exists = NodeFS.existsSync,
+  } = io;
+  const dir = NodePath.join(checkout, RUST_CLIENT_DIR);
+  if (skipsRust(env)) return { reason: "OOP_SKIP_RUST is set", env: {} };
+  if (!exists(NodePath.join(dir, "Cargo.toml")))
+    return { reason: `no ${RUST_CLIENT_DIR}`, env: {} };
+  if (!probe("cargo", ["--version"])) return { reason: "cargo is not installed", env: {} };
+  try {
+    runCargo(cargoReleaseArgs({ locked: exists(NodePath.join(dir, "Cargo.lock")) }), {
+      cwd: dir,
+      env: { ...env, OOP_VERSION: version },
+    });
+  } catch (error) {
+    return { reason: `cargo build failed (${error.message})`, env: {} };
+  }
+  const binary = NodePath.join(dir, "target", "release", "oop-rs.exe");
+  const printed = exists(binary) ? probe(binary, ["--version"]) : "";
+  if (printed !== version) {
+    return { reason: `oop-rs.exe prints "${printed}", not ${version}`, env: {} };
+  }
+  return { reason: undefined, env: { OOP_RS_BIN: binary } };
+}
+
 async function packageInstaller(
   sourceRoot,
   arch,
@@ -452,6 +490,9 @@ async function packageInstaller(
     cwd: checkout,
     env,
   });
+  const rust = buildRustClient(checkout, env, version);
+  if (rust.reason !== undefined)
+    console.log(`The Windows terminal stays TypeScript only: ${rust.reason}.`);
   const out = NodePath.join(artifactsRoot, `${Date.now()}`);
   await NodeFSP.mkdir(out, { recursive: true });
   run(
@@ -470,7 +511,7 @@ async function packageInstaller(
       "--output-dir",
       out,
     ],
-    { cwd: checkout, env },
+    { cwd: checkout, env: { ...env, ...rust.env } },
   );
 
   const fileName = windowsFeedInstallerName(version, arch);

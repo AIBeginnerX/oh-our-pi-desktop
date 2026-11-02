@@ -9,11 +9,12 @@ import {
   type ThreadMirrorState,
 } from "../link/threadMirror.ts";
 import { setLanguage } from "../i18n/index.ts";
+import { petFrameCount, petRows, type PetLook, type PetState } from "../render/pet.ts";
 import { LiveRegion, type Scheduler } from "../render/liveRegion.ts";
 import { RegionSwitch } from "../render/regionSwitch.ts";
 import { SplitRegion } from "../render/splitRegion.ts";
 import { makeStyle, type Style } from "../render/style.ts";
-import type { Symbols } from "../render/symbols.ts";
+import { UNICODE_SYMBOLS, type Symbols } from "../render/symbols.ts";
 import {
   makeConfig,
   makeProject,
@@ -25,6 +26,7 @@ import {
   threadSnapshotItem,
 } from "../testing/fixtures.ts";
 import { FakeTerminal } from "../testing/terminal.ts";
+import { visibleWidth } from "../text/width.ts";
 import { AppController, type ControllerLink } from "./controller.ts";
 
 const online: LinkStatus = { phase: "online", attempt: 0, retryAt: null, detail: null };
@@ -53,6 +55,8 @@ interface Options {
   readonly pet?: boolean;
   readonly savePet?: (on: boolean) => void;
   readonly animations?: boolean;
+  /** The server's config, for a test that needs the crew's settings and providers. */
+  readonly config?: ReturnType<typeof makeConfig>;
 }
 
 /**
@@ -98,7 +102,7 @@ const harness = (options: Options = {}) => {
         }),
       ],
     ),
-    config: makeConfig(),
+    config: options.config ?? makeConfig(),
     thread: emptyThreadMirror as ThreadMirrorState,
     getSettings: async () => ({ threadGoals: {} }) as never,
     updateSettings: async () => ({}) as never,
@@ -149,7 +153,6 @@ const harness = (options: Options = {}) => {
     ...(options.startup
       ? {
           startup: { banner: true, version: "0.0.133", checkUpdate: async () => null },
-          server: "127.0.0.1:4011",
         }
       : {}),
   });
@@ -244,7 +247,6 @@ describe("the default layout of a conversation", () => {
     expect(screenRows(h)[0]).toMatch(/[█▄▀]/u);
     expect(text).toContain("OOP Terminal".slice(0, 3));
     expect(text).toContain("v0.0.133");
-    expect(text).toContain("127.0.0.1:4011");
     expect(text).toContain("/work/app");
   });
 
@@ -424,7 +426,7 @@ describe("the pinned header", () => {
           },
         ],
       });
-    // The first words move the pet from thinking to typing; the words after that change nothing.
+    // The first words move Mocha from thinking to typing; the words after that change nothing.
     h.deliver(streaming(4), 4);
     const mark = h.term.writes.length;
     for (let sequence = 5; sequence < 12; sequence += 1) {
@@ -449,24 +451,49 @@ describe("the pet", () => {
     h.openNewest();
     return h;
   };
-  /** The pet's strip: the columns of the middle column that the pet walks in. */
-  const face = (h: ReturnType<typeof harness>) => screenRows(h).slice(0, 4).join("\n");
+  /** With no provider known she has the default coffee; plain colour makes the glyphs the same. */
+  const look: PetLook = { tone: "default", from: "default" };
+  /** The picture pet.ts draws for one frame of a state, plain, as this header shows it. */
+  const picture = (state: PetState, frame = 0): string[] =>
+    petRows(state, frame, look, makeStyle(false).theme, UNICODE_SYMBOLS).map((row) => row.trim());
+  /** Whether the header carries that picture now, every row of it on the row it belongs to. */
+  const shows = (h: ReturnType<typeof harness>, state: PetState, frame = 0): boolean => {
+    const rows = screenRows(h).slice(0, 5);
+    return picture(state, frame).every((row, index) => (rows[index] ?? "").includes(row));
+  };
+  /** Whether the header shows any frame of a state; the clock alone picks the frame. */
+  const showing = (h: ReturnType<typeof harness>, state: PetState): boolean =>
+    Array.from({ length: petFrameCount(state) }, (_, frame) => frame).some((frame) =>
+      shows(h, state, frame),
+    );
+  /**
+   * The column Mocha stands at: the left edge of her coaster, a solid run with a half block at each
+   * end on the strip's last row, which neither the wordmark nor the thread line makes. -1 when no
+   * pet is drawn. In cells, since a thread title in the row before it can be wide.
+   */
+  const petAt = (h: ReturnType<typeof harness>): number => {
+    const row = screenRows(h)[4] as string;
+    const index = row.search(/▄▄[▄█]{6}▄▄/u);
+    return index < 0 ? -1 : visibleWidth(row.slice(0, index));
+  };
 
   it("greets at startup, then idles", () => {
     const h = open();
-    expect(face(h)).toContain("^ ^");
+    // She waves hello with a wave of steam, which no idle frame has.
+    expect(showing(h, "greeting")).toBe(true);
     h.advance(5000);
     h.controller.render();
     h.settle();
-    expect(face(h)).toContain("o o");
-    expect(face(h)).not.toContain("^ ^");
+    expect(showing(h, "idle")).toBe(true);
+    expect(showing(h, "greeting")).toBe(false);
   });
 
   it("shows how the turn goes: thinking, a tool, a question for you", () => {
     const h = open({ animations: false });
     h.advance(5000);
     h.deliver(runningThread());
-    expect(face(h)).toContain("?");
+    // Thick steam and rising bubbles while she thinks.
+    expect(showing(h, "thinking")).toBe(true);
     h.deliver(
       runningThread({
         activities: [
@@ -484,7 +511,9 @@ describe("the pet", () => {
       }),
       5,
     );
-    expect(face(h)).toContain("> <");
+    // She stirs with a spoon at the work; the bubbles are gone.
+    expect(showing(h, "tool")).toBe(true);
+    expect(showing(h, "thinking")).toBe(false);
   });
 
   it("keeps exactly one timer while idle, none while unfocused, none with animations off", () => {
@@ -508,37 +537,39 @@ describe("the pet", () => {
       makeThread({ id: "thread-new", title: "Fix the login bug", latestTurn: null, session: null }),
       6,
     );
-    // Back to idle: only the pet's one slow timer.
+    // Back to idle: only Mocha's one slow timer.
     expect(h.activeTimers()).toBe(1);
     h.controller.handleKey({ type: "focus", focused: false });
     expect(h.activeTimers()).toBe(0);
   });
 
-  it("moves along the header while the turn runs, and stands still when it ends", () => {
+  it("stays where she is while the turn runs and when it ends: she does not walk", () => {
     const h = open();
+    h.advance(5000);
+    h.controller.render();
+    h.settle();
+    const rest = petAt(h);
+    expect(rest).toBeGreaterThanOrEqual(0);
     h.deliver(runningThread());
-    const positions = new Set<number>();
     for (let frame = 0; frame < 12; frame += 1) {
       h.advance(250);
       h.controller.render();
       h.settle();
-      positions.add((screenRows(h)[1] as string).lastIndexOf("██"));
+      expect(petAt(h)).toBe(rest);
     }
-    expect(positions.size).toBeGreaterThan(3);
     h.deliver(
       makeThread({ id: "thread-new", title: "Fix the login bug", latestTurn: null, session: null }),
       9,
     );
-    const rest = (screenRows(h)[1] as string).lastIndexOf("██");
     for (let frame = 0; frame < 6; frame += 1) {
       h.advance(500);
       h.controller.render();
       h.settle();
-      expect((screenRows(h)[1] as string).lastIndexOf("██")).toBe(rest);
+      expect(petAt(h)).toBe(rest);
     }
   });
 
-  it("writes about four header updates a second while working and almost none while idle", () => {
+  it("writes about four header updates a second while working and a slow trickle while idle", () => {
     const h = open();
     h.deliver(runningThread());
     const mark = h.term.writes.length;
@@ -547,7 +578,7 @@ describe("the pet", () => {
       h.controller.render();
       h.settle();
     }
-    // Ten seconds of 100 ms ticks is four seconds of turn: about 16 pet frames at most.
+    // Ten seconds of 100 ms ticks is four seconds of turn: about 16 of Mocha's frames at most.
     const working = h.term.writes.length - mark;
     expect(working).toBeLessThanOrEqual(17);
     expect(h.since(mark)).not.toContain("\u001b[2J");
@@ -562,8 +593,9 @@ describe("the pet", () => {
       h.controller.render();
       h.settle();
     }
-    // Ten seconds idle: a handful of slow changes, not a stream.
-    expect(h.term.writes.length - idleMark).toBeLessThanOrEqual(5);
+    // Ten seconds idle: the steam trades places every second or two and she blinks every three and
+    // a half, each a repaint of her strip alone; not a stream.
+    expect(h.term.writes.length - idleMark).toBeLessThanOrEqual(12);
   });
 
   it("goes to sleep after a quiet while", () => {
@@ -571,8 +603,29 @@ describe("the pet", () => {
     h.advance(200_000);
     h.controller.render();
     h.settle();
-    expect(face(h)).toMatch(/[zZ]/u);
-    expect(face(h)).toContain("- -");
+    // Eyes shut, no steam, and a z.
+    expect(showing(h, "resting")).toBe(true);
+    expect(showing(h, "idle")).toBe(false);
+  });
+
+  it("jumps for a moment when /model changes the model, and then settles", () => {
+    const h = open();
+    h.advance(5000);
+    h.controller.render();
+    h.settle();
+    expect(showing(h, "idle")).toBe(true);
+    h.run("/model");
+    h.press(key("down"), key("enter"));
+    // Her third picture of the switch (half a second in) is a jump no other state draws.
+    h.advance(600);
+    h.controller.render();
+    h.settle();
+    expect(shows(h, "switching", 2)).toBe(true);
+    expect(showing(h, "idle")).toBe(false);
+    h.advance(2000);
+    h.controller.render();
+    h.settle();
+    expect(showing(h, "idle")).toBe(true);
   });
 
   it("is turned off and on with /pet and remembered", () => {
@@ -581,19 +634,20 @@ describe("the pet", () => {
     h.advance(5000);
     h.run("/pet off");
     expect(saved).toEqual([false]);
-    expect(face(h)).not.toContain("o o");
+    expect(petAt(h)).toBe(-1);
     expect(screenRows(h).join("\n")).toContain("v0.0.133");
     expect(h.activeTimers()).toBe(0);
     h.run("/pet");
     expect(saved).toEqual([false, true]);
-    expect(face(h)).toContain("o o");
+    expect(petAt(h)).toBeGreaterThanOrEqual(0);
+    expect(showing(h, "idle")).toBe(true);
     h.run("/pet maybe");
     expect(h.screen()).toContain("Usage: /pet [on|off]");
   });
 
   it("is off from the start with the pet setting off", () => {
     const h = open({ pet: false });
-    expect(face(h)).not.toContain("o o");
+    expect(petAt(h)).toBe(-1);
     expect(h.activeTimers()).toBe(0);
   });
 
@@ -607,5 +661,115 @@ describe("the pet", () => {
     help.run("/dag-workflow off");
     help.run("/sidebar off");
     expect(help.screen() + help.term.scrollback.join("\n")).toContain("/pet");
+  });
+});
+
+describe("the crew at the top of the conversation", () => {
+  const model = (instanceId: string, slug: string, name: string, isDefault = false) => ({
+    slug,
+    name,
+    isCustom: false,
+    isDefault,
+    capabilities: null,
+    instanceId,
+  });
+  const providers = [
+    {
+      instanceId: "codex",
+      driver: "codex",
+      displayName: "Codex",
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      models: [model("codex", "gpt-5", "GPT-5", true), model("codex", "gpt-5-mini", "GPT-5 mini")],
+    },
+    {
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      displayName: "Claude",
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      models: [model("claudeAgent", "claude-opus-4", "Opus 4", true)],
+    },
+  ];
+  const pins = {
+    worker: { instanceId: "codex", model: "gpt-5-mini" },
+    expert: { instanceId: "claudeAgent", model: "claude-opus-4" },
+    auditor: { instanceId: "codex", model: "gpt-5" },
+  };
+  const configWith = (crew: Record<string, unknown>) =>
+    makeConfig({
+      providers,
+      settings: {
+        crew: { enabled: false, preset: "recommended", pinned: {}, threads: {}, ...crew },
+      },
+    });
+  const open = (crew: Record<string, unknown>, options: Options = {}) => {
+    const h = harness({
+      startup: true,
+      // Wide enough that the middle column has room for the full words beside the side panels.
+      columns: 200,
+      rows: 36,
+      sidebar: true,
+      workflow: true,
+      config: configWith(crew),
+      ...options,
+    });
+    h.openNewest();
+    return h;
+  };
+  const top = (h: ReturnType<typeof harness>) => screenRows(h).slice(0, 8).join("\n");
+
+  it("names each role with its model while the crew is on", () => {
+    const h = open({ enabled: true, pinned: pins });
+    expect(top(h)).toContain("Crew worker GPT-5 mini · expert Opus 4 · auditor GPT-5");
+  });
+
+  it("says nothing of the crew while it is off", () => {
+    const h = open({ enabled: false, pinned: pins });
+    expect(top(h)).not.toMatch(/Crew|worker|auditor/u);
+  });
+
+  it("follows the crew setting and a role's model as they change in the session", () => {
+    const h = open({ enabled: false, pinned: pins });
+    expect(top(h)).not.toContain("worker");
+    h.link.config = configWith({ enabled: true, pinned: pins });
+    h.controller.render();
+    h.settle();
+    expect(top(h)).toContain("worker GPT-5 mini");
+    h.link.config = configWith({
+      enabled: true,
+      pinned: { ...pins, worker: { instanceId: "codex", model: "gpt-5" } },
+    });
+    h.controller.render();
+    h.settle();
+    expect(top(h)).toContain("worker GPT-5 · expert Opus 4");
+    h.link.config = configWith({ enabled: false, pinned: pins });
+    h.controller.render();
+    h.settle();
+    expect(top(h)).not.toContain("worker");
+  });
+
+  it("uses the thread's own switch over the default", () => {
+    const h = open({
+      enabled: false,
+      pinned: pins,
+      threads: { "thread-new": { enabled: true } },
+    });
+    expect(top(h)).toContain("worker GPT-5 mini");
+  });
+
+  it("is a short form on the one-line header, and the width is never exceeded", () => {
+    const h = open({ enabled: true, pinned: pins }, { rows: 24 });
+    const first = screenRows(h)[0] as string;
+    expect(first).toContain("Crew w GPT-5 mini · e Opus 4 · a GPT-5");
+    expect(first).not.toContain("worker");
+    // With little room it is left out whole, not shown as a stub.
+    const narrow = open({ enabled: true, pinned: pins }, { columns: 100, rows: 24 });
+    expect(screenRows(narrow)[0]).not.toContain("Crew");
+    for (const row of screenRows(narrow)) expect(row.length).toBeLessThanOrEqual(100);
   });
 });

@@ -438,6 +438,29 @@ jobs:
         shell: bash
         run: cargo build --locked --release --manifest-path native/resource-monitor/Cargo.toml
 
+      # The Rust terminal client. macOS builds it on its runner and Linux in a Debian container, so
+      # each archive carries the binary for its platform and the one-line installers set up the Rust
+      # `oop`. It reads the release version from OOP_RELEASE.json (OOP_VERSION is passed as well) and
+      # this step fails on a binary that prints another one. The client uses Unix-only APIs, so the
+      # Windows archive stays TypeScript only until it builds there.
+      - name: Build the Rust terminal client
+        if: matrix.platform != 'win'
+        shell: bash
+        env:
+          OOP_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.platform }}" == linux ]]; then
+            # Debian 12 (glibc 2.36) like the local release build, so the binary also runs on older
+            # distributions than this runner's; the runner's Docker pulls the image for its own CPU.
+            docker run --rm --user "$(id -u):$(id -g)" -e OOP_VERSION -e CARGO_HOME=/tmp/cargo \
+              -v "$PWD:/src" -w /src rust:1-bookworm \
+              cargo build --locked --release --manifest-path apps/oop-tui-rs/Cargo.toml
+          else
+            cargo build --locked --release --manifest-path apps/oop-tui-rs/Cargo.toml
+          fi
+          test "$(apps/oop-tui-rs/target/release/oop-rs --version)" = "$OOP_VERSION"
+
       # The archive carries the official Node.js that built it (checked against nodejs.org's
       # SHASUMS256.txt), oop.mjs, the server bundle, and the native packages the server loads.
       - name: Package the terminal app
@@ -450,12 +473,15 @@ jobs:
           ASSET: ${{ matrix.asset }}
         run: |
           set -euo pipefail
+          rust_args=()
+          if [[ "$PLATFORM" != win ]]; then rust_args=(--oop-rs apps/oop-tui-rs/target/release/oop-rs); fi
           node scripts/build-terminal-archive.ts \
             --platform "$PLATFORM" \
             --arch "$ARCH" \
             --version "$VERSION" \
             --node-version "$(node -p 'process.versions.node')" \
             --resource-monitor "native/resource-monitor/target/release/$MONITOR" \
+            ${rust_args[@]+"${rust_args[@]}"} \
             --output-dir terminal-out
           test -s "terminal-out/$ASSET"
           test -s "terminal-out/$ASSET.sha256"

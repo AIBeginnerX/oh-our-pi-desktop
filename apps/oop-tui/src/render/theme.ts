@@ -15,6 +15,7 @@ export const FOREGROUND_TOKENS = [
   "accent",
   "text",
   "onBg",
+  "userFg",
   "muted",
   "dim",
   "border",
@@ -77,6 +78,8 @@ export type Theme = { readonly [K in ForegroundToken]: Paint } & {
   readonly enabled: boolean;
   /** Whether `bg` can fill behind text (256 colours or more). */
   readonly supportsBackground: boolean;
+  /** Whether `bg` paints `token`: false at 16 colours and for a token left at the terminal's own. */
+  readonly fills: (token: BackgroundToken) => boolean;
   /**
    * `text` on a background token, in the theme's `onBg` foreground (also after a paint inside `text`
    * closes). Where backgrounds are not supported, `text` is painted in the `fallback` foreground
@@ -147,6 +150,7 @@ export const createTheme = (name: string, tokens: ThemeTokens, level: ColorLevel
     level,
     enabled: level > 0,
     supportsBackground,
+    fills: (token) => supportsBackground && colorCodes(backgrounds[token], level, true) !== null,
     bg: (token, text, fallback) => {
       if (!supportsBackground) return fallback === undefined ? text : paints[fallback](text);
       const codes = colorCodes(backgrounds[token], level, true);
@@ -166,6 +170,7 @@ const oop: ThemeTokens = {
   accent: "#38bdf8",
   text: "default",
   onBg: "#e5e7eb",
+  userFg: "#fcd34d",
   muted: "#9aa3b5",
   dim: "#6b7489",
   border: "#3a4256",
@@ -196,6 +201,7 @@ const oop: ThemeTokens = {
 const oopLight: ThemeTokens = {
   ...oop,
   onBg: "#1f2937",
+  userFg: "#92400e",
   brand: "#7253b9",
   brandDim: "#9d7fd6",
   accent: "#0284c7",
@@ -229,6 +235,7 @@ const oopLight: ThemeTokens = {
 const aurora: ThemeTokens = {
   ...oop,
   onBg: "#e6f4f1",
+  userFg: "#f9a8d4",
   brand: "#5eead4",
   brandDim: "#0d9488",
   accent: "#a3e635",
@@ -260,6 +267,7 @@ const aurora: ThemeTokens = {
 const sunset: ThemeTokens = {
   ...oop,
   onBg: "#f5ebe6",
+  userFg: "#7dd3fc",
   brand: "#fb923c",
   brandDim: "#c2410c",
   accent: "#f472b6",
@@ -292,6 +300,7 @@ const sunset: ThemeTokens = {
 /** Added lines are blue and removed lines orange; nothing depends on telling red from green. */
 const colorblind: ThemeTokens = {
   ...oop,
+  userFg: "#f0e442",
   brand: "#56b4e9",
   brandDim: "#0072b2",
   accent: "#cc79a7",
@@ -324,6 +333,7 @@ const ansi: ThemeTokens = {
   accent: "cyan",
   text: "default",
   onBg: "default",
+  userFg: "cyan",
   muted: "brightBlack",
   dim: "brightBlack",
   border: "brightBlack",

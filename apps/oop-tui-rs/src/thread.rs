@@ -24,6 +24,7 @@ pub struct Session {
     pub active_turn_id: Option<String>,
     pub last_error: Option<String>,
     pub updated_at: String,
+    pub provider_instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,6 +79,9 @@ pub struct Plan {
     pub id: String,
     pub turn_id: Option<String>,
     pub plan_markdown: String,
+    /// When a turn built this plan; `None` while it can still be implemented.
+    pub implemented_at: Option<String>,
+    pub implementation_thread_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -90,6 +94,17 @@ pub struct Checkpoint {
     pub status: String,
     pub assistant_message_id: Option<String>,
     pub completed_at: String,
+    /// The files the turn changed, with the line counts `/diff` and `/undo` show.
+    pub files: Vec<CheckpointFile>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CheckpointFile {
+    pub path: String,
+    pub kind: String,
+    pub additions: u64,
+    pub deletions: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]

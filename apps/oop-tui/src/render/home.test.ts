@@ -34,7 +34,7 @@ const input = (extra: Partial<HomeInput> = {}): HomeInput => ({
   columns: 100,
   theme: createTheme("oop", BUILTIN_THEMES.oop, 3),
   symbols: UNICODE_SYMBOLS,
-  banner: { version: "0.0.127", server: "127.0.0.1:3773", cwd: "/home/me/app", home: "/home/me" },
+  banner: { version: "0.0.127", cwd: "/home/me/app", home: "/home/me" },
   report: UPDATE,
   versions: { terminal: "0.0.127", app: "0.0.127" },
   ...extra,

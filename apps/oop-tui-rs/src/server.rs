@@ -23,9 +23,12 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn user_home() -> PathBuf {
-    std::env::var_os("HOME")
+    let from_env = std::env::var_os("HOME").filter(|v| !v.is_empty());
+    #[cfg(windows)]
+    let from_env = from_env.or_else(|| std::env::var_os("USERPROFILE").filter(|v| !v.is_empty()));
+    from_env
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
+        .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "C:\\" } else { "/" }))
 }
 
 /// The flag, else `OOP_HOME`, else the desktop app's own home. Whether it was named on purpose
@@ -85,21 +88,49 @@ fn credentials_path() -> PathBuf {
 
 /// Loopback names are one server: `localhost`, `127.0.0.1` and `[::1]` with the same port.
 pub fn origins_match(a: &str, b: &str) -> bool {
-    let norm = |o: &str| {
-        let rest = o
-            .trim_end_matches('/')
-            .strip_prefix("http://")
-            .unwrap_or(o)
-            .to_string();
-        let (host, port) = rest.rsplit_once(':').unwrap_or((&rest, "80"));
-        let host = if matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
-            "loopback"
-        } else {
-            host
-        };
-        format!("{host}:{port}")
+    let norm = |o: &str| match http::Origin::parse(o.trim_end_matches('/')) {
+        Ok(origin) => {
+            let host = if matches!(origin.host.as_str(), "localhost" | "127.0.0.1" | "::1") {
+                "loopback"
+            } else {
+                origin.host.as_str()
+            };
+            format!(
+                "{}{host}:{}",
+                if origin.tls { "tls " } else { "" },
+                origin.port
+            )
+        }
+        Err(_) => o.to_string(),
     };
     norm(a) == norm(b)
+}
+
+/// The credentials folder is the user's alone (Unix modes; on Windows the profile's own ACLs apply).
+fn restrict_directory(directory: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+        Ok(())
+    }
+}
+
+/// A new file nobody but the user can read (Unix mode 0600).
+fn restrict_new_file(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = options;
+    }
 }
 
 pub fn find_credential(environment_id: &str, origin: &str) -> Result<Option<Credential>, String> {
@@ -120,7 +151,6 @@ pub fn find_credential(environment_id: &str, origin: &str) -> Result<Option<Cred
 }
 
 pub fn save_credential(credential: &Credential) -> Result<(), String> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let path = credentials_path();
     let mut file = match std::fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str::<CredentialFile>(&text)
@@ -142,16 +172,14 @@ pub fn save_credential(credential: &Credential) -> Result<(), String> {
     );
     let directory = path.parent().ok_or("no config directory")?;
     std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
-    std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
-        .map_err(|e| e.to_string())?;
+    restrict_directory(directory).map_err(|e| e.to_string())?;
     let temporary = path.with_extension(format!("{}.tmp", crate::text::new_id()));
     let write = || -> std::io::Result<()> {
         use std::io::Write;
-        let mut out = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&temporary)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        restrict_new_file(&mut options);
+        let mut out = options.open(&temporary)?;
         out.write_all(format!("{}\n", serde_json::to_string_pretty(&file)?).as_bytes())?;
         std::fs::rename(&temporary, &path)
     };
@@ -223,6 +251,7 @@ pub fn parse_port(origin: &str) -> Option<u16> {
 
 /// The announced pid's executable and command line, if it is this user's process and listens on
 /// the announced port. Anything else (stale file, someone else's server) gets nothing sent to it.
+#[cfg(unix)]
 pub async fn inspect(pid: u32, port: u16) -> Option<(String, String)> {
     let pid_text = pid.to_string();
     let ps = |field: &'static str| {
@@ -254,6 +283,31 @@ pub async fn inspect(pid: u32, port: u16) -> Option<(String, String)> {
     let executable = ps("comm=").await.ok()?;
     let command = ps("command=").await.ok()?;
     (!executable.is_empty() && !command.is_empty()).then_some((executable, command))
+}
+
+/// The same question on Windows, asked of PowerShell: the process must be this user's and hold a
+/// listener on the port; the answer is its executable path and command line. Written without a
+/// Windows machine to run it on.
+#[cfg(not(unix))]
+pub async fn inspect(pid: u32, port: u16) -> Option<(String, String)> {
+    let script = format!(
+        "$p = Get-CimInstance Win32_Process -Filter 'ProcessId={pid}'; if (-not $p) {{ exit 1 }}; \
+         $o = Invoke-CimMethod -InputObject $p -MethodName GetOwner; \
+         if ($o.User -ne $env:USERNAME) {{ exit 1 }}; \
+         if (-not (Get-NetTCPConnection -OwningProcess {pid} -LocalPort {port} -State Listen \
+         -ErrorAction SilentlyContinue)) {{ exit 1 }}; $p.ExecutablePath; $p.CommandLine"
+    );
+    let text = run(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", &script],
+        &[],
+    )
+    .await
+    .ok()?;
+    let mut lines = text.lines().map(str::trim).filter(|l| !l.is_empty());
+    let executable = lines.next()?.to_string();
+    let command = lines.next()?.replace('\\', "/");
+    Some((executable, command))
 }
 
 /// The server's script inside its command line: an absolute path ending in
@@ -373,10 +427,17 @@ fn find_app_program() -> Option<AppProgram> {
 }
 
 fn which(program: &str) -> Option<String> {
-    std::env::var_os("PATH")?
-        .to_string_lossy()
-        .split(':')
-        .map(|dir| Path::new(dir).join(program))
+    let names: &[&str] = if cfg!(windows) {
+        &[".exe", ".cmd", ""]
+    } else {
+        &[""]
+    };
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .flat_map(|dir| {
+            names
+                .iter()
+                .map(move |ext| dir.join(format!("{program}{ext}")))
+        })
         .find(|candidate| candidate.is_file())
         .map(|p| p.to_string_lossy().into_owned())
 }
@@ -402,6 +463,37 @@ fn pick_port() -> Option<u16> {
 enum Started {
     Ready,
     Occupied,
+}
+
+/// Keeps the server apart from this terminal. Unix: a session of its own, like the TypeScript
+/// terminal's `detached: true`, so the server has no controlling terminal and can never take the
+/// foreground away from this terminal's keys. Windows: a new process group with no console and no
+/// window (`CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW`). The Windows side
+/// could not be run where this was written.
+fn detach(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: `setsid` is async-signal-safe and touches no memory of this process.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS | CREATE_NO_WINDOW);
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = command;
+    }
 }
 
 /// Starts `serve --daemon` detached (no window, no stdio, own process group) and waits until it
@@ -434,16 +526,7 @@ async fn start_daemon(
     for (name, _) in std::env::vars().filter(|(n, _)| n.starts_with("T3CODE_")) {
         command.env_remove(name);
     }
-    use std::os::unix::process::CommandExt;
-    // A session of its own, like the TypeScript terminal's `detached: true`: the server keeps no
-    // controlling terminal, so it can never take the foreground away from this terminal's keys.
-    // SAFETY: `setsid` is async-signal-safe and touches no memory of this process.
-    unsafe {
-        command.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
+    detach(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| format!("cannot run the server: {e}"))?;
@@ -467,7 +550,29 @@ async fn start_daemon(
 }
 
 /// A server to talk to: the announced one, else one started here.
-pub async fn resolve(home: &Path, isolated: bool, notify: impl Fn(&str)) -> Result<Found, String> {
+pub async fn resolve(
+    home: &Path,
+    isolated: bool,
+    server: Option<&str>,
+    notify: impl Fn(&str),
+) -> Result<Found, String> {
+    // `--server <address>`: that one and no other; this terminal starts nothing for it.
+    if let Some(address) = server {
+        let origin = if address.contains("://") {
+            address.trim_end_matches('/').to_string()
+        } else {
+            format!("http://{}", address.trim_end_matches('/'))
+        };
+        let (environment_id, label) = probe(&origin)
+            .await
+            .ok_or_else(|| format!("nothing answers at {origin}"))?;
+        return Ok(Found {
+            pid: 0,
+            origin,
+            environment_id,
+            label,
+        });
+    }
     if let Discovery::Found(found) = discover(home).await {
         return Ok(found);
     }
@@ -613,6 +718,12 @@ pub async fn bearer_for(
     {
         return Ok(saved.token);
     }
+    if found.pid == 0 {
+        return Err(format!(
+            "no saved login for {}; run `oop-rs pair <token> --server {}`",
+            found.origin, found.origin
+        ));
+    }
     let label = client_label().await;
     notify("pairing with this computer's server…");
     let token = mint_local_pairing_token(found, home, &label).await.ok_or(
@@ -671,8 +782,9 @@ pub async fn websocket_url(found: &Found, bearer: &str, version: &str) -> Result
         .ok_or("the server issued no WebSocket ticket")?
         .to_string();
     let authority = http::authority(&found.origin)?;
+    let scheme = http::ws_scheme(&found.origin)?;
     Ok(format!(
-        "ws://{authority}/ws?wsTicket={}&clientSurface=cli&clientAppVersion={}&clientDeviceType=desktop&clientOs={}&connectionMethod=direct&orchestrationProtocol={ORCHESTRATION_PROTOCOL}",
+        "{scheme}://{authority}/ws?wsTicket={}&clientSurface=cli&clientAppVersion={}&clientDeviceType=desktop&clientOs={}&connectionMethod=direct&orchestrationProtocol={ORCHESTRATION_PROTOCOL}",
         http::form_encode(&ticket),
         http::form_encode(version),
         http::form_encode(client_os()),
@@ -717,5 +829,25 @@ mod tests {
             "http://127.0.0.1:3911",
             "http://127.0.0.1:3912"
         ));
+    }
+
+    #[test]
+    fn secure_and_plain_origins_are_different_servers() {
+        assert!(origins_match("https://a.example/", "https://a.example:443"));
+        assert!(!origins_match("https://a.example", "http://a.example:443"));
+        assert!(!origins_match("https://a.example", "https://b.example"));
+        assert!(origins_match("http://[::1]:3911", "http://localhost:3911"));
+    }
+
+    #[tokio::test]
+    async fn the_socket_address_follows_the_scheme_of_the_origin() {
+        // `websocket_url` asks the server for a ticket first, so only the pieces are checked here.
+        assert_eq!(http::ws_scheme("https://t.example").unwrap(), "wss");
+        assert_eq!(
+            http::authority("https://t.example").unwrap(),
+            "t.example:443"
+        );
+        assert_eq!(parse_port("https://t.example"), Some(443));
+        assert_eq!(parse_port("http://127.0.0.1:3911"), Some(3911));
     }
 }

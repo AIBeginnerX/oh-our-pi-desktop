@@ -19,6 +19,7 @@ import {
   formatCost,
   formatTokenCount,
   phaseWord,
+  roleWord,
 } from "../render/crewBoard.ts";
 import { formatElapsed } from "../render/spinner.ts";
 import type { Style } from "../render/style.ts";
@@ -26,6 +27,7 @@ import type { Symbols } from "../render/symbols.ts";
 import { visibleWidth } from "../text/width.ts";
 import { t } from "../i18n/index.ts";
 import { truncateStyled, wrapStyled } from "../text/wrap.ts";
+import { sameCrewRoles, type CrewRoleModel } from "./crew.ts";
 import type { CrewBoard, CrewTask, CrewTaskPhase, WaitingCrewThread } from "./crewBoard.ts";
 import {
   activeTurnOf,
@@ -55,6 +57,8 @@ export interface AgentsSource {
   /** The lead's model as the composer shows it. */
   readonly leadModel: string | null;
   readonly board: CrewBoard | null;
+  /** The crew's roles with their models; null or absent with the crew off. */
+  readonly crew?: ReadonlyArray<CrewRoleModel> | null;
   readonly waiting: ReadonlyArray<WaitingCrewThread>;
   /** The lead's own thread waits for an approval or an answer. */
   readonly leadWaiting: Waiting | null;
@@ -139,6 +143,8 @@ export interface AgentsView {
   };
   /** The crew board's one line for the lead's newest turn that used it. */
   readonly board: string | null;
+  /** The crew's roles with the model each runs; null with the crew off. */
+  readonly crew: ReadonlyArray<CrewRoleModel> | null;
   /** Something is working, so the clock matters. */
   readonly live: boolean;
 }
@@ -154,6 +160,7 @@ export const EMPTY_AGENTS_VIEW: AgentsView = {
   groupsFolded: 0,
   counts: { working: 0, idle: 0, done: 0, failed: 0, stopped: 0, tokens: 0 },
   board: null,
+  crew: null,
   live: false,
 };
 
@@ -552,6 +559,7 @@ export const deriveAgentsView = (source: AgentsSource): AgentsView => {
       [...tasks.values()].filter((task) => task.phase !== "running"),
     ),
     board: source.board === null ? null : boardSummary(source.board),
+    crew: source.crew ?? null,
     live: rows.some((row) => row.live) || shown.some(workflowIsLive),
   };
 };
@@ -818,6 +826,20 @@ export const renderAgentsPanel = (input: AgentsPanelInput): string[] => {
   let focus = -1;
   let focusWaiting = false;
   const heading = (text: string) => body.push(theme.dim(text));
+  if (view.crew !== null) {
+    // Who the crew would hand work to, and on which model: the roles are the desktop's.
+    heading(t("providers.agents.headingCrew"));
+    const wide = Math.max(...view.crew.map(({ role }) => roleWord(role).length));
+    for (const { role, model } of view.crew) {
+      body.push(
+        truncateStyled(
+          `  ${theme.muted(roleWord(role).padEnd(wide))}  ${model === null ? theme.dim(t("providers.agents.noModel")) : theme.text(flat(model))}`,
+          room - 1,
+        ),
+      );
+    }
+    body.push("");
+  }
   heading(t("providers.agents.headingAgents"));
   for (const row of view.rows) {
     if (row.waiting !== null && !focusWaiting) {
@@ -872,6 +894,7 @@ export class AgentsPanel {
     readonly latestTurn: unknown;
     readonly leadModel: string | null;
     readonly board: CrewBoard | null;
+    readonly crew: ReadonlyArray<CrewRoleModel> | null;
     readonly waiting: ReadonlyArray<WaitingCrewThread>;
     readonly leadWaiting: Waiting | null;
     readonly view: AgentsView;
@@ -901,6 +924,7 @@ export class AgentsPanel {
       memo.latestTurn === thread.latestTurn &&
       memo.leadModel === source.leadModel &&
       memo.board === source.board &&
+      sameCrewRoles(memo.crew, source.crew ?? null) &&
       sameWaiting(memo.waiting, source.waiting) &&
       memo.leadWaiting === source.leadWaiting
     ) {
@@ -913,6 +937,7 @@ export class AgentsPanel {
       latestTurn: thread.latestTurn,
       leadModel: source.leadModel,
       board: source.board,
+      crew: source.crew ?? null,
       waiting: source.waiting,
       leadWaiting: source.leadWaiting,
       view,

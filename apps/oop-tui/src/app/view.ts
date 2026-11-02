@@ -435,7 +435,7 @@ const queueRows = (
     const first = oneLine(item.split("\n")[0] ?? "");
     const more = item.includes("\n") ? " …" : "";
     rows.push(
-      railRow(rail, theme.dim(truncateStyled(`${index + 1}. ${first}${more}`, inner)), "idle"),
+      railRow(rail, theme.userFg(truncateStyled(`${index + 1}. ${first}${more}`, inner)), "idle"),
     );
   });
   return rows.slice(0, room);

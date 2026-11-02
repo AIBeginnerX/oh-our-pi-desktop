@@ -83,6 +83,7 @@ import {
   stageDesktopDmgBackground,
   stageResourceMonitor,
   stageTerminalApp,
+  resolveRustClientSources,
   TerminalAppBundleIncompleteError,
   stageLinuxCaptureHelper,
   stageWslRuntimeArchive,
@@ -1147,6 +1148,96 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       }),
     ),
   );
+
+  it.effect("copies the Rust client next to oop.mjs, as oop-rs.exe on Windows", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-rust-test-" });
+        const stageResourcesDir = path.join(repoRoot, "stage");
+        yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
+        yield* fs.writeFileString(path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"), "bundle");
+        const oopRs = path.join(repoRoot, "built-oop-rs");
+        yield* fs.writeFileString(oopRs, "rust client");
+
+        yield* stageTerminalApp({
+          repoRoot,
+          stageResourcesDir,
+          platform: "win",
+          rust: { oopRs, terminalApp: undefined },
+        });
+
+        assert.deepStrictEqual(
+          [...(yield* fs.readDirectory(path.join(stageResourcesDir, "oop")))].toSorted(),
+          ["oop-rs.exe", "oop.mjs"],
+        );
+        assert.equal(
+          yield* fs.readFileString(path.join(stageResourcesDir, "oop/oop-rs.exe")),
+          "rust client",
+        );
+      }),
+    ),
+  );
+
+  it.effect(
+    "copies OOP Terminal.app whole, keeping its symlinks, when the macOS build has one",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          // The copy goes through ditto, which only macOS ships.
+          if ((yield* HostProcessPlatform) !== "darwin") return;
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-app-test-" });
+          const stageResourcesDir = path.join(repoRoot, "stage");
+          yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
+          yield* fs.writeFileString(path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"), "bundle");
+          const app = path.join(repoRoot, "OOP Terminal.app");
+          yield* fs.makeDirectory(path.join(app, "Contents/MacOS"), { recursive: true });
+          yield* fs.writeFileString(path.join(app, "Contents/MacOS/oop-terminal"), "gui");
+          yield* fs.symlink("oop-terminal", path.join(app, "Contents/MacOS/alias"));
+
+          yield* stageTerminalApp({
+            repoRoot,
+            stageResourcesDir,
+            rust: { oopRs: undefined, terminalApp: app },
+          });
+
+          const staged = path.join(stageResourcesDir, "oop/OOP Terminal.app/Contents/MacOS");
+          assert.equal(yield* fs.readFileString(path.join(staged, "oop-terminal")), "gui");
+          assert.equal(yield* fs.readLink(path.join(staged, "alias")), "oop-terminal");
+        }),
+      ),
+  );
+
+  it("finds the Rust client sources: an explicit path must exist, the default is optional", () => {
+    const present = new Set(["/repo/apps/oop-tui-rs/target/release/oop-rs", "/x/app", "/x/rs"]);
+    const resolve = (platform: "mac" | "win" | "linux", env: Record<string, string | undefined>) =>
+      resolveRustClientSources({
+        repoRoot: "/repo",
+        platform,
+        env,
+        exists: (target) => present.has(target),
+        join: (...parts) => NodePath.posix.join(...parts),
+      });
+
+    assert.deepStrictEqual(resolve("mac", {}), {
+      oopRs: "/repo/apps/oop-tui-rs/target/release/oop-rs",
+      terminalApp: undefined,
+    });
+    assert.deepStrictEqual(resolve("mac", { OOP_RS_BIN: "/x/rs", OOP_TERMINAL_APP: "/x/app" }), {
+      oopRs: "/x/rs",
+      terminalApp: "/x/app",
+    });
+    // Only macOS carries the GUI app, and Windows has no default build to find.
+    assert.deepStrictEqual(resolve("win", { OOP_TERMINAL_APP: "/x/app" }), {
+      oopRs: undefined,
+      terminalApp: undefined,
+    });
+    assert.throws(() => resolve("mac", { OOP_RS_BIN: "/nowhere/oop-rs" }), /does not exist/);
+    assert.throws(() => resolve("mac", { OOP_TERMINAL_APP: "/nowhere/app" }), /does not exist/);
+  });
 
   it.effect("refuses a terminal app bundle that left a dependency out", () =>
     Effect.scoped(

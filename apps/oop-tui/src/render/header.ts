@@ -1,6 +1,16 @@
+import type { CrewRoleModel } from "../app/crew.ts";
+import { visibleWidth } from "../text/width.ts";
 import { truncateStyled } from "../text/wrap.ts";
 import { homeRelative, oneLine, WORDMARK } from "./banner.ts";
-import { PET_MINI_WIDTH, PET_WIDTH, petMini, petRows, type PetPose, type PetState } from "./pet.ts";
+import { roleWord } from "./crewBoard.ts";
+import {
+  PET_MINI_TRACK_WIDTH,
+  PET_TRACK_WIDTH,
+  petMini,
+  petRows,
+  type PetLook,
+  type PetState,
+} from "./pet.ts";
 import { ASCII_SYMBOLS, type Symbols } from "./symbols.ts";
 import type { Theme } from "./theme.ts";
 import { t } from "../i18n/index.ts";
@@ -8,14 +18,12 @@ import { t } from "../i18n/index.ts";
 /** The full header needs this many columns and rows; below either it folds to one line. */
 export const HEADER_FULL_MIN_COLUMNS = 40;
 export const HEADER_FULL_MIN_ROWS = 30;
-/** Rows of the full header: the wordmark, the thread line, the folder line and a rule. */
+/** Rows of the full header: the wordmark, the thread line, the folder line and a rule. Mocha is five rows tall. */
 export const HEADER_FULL_ROWS = 7;
 const LOGO_WIDTH = 21;
 const GAP = 2;
 const NOTES_X = LOGO_WIDTH + GAP;
 const MIN_NOTES = 14;
-/** Cells the pet may walk beyond its own width. */
-const MAX_TRAVEL = 16;
 
 export type HeaderState = "idle" | "working" | "waiting" | "error" | "offline" | "none";
 
@@ -26,7 +34,6 @@ export interface HeaderInput {
   readonly theme: Theme;
   readonly symbols: Symbols;
   readonly version: string;
-  readonly server: string | null;
   readonly cwd: string;
   readonly home: string | null;
   /** What is true now, read from the thread on screen. */
@@ -35,19 +42,22 @@ export interface HeaderInput {
     readonly model: string | null;
     readonly thread: string | null;
   };
-  /** Null with the pet turned off. */
+  /** The crew's roles and the model each runs; null when the crew is off. */
+  readonly crew: ReadonlyArray<CrewRoleModel> | null;
+  /** Null with Mocha turned off. */
   readonly pet: {
     readonly state: PetState;
     readonly frame: number;
-    readonly pose: PetPose;
+    readonly look: PetLook;
   } | null;
 }
 
 /**
  * The header in two parts per row: `lead` (logo and status, which change with the thread) and
- * `track` (the strip the pet walks in, `trackWidth` cells at the right edge of the rows that have
- * one; the rows under the wordmark have none and run the full width). The region paints them
- * separately, so a pet that moves rewrites its strip and nothing else.
+ * `track` (the strip Mocha stands in, `trackWidth` cells at the right edge of the rows that have
+ * one: five in the full header, the wordmark's four and the thread row; the rows under them have
+ * none and run the full width). The region paints them separately, so a pet that moves rewrites its
+ * strip and nothing else.
  */
 export interface HeaderFrame {
   readonly lead: string[];
@@ -56,10 +66,6 @@ export interface HeaderFrame {
   /** Set by the caller when the scrollback still lacks the banner line this header stands for. */
   readonly scrollback?: ReadonlyArray<string>;
 }
-
-/** Cells the pet may walk beyond its own width in a track. */
-export const travelOf = (trackWidth: number, mini: boolean): number =>
-  Math.max(0, trackWidth - 1 - (mini ? PET_MINI_WIDTH : PET_WIDTH));
 
 const stateText = (input: HeaderInput): string => {
   const { theme, symbols } = input;
@@ -89,53 +95,105 @@ const threadText = (input: HeaderInput): string =>
 /** Between the facts of a line; the middle dot is not ASCII. */
 const dotOf = (symbols: Symbols): string => (symbols === ASCII_SYMBOLS ? "|" : "·");
 
-const place = (pet: string[], pose: PetPose, trackWidth: number, width: number): string[] => {
-  const x = Math.min(pose.x, Math.max(0, trackWidth - 1 - width));
-  return pet.map((row) => " ".repeat(x) + row + " ".repeat(Math.max(0, trackWidth - x - width)));
+/**
+ * `Crew  worker DeepSeek V4.1 Flash · expert Sonnet 5.5 · auditor Opus 5.5`: each role with the
+ * model it runs, or a letter for the role where the room is short. Empty with the crew off.
+ */
+const crewText = (input: HeaderInput, words: boolean): string => {
+  const { theme, symbols } = input;
+  if (input.crew === null) return "";
+  const between = theme.dim(` ${dotOf(symbols)} `);
+  const roles = input.crew.map(
+    ({ role, model }) =>
+      `${theme.muted(words ? roleWord(role) : roleWord(role).charAt(0))} ${
+        model === null ? theme.dim("-") : theme.text(oneLine(model))
+      }`,
+  );
+  return `${theme.dim(t("render.header.crew"))}${roles.join(between)}`;
 };
 
-/** Whether the full header fits, and how wide the pet's strip is (0 when there is no room for it). */
+/** Mocha's rows as the strip: a gap in front, and the last column free next to the divider. */
+const place = (pet: string[], trackWidth: number): string[] =>
+  pet.map((row) => {
+    const width = visibleWidth(row);
+    return " " + row + " ".repeat(Math.max(0, trackWidth - 1 - width));
+  });
+
+/** The least the folder is worth showing in: fewer cells than this and the crew has the row to itself. */
+const FOLDER_MIN = 20;
+
+/**
+ * The folder line with the crew after it, on the row the full header has for facts. The crew's
+ * models are what this row is for: the folder is cut short to make room for them, and left out of
+ * the row (the status bar still names it) when even that does not leave it a useful width.
+ */
+const crewBeside = (input: HeaderInput, folder: string, wide: number): string => {
+  const between = input.theme.dim(`  ${dotOf(input.symbols)}  `);
+  const gap = visibleWidth(between);
+  const words = crewText(input, true);
+  if (visibleWidth(folder) + gap + visibleWidth(words) <= wide) {
+    return `${folder}${between}${words}`;
+  }
+  const letters = crewText(input, false);
+  const folderRoom = wide - gap - visibleWidth(letters);
+  if (folderRoom < FOLDER_MIN) return truncateStyled(letters, wide);
+  return `${truncateStyled(folder, folderRoom)}${between}${letters}`;
+};
+
+/**
+ * Whether the full header fits, and how wide Mocha's strip is (0 when there is no room for her).
+ * `mini` is her one-line form: the compact header always shows her so, and the full header falls
+ * back to it on the first row where the strip beside the notes is too narrow for all five rows.
+ */
 export const headerTrack = (
   columns: number,
   rows: number,
   petOn: boolean,
-): { readonly full: boolean; readonly width: number } => {
+): { readonly full: boolean; readonly width: number; readonly mini: boolean } => {
   const full = columns >= HEADER_FULL_MIN_COLUMNS && rows >= HEADER_FULL_MIN_ROWS;
-  if (!petOn) return { full, width: 0 };
-  if (!full) {
-    const avail = columns - 24;
-    return { full, width: avail >= PET_MINI_WIDTH + 2 ? Math.min(avail, PET_MINI_WIDTH + 7) : 0 };
-  }
-  const avail = columns - NOTES_X - MIN_NOTES;
-  return { full, width: avail >= PET_WIDTH + 1 ? Math.min(avail, PET_WIDTH + 1 + MAX_TRAVEL) : 0 };
+  if (!petOn) return { full, width: 0, mini: !full };
+  const avail = full ? columns - NOTES_X - MIN_NOTES : columns - 24;
+  if (full && avail >= PET_TRACK_WIDTH) return { full, width: PET_TRACK_WIDTH, mini: false };
+  return avail >= PET_MINI_TRACK_WIDTH
+    ? { full, width: PET_MINI_TRACK_WIDTH, mini: true }
+    : { full, width: 0, mini: true };
 };
 
 /** The full or the one-line header for this size. */
 export const renderHeader = (input: HeaderInput): HeaderFrame => {
   const { theme, symbols } = input;
-  const { full, width: trackWidth } = headerTrack(input.columns, input.rows, input.pet !== null);
+  const {
+    full,
+    width: trackWidth,
+    mini: trackMini,
+  } = headerTrack(input.columns, input.rows, input.pet !== null);
   const version = oneLine(input.version);
   if (!full) {
-    const parts = [
+    const between = theme.dim(` ${dotOf(symbols)} `);
+    const room = input.columns - trackWidth - 1;
+    const facts = [
       `${theme.brand.bold(`${symbols.brand} OOP`)} ${theme.muted(`v${version}`)}`,
       stateText(input),
       modelText(input),
+    ].join(between);
+    // The crew comes before the thread's title, which is the first to be cut; where it would
+    // have less than a few cells it is left out whole rather than shown as a stub.
+    const crewRoom = room - visibleWidth(facts) - visibleWidth(between);
+    const parts = [
+      facts,
+      ...(input.crew === null || crewRoom < 14
+        ? []
+        : [truncateStyled(crewText(input, false), crewRoom)]),
       threadText(input),
     ];
-    const lead = truncateStyled(
-      parts.join(theme.dim(` ${dotOf(symbols)} `)),
-      input.columns - trackWidth - 1,
-    );
+    const lead = truncateStyled(parts.join(between), room);
     if (trackWidth === 0 || input.pet === null) return { lead: [lead], track: [], trackWidth: 0 };
-    const mini = petMini(input.pet.state, input.pet.frame, theme);
-    return {
-      lead: [lead],
-      track: place([mini], input.pet.pose, trackWidth, PET_MINI_WIDTH),
-      trackWidth,
-    };
+    const mini = petMini(input.pet.state, input.pet.frame, input.pet.look, theme, symbols);
+    return { lead: [lead], track: place([mini], trackWidth), trackWidth };
   }
 
-  // The wordmark rows share the strip with the pet; the rows under them run the full width.
+  // The wordmark rows and the thread row share the strip with the pet (all five rows, or just the
+  // first with her one-line form); the rows under them run the full width.
   const leadWidth = input.columns - trackWidth - (trackWidth === 0 ? 1 : 0);
   const wide = input.columns - 1;
   const notesWidth = leadWidth - NOTES_X;
@@ -153,23 +211,20 @@ export const renderHeader = (input: HeaderInput): HeaderFrame => {
       leadWidth,
     );
   });
-  const where = [
-    `${theme.dim(t("render.header.folder"))}${homeRelative(oneLine(input.cwd), input.home)}`,
-    ...(input.server === null
-      ? []
-      : [`${theme.dim(t("render.header.server"))}${oneLine(input.server)}`]),
-  ];
-  lead.push(truncateStyled(`${theme.dim(t("render.header.thread"))}${threadText(input)}`, wide));
-  lead.push(truncateStyled(where.join(theme.dim(`  ${dotOf(symbols)}  `)), wide));
+  const folder = `${theme.dim(t("render.header.folder"))}${homeRelative(oneLine(input.cwd), input.home)}`;
+  const threadRow = `${theme.dim(t("render.header.thread"))}${threadText(input)}`;
+  lead.push(truncateStyled(threadRow, trackWidth > 0 && !trackMini ? leadWidth : wide));
+  lead.push(input.crew === null ? truncateStyled(folder, wide) : crewBeside(input, folder, wide));
   lead.push(theme.border(symbols.rule.repeat(wide)));
+  const { pet } = input;
   const track =
-    trackWidth === 0 || input.pet === null
+    trackWidth === 0 || pet === null
       ? []
       : place(
-          petRows(input.pet.state, input.pet.frame, input.pet.pose.dir, theme, symbols),
-          input.pet.pose,
+          trackMini
+            ? [petMini(pet.state, pet.frame, pet.look, theme, symbols)]
+            : petRows(pet.state, pet.frame, pet.look, theme, symbols),
           trackWidth,
-          PET_WIDTH,
         );
   return { lead, track, trackWidth };
 };

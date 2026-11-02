@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Node's typed junction API avoids Windows symlink privileges while keeping the probe isolated.
 
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeCrypto from "node:crypto";
 import * as NodeModule from "node:module";
@@ -48,6 +49,7 @@ import {
   LINUX_BROWSER_SECRET_EXTRA_RESOURCES,
   LINUX_CAPTURE_EXTRA_RESOURCES,
   LINUX_FILE_EXCLUSIONS,
+  TERMINAL_APP_BUNDLE_NAME,
   TERMINAL_APP_BUNDLE_SOURCE,
   terminalAppBundleImports,
   TERMINAL_APP_EXTRA_RESOURCES,
@@ -66,7 +68,10 @@ import {
   bundlesTerminalApp,
   bundlesWslRuntime,
   resolveMacFileExclusions,
+  resolveRustClientSources,
   resolveWindowsServerAsarIgnoreGlobs,
+  rustClientBinaryName,
+  type RustClientSources,
 } from "./desktop-build/resources.ts";
 import {
   createStagePatchedDependencies,
@@ -106,10 +111,13 @@ export {
   WSL_RUNTIME_ARCHIVE_HASH_NAME,
   WSL_RUNTIME_ARCHIVE_NAME,
   WSL_RUNTIME_EXTRA_RESOURCES,
+  TERMINAL_APP_BUNDLE_NAME,
   bundlesTerminalApp,
   bundlesWslRuntime,
   resolveMacFileExclusions,
+  resolveRustClientSources,
   resolveWindowsServerAsarIgnoreGlobs,
+  rustClientBinaryName,
 } from "./desktop-build/resources.ts";
 export {
   createStagePatchedDependencies,
@@ -2658,10 +2666,16 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
 /**
  * Copies the built terminal app (apps/oop-tui) to resources/oop/oop.mjs. The file is a single
  * bundle with its dependencies inlined, run by the app's own runtime, so nothing else ships.
+ *
+ * With `rust`, the Rust client goes next to it as resources/oop/oop-rs[.exe], and on macOS the
+ * native terminal program as resources/oop/OOP Terminal.app. The `oop` command prefers the Rust
+ * client and falls back to oop.mjs, which also serves the subcommands the Rust client lacks.
  */
 export const stageTerminalApp = Effect.fn("stageTerminalApp")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
+  readonly platform?: typeof BuildPlatform.Type;
+  readonly rust?: RustClientSources;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -2674,6 +2688,23 @@ export const stageTerminalApp = Effect.fn("stageTerminalApp")(function* (input: 
   const destinationPath = path.join(destinationDirectory, TERMINAL_APP_RESOURCE_NAME);
   yield* fs.copyFile(sourcePath, destinationPath);
   yield* fs.chmod(destinationPath, 0o644);
+
+  const platform = input.platform ?? "mac";
+  if (input.rust?.oopRs !== undefined) {
+    const rustPath = path.join(destinationDirectory, rustClientBinaryName(platform));
+    yield* fs.copyFile(input.rust.oopRs, rustPath);
+    yield* fs.chmod(rustPath, 0o755);
+  }
+  if (input.rust?.terminalApp !== undefined) {
+    // ditto keeps symlinks, modes and the code signature of the bundle exactly as built.
+    yield* runCommand(
+      ChildProcess.make("ditto", [
+        input.rust.terminalApp,
+        path.join(destinationDirectory, TERMINAL_APP_BUNDLE_NAME),
+      ]),
+      { label: `ditto ${TERMINAL_APP_BUNDLE_NAME}`, verbose: false },
+    );
+  }
 });
 
 export const stageBrowserSecret = Effect.fn("stageBrowserSecret")(function* (input: {
@@ -4007,7 +4038,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     verbose: options.verbose,
   });
   if (terminalAppBundled) {
-    yield* stageTerminalApp({ repoRoot, stageResourcesDir });
+    const rust = resolveRustClientSources({
+      repoRoot,
+      platform: options.platform,
+      env: process.env,
+      exists: NodeFS.existsSync,
+      join: path.join,
+    });
+    yield* Effect.log(
+      rust.oopRs === undefined
+        ? "[desktop-artifact] No Rust terminal client was built; the oop command stays TypeScript."
+        : `[desktop-artifact] Bundling the Rust terminal client ${rust.oopRs}${rust.terminalApp === undefined ? "" : ` and ${rust.terminalApp}`}.`,
+    );
+    yield* stageTerminalApp({ repoRoot, stageResourcesDir, platform: options.platform, rust });
   }
   if (options.platform === "linux") {
     for (const backend of ["kde", "hyprland"] as const)

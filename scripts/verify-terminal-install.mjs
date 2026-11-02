@@ -88,15 +88,27 @@ const install = (label) =>
       )
     : must(label, run("sh", [path.join(scripts, "install-terminal.sh")], env));
 
-const oop = (args) =>
+const oop = (args, extraEnv = {}) =>
   windows
-    ? run("cmd.exe", ["/d", "/c", path.join(binDir, "oop.cmd"), ...args], env)
-    : run(path.join(binDir, "oop"), args, env);
+    ? run("cmd.exe", ["/d", "/c", path.join(binDir, "oop.cmd"), ...args], { ...env, ...extraEnv })
+    : run(path.join(binDir, "oop"), args, { ...env, ...extraEnv });
 
 async function verifyVersion(label) {
   const { output } = await must(label, oop(["--version"]));
   const printed = output.trim().split(/\r?\n/).at(-1);
   if (printed !== version) throw new Error(`${label}: oop printed "${printed}", expected ${version}.`);
+  // The TypeScript terminal must keep working next to the Rust client: it is the fallback and the
+  // OOP_TUI=ts escape hatch.
+  const ts = await must(`${label} (OOP_TUI=ts)`, oop(["--version"], { OOP_TUI: "ts" }));
+  const tsPrinted = ts.output.trim().split(/\r?\n/).at(-1);
+  if (tsPrinted !== version) throw new Error(`${label}: OOP_TUI=ts printed "${tsPrinted}", expected ${version}.`);
+}
+
+// Which client the install carries is not asserted: an archive without a binary for its platform is
+// valid. Reported so the release log shows whether the Rust client shipped.
+async function reportClient() {
+  const rust = path.join(installDir, windows ? "oop-rs.exe" : "oop-rs");
+  console.log(`info: this archive carries the ${(await exists(rust)) ? "Rust" : "TypeScript"} terminal client`);
 }
 
 // Starts the bundled server with the command line `oop` builds (link/daemon.ts daemonCommand), on a
@@ -148,6 +160,7 @@ let failure;
 try {
   await install("first install");
   await verifyVersion("oop --version after install");
+  await reportClient();
   await must("oop --help", oop(["--help"]));
   await verifyServer();
   await install("reinstall over the existing install");

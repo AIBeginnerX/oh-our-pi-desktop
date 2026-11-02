@@ -306,3 +306,26 @@ export const roleModelText = (crew: ResolvedCrew, role: CrewRole): string => {
   if (option === null) return t("providers.crew.noneAvailable");
   return `${crew.pinned.has(role) ? "" : "Auto · "}${option.label}`;
 };
+
+/** A role of the crew and the model it runs now, for the header and the Agents panel. */
+export interface CrewRoleModel {
+  readonly role: CrewRole;
+  /** The model's name as the desktop's crew chip shows it; null when no model can fill the role. */
+  readonly model: string | null;
+}
+
+/** The roles of a crew that is on, each with its model; null when the crew is off. */
+export const crewRoleModels = (crew: ResolvedCrew): ReadonlyArray<CrewRoleModel> | null =>
+  crew.enabled
+    ? CREW_ROLES.map((role) => ({ role, model: crew.roles[role]?.label ?? null }))
+    : null;
+
+export const sameCrewRoles = (
+  a: ReadonlyArray<CrewRoleModel> | null,
+  b: ReadonlyArray<CrewRoleModel> | null,
+): boolean =>
+  a === b ||
+  (a !== null &&
+    b !== null &&
+    a.length === b.length &&
+    a.every((entry, index) => entry.role === b[index]?.role && entry.model === b[index]?.model));

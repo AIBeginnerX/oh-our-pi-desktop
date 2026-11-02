@@ -48,7 +48,11 @@ quarantine or Windows SmartScreen.
   the launcher, `~/.local/share/oop-desktop`, and menu entry to uninstall.
 
 On macOS and Windows the installers also add an `oop` command: OOP in a terminal,
-which runs the terminal app bundled inside OOP and needs no Node.js. It goes to
+which runs the terminal app bundled inside OOP and needs no Node.js. On macOS the
+command starts the native Rust client (`oop-rs`) bundled in the app and falls back to
+the TypeScript terminal when it is missing; `OOP_TUI=ts oop` forces the TypeScript one.
+The macOS installer also puts `OOP Terminal.app` (the native terminal window with
+splits) next to `OOP.app`. The Windows build is TypeScript only for now. It goes to
 `~/.local/bin/oop` on macOS and `%LOCALAPPDATA%\oop-terminal\oop.cmd` on Windows
 (`OOP_BIN_DIR` overrides the folder). An existing `oop` that OOP did not create is
 never overwritten, and `PATH` is never edited: if `oop` is not found, add that
@@ -79,8 +83,9 @@ Windows PowerShell (x64):
 irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex
 ```
 
-This installs the terminal app, the server it starts in the background, and a
-private copy of Node.js, all in your user folder. It needs no Node.js, pnpm, git,
+This installs the terminal app (the native `oop-rs` client where the release has
+one, with the TypeScript terminal as fallback), the server it starts in the
+background, and a private copy of Node.js, all in your user folder. It needs no Node.js, pnpm, git,
 or compiler, and it checks the SHA-256 of the download before installing.
 Releases before the first one that lists `OOP-terminal-…` files under **Assets**
 have no terminal archives; the installer then stops without changing anything.
@@ -94,6 +99,9 @@ have no terminal archives; the installer then stops without changing anything.
   existing install folder that this installer did not make is never replaced;
   the installer stops before downloading. `PATH` is never edited: when the
   folder is not on `PATH`, the installer prints the line to add.
+- `OOP_TUI=ts oop` runs the TypeScript terminal for one run instead of `oop-rs`.
+  A release whose archive has no `oop-rs` gets the TypeScript terminal alone;
+  Windows archives are TypeScript only today.
 - Intel Macs, Windows on ARM, 32-bit systems, and musl Linux (for example
   Alpine) are not supported and stop with a message. Linux needs glibc and
   `libatomic1`.

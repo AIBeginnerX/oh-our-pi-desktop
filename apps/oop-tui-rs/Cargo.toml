@@ -12,7 +12,6 @@ path = "src/main.rs"
 
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-libc = "0.2"
 ratatui = "0.30"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
@@ -27,9 +26,24 @@ tokio = { version = "1", features = [
   "fs",
   "signal",
 ] }
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
+# TLS is rustls with the `ring` provider and the bundled Mozilla roots: no OpenSSL, and no system
+# keychain is read. `SSL_CERT_FILE` adds roots (see http.rs). The configuration is built on the
+# first https/wss use only.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = [
+  "connect",
+  "rustls-tls-webpki-roots",
+] }
+webpki-roots = "0.26"
 unicode-width = "0.2"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+rcgen = "0.13"
 
 [profile.release]
 codegen-units = 1

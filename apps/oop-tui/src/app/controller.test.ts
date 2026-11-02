@@ -38,6 +38,9 @@ import { stringWidth, stripAnsi } from "../text/width.ts";
 import { applyThreadItem } from "../link/threadMirror.ts";
 import { CommandRejectedError } from "../link/transport.ts";
 import type { ThemeSwitcher } from "../settings.ts";
+import type { ClipboardOutcome } from "../clipboard/clipboard.ts";
+import type { SplitControl } from "../render/regionSwitch.ts";
+import type { SelectionControl } from "../terminal/selection.ts";
 import { AppController, type ControllerLink } from "./controller.ts";
 import type { CheckUpdate, LatestRelease } from "./updateCheck.ts";
 import { linkNotice } from "./view.ts";
@@ -101,6 +104,13 @@ interface Options {
   readonly diff?: string;
   /** Makes that ask fail. */
   readonly diffError?: Error;
+  /** The side-by-side layout is on, and drags over the conversation reach this selection. */
+  readonly mouse?: {
+    readonly selection: SelectionControl;
+    readonly clipboard: (text: string) => Promise<ClipboardOutcome>;
+    /** Whether the layout is on; on when absent. */
+    readonly layoutOn?: () => boolean;
+  };
   /** Turns the start screen on; every field has a default. */
   readonly startup?: {
     readonly banner?: boolean;
@@ -249,6 +259,28 @@ const harness = (options: Options = {}) => {
     suspend: () => void (suspended += 1),
     ...(options.canonical ? { canonical: options.canonical } : {}),
     ...(options.themes ? { themes: options.themes } : {}),
+    ...(options.mouse
+      ? {
+          split: new Proxy(
+            { active: () => options.mouse?.layoutOn?.() ?? true },
+            {
+              // The calls that lay the layout out are not what these tests are about.
+              get: (target, name) =>
+                name in target
+                  ? (target as Record<string | symbol, unknown>)[name]
+                  : name === "unavailable"
+                    ? () => null
+                    : name === "leftSize"
+                      ? () => ({ columns: 60, rows: 24 })
+                      : name === "terminalRows"
+                        ? () => 24
+                        : () => undefined,
+            },
+          ) as unknown as SplitControl,
+          selection: options.mouse.selection,
+          clipboard: options.mouse.clipboard,
+        }
+      : {}),
     ...(options.startup
       ? {
           startup: {
@@ -315,11 +347,20 @@ const harness = (options: Options = {}) => {
   };
 };
 
-/** The conversation rows of `대화 N`: a user message sits against the right edge (bar-closed), a reply on the rail. */
+/**
+ * The conversation rows of `대화 N`: a user message is the inside row of a box against the right edge,
+ * so it starts and ends with the box's own vertical; a reply hangs off the rail on the left. The box's
+ * border is what tells the two apart on the screen alone.
+ */
 const talkRows = (rows: ReadonlyArray<string>): string[] =>
   rows
     .filter((row) => /대화 \d+( │)?$/u.test(row))
-    .map((row) => (row.endsWith(" │") ? `우 ${row.slice(0, -2).trim()}` : `좌 ${row.slice(3)}`));
+    .map((row) => {
+      const inside = row.trimStart();
+      return inside.startsWith("│ ") && row.endsWith(" │")
+        ? `우 ${inside.slice(2, -2).trim()}`
+        : `좌 ${row.slice(3)}`;
+    });
 
 describe("starting up", () => {
   it("lands on the project list when the folder belongs to no project", () => {
@@ -10516,5 +10557,130 @@ describe("the model picked last", () => {
     const command = h.dispatched[0] as TurnStart;
     expect(command.bootstrap).toBeUndefined();
     expect(command.modelSelection).toEqual({ instanceId: "codex", model: "gpt-5" });
+  });
+});
+
+describe("selecting conversation text with the mouse", () => {
+  const mouse = (action: "press" | "drag" | "release", x = 5, y = 5): KeyEvent => ({
+    type: "mouse",
+    action,
+    x,
+    y,
+  });
+  /** A selection that records what the controller asked and ends with `text`. */
+  const fakeSelection = (text: string | null) => {
+    const calls: string[] = [];
+    let selecting = false;
+    const selection: SelectionControl = {
+      selectStart: (x, y) => {
+        selecting = true;
+        calls.push(`start ${x},${y}`);
+      },
+      selectMove: (x, y) => void calls.push(`move ${x},${y}`),
+      selectEnd: (x, y) => {
+        calls.push(`end ${x},${y}`);
+        selecting = text !== null;
+        return text;
+      },
+      selectClear: () => {
+        selecting = false;
+        calls.push("clear");
+      },
+      selecting: () => selecting,
+    };
+    return { selection, calls };
+  };
+  const outcome = (over: Partial<ClipboardOutcome> = {}): ClipboardOutcome => ({
+    chars: 4,
+    osc52: "sent",
+    tool: { name: "pbcopy", ok: true },
+    ...over,
+  });
+  const open = (text: string | null, copy: (text: string) => Promise<ClipboardOutcome>) => {
+    const { selection, calls } = fakeSelection(text);
+    const h = harness({ mouse: { selection, clipboard: copy } });
+    h.openNewest();
+    return { h, calls };
+  };
+
+  it("passes a press, a drag and a release to the selection and copies the text it hands back", async () => {
+    const copies: string[] = [];
+    const { h, calls } = open("복사할 글", async (text) => {
+      copies.push(text);
+      return outcome({ chars: 5 });
+    });
+    h.press(mouse("press", 3, 4), mouse("drag", 6, 4), mouse("release", 9, 5));
+    expect(calls.slice(-3)).toEqual(["start 3,4", "move 6,4", "end 9,5"]);
+    expect(copies).toEqual(["복사할 글"]);
+    await flushMicrotasks();
+    expect(h.screen()).toContain("5자를 복사했습니다.");
+  });
+
+  it("copies nothing for a click, and never touches the clipboard", async () => {
+    let copies = 0;
+    const { h } = open(null, async () => {
+      copies += 1;
+      return outcome();
+    });
+    h.press(mouse("press"), mouse("release"));
+    await flushMicrotasks();
+    expect(copies).toBe(0);
+    expect(h.screen()).not.toContain("복사했습니다");
+  });
+
+  it("says a clipboard tool failed in the notice, and the input still works", async () => {
+    const { h } = open("글", async () =>
+      outcome({ tool: { name: "pbcopy", ok: false, reason: "failed" } }),
+    );
+    h.press(mouse("press"), mouse("drag", 8, 5), mouse("release", 8, 5));
+    await flushMicrotasks();
+    expect(h.screen()).toContain("pbcopy");
+    expect(h.screen()).toContain("OSC 52");
+    h.typeText("계속");
+    expect(h.screen()).toContain("계속");
+    expect(h.screen()).not.toContain("pbcopy");
+  });
+
+  it("survives a clipboard that rejects, and says it could not copy", async () => {
+    const { h } = open("글", () => Promise.reject(new Error("boom")));
+    h.press(mouse("press"), mouse("drag", 8, 5), mouse("release", 8, 5));
+    await flushMicrotasks();
+    expect(h.screen()).toContain("복사하지 못했습니다");
+    h.typeText("x");
+    expect(h.screen()).toContain("x");
+  });
+
+  it("drops the selection when a key is pressed, but not for the wheel", () => {
+    const { h, calls } = open("글", async () => outcome());
+    h.press(mouse("press"), mouse("drag", 8, 5), mouse("release", 8, 5));
+    calls.length = 0;
+    h.press({ type: "mouse", action: "wheelUp", x: 5, y: 5 });
+    expect(calls).toEqual([]);
+    h.typeText("a");
+    expect(calls).toEqual(["clear"]);
+  });
+
+  it("gives the mouse to no one while a picker covers the conversation", () => {
+    const { h, calls } = open("글", async () => outcome());
+    h.typeText("/model");
+    h.press(key("enter"));
+    calls.length = 0;
+    h.press(mouse("press"), mouse("drag", 8, 5), mouse("release", 8, 5));
+    expect(calls.filter((call) => call !== "clear")).toEqual([]);
+  });
+
+  it("ignores the mouse when the layout is not side by side", () => {
+    const { selection, calls } = fakeSelection("글");
+    let on = false;
+    const h = harness({
+      mouse: { selection, clipboard: async () => outcome(), layoutOn: () => on },
+    });
+    h.openNewest();
+    calls.length = 0;
+    h.press(mouse("press"), mouse("drag", 8, 5), mouse("release", 8, 5));
+    expect(calls.filter((call) => call !== "clear")).toEqual([]);
+    on = true;
+    h.press(mouse("press"));
+    expect(calls).toContain("start 5,5");
   });
 });

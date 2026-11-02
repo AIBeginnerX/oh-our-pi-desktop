@@ -12,6 +12,7 @@ import {
   buildOopUpdatePkg,
   componentPlist,
   distributionXml,
+  terminalAppInstall,
   localUpdateFeed,
   parseArgs,
   postinstallScript,
@@ -1215,3 +1216,108 @@ NodeTest.describe("old release cleanup", () => {
     }
   });
 });
+
+NodeTest.test(
+  "component plist lists OOP Terminal.app as a second non-relocatable bundle only when it ships",
+  () => {
+    NodeAssert.equal(componentPlist().includes("OOP Terminal.app"), false);
+    const plist = componentPlist({ terminalApp: true });
+    NodeAssert.ok(plist.includes("Applications/OOP.app/Contents/Resources/oop/OOP Terminal.app"));
+    NodeAssert.equal((plist.match(/BundleIsRelocatable<\/key>\s*<false\/>/gu) ?? []).length, 2);
+    NodeAssert.equal(
+      (plist.match(/<key>BundleOverwriteAction<\/key>\s*<string>upgrade<\/string>/gu) ?? []).length,
+      2,
+    );
+  },
+);
+
+NodeTest.test(
+  "terminal app install fragment rejects unsafe paths and ends the postinstall script",
+  () => {
+    NodeAssert.throws(() => terminalAppInstall({ applications: "/tmp/a b; rm -rf /" }), /Invalid/);
+    NodeAssert.throws(() => terminalAppInstall({ ditto: "ditto" }), /Invalid/);
+    const script = postinstallScript("0.0.45");
+    NodeAssert.ok(script.includes(terminalAppInstall()));
+    NodeAssert.ok(script.trimEnd().endsWith("exit 0"));
+    // OOP.app is verified before the optional copy starts, so a copy problem cannot fail the install.
+    NodeAssert.ok(
+      script.indexOf("codesign --verify --deep --strict --verbose=2") <
+        script.indexOf("install_terminal_app()"),
+    );
+  },
+);
+
+NodeTest.test(
+  "terminal app install copies, replaces only its own bundle id, and never fails the install",
+  // oxlint-disable-next-line t3code/no-global-process-runtime -- Plain node:test script, no Effect runtime.
+  { skip: NodeOS.platform() !== "darwin" },
+  async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "pkg-terminal-app-"));
+    try {
+      const applications = NodePath.join(root, "Applications");
+      const target = NodePath.join(applications, "OOP.app");
+      const src = NodePath.join(target, "Contents/Resources/oop/OOP Terminal.app");
+      const plist = (id) =>
+        `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>${id}</string></dict></plist>`;
+      const writeApp = async (dir, id, marker) => {
+        await NodeFSP.mkdir(NodePath.join(dir, "Contents"), { recursive: true });
+        await NodeFSP.writeFile(NodePath.join(dir, "Contents/Info.plist"), plist(id));
+        await NodeFSP.writeFile(NodePath.join(dir, "Contents/marker"), marker);
+      };
+      await writeApp(src, "dev.oop.terminal", "new");
+      const bin = NodePath.join(root, "bin");
+      await NodeFSP.mkdir(bin);
+      const ditto = NodePath.join(bin, "ditto");
+      const codesign = NodePath.join(bin, "codesign");
+      await NodeFSP.writeFile(ditto, '#!/bin/sh\nexec /bin/cp -R "$1" "$2"\n', { mode: 0o755 });
+      await NodeFSP.writeFile(codesign, "#!/bin/sh\nexit ${FAKE_CODESIGN_EXIT:-0}\n", {
+        mode: 0o755,
+      });
+      const fragment = terminalAppInstall({ ditto, codesign, applications });
+      const runFragment = (extraEnv = {}) =>
+        NodeChildProcess.spawnSync(
+          "/bin/sh",
+          ["-c", `set -eu\ntarget='${target}'\nowner=''\n${fragment}\necho finished`],
+          { encoding: "utf8", env: { ...process.env, ...extraEnv } },
+        );
+      const dst = NodePath.join(applications, "OOP Terminal.app");
+      const marker = () => NodeFSP.readFile(NodePath.join(dst, "Contents/marker"), "utf8");
+
+      let result = runFragment();
+      NodeAssert.equal(result.status, 0);
+      NodeAssert.ok(result.stdout.includes("finished"));
+      NodeAssert.equal(await marker(), "new");
+
+      // Our own earlier copy is replaced, with no staging folder left behind.
+      await NodeFSP.writeFile(NodePath.join(dst, "Contents/marker"), "old");
+      result = runFragment();
+      NodeAssert.equal(await marker(), "new");
+      NodeAssert.deepEqual(
+        (await NodeFSP.readdir(applications)).filter((name) => name.startsWith(".OOP Terminal")),
+        [],
+      );
+
+      // A failing signature check keeps the existing copy and still lets the script finish.
+      await NodeFSP.writeFile(NodePath.join(dst, "Contents/marker"), "kept");
+      result = runFragment({ FAKE_CODESIGN_EXIT: "1" });
+      NodeAssert.ok(result.stdout.includes("finished"));
+      NodeAssert.equal(await marker(), "kept");
+
+      // Another app with the same name is left alone.
+      await writeApp(dst, "com.someone.else", "theirs");
+      result = runFragment();
+      NodeAssert.ok(result.stdout.includes("finished"));
+      NodeAssert.match(result.stderr, /not ours/);
+      NodeAssert.equal(await marker(), "theirs");
+
+      // A build without the terminal app has nothing to do.
+      await NodeFSP.rm(src, { recursive: true });
+      await NodeFSP.rm(dst, { recursive: true });
+      result = runFragment();
+      NodeAssert.ok(result.stdout.includes("finished"));
+      NodeAssert.equal((await NodeFSP.readdir(applications)).includes("OOP Terminal.app"), false);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  },
+);

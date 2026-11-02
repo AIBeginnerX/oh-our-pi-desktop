@@ -50,18 +50,40 @@ pub fn truncate(text: &str, max: usize) -> String {
     out
 }
 
+/// How a wrapped row relates to the one before it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Join {
+    /// A line of its own.
+    #[default]
+    New,
+    /// The same line, cut mid-word (or between Korean syllables): joined with nothing.
+    Cont,
+    /// The same line, cut at a space the wrap dropped: joined with one space.
+    ContSpace,
+}
+
 /// Breaks text into lines of at most `max` cells: at spaces when there is one, else mid-word (the
 /// only option for Korean/Japanese/Chinese, which have no spaces to break at inside a clause).
 pub fn wrap(text: &str, max: usize) -> Vec<String> {
+    wrap_flow(text, max)
+        .into_iter()
+        .map(|(row, _)| row)
+        .collect()
+}
+
+/// `wrap`, with how each row joins the one before it, so a selection of wrapped text copies as the
+/// lines the writer typed.
+pub fn wrap_flow(text: &str, max: usize) -> Vec<(String, Join)> {
     let max = max.max(1);
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
         let chars: Vec<char> = paragraph.chars().collect();
         if chars.is_empty() {
-            lines.push(String::new());
+            lines.push((String::new(), Join::New));
             continue;
         }
         let mut start = 0;
+        let mut join = Join::New;
         while start < chars.len() {
             let mut used = 0;
             let mut i = start;
@@ -78,18 +100,21 @@ pub fn wrap(text: &str, max: usize) -> Vec<String> {
                 i += 1;
             }
             if i >= chars.len() {
-                lines.push(chars[start..].iter().collect());
+                lines.push((chars[start..].iter().collect(), join));
                 break;
             }
             if chars[i] == ' ' {
-                lines.push(chars[start..i].iter().collect());
+                lines.push((chars[start..i].iter().collect(), join));
                 start = i + 1;
+                join = Join::ContSpace;
             } else if let Some(s) = space.filter(|s| *s > start) {
-                lines.push(chars[start..s].iter().collect());
+                lines.push((chars[start..s].iter().collect(), join));
                 start = s + 1;
+                join = Join::ContSpace;
             } else {
-                lines.push(chars[start..i].iter().collect());
+                lines.push((chars[start..i].iter().collect(), join));
                 start = i;
+                join = Join::Cont;
             }
         }
     }
@@ -114,7 +139,7 @@ pub fn iso_now() -> String {
 }
 
 /// Days since 1970-01-01 to a calendar date (Howard Hinnant's algorithm).
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);

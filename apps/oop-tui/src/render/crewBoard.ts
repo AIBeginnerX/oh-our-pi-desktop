@@ -47,6 +47,9 @@ export const followUpText = (reason: unknown): string =>
 export const roleName = (role: string): string =>
   (CREW_ROLE_LABEL as Record<string, string | undefined>)[role] ?? role;
 
+/** A role as the header and the roster say it: the desktop's label in lower case, `worker`. */
+export const roleWord = (role: string): string => roleName(role).toLowerCase();
+
 export const phaseWord = (task: CrewTask): string =>
   task.phase === "stopped" && task.unreported
     ? t("render.crew.stoppedUnreported")

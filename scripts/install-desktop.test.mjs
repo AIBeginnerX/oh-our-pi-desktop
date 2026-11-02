@@ -62,6 +62,22 @@ async function fixture(
       const bundle = path.join(source, "OOP.app", "Contents", "Resources", "oop", "oop.mjs");
       await fs.mkdir(path.dirname(bundle), { recursive: true });
       await fs.writeFile(bundle, "// fixture terminal app\n");
+      if (terminal === "rust") {
+        // The Rust client shows how the launcher started it; OOP Terminal.app is a bundle with an identifier.
+        const resources = path.dirname(bundle);
+        await fs.writeFile(
+          path.join(resources, "oop-rs"),
+          '#!/bin/sh\nprintf "rust ts-entry=%s node=%s electron=%s run-as-node=%s\\n" "$OOP_TS_ENTRY" "$OOP_TS_NODE" "${OOP_TS_NODE_ELECTRON-unset}" "${ELECTRON_RUN_AS_NODE-unset}"\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n',
+          { mode: 0o755 },
+        );
+        const terminalApp = path.join(resources, "OOP Terminal.app", "Contents");
+        await fs.mkdir(path.join(terminalApp, "MacOS"), { recursive: true });
+        await fs.writeFile(
+          path.join(terminalApp, "Info.plist"),
+          '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.example.oop-terminal</string></dict></plist>\n',
+        );
+        await fs.writeFile(path.join(terminalApp, "MacOS", "oop-terminal"), "#!/bin/sh\n", { mode: 0o755 });
+      }
     }
     const image = path.join(root, "fixture.dmg");
     const created = await run("hdiutil", [
@@ -192,6 +208,50 @@ const ownedTerminalFiles = [
 ];
 
 test(
+  "macOS installer installs OOP Terminal.app beside OOP.app and an oop command that runs the Rust client",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin", terminal: "rust" });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    const installDir = setup.env.OOP_INSTALL_DIR;
+    assert.match(result.output, /OOP Terminal\.app, the OOP terminal as an app of its own/);
+    assert.ok(
+      (await fs.stat(path.join(installDir, "OOP Terminal.app", "Contents", "MacOS", "oop-terminal"))).isFile(),
+    );
+    const command = path.join(setup.home, ".local", "bin", "oop");
+    const {
+      ELECTRON_RUN_AS_NODE: _inherited,
+      OOP_TS_NODE: _node,
+      OOP_TS_NODE_ELECTRON: _electron,
+      ...clean
+    } = process.env;
+    const rust = await run(command, ["--version", "two words"], clean);
+    const resources = path.join(installDir, "OOP.app", "Contents", "Resources", "oop");
+    // The Rust client is told how to run the TypeScript terminal: the app's own runtime is Electron
+    // acting as node, so OOP_TS_NODE names it and OOP_TS_NODE_ELECTRON=1 says so. ELECTRON_RUN_AS_NODE
+    // itself is not set for the client; oop-rs adds it to the child it starts.
+    const appRuntime = path.join(installDir, "OOP.app", "Contents", "MacOS", "OOP");
+    assert.equal(
+      rust.output,
+      `rust ts-entry=${path.join(resources, "oop.mjs")} node=${appRuntime} electron=1 run-as-node=unset\n[--version]\n[two words]\n`,
+    );
+    // OOP_TUI=ts runs the TypeScript terminal on the app's runtime instead.
+    const ts = await run(command, ["--version"], { ...clean, OOP_TUI: "ts" });
+    assert.match(ts.output, /^run-as-node=1\n\[.*oop\.mjs\]\n\[--version\]\n$/);
+    // A reinstall replaces our own copy; an app of that name with another identifier is left alone.
+    const again = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(again.code, 0, again.output);
+    const foreign = path.join(installDir, "OOP Terminal.app");
+    await fs.writeFile(path.join(foreign, "Contents", "Info.plist"), "<plist version=\"1.0\"><dict><key>CFBundleIdentifier</key><string>other</string></dict></plist>\n");
+    const kept = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(kept.code, 0, kept.output);
+    assert.match(kept.output, /Could not install OOP Terminal\.app/);
+    assert.match(await fs.readFile(path.join(foreign, "Contents", "Info.plist"), "utf8"), /other/);
+  },
+);
+
+test(
   "macOS installer adds an oop command that runs the app's runtime on the bundled terminal app",
   { skip: process.platform !== "darwin", timeout: 60_000 },
   async (t) => {
@@ -203,7 +263,12 @@ test(
     assert.match(result.output, /not on PATH/);
     assert.equal((await fs.stat(command)).mode & 0o777, 0o755);
     // The launcher keeps each argument whole, and the variable reaches only the app's process.
-    const { ELECTRON_RUN_AS_NODE: _inherited, ...clean } = process.env;
+    const {
+      ELECTRON_RUN_AS_NODE: _inherited,
+      OOP_TS_NODE: _node,
+      OOP_TS_NODE_ELECTRON: _electron,
+      ...clean
+    } = process.env;
     const launch = await run(command, ["--version", "two words", "it's", "$HOME", "*"], clean);
     assert.equal(launch.code, 0, launch.output);
     const app = path.join(setup.env.OOP_INSTALL_DIR, "OOP.app", "Contents");

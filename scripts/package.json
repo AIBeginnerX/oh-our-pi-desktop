@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vp test run --exclude '**/build-oop-update-pkg*.test.mjs' --exclude '**/macos.test.mjs' --exclude '**/windows.test.mjs' --exclude '**/verify-release-feeds.test.mjs' && node --test build-oop-update-pkg.test.mjs build-oop-update-pkg.native.test.mjs build-oop-update-pkg.signing.test.mjs macos.test.mjs windows.test.mjs verify-release-feeds.test.mjs"
+    "test": "vp test run --exclude '**/build-oop-update-pkg*.test.mjs' --exclude '**/macos.test.mjs' --exclude '**/windows.test.mjs' --exclude '**/verify-release-feeds.test.mjs' --exclude '**/build-oop-cli-archives.test.mjs' && node --test build-oop-cli-archives.test.mjs build-oop-update-pkg.test.mjs build-oop-update-pkg.native.test.mjs build-oop-update-pkg.signing.test.mjs macos.test.mjs windows.test.mjs verify-release-feeds.test.mjs"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",

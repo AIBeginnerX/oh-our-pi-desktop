@@ -1,6 +1,6 @@
 import { defineMessages } from "./define.ts";
 
-/** The pinned header (logo, live status, pet) and the `/pet` command. */
+/** The pinned header (logo, live status, Mocha) and the `/pet` command. */
 export const header = defineMessages(
   {
     "render.header.state.idle": "Idle",
@@ -14,15 +14,15 @@ export const header = defineMessages(
     "render.header.noModel": "No model",
     "render.header.thread": "Thread ",
     "render.header.folder": "Folder ",
-    "render.header.server": "Server ",
-    "session.c.petOn": "The pet is on.",
-    "session.c.petOff": "The pet is off.",
+    "render.header.crew": "Crew ",
+    "session.c.petOn": "Mocha is on.",
+    "session.c.petOff": "Mocha is off.",
     "session.c.petUsage": "Usage: /pet [on|off]",
     "session.c.petNoHeader":
-      "The pet lives in the header, which needs the banner and the side-by-side layout.",
+      "Mocha lives in the header, which needs the banner and the side-by-side layout.",
     "session.c.help.pet":
-      "/pet shows or hides the pet in the header (typed again it toggles) • it moves only while a turn runs and sleeps when you are away • it stands still with animations off or while the terminal is unfocused • the choice is remembered (oop config set pet true|false)",
-    "session.slash.pet.note": "Show or hide the pet in the header",
+      "/pet shows or hides Mocha, the coffee mug in the header (typed again it toggles) • her coffee takes the colour of the provider that answers • she steams when idle, brews while the model thinks, bounces as text arrives, and sleeps when you are away • she holds still with animations off or while the terminal is unfocused • the choice is remembered (oop config set pet true|false)",
+    "session.slash.pet.note": "Show or hide Mocha in the header",
     "session.slash.pet.usage": "[on|off]",
   },
   {
@@ -37,14 +37,14 @@ export const header = defineMessages(
     "render.header.noModel": "모델 없음",
     "render.header.thread": "스레드 ",
     "render.header.folder": "폴더 ",
-    "render.header.server": "서버 ",
-    "session.c.petOn": "펫을 켰습니다.",
-    "session.c.petOff": "펫을 껐습니다.",
+    "render.header.crew": "크루 ",
+    "session.c.petOn": "모카를 켰습니다.",
+    "session.c.petOff": "모카를 껐습니다.",
     "session.c.petUsage": "사용법: /pet [on|off]",
-    "session.c.petNoHeader": "펫은 헤더에 있으므로 배너와 나란히 보기 화면이 필요합니다.",
+    "session.c.petNoHeader": "모카는 헤더에 있으므로 배너와 나란히 보기 화면이 필요합니다.",
     "session.c.help.pet":
-      "/pet 으로 헤더의 펫을 보이거나 숨깁니다 (다시 치면 전환) • 턴이 진행되는 동안에만 움직이고 자리를 비우면 잠듭니다 • 애니메이션이 꺼져 있거나 터미널이 포커스를 잃으면 가만히 서 있습니다 • 선택은 기억됩니다 (oop config set pet true|false)",
-    "session.slash.pet.note": "헤더의 펫 보이기·숨기기",
+      "/pet 으로 헤더의 커피잔 모카를 보이거나 숨깁니다 (다시 치면 전환) • 커피 색은 답하는 제공자에 따라 바뀝니다 • 대기 중엔 김이 오르고, 생각할 땐 끓고, 글이 올 땐 들썩이고, 자리를 비우면 잠듭니다 • 애니메이션이 꺼져 있거나 터미널이 포커스를 잃으면 가만히 있습니다 • 선택은 기억됩니다 (oop config set pet true|false)",
+    "session.slash.pet.note": "헤더의 모카 보이기·숨기기",
     "session.slash.pet.usage": "[on|off]",
   },
 );

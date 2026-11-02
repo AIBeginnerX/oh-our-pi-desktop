@@ -18,6 +18,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, watch};
+use tokio_rustls::rustls::ClientConfig;
+use tokio_tungstenite::Connector;
 use tokio_tungstenite::tungstenite::Message;
 
 const PING_EVERY: Duration = Duration::from_secs(10);
@@ -72,9 +74,18 @@ impl Drop for RpcStream {
 
 impl Rpc {
     pub async fn connect(url: &str) -> Result<Rpc, String> {
+        Rpc::connect_with(url, None).await
+    }
+
+    /// `connect` with the TLS settings named; `None` means `http::client_config()`, built only
+    /// for a `wss://` address.
+    pub async fn connect_with(url: &str, tls: Option<Arc<ClientConfig>>) -> Result<Rpc, String> {
+        let connector = url
+            .starts_with("wss://")
+            .then(|| Connector::Rustls(tls.unwrap_or_else(crate::http::client_config)));
         let (socket, _) = tokio::time::timeout(
             Duration::from_secs(15),
-            tokio_tungstenite::connect_async(url),
+            tokio_tungstenite::connect_async_tls_with_config(url, None, false, connector),
         )
         .await
         .map_err(|_| "the WebSocket did not open in time".to_string())?
@@ -371,5 +382,45 @@ mod tests {
             rpc.call("do.it", json!({})).await.unwrap_err(),
             "no provider"
         );
+    }
+
+    /// The same protocol over `wss://`: the server presents a certificate made for the test, and
+    /// the client trusts that one only. A client that trusts nothing never gets to speak.
+    #[tokio::test]
+    async fn a_secure_socket_carries_calls_and_refuses_an_untrusted_certificate() {
+        let (acceptor, trusting) = crate::http::testtls::server_and_trusting_client();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let (tcp, _) = listener.accept().await.unwrap();
+                let acceptor = acceptor.clone();
+                tokio::spawn(async move {
+                    let Ok(tls) = acceptor.accept(tcp).await else {
+                        return;
+                    };
+                    let mut ws = tokio_tungstenite::accept_async(tls).await.unwrap();
+                    while let Some(Ok(Message::Text(text))) = ws.next().await {
+                        let m: Value = serde_json::from_str(text.as_str()).unwrap();
+                        if m["_tag"] == "Request" {
+                            let done = json!({"_tag": "Exit", "requestId": m["id"],
+                                "exit": {"_tag": "Success", "value": {"echo": m["tag"]}}});
+                            ws.send(Message::text(done.to_string())).await.unwrap();
+                        }
+                    }
+                });
+            }
+        });
+        let url = format!("wss://localhost:{port}/ws");
+        let rpc = Rpc::connect_with(&url, Some(trusting)).await.unwrap();
+        assert_eq!(
+            rpc.call("say.hi", json!({})).await.unwrap(),
+            json!({"echo": "say.hi"})
+        );
+        let refused = Rpc::connect_with(&url, Some(crate::http::testtls::distrusting_client()))
+            .await
+            .err()
+            .expect("an untrusted certificate must not be accepted");
+        assert!(refused.contains("cannot open the WebSocket"), "{refused}");
     }
 }

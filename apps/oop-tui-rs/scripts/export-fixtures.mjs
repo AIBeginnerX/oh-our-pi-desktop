@@ -702,6 +702,47 @@ command(
   },
 );
 command(
+  "turn.start.implement-plan",
+  {
+    text: "PLEASE IMPLEMENT THIS PLAN:\n# Plan\n- one",
+    planId: "plan-1",
+    runtimeMode: "full-access",
+    interactionMode: "default",
+  },
+  {
+    type: "thread.turn.start",
+    commandId: "cmd-1",
+    threadId: THREAD,
+    message: msg("PLEASE IMPLEMENT THIS PLAN:\n# Plan\n- one"),
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    sourceProposedPlan: { threadId: THREAD, planId: "plan-1" },
+    createdAt: T0,
+  },
+);
+command(
+  "checkpoint.revert",
+  { turnCount: 1 },
+  {
+    type: "thread.checkpoint.revert",
+    commandId: "cmd-1",
+    threadId: THREAD,
+    turnCount: 1,
+    createdAt: T0,
+  },
+);
+command(
+  "conversation.revert",
+  { turnCount: 1 },
+  {
+    type: "thread.conversation.revert",
+    commandId: "cmd-1",
+    threadId: THREAD,
+    turnCount: 1,
+    createdAt: T0,
+  },
+);
+command(
   "turn.interrupt",
   { turnId: TURN },
   {
@@ -814,6 +855,70 @@ put("config/server-config.json", {
   threadResumeCompletionMarker: true,
   environment: { serverVersion: "0.0.43" },
 });
+
+// --- Mocha, the header's pet (fixtures/pet/mocha.json) ---------------------------------------------
+// The pictures, the palette and the timing come from apps/oop-tui/src/render/mochaArt.ts; the Rust
+// app loads this file and draws from it. The golden part is what the TypeScript renderer makes of
+// every picture, so each client tests that it draws the same cells.
+
+const tuiRender = NodePath.join(root, "..", "oop-tui", "src", "render");
+const art = await import(NodeURL.pathToFileURL(NodePath.join(tuiRender, "mochaArt.ts")).href);
+const pet = await import(NodeURL.pathToFileURL(NodePath.join(tuiRender, "pet.ts")).href);
+{
+  const look = { tone: "openai", from: "claude" };
+  const modes = {
+    rich: { level: 3, ascii: false },
+    flat: { level: 0, ascii: false },
+    ascii: { level: 0, ascii: true },
+  };
+  const glyphs = {};
+  for (const [mode, draw] of Object.entries(modes)) {
+    glyphs[mode] = {};
+    glyphs[`mini-${mode}`] = {};
+    for (const state of art.MOCHA_STATES) {
+      const of = (list) =>
+        list.map((rows) =>
+          pet.mochaCells(rows, look, draw).map((row) => row.map((c) => c.glyph).join("")),
+        );
+      glyphs[mode][state] = of(art.MOCHA[state].frames);
+      glyphs[`mini-${mode}`][state] = of(art.MOCHA[state].mini);
+    }
+  }
+  // Every cell of every state's first picture, as `glyph fg bg`, at each colour level.
+  const cells = {};
+  for (const [name, draw] of [
+    ["3", { level: 3, ascii: false }],
+    ["1", { level: 1, ascii: false }],
+    ["0", { level: 0, ascii: false }],
+    ["ascii1", { level: 1, ascii: true }],
+  ]) {
+    cells[name] = {};
+    for (const state of art.MOCHA_STATES) {
+      const encode = (rows) =>
+        pet
+          .mochaCells(rows, look, draw)
+          .map((row) => row.map((c) => `${c.glyph} ${c.fg} ${c.bg}`).join(","));
+      cells[name][state] = {
+        full: encode(art.MOCHA[state].frames[0]),
+        mini: encode(art.MOCHA[state].mini[0]),
+      };
+    }
+  }
+  put("pet/mocha.json", {
+    width: art.MOCHA_WIDTH,
+    height: art.MOCHA_HEIGHT,
+    miniWidth: art.MOCHA_MINI_WIDTH,
+    miniHeight: art.MOCHA_MINI_HEIGHT,
+    palette: art.MOCHA_PALETTE,
+    liquid: art.MOCHA_LIQUID,
+    steamLift: art.MOCHA_STEAM_LIFT,
+    ansi16: art.MOCHA_ANSI16,
+    ansi16Tone: art.MOCHA_ANSI16_TONE,
+    states: art.MOCHA,
+    toneCases: art.MOCHA_TONE_CASES,
+    golden: { look, glyphs, cells },
+  });
+}
 
 // --- write or check -----------------------------------------------------------------------------
 

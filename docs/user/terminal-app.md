@@ -17,6 +17,10 @@ If the shell says `command not found`, the folder holding `oop` is not on your `
 `~/.local/bin` on macOS or `%LOCALAPPDATA%\oop-terminal` on Windows. The installer does not edit
 `PATH`, and it leaves alone an `oop` it did not create.
 
+On macOS, `oop` runs the faster native client when it is installed and the TypeScript terminal
+otherwise. Both read the same threads and settings. To use the TypeScript terminal for one run,
+start it as `OOP_TUI=ts oop`.
+
 `oop --help` lists everything. The ones you will use most:
 
 | Task                                    | Command                   |
@@ -28,6 +32,26 @@ If the shell says `command not found`, the folder holding `oop` is not on your `
 | Check your setup                        | `oop doctor`              |
 | See what is new in the latest release   | `oop update`              |
 | Stop the server the terminal started    | `oop stop`                |
+
+## OOP Terminal and splits
+
+On macOS the desktop app also installs **OOP Terminal**, a window of its own that runs `oop` and
+ordinary shells side by side. Open it from `~/Applications` (or `/Applications`, if you used the
+`.pkg` update), like any app. Use it to keep several threads, or a thread and a shell, on one screen:
+
+| Task                                    | Shortcut                          |
+| --------------------------------------- | --------------------------------- |
+| Split right, with `oop` in the new pane | `Cmd+D`                           |
+| Split down, with `oop` in the new pane  | `Cmd+Shift+D`                     |
+| Split toward an arrow, with `oop`       | `Cmd+Option+Arrow`                |
+| Split toward an arrow, with a shell     | `Cmd+Option+Shift+Arrow`          |
+| Move to the previous or next pane       | `Cmd+Option+[` and `Cmd+Option+]` |
+| Zoom the pane, or return                | `Cmd+Shift+Enter`                 |
+| Close the pane, open a new window       | `Cmd+W`, `Cmd+N`                  |
+
+OOP Terminal is not required: `oop` works in Terminal, iTerm, or any other terminal, and the
+splits in this window are separate from the side panels `oop` opens inside a thread
+(`/dag-workflow`, `/tasks`).
 
 ## Start with a message
 
@@ -75,6 +99,24 @@ answer, so a terminal in another window or tab can flag itself. A request is run
 that was already waiting when you opened the thread is not. Turn it off with
 `oop config set notify false`. The bell is the only signal; it does not check whether the terminal
 is the window you are looking at.
+
+## Mocha
+
+The header of a tall terminal has a small coffee mug, Mocha, who reacts to what the agent is doing:
+she steams while idle, bubbles while it thinks, stirs while it uses a tool, perks up while text
+arrives, waits for you when an approval or an answer is needed, cheers when a turn ends well, looks
+upset on an error or a lost connection, and dozes after a quiet while until a key press wakes her.
+On a terminal too short for the full header she shrinks to a small cup at the end of the first
+line, and she is left out when there is no room.
+
+Her coffee takes the colour of the provider you are talking to: orange for Claude, green for Codex,
+purple for a local model (Ollama, or a local model in OpenCode), and brown for the others. Switching
+the model with `/model` gives her a small hop and a colour wave. With few colours, no colour
+(`NO_COLOR`), or ASCII symbols she is drawn with plainer shapes.
+
+Turn her off and on with `/pet off` and `/pet on`, or `oop config set pet false`. She holds still
+when animations are off (`oop config set animations false`) and while the terminal window is not
+focused.
 
 ## Find and pin threads
 
@@ -128,8 +170,8 @@ that terminal starts its server again after a few seconds. A turn that is runnin
 changes hands is interrupted, unless **Settings → General → Continue threads after restarts** is
 on.
 
-`oop` needs OOP Desktop installed on the computer it runs on. The Linux AppImage does not include
-the terminal app yet.
+Without the desktop app, install the terminal app on its own (INSTALL.md, "Terminal app only"). It carries its own server and
+needs no OOP Desktop. The Linux AppImage does not include the terminal app.
 
 ## Task list
 
@@ -149,5 +191,8 @@ refining the plan.
 
 ## Updates
 
-The terminal app is part of the desktop app, so updating the app updates `oop` too. `oop update`
-shows what changed since your version; it does not install anything.
+The terminal app is part of the desktop app, so updating the app updates `oop` and OOP Terminal
+too. On macOS, both the in-app update and the `.pkg` update replace `OOP Terminal.app`; the `.pkg`
+leaves alone an app of that name that is not OOP's. A terminal-only install is updated by running
+its install command again. `oop update` shows what changed since your version; it does not
+install anything.

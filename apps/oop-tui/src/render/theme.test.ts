@@ -4,7 +4,7 @@ import * as NodePath from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { parseColor } from "./color.ts";
+import { type Color, colorCodes, indexedToRgb, parseColor } from "./color.ts";
 import {
   applyOverrides,
   BACKGROUND_TOKENS,
@@ -329,5 +329,76 @@ describe("user themes on disk", () => {
     NodeFS.writeFileSync(NodePath.join(configDir, "themes", "notes.txt"), "x");
     expect(listThemeNames(configDir)).toEqual([...BUILTIN_THEME_NAMES, "alpha", "zebra"]);
     expect(listThemeNames("/does/not/exist")).toEqual([...BUILTIN_THEME_NAMES]);
+  });
+});
+
+describe("userFg, the colour of what the user said", () => {
+  const LEVELS = [1, 2, 3] as const;
+  /** The colour an SGR code (`38;2;r;g;b`, `48;5;n`, `93`) shows. */
+  const shownRgb = (code: string) => {
+    const [mode, kind, ...rest] = code.split(";").map(Number) as [number, number, ...number[]];
+    if (mode === 38 || mode === 48) {
+      return kind === 2
+        ? { r: rest[0] as number, g: rest[1] as number, b: rest[2] as number }
+        : indexedToRgb(rest[0] as number);
+    }
+    return indexedToRgb(mode >= 90 ? mode - 82 : mode >= 40 ? mode - 40 : mode - 30);
+  };
+  const relativeLuminance = ({ r, g, b }: { r: number; g: number; b: number }) => {
+    const [lr, lg, lb] = [r, g, b].map((channel) => {
+      const unit = channel / 255;
+      return unit <= 0.03928 ? unit / 12.92 : ((unit + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    return 0.2126 * lr + 0.7152 * lg + 0.0722 * lb;
+  };
+  const contrast = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+
+  it("is a colour in every theme and at every depth, not the terminal's own", () => {
+    for (const name of BUILTIN_THEME_NAMES) {
+      for (const level of LEVELS) {
+        expect(built(name, level).userFg("x"), `${name} at ${level}`).toContain("\u001b[");
+      }
+    }
+  });
+
+  it("is not the brand colour, the colour on a fill, or the body text, at any depth", () => {
+    for (const name of BUILTIN_THEME_NAMES) {
+      for (const level of LEVELS) {
+        const theme = built(name, level);
+        const mine = theme.userFg("x");
+        expect(mine, `${name} at ${level}: brand`).not.toBe(theme.brand("x"));
+        expect(mine, `${name} at ${level}: onBg`).not.toBe(theme.onBg("x"));
+        expect(mine, `${name} at ${level}: text`).not.toBe(theme.text("x"));
+      }
+    }
+  });
+
+  it("stays readable on the user's fill wherever the fill is drawn", () => {
+    for (const name of BUILTIN_THEME_NAMES) {
+      for (const level of [2, 3] as const) {
+        if (!built(name, level).fills("userBg")) continue;
+        const tokens = BUILTIN_THEMES[name];
+        const fill = colorCodes(parseColor(tokens.userBg) as Color, level, true) as string;
+        const text = colorCodes(parseColor(tokens.userFg) as Color, level) as string;
+        expect(
+          contrast(relativeLuminance(shownRgb(text)), relativeLuminance(shownRgb(fill))),
+          `${name} at ${level}`,
+        ).toBeGreaterThan(4.5);
+      }
+    }
+  });
+
+  it("says whether a background is drawn: not at 16 colours and not where it is left at the terminal's own", () => {
+    expect(built("oop", 1).fills("userBg")).toBe(false);
+    expect(built("oop", 0).fills("userBg")).toBe(false);
+    expect(built("oop", 2).fills("userBg")).toBe(true);
+    expect(built("oop", 3).fills("userBg")).toBe(true);
+    expect(built("ansi", 3).fills("userBg")).toBe(false);
+  });
+
+  it("is a token an override can change", () => {
+    const { tokens, warnings } = applyOverrides(BUILTIN_THEMES.oop, { userFg: "#ff8800" });
+    expect(warnings).toEqual([]);
+    expect(createTheme("mine", tokens, 3).userFg("x")).toBe("\u001b[38;2;255;136;0mx\u001b[39m");
   });
 });

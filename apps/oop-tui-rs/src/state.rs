@@ -41,6 +41,7 @@ pub struct ProjectShell {
     pub id: String,
     pub title: String,
     pub workspace_root: String,
+    pub updated_at: String,
     pub default_model_selection: Option<Value>,
 }
 

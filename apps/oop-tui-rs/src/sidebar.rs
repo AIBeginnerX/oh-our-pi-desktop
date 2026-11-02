@@ -256,7 +256,7 @@ fn sort_settled(threads: &mut [&ThreadShell]) {
 }
 
 /// Arranged keys first (string order), then keyless threads newest-created first.
-fn sort_pinned(threads: &mut [&ThreadShell]) {
+pub(crate) fn sort_pinned(threads: &mut [&ThreadShell]) {
     threads.sort_by(|a, b| match (&a.pin_order_key, &b.pin_order_key) {
         (Some(x), Some(y)) => x.cmp(y).then_with(|| a.id.cmp(&b.id)),
         (Some(_), None) => Ordering::Less,
@@ -292,7 +292,7 @@ fn is_crew_title(title: &str) -> bool {
         .any(|role| title.starts_with(&format!("Crew {role} · ")))
 }
 
-fn is_crew_sub_thread(thread: &ThreadShell) -> bool {
+pub(crate) fn is_crew_sub_thread(thread: &ThreadShell) -> bool {
     thread.parent_thread_id.is_some() || is_crew_title(&thread.title)
 }
 

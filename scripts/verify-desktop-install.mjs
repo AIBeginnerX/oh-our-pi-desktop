@@ -131,6 +131,19 @@ async function verifyTerminalCommand(label) {
   );
   const printed = output.trim().split(/\r?\n/).at(-1);
   if (printed !== version) throw new Error(`${label}: oop printed "${printed}", expected ${version}.`);
+  if (process.platform === "darwin") await verifyTerminalApp(label);
+}
+
+// A macOS app that carries OOP Terminal.app (the native terminal program) must have it installed
+// beside OOP.app as an app of its own; one that predates it has nothing to install.
+async function verifyTerminalApp(label) {
+  const carried = path.join(installDir, "OOP.app", "Contents", "Resources", "oop", "OOP Terminal.app");
+  if (!(await exists(carried))) return console.log(`info: ${label}: this app carries no OOP Terminal.app`);
+  const installed = path.join(installDir, "OOP Terminal.app");
+  await must(
+    `${label}: OOP Terminal.app is installed and intact`,
+    run("codesign", ["--verify", "--deep", "--strict", installed], env),
+  );
 }
 
 async function launch(label) {
@@ -165,6 +178,7 @@ try {
     await must("uninstall", run(copy, ["/S", "/currentuser", `_?=${installLocation}`], env));
   } else if (process.platform === "darwin") {
     await fs.rm(path.join(installDir, "OOP.app"), { recursive: true });
+    await fs.rm(path.join(installDir, "OOP Terminal.app"), { recursive: true, force: true });
     console.log("ok: uninstall");
   } else {
     for (const file of [

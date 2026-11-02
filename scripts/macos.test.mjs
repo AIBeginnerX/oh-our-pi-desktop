@@ -8,6 +8,9 @@ import * as NodeTest from "node:test";
 import {
   assertSeparatePaths,
   build,
+  buildRustClients,
+  cargoReleaseArgs,
+  findTerminalApp,
   defaultCacheRoot,
   isolatedEnvironment,
   main,
@@ -20,6 +23,8 @@ import {
   RSYNC_EXCLUDES,
   runCommand,
   releaseVersion,
+  rustBuildEnvironment,
+  skipsRust,
   upstreamVersion,
   runtimePaths,
   smbShareUrlForPath,
@@ -1061,3 +1066,124 @@ NodeTest.test("finds the SMB share that holds the update folder", () => {
   NodeAssert.equal(smbShareUrlForPath(mounts, "/Volumes/Shared-1/release"), undefined);
   NodeAssert.equal(smbShareUrlForPath(mounts, "/Users/example/release"), undefined);
 });
+
+NodeTest.test(
+  "Rust build settings: version in the environment, cargo on PATH, --locked only with a lockfile",
+  () => {
+    const env = rustBuildEnvironment(
+      { PATH: "/usr/bin", GITHUB_REPOSITORY: "x/y", OOP_VERSION: "0.0.1" },
+      "1.2.3",
+      "/Users/test",
+    );
+    NodeAssert.equal(env.OOP_VERSION, "1.2.3");
+    NodeAssert.equal(env.PATH, "/usr/bin:/Users/test/.cargo/bin");
+    NodeAssert.equal(env.GITHUB_REPOSITORY, undefined);
+    NodeAssert.deepEqual(cargoReleaseArgs({ locked: false }), ["build", "--release"]);
+    NodeAssert.deepEqual(cargoReleaseArgs({ locked: true }), ["build", "--release", "--locked"]);
+    NodeAssert.equal(skipsRust({ OOP_SKIP_RUST: "1" }), true);
+    NodeAssert.equal(skipsRust({}), false);
+  },
+);
+
+async function rustCheckout(root, { terminal }) {
+  const checkout = NodePath.join(root, "checkout");
+  await NodeFSP.mkdir(NodePath.join(checkout, "apps/oop-tui-rs"), { recursive: true });
+  await NodeFSP.writeFile(NodePath.join(checkout, "apps/oop-tui-rs/Cargo.toml"), "[package]\n");
+  await NodeFSP.writeFile(NodePath.join(checkout, "apps/oop-tui-rs/Cargo.lock"), "");
+  if (terminal) {
+    await NodeFSP.mkdir(NodePath.join(checkout, "apps/oop-terminal"), { recursive: true });
+    await NodeFSP.writeFile(NodePath.join(checkout, "apps/oop-terminal/Cargo.toml"), "[package]\n");
+  }
+  return { checkout };
+}
+
+NodeTest.test("findTerminalApp returns the newest OOP Terminal.app below the crate", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-terminal-app-"));
+  try {
+    NodeAssert.equal(await findTerminalApp(root), undefined);
+    const older = NodePath.join(root, "target/bundle/OOP Terminal.app");
+    const newer = NodePath.join(root, "dist/OOP Terminal.app");
+    await NodeFSP.mkdir(older, { recursive: true });
+    await NodeFSP.mkdir(newer, { recursive: true });
+    await NodeFSP.utimes(older, new Date(1_000_000), new Date(1_000_000));
+    NodeAssert.equal(await findTerminalApp(root), newer);
+  } finally {
+    await NodeFSP.rm(root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test(
+  "buildRustClients builds oop-rs, bundles the terminal app and names both for the artifact builder",
+  async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-rust-"));
+    try {
+      const paths = await rustCheckout(root, { terminal: true });
+      const calls = [];
+      const runner = async (command, args, options) => {
+        calls.push({ command, args, cwd: options.cwd, env: options.env });
+        if (command === "bash")
+          await NodeFSP.mkdir(NodePath.join(options.cwd, "dist/OOP Terminal.app"), {
+            recursive: true,
+          });
+      };
+      const result = await buildRustClients(
+        paths,
+        runner,
+        "1.2.3",
+        { PATH: "/usr/bin" },
+        () => "1.2.3",
+      );
+      NodeAssert.deepEqual(
+        calls.map(({ command, args, cwd }) => [
+          command,
+          args.join(" "),
+          NodePath.relative(paths.checkout, cwd),
+        ]),
+        [
+          ["cargo", "build --release --locked", "apps/oop-tui-rs"],
+          ["cargo", "build --release", "apps/oop-terminal"],
+          ["bash", "scripts/bundle-macos.sh", "apps/oop-terminal"],
+        ],
+      );
+      NodeAssert.ok(calls.every(({ env }) => env.OOP_VERSION === "1.2.3"));
+      NodeAssert.equal(calls[2].env.OOP_RS_BIN, result.OOP_RS_BIN);
+      NodeAssert.equal(
+        result.OOP_RS_BIN,
+        NodePath.join(paths.checkout, "apps/oop-tui-rs/target/release/oop-rs"),
+      );
+      NodeAssert.equal(
+        result.OOP_TERMINAL_APP,
+        NodePath.join(paths.checkout, "apps/oop-terminal/dist/OOP Terminal.app"),
+      );
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test(
+  "buildRustClients refuses a stale oop-rs, and does nothing when skipped or absent",
+  async () => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-rust-skip-"));
+    try {
+      const paths = await rustCheckout(root, { terminal: false });
+      const runner = async () => {};
+      await NodeAssert.rejects(
+        buildRustClients(paths, runner, "1.2.3", {}, () => "0.0.1"),
+        /out of date/,
+      );
+      const calls = [];
+      const spy = async (...call) => calls.push(call);
+      NodeAssert.deepEqual(await buildRustClients(paths, spy, "1.2.3", { OOP_SKIP_RUST: "1" }), {});
+      const empty = { checkout: NodePath.join(root, "empty") };
+      await NodeFSP.mkdir(empty.checkout);
+      NodeAssert.deepEqual(await buildRustClients(empty, spy, "1.2.3", {}), {});
+      NodeAssert.equal(calls.length, 0);
+      // Without apps/oop-terminal only oop-rs is returned.
+      const onlyCli = await buildRustClients(paths, runner, "1.2.3", {}, () => "1.2.3");
+      NodeAssert.deepEqual(Object.keys(onlyCli), ["OOP_RS_BIN"]);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  },
+);

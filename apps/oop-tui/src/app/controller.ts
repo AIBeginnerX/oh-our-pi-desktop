@@ -88,18 +88,17 @@ import {
   type RailTone,
 } from "../render/rail.ts";
 import { renderBanner } from "../render/banner.ts";
-import { headerTrack, renderHeader, travelOf, type HeaderState } from "../render/header.ts";
+import { headerTrack, renderHeader, type HeaderState } from "../render/header.ts";
 import {
-  INITIAL_POSE,
   newPetMemory,
   observePet,
   petClock,
+  petLook,
   petState,
-  stepPose,
+  toneOf,
   touchPet,
   type PetMemory,
   type PetObservation,
-  type PetPose,
 } from "../render/pet.ts";
 import { crewBarText, roleName } from "../render/crewBoard.ts";
 import {
@@ -118,6 +117,9 @@ import { SPINNER_INTERVAL_MS, type Symbols, UNICODE_SYMBOLS } from "../render/sy
 import type { StatusLineSetting, ThemeSwitcher } from "../settings.ts";
 import { deriveThreadStatus, type ThreadStatus } from "../state/threadStatus.ts";
 import { TranscriptPrinter } from "../state/transcript.ts";
+import type { ClipboardOutcome } from "../clipboard/clipboard.ts";
+import { copyNotice } from "../clipboard/notice.ts";
+import type { SelectionControl } from "../terminal/selection.ts";
 import { graphemesOf, sanitizeForTerminal } from "../text/width.ts";
 import { wrapStyled, wrapWithPrefix } from "../text/wrap.ts";
 import type { LinkStatus } from "../link/client.ts";
@@ -182,6 +184,7 @@ import {
   crewBrainProblem,
   crewEnabledFor,
   crewPickItems,
+  crewRoleModels,
   crewSettingsOf,
   parseCrewPreset,
   parseCrewRole,
@@ -189,6 +192,7 @@ import {
   presetLabel,
   presetWords,
   type CrewChange,
+  type CrewRoleModel,
 } from "./crew.ts";
 import {
   crewSubThreadLabel,
@@ -383,6 +387,10 @@ export interface ControllerDeps {
   readonly notify?: boolean;
   /** Repeats a call while a turn runs; the spinner and the elapsed time hang off it. */
   readonly ticker?: Ticker;
+  /** Selecting text of the side-by-side conversation with the mouse; absent: a drag does nothing. */
+  readonly selection?: SelectionControl;
+  /** Puts text on the clipboard; called only for a selection the user made. Never rejects. */
+  readonly clipboard?: (text: string) => Promise<ClipboardOutcome>;
   /** Reaches the terminal's title and bell. Absent where neither should be touched (no colour, no tty). */
   readonly terminal?: {
     readonly setTitle: (title: string) => void;
@@ -392,8 +400,6 @@ export interface ControllerDeps {
   };
   /** The user's home folder, shown as `~` in the status bar. */
   readonly home?: string;
-  /** `host:port` of the server, said once when the connection is up. Absent: the step is left out. */
-  readonly server?: string | null;
   readonly cwd: string;
   readonly platform: NodeJS.Platform;
   readonly context: CommandContext;
@@ -596,10 +602,14 @@ export class AppController {
   private petOn: boolean;
   private petMemory: PetMemory;
   private petStarted = false;
-  private petPose: PetPose = INITIAL_POSE;
   private petTimer: { readonly due: number; readonly stop: () => void } | null = null;
   /** Milliseconds from `petDueAt` to the pet's next frame; null when it needs no timer. */
   private petNext: { readonly due: number } | null = null;
+  /** The crew's roles last worked out, and what they were worked out from. */
+  private crewRolesMemo: {
+    readonly from: ReadonlyArray<unknown>;
+    readonly roles: ReadonlyArray<CrewRoleModel> | null;
+  } | null = null;
   /** The start screen's banner line was skipped for the pinned header and is not yet in the scrollback. */
   private bannerOwed = false;
   /** The pinned header has been drawn since the banner became owed. */
@@ -981,7 +991,6 @@ export class AppController {
       ...(startup.banner && !pinned
         ? renderBanner({
             version: startup.version,
-            server: this.deps.server ?? null,
             cwd: this.deps.cwd,
             home: this.deps.home ?? null,
             columns: region.usableColumns() + 1,
@@ -1104,8 +1113,6 @@ export class AppController {
    * about a connection that has not happened.
    */
   private commitSetupStart(project: string | null): void {
-    const { style } = this.deps;
-    const server = this.deps.server;
     this.railOpen = true;
     this.hold([
       ...railStartRows(
@@ -1116,7 +1123,6 @@ export class AppController {
       ),
       railGap(this.rail),
       railDone(this.rail, t("session.c.serverConnected")),
-      ...(server ? [railRow(this.rail, style.theme.dim(sanitizeForTerminal(server)))] : []),
     ]);
   }
 
@@ -1854,6 +1860,22 @@ export class AppController {
       tool: chat?.status?.runningTool != null,
       streaming: chat !== null && chat.partial.length > 0,
       online: phase === "online" || phase === "connecting",
+      model: chat === null ? null : this.petModel(chat),
+    };
+  }
+
+  /** The model the next message goes to, with the colour its provider gives Mocha's coffee. */
+  private petModel(screen: ChatScreen): PetObservation["model"] {
+    const selection = this.currentModel(screen);
+    if (selection === null) return null;
+    const driver =
+      this.deps.link.config?.providers.find(
+        (candidate) => candidate.instanceId === selection.instanceId,
+      )?.driver ?? null;
+    return {
+      scope: screen.isDraft ? `draft:${screen.projectId}` : screen.threadId,
+      key: `${selection.instanceId}/${selection.model}`,
+      tone: toneOf(driver, selection.instanceId, selection.model),
     };
   }
 
@@ -1866,6 +1888,37 @@ export class AppController {
       ? mirror.title
       : (this.deps.link.shell?.threads.find((thread) => thread.id === screen.threadId)?.title ??
           null);
+  }
+
+  /**
+   * The crew's roles with the model each runs, for the header and the Agents panel: null when the
+   * crew is off for the thread on screen, or cannot run on its model. It follows the crew setting
+   * and the thread's model as they change, and is worked out again only when one of them has.
+   */
+  private crewRolesOf(screen: Screen): ReadonlyArray<CrewRoleModel> | null {
+    const { config } = this.deps.link;
+    if (config === null) return null;
+    const chat = screen.kind === "chat" ? screen : null;
+    const brain = chat === null ? null : this.turnSelection(chat);
+    const threadId = chat === null || chat.isDraft ? null : chat.threadId;
+    const from = [config.settings, config.providers, threadId, brain?.instanceId, brain?.model];
+    const memo = this.crewRolesMemo;
+    if (memo !== null && memo.from.every((value, index) => value === from[index])) {
+      return memo.roles;
+    }
+    const usable = chat === null || crewBrainProblem(config, brain) === null;
+    const roles = usable
+      ? crewRoleModels(
+          resolveCrew({
+            settings: crewSettingsOf(config.settings),
+            threadId,
+            providers: config.providers,
+            brain,
+          }),
+        )
+      : null;
+    this.crewRolesMemo = { from, roles };
+    return roles;
   }
 
   /** The model of the thread on screen, as the status bar names it. */
@@ -1909,16 +1962,10 @@ export class AppController {
     this.petMemory = observePet(this.petMemory, observation, now);
     const state = petState(this.petMemory, observation, now);
     const animate = this.deps.animations !== false && this.focused;
-    const clock = animate ? petClock(state, now) : { frame: 0, step: 0, remaining: 0 };
+    const clock = animate ? petClock(state, now, this.petMemory) : { frame: 0, remaining: 0 };
     const columns = this.deps.region.usableColumns() + 1;
     const rows = split.terminalRows();
     const track = headerTrack(columns, rows, this.petOn);
-    this.petPose = stepPose(
-      this.petPose,
-      animate ? state : "idle",
-      clock.step,
-      travelOf(track.width, !track.full),
-    );
     const link = this.deps.link.status.phase;
     const threadPhase = screen.kind === "chat" ? (screen.status?.phase ?? "idle") : null;
     const headerState: HeaderState =
@@ -1932,7 +1979,6 @@ export class AppController {
     const scrollback = this.bannerOwed
       ? renderBanner({
           version: startup.version,
-          server: this.deps.server ?? null,
           cwd: this.deps.cwd,
           home: this.deps.home ?? null,
           columns,
@@ -1947,15 +1993,18 @@ export class AppController {
       theme: this.deps.style.theme,
       symbols: this.symbols,
       version: startup.version,
-      server: this.deps.server ?? null,
       cwd: this.deps.cwd,
       home: this.deps.home ?? null,
+      crew: this.crewRolesOf(screen),
       status: {
         state: headerState,
         model: this.headerModel(screen),
         thread: this.headerThread(screen),
       },
-      pet: this.petOn && track.width > 0 ? { state, frame: clock.frame, pose: this.petPose } : null,
+      pet:
+        this.petOn && track.width > 0
+          ? { state, frame: clock.frame, look: petLook(this.petMemory, state) }
+          : null,
     });
     split.setHeader(scrollback === undefined ? frame : { ...frame, scrollback });
     if (animate && this.petOn && track.width > 0) this.petNext = { due: now + clock.remaining };
@@ -2027,7 +2076,6 @@ export class AppController {
       banner: startup.banner
         ? {
             version: startup.version,
-            server: this.deps.server ?? null,
             cwd: this.deps.cwd,
             home: this.deps.home ?? null,
           }
@@ -3686,6 +3734,7 @@ export class AppController {
       return;
     }
     this.petMemory = touchPet(this.petMemory, this.deps.now());
+    if (this.deps.selection?.selecting() === true) this.deps.selection.selectClear();
     if (event.type === "ctrl" && event.letter === "z") {
       this.deps.suspend?.();
       return;
@@ -3710,15 +3759,57 @@ export class AppController {
 
   /**
    * The wheel scrolls the conversation of the side-by-side layout, three rows a notch, while the
-   * chat is what is on screen. Clicks and drags are not used: they only reach the program because
-   * wheel reporting needs them on, and are dropped here.
+   * chat is what is on screen. The left button selects its text: press, drag, and on release the
+   * selection is copied (a click copies nothing). Anything covering the conversation (a picker, a
+   * panel) gets no mouse.
    */
   private handleMouse(event: Extract<KeyEvent, { type: "mouse" }>): void {
-    if (event.action !== "wheelUp" && event.action !== "wheelDown") return;
-    if (this.screen.kind !== "chat" || this.deps.split?.active() !== true) return;
-    if (this.picker !== null || this.stats !== null || this.prompt !== null) return;
-    if (this.crewView !== null || this.provider.isOpen()) return;
-    this.deps.region.scrollBy?.(event.action === "wheelUp" ? WHEEL_ROWS : -WHEEL_ROWS);
+    const covered =
+      this.picker !== null ||
+      this.stats !== null ||
+      this.prompt !== null ||
+      this.crewView !== null ||
+      this.provider.isOpen();
+    if (this.screen.kind !== "chat" || this.deps.split?.active() !== true || covered) {
+      this.deps.selection?.selectClear();
+      return;
+    }
+    const selection = this.deps.selection;
+    switch (event.action) {
+      case "wheelUp":
+      case "wheelDown":
+        this.deps.region.scrollBy?.(event.action === "wheelUp" ? WHEEL_ROWS : -WHEEL_ROWS);
+        return;
+      case "press":
+        selection?.selectStart(event.x, event.y);
+        return;
+      case "drag":
+        selection?.selectMove(event.x, event.y);
+        return;
+      case "release": {
+        const text = selection?.selectEnd(event.x, event.y) ?? null;
+        if (text !== null) this.copyToClipboard(text);
+        return;
+      }
+    }
+  }
+
+  /** Copies what the user selected and says how it went; a clipboard that fails shows only in the notice. */
+  private copyToClipboard(text: string): void {
+    const { clipboard } = this.deps;
+    if (clipboard === undefined) return;
+    void clipboard(text).then(
+      (outcome) => {
+        if (this.disposed) return;
+        this.notice = copyNotice(outcome);
+        this.render();
+      },
+      () => {
+        if (this.disposed) return;
+        this.notice = copyNotice({ chars: Array.from(text).length, osc52: "failed", tool: null });
+        this.render();
+      },
+    );
   }
 
   private handlePickerKey(
@@ -5212,6 +5303,7 @@ export class AppController {
       thread,
       leadModel: this.labelForModel(model.instanceId, model.model),
       board: this.crewBoardOf(screen),
+      crew: this.crewRolesOf(screen),
       // A new list of the same waiting threads is no change: the panel compares ids and kinds.
       waiting,
       leadWaiting: shell?.hasPendingApprovals

@@ -1,0 +1,26 @@
+{
+  "args": {
+    "text": "PLEASE IMPLEMENT THIS PLAN:\n# Plan\n- one",
+    "planId": "plan-1",
+    "runtimeMode": "full-access",
+    "interactionMode": "default"
+  },
+  "command": {
+    "type": "thread.turn.start",
+    "commandId": "cmd-1",
+    "threadId": "thread-1",
+    "message": {
+      "messageId": "msg-1",
+      "role": "user",
+      "text": "PLEASE IMPLEMENT THIS PLAN:\n# Plan\n- one",
+      "attachments": []
+    },
+    "runtimeMode": "full-access",
+    "interactionMode": "default",
+    "sourceProposedPlan": {
+      "threadId": "thread-1",
+      "planId": "plan-1"
+    },
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

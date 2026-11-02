@@ -76,6 +76,24 @@ pub fn turn_start(ctx: &Ctx, turn: &Turn) -> Value {
     command
 }
 
+/// A turn that builds a proposed plan (`/implement`): an ordinary turn start that also names the
+/// plan, so the server marks it built.
+pub fn turn_start_from_plan(ctx: &Ctx, turn: &Turn, plan_thread_id: &str, plan_id: &str) -> Value {
+    let mut command = turn_start(ctx, turn);
+    command["sourceProposedPlan"] = json!({"threadId": plan_thread_id, "planId": plan_id});
+    command
+}
+
+/// Rewinds the thread to the state after `turn_count` turns. With `restore_files` the folder goes
+/// back to that checkpoint too; without it only the conversation does.
+pub fn revert(ctx: &Ctx, thread_id: &str, turn_count: u64, restore_files: bool) -> Value {
+    json!({
+        "type": if restore_files { "thread.checkpoint.revert" } else { "thread.conversation.revert" },
+        "commandId": ctx.command_id, "threadId": thread_id, "turnCount": turn_count,
+        "createdAt": ctx.created_at,
+    })
+}
+
 /// Stops the running turn; without a turn id the server stops whichever is running.
 pub fn turn_interrupt(ctx: &Ctx, thread_id: &str, turn_id: Option<&str>) -> Value {
     let mut command = json!({"type": "thread.turn.interrupt", "commandId": ctx.command_id, "threadId": thread_id});
@@ -216,6 +234,39 @@ mod tests {
     }
 
     #[test]
+    fn implementing_a_plan_and_reverting_match_their_fixtures() {
+        let f = fixture("turn.start.implement-plan.json");
+        let a = &f["args"];
+        let built = turn_start_from_plan(
+            &ctx(),
+            &Turn {
+                thread_id: THREAD,
+                message_id: "msg-1",
+                text: str_of(&a["text"]),
+                model: None,
+                runtime_mode: str_of(&a["runtimeMode"]),
+                interaction_mode: str_of(&a["interactionMode"]),
+                bootstrap: None,
+            },
+            THREAD,
+            str_of(&a["planId"]),
+        );
+        assert_eq!(built, f["command"]);
+        for (name, restore) in [
+            ("checkpoint.revert.json", true),
+            ("conversation.revert.json", false),
+        ] {
+            let f = fixture(name);
+            let a = &f["args"];
+            assert_eq!(
+                revert(&ctx(), THREAD, a["turnCount"].as_u64().unwrap(), restore),
+                f["command"],
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
     fn interrupt_with_and_without_a_turn_matches() {
         let with = fixture("turn.interrupt.json");
         assert_eq!(
@@ -277,6 +328,8 @@ mod tests {
             names,
             [
                 "approval.respond.json",
+                "checkpoint.revert.json",
+                "conversation.revert.json",
                 "interaction-mode.set.json",
                 "project.create.json",
                 "runtime-mode.set.json",
@@ -284,6 +337,7 @@ mod tests {
                 "turn.interrupt.no-turn.json",
                 "turn.start.existing-with-model.json",
                 "turn.start.existing.json",
+                "turn.start.implement-plan.json",
                 "turn.start.new-thread.json",
                 "user-input.respond.json",
             ]

@@ -17,7 +17,8 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/resources/browser-secret/**/*",
   "!apps/desktop/prod-resources/browser-secret",
   "!apps/desktop/prod-resources/browser-secret/**/*",
-  // The terminal app is one loose file that ships once, at resources/oop/oop.mjs.
+  // The terminal app ships once, loose, in resources/oop (oop.mjs, and the Rust client with
+  // OOP Terminal.app when a build carries them).
   "!apps/desktop/resources/oop",
   "!apps/desktop/resources/oop/**/*",
   "!apps/desktop/prod-resources/oop",
@@ -167,6 +168,53 @@ export const bundlesTerminalApp = (input: {
   readonly platform: BuildPlatform;
   readonly oopBrand: boolean;
 }): boolean => input.oopBrand && input.platform !== "linux";
+
+// The Rust terminal client (apps/oop-tui-rs) ships next to oop.mjs, and on macOS the native
+// terminal program (apps/oop-terminal, `OOP Terminal.app`) ships inside the same folder. Both are
+// optional inputs: the release script that built them names them with OOP_RS_BIN and
+// OOP_TERMINAL_APP, and a build without them keeps the TypeScript terminal alone.
+export const RUST_CLIENT_BINARY_SOURCE = "apps/oop-tui-rs/target/release/oop-rs";
+export const TERMINAL_APP_BUNDLE_NAME = "OOP Terminal.app";
+export const rustClientBinaryName = (platform: BuildPlatform): string =>
+  platform === "win" ? "oop-rs.exe" : "oop-rs";
+
+export interface RustClientSources {
+  readonly oopRs: string | undefined;
+  readonly terminalApp: string | undefined;
+}
+
+/**
+ * Which Rust pieces a build can stage. `oopRs` is OOP_RS_BIN, else the default `cargo build
+ * --release` output of apps/oop-tui-rs; `terminalApp` is OOP_TERMINAL_APP and only counts on macOS.
+ * A named path that does not exist is an error (the release script said it built it); an unnamed
+ * default that is missing just means a TypeScript-only build.
+ */
+export const resolveRustClientSources = (input: {
+  readonly repoRoot: string;
+  readonly platform: BuildPlatform;
+  readonly env: Readonly<Record<string, string | undefined>>;
+  readonly exists: (path: string) => boolean;
+  readonly join: (...parts: ReadonlyArray<string>) => string;
+}): RustClientSources => {
+  const named = (name: string): string | undefined => input.env[name]?.trim() || undefined;
+  const explicitBinary = named("OOP_RS_BIN");
+  const defaultBinary = input.join(
+    input.repoRoot,
+    "apps/oop-tui-rs/target/release",
+    rustClientBinaryName(input.platform),
+  );
+  const oopRs = explicitBinary ?? (input.exists(defaultBinary) ? defaultBinary : undefined);
+  const terminalApp = input.platform === "mac" ? named("OOP_TERMINAL_APP") : undefined;
+  for (const [name, path] of [
+    ["OOP_RS_BIN", explicitBinary],
+    ["OOP_TERMINAL_APP", terminalApp],
+  ] as const) {
+    if (path !== undefined && !input.exists(path)) {
+      throw new Error(`${name} names ${path}, which does not exist.`);
+    }
+  }
+  return { oopRs, terminalApp };
+};
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/hyprland-capture",

@@ -152,6 +152,16 @@ describe("KeyParser mouse reports", () => {
     expect(parser.feed("2;7M")).toEqual([{ type: "mouse", action: "wheelUp", x: 12, y: 7 }]);
   });
 
+  it("reports a drag only for the left button, and drops the middle and right buttons and bare motion", () => {
+    const parser = new KeyParser();
+    // 1 and 2 are the middle and right buttons, 33 and 34 their drags, 35 motion with none down.
+    for (const code of [1, 2, 33, 34, 35]) {
+      expect(parser.feed(`\u001b[<${code};5;6M`)).toEqual([]);
+    }
+    expect(parser.feed("\u001b[<2;5;6m")).toEqual([]);
+    expect(parser.feed("\u001b[<36;5;6M")).toEqual([{ type: "mouse", action: "drag", x: 5, y: 6 }]);
+  });
+
   it("drops a button report it does not use without disturbing the keys around it", () => {
     const parser = new KeyParser();
     expect(parser.feed("\u001b[<66;1;1Ma")).toEqual([{ type: "text", text: "a" }]);

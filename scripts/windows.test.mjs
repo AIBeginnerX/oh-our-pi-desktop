@@ -10,6 +10,7 @@ import {
   autoBuildDecision,
   autoBuildSource,
   buildDriveSource,
+  buildRustClient,
   copyRunnerLog,
   driveRootCandidates,
   moveTaskToRunner,
@@ -335,4 +336,51 @@ NodeTest.test("moves the task off the NAS only once Drive carries the build", ()
     moveTaskToRunner({ source: "nas", fromRunner: false, decision: "up-to-date", built: false }),
     false,
   );
+});
+
+NodeTest.test("the Windows Rust client build is best effort and never fails the release", () => {
+  const checkout = NodePath.join("C:", "cache", "checkout");
+  const dir = NodePath.join(checkout, "apps", "oop-tui-rs");
+  const binary = NodePath.join(dir, "target", "release", "oop-rs.exe");
+  const files = new Set([
+    NodePath.join(dir, "Cargo.toml"),
+    NodePath.join(dir, "Cargo.lock"),
+    binary,
+  ]);
+  const build = ({ env = {}, cargo = "cargo 1.80", printed = "1.2.3", fail, has = files } = {}) => {
+    const runs = [];
+    const result = buildRustClient(checkout, env, "1.2.3", {
+      exists: (target) => has.has(target),
+      probe: (command) => (command === "cargo" ? cargo : printed),
+      runCargo: (args, options) => {
+        runs.push({ args, options });
+        if (fail) throw new Error(fail);
+      },
+    });
+    return { result, runs };
+  };
+
+  const ok = build();
+  NodeAssert.deepEqual(ok.result, { reason: undefined, env: { OOP_RS_BIN: binary } });
+  NodeAssert.deepEqual(ok.runs[0].args, ["build", "--release", "--locked"]);
+  NodeAssert.equal(ok.runs[0].options.cwd, dir);
+  NodeAssert.equal(ok.runs[0].options.env.OOP_VERSION, "1.2.3");
+
+  const skipped = build({ env: { OOP_SKIP_RUST: "1" } });
+  NodeAssert.match(skipped.result.reason, /OOP_SKIP_RUST/);
+  NodeAssert.equal(skipped.runs.length, 0);
+  NodeAssert.match(
+    build({ has: new Set() }).result.reason,
+    /no apps\/oop-tui-rs|no apps.oop-tui-rs/,
+  );
+  NodeAssert.match(build({ cargo: "" }).result.reason, /cargo is not installed/);
+  NodeAssert.match(
+    build({ fail: "linker not found" }).result.reason,
+    /cargo build failed \(linker not found\)/,
+  );
+  NodeAssert.match(build({ printed: "0.0.1" }).result.reason, /prints "0\.0\.1", not 1\.2\.3/);
+  const noBinary = build({ has: new Set([NodePath.join(dir, "Cargo.toml")]) });
+  NodeAssert.deepEqual(noBinary.result.env, {});
+  NodeAssert.deepEqual(noBinary.runs[0].args, ["build", "--release"]);
+  NodeAssert.match(noBinary.result.reason, /prints "", not 1\.2\.3/);
 });

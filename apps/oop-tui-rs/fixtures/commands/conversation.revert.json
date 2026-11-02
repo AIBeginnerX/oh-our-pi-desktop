@@ -1,0 +1,12 @@
+{
+  "args": {
+    "turnCount": 1
+  },
+  "command": {
+    "type": "thread.conversation.revert",
+    "commandId": "cmd-1",
+    "threadId": "thread-1",
+    "turnCount": 1,
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}

@@ -30,10 +30,11 @@ pub fn backoff(attempt: u32, jitter: f64) -> Duration {
 pub async fn connect_once(
     home: &std::path::Path,
     isolated: bool,
+    server: Option<&str>,
     version: &str,
     progress: impl Fn(&str) + Copy,
 ) -> Result<Session, String> {
-    let found = server::resolve(home, isolated, progress).await?;
+    let found = server::resolve(home, isolated, server, progress).await?;
     let bearer = server::bearer_for(&found, home, progress).await?;
     let url = server::websocket_url(&found, &bearer, version).await?;
     let rpc = Rpc::connect(&url).await?;
@@ -56,7 +57,13 @@ fn jitter() -> f64 {
     ) / 1000.0
 }
 
-pub async fn supervise(home: PathBuf, isolated: bool, version: String, tx: UnboundedSender<Msg>) {
+pub async fn supervise(
+    home: PathBuf,
+    isolated: bool,
+    server: Option<String>,
+    version: String,
+    tx: UnboundedSender<Msg>,
+) {
     let mut attempt = 0u32;
     let mut ever_online = false;
     loop {
@@ -68,41 +75,43 @@ pub async fn supervise(home: PathBuf, isolated: bool, version: String, tx: Unbou
         let progress = |what: &str| {
             let _ = tx.send(Msg::Link(LinkStatus::Starting(what.to_string())));
         };
-        let reason = match connect_once(&home, isolated, &version, progress).await {
-            Ok(session) => {
-                ever_online = true;
-                let started = Instant::now();
-                let server = session
-                    .found
-                    .origin
-                    .trim_start_matches("http://")
-                    .to_string();
-                let _ = tx.send(Msg::Connected {
-                    rpc: session.rpc.clone(),
-                    config: session.config,
-                    server,
-                    origin: session.found.origin.clone(),
-                    bearer: session.bearer.clone(),
-                });
-                let reason = session.rpc.closed().await;
-                attempt = if started.elapsed() >= STABLE_SESSION {
-                    1
-                } else {
-                    attempt + 1
-                };
-                reason
-            }
-            Err(error) => {
-                // Before the first connection an error means something to fix (no app to start a
-                // server from, a login that cannot be made); retrying would only repeat it.
-                if !ever_online {
-                    let _ = tx.send(Msg::Link(LinkStatus::Failed(error)));
-                    return;
+        let reason =
+            match connect_once(&home, isolated, server.as_deref(), &version, progress).await {
+                Ok(session) => {
+                    ever_online = true;
+                    let started = Instant::now();
+                    let server = session
+                        .found
+                        .origin
+                        .trim_start_matches("https://")
+                        .trim_start_matches("http://")
+                        .to_string();
+                    let _ = tx.send(Msg::Connected {
+                        rpc: session.rpc.clone(),
+                        config: session.config,
+                        server,
+                        origin: session.found.origin.clone(),
+                        bearer: session.bearer.clone(),
+                    });
+                    let reason = session.rpc.closed().await;
+                    attempt = if started.elapsed() >= STABLE_SESSION {
+                        1
+                    } else {
+                        attempt + 1
+                    };
+                    reason
                 }
-                attempt += 1;
-                error
-            }
-        };
+                Err(error) => {
+                    // Before the first connection an error means something to fix (no app to start a
+                    // server from, a login that cannot be made); retrying would only repeat it.
+                    if !ever_online {
+                        let _ = tx.send(Msg::Link(LinkStatus::Failed(error)));
+                        return;
+                    }
+                    attempt += 1;
+                    error
+                }
+            };
         let wait = backoff(attempt, jitter());
         let _ = tx.send(Msg::Link(LinkStatus::Reconnecting(format!(
             "{reason}; retrying in {}s",

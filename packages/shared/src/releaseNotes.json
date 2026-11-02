@@ -1,6 +1,28 @@
 {
   "versions": [
     {
+      "version": "0.0.136",
+      "date": "2026-11-02",
+      "highlights": [
+        {
+          "en": "Meet OOP Terminal, a standalone Rust terminal app that opens straight into OOP and lets you split panes up, down, left and right.",
+          "ko": "독립 실행 Rust 터미널 앱 OOP Terminal이 추가되었습니다. 실행하면 바로 OOP가 열리고 상하좌우로 화면을 나눌 수 있습니다."
+        },
+        {
+          "en": "On macOS and Linux the oop command now runs the new Rust client, with the previous terminal app as a fallback. Windows keeps the current terminal app.",
+          "ko": "macOS와 Linux의 oop 명령이 새 Rust 클라이언트로 실행되고, 기존 터미널 앱은 대체 수단으로 남습니다. Windows는 기존 터미널 앱을 그대로 씁니다."
+        },
+        {
+          "en": "Terminal text you drag over is copied automatically, your messages appear in a box in their own color, the top bar shows each crew role's model and no longer shows the server address.",
+          "ko": "터미널에서 드래그한 글자가 자동으로 복사되고, 내 메시지는 전용 색의 박스로 표시됩니다. 상단에는 크루 역할별 모델이 표시되고 서버 주소는 더 이상 나오지 않습니다."
+        },
+        {
+          "en": "Mocha, a new coffee mug pet, replaces Oo. Its coffee takes the color of the active provider.",
+          "ko": "새 커피잔 펫 모카가 Oo를 대신합니다. 커피 색은 사용 중인 프로바이더에 따라 바뀝니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.135",
       "date": "2026-11-02",
       "highlights": [
