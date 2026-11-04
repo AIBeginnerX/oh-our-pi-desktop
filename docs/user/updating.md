@@ -81,8 +81,6 @@ Provider update checks and restart continuation preferences are in
 **Settings → Maintenance**. If provider update checks are disabled, enable them
 there before refreshing to find newer versions.
 
-Install App Store or Google Play releases as usual. The mobile app can also
-download updates in the background and apply them when you next leave the app.
-It saves drafts and queued messages before restarting. If you keep the app open
-for a long time, it may ask to install immediately; choosing **Later** leaves the
-update queued for the next suitable moment.
+The React Native app installs App Store or Google Play releases and downloads
+updates in the background. That app is no longer the supported phone surface; on
+the relay mobile web, reload the page to get the current web app.

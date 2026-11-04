@@ -43,12 +43,9 @@ import {
   OpenCodeRuntimeError,
   type OpenCodeRuntimeShape,
 } from "../opencodeRuntime.ts";
-import {
-  isOpenCodeNotFound,
-  isSameOpenCodeDirectory,
-  makeOpenCodeAdapter,
-  mergeOpenCodeAssistantText,
-} from "./OpenCodeAdapter.ts";
+import { makeOpenCodeAdapter } from "./OpenCodeAdapter.ts";
+import { isOpenCodeNotFound, isSameOpenCodeDirectory } from "./OpenCodeAdapter.state.ts";
+import { mergeOpenCodeAssistantText } from "./OpenCodeAdapter.helpers.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
 // Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.

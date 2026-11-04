@@ -3,6 +3,8 @@
 #   scripts/bundle-macos.sh              -> target/release/OOP Terminal.app
 #   PROFILE=debug scripts/bundle-macos.sh -> target/debug/OOP Terminal.app (자동 조종 훅 포함)
 #   OOP_RS_BIN=/path/to/oop-rs ...        -> 번들 Contents/Resources 에 oop-rs 를 복사
+#   OOP_VERSION=X.Y.Z ...                 -> 번들 버전. 릴리스 빌드는 앱 버전과 같게 넘긴다
+#                                            (없으면 Cargo.toml 의 crate 버전)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,8 +12,13 @@ REPO="$(cd "$ROOT/../.." && pwd)"
 PROFILE="${PROFILE:-release}"
 APP_NAME="OOP Terminal"
 BUNDLE_ID="com.oop.terminal"
-VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
-ICON_SRC="$REPO/assets/oop/oop-macos-1024.png"
+VERSION="${OOP_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)}"
+# 값이 Info.plist 에 그대로 들어가므로 숫자 점 표기가 아니면 거절한다.
+if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  echo "버전이 X.Y.Z 형식이 아닙니다: $VERSION" >&2
+  exit 1
+fi
+ICON_SRC="$REPO/assets/oop/oop-terminal-macos-1024.png"
 
 cd "$ROOT"
 if [ "$PROFILE" = release ]; then
@@ -25,7 +32,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/target/$PROFILE/oop-terminal" "$APP/Contents/MacOS/oop-terminal"
 
-# 아이콘: 저장소의 OOP 아이콘 PNG -> icns
+# 아이콘: 저장소의 터미널 전용 OOP 아이콘(우상단 작은 T) PNG -> icns
 if [ -f "$ICON_SRC" ]; then
   SET="$(mktemp -d)/AppIcon.iconset"
   mkdir -p "$SET"

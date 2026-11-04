@@ -30,11 +30,9 @@ import {
 } from "@t3tools/contracts";
 import { ServerConfig } from "../config.ts";
 import { gitCommandDuration } from "../observability/Metrics.ts";
-import {
-  makeGitVcsDriverCore,
-  parseGitCheckoutProgressLine,
-  splitNullSeparatedGitStdoutPaths,
-} from "./GitVcsDriverCore.ts";
+import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
+import { parseGitCheckoutProgressLine } from "./gitTrace2.ts";
+import { splitNullSeparatedGitStdoutPaths } from "./gitOutputParsers.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 
 const encodeGitCommandError = Schema.encodeEffect(Schema.fromJsonString(GitCommandError));

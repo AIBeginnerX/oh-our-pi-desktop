@@ -247,7 +247,8 @@ export class ProviderMemoryHandoffRefusedError extends Schema.TaggedError<Provid
 /**
  * ProviderSkillTrialHandoffRefusedError - A send carrying a skill-trial
  * delivery claim was refused: a memory and a skill-trial handoff arrived on
- * the same send (`conflicting-handoff`), the asynchronous claim declined or
+ * the same send (`conflicting-handoff`), the adapter does not run skill trials
+ * (`trials-unsupported`), the asynchronous claim declined or
  * its receipt was lost (`claim-refused`), or the routed instance, binding, or
  * registry adapter re-observed after a committed claim no longer matches the
  * frozen route (`binding-changed`). Carries no foreign cause so details of an
@@ -258,7 +259,12 @@ export class ProviderSkillTrialHandoffRefusedError extends Schema.TaggedError<Pr
   {
     operation: Schema.String,
     threadId: Schema.String,
-    reason: Schema.Literals(["binding-changed", "claim-refused", "conflicting-handoff"]),
+    reason: Schema.Literals([
+      "binding-changed",
+      "claim-refused",
+      "conflicting-handoff",
+      "trials-unsupported",
+    ]),
   },
 ) {
   override get message(): string {

@@ -21,8 +21,10 @@ import type { Connection } from "effect/unstable/sql/SqlConnection";
 import { SqlError, classifySqliteError } from "effect/unstable/sql/SqlError";
 import * as Statement from "effect/unstable/sql/Statement";
 
+import { PROJECT_MEMORY_SEND_DRIVER_KINDS } from "../memory/ProjectMemorySendProviders.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
 import {
+  MEMORY_ECHO_PROVIDER_COVERAGE,
   MEMORY_ECHO_WITHHELD_ERROR,
   MEMORY_ECHO_WITHHELD_NOTICE,
   carriesMemoryEchoField,
@@ -760,6 +762,103 @@ describe("A-ECHO-1 memoryEcho", () => {
         assert.isFalse(carriesMemoryEchoField(emptyError));
         assert.strictEqual(withholdMemoryEcho(emptyError), emptyError);
       }),
+    );
+  });
+});
+
+describe("memoryEcho per provider", () => {
+  const thread = ThreadId.make("thread-codex-echo");
+  const mark = "CODEX-ECHO-MARK-5d2b";
+  const codexBase = {
+    provider: ProviderDriverKind.make("codex"),
+    threadId: thread,
+    createdAt: NOW,
+    turnId: TurnId.make("turn-codex"),
+  };
+
+  it("has a coverage decision for every driver allowed to receive memory", () => {
+    for (const driver of PROJECT_MEMORY_SEND_DRIVER_KINDS) {
+      assert.isDefined(MEMORY_ECHO_PROVIDER_COVERAGE[driver], `no echo coverage for ${driver}`);
+    }
+  });
+
+  it("withholds every Codex shape that persists provider text, and keeps ids and typed data", () => {
+    const events: ReadonlyArray<ProviderRuntimeEvent> = [
+      // `error` notification that will not retry, and fatal `process/stderr`.
+      {
+        ...codexBase,
+        type: "runtime.error",
+        eventId: EventId.make("codex-error"),
+        payload: { message: `quota ${mark}`, class: "provider_error", detail: { error: mark } },
+      },
+      // `error` notification with willRetry, and non-fatal `process/stderr`.
+      {
+        ...codexBase,
+        type: "runtime.warning",
+        eventId: EventId.make("codex-warning"),
+        payload: { message: `retrying ${mark}`, detail: { stderr: mark } },
+      },
+      // `turn/completed` carrying the turn's error.
+      {
+        ...codexBase,
+        type: "turn.completed",
+        eventId: EventId.make("codex-turn"),
+        payload: { state: "failed", errorMessage: `failed ${mark}` },
+      },
+      // systemError thread status.
+      {
+        ...codexBase,
+        type: "session.state.changed",
+        eventId: EventId.make("codex-session"),
+        payload: { state: "error", reason: `system ${mark}`, detail: { status: mark } },
+      },
+      // Failed collab-agent task.
+      {
+        ...codexBase,
+        type: "task.updated",
+        eventId: EventId.make("codex-task"),
+        payload: { taskId: RuntimeTaskId.make("task-1"), error: `child ${mark}` },
+      },
+      {
+        ...codexBase,
+        type: "task.completed",
+        eventId: EventId.make("codex-task-done"),
+        payload: {
+          taskId: RuntimeTaskId.make("task-1"),
+          status: "failed",
+          summary: `child failed ${mark}`,
+        },
+      },
+    ];
+    for (const event of events) {
+      assert.isTrue(carriesMemoryEchoField(event), event.type);
+      const withheld = withholdMemoryEcho(event);
+      assert.notInclude(JSON.stringify(withheld), mark, event.type);
+      assert.equal(withheld.eventId, event.eventId);
+      assert.equal(withheld.threadId, event.threadId);
+    }
+  });
+
+  it("does not mask ordinary Codex output, and Claude's snapshot shape is Claude-only", () => {
+    const text: Extract<ProviderRuntimeEvent, { type: "content.delta" }> = {
+      ...codexBase,
+      type: "content.delta",
+      eventId: EventId.make("codex-text"),
+      payload: { streamKind: "assistant_text", delta: `answer ${mark}` },
+    };
+    assert.isFalse(carriesMemoryEchoField(text));
+    // The same raw frame that masks a Claude snapshot means nothing on another driver.
+    const claudeShaped = {
+      ...text,
+      raw: {
+        source: "claude.sdk.message" as const,
+        method: "claude/assistant",
+        payload: { type: "assistant", error: "boom" },
+      },
+    };
+    assert.isFalse(carriesMemoryEchoField(claudeShaped));
+    assert.isTrue(
+      carriesMemoryEchoField({ ...claudeShaped, provider: ProviderDriverKind.make("claudeAgent") }),
     );
   });
 });

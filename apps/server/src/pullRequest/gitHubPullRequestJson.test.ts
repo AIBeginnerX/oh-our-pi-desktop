@@ -2,10 +2,8 @@ import * as Result from "effect/Result";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  buildPullRequestSummariesGraphQlQuery,
   decodePullRequestSummariesJson,
   buildReviewSubmissionJson,
-  buildPullRequestStackMembershipsGraphQlQuery,
   decodePullRequestStackMembershipsJson,
   buildReviewerRequestJson,
   buildSetFilesViewedGraphQlMutation,
@@ -25,9 +23,13 @@ import {
   decodeViewerPermissionsJson,
   decodeWorkflowRunApprovalsJson,
   reviewThreadConversation,
+} from "./gitHubPullRequestJson.ts";
+import {
+  buildPullRequestSummariesGraphQlQuery,
+  buildPullRequestStackMembershipsGraphQlQuery,
   REVIEW_THREADS_GRAPHQL_QUERY,
   pullRequestSearchGraphQlQuery,
-} from "./gitHubPullRequestJson.ts";
+} from "./gitHubGraphQlQueries.ts";
 
 function listJson(entries: ReadonlyArray<Record<string, unknown>>): string {
   return JSON.stringify(

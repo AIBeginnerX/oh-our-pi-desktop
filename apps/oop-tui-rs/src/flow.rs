@@ -32,8 +32,12 @@ pub struct FlowInput<'a> {
     pub lead_model: Option<String>,
     pub crew: Option<&'a [CrewRoleModel]>,
     pub lead_waiting: Option<Waiting>,
+    /// What the lead's session cost in the work the panes show (`work_scope`).
+    pub lead_cost: Option<f64>,
     /// The thread is open but has not been received yet.
     pub loading: bool,
+    /// A request was just sent and its message has not come back, so no work of it exists yet.
+    pub pending: bool,
     pub now_ms: i64,
     /// 250 ms animation tick; picks the spinner glyph of a running mark.
     pub tick: usize,
@@ -135,7 +139,7 @@ fn tool_counts(categories: impl IntoIterator<Item = Option<Cat>>) -> Vec<ToolCou
 
 /// What a tool call counts as; `None` for calls that are not tool work (they launch agents, are
 /// crew plumbing, or planning).
-fn tool_category(name: &str, kind: &Value, item_type: &Value) -> Option<Cat> {
+pub(crate) fn tool_category(name: &str, kind: &Value, item_type: &Value) -> Option<Cat> {
     let mut tool = name.to_lowercase();
     if tool.starts_with("mcp__")
         && let Some(at) = tool.rfind("__").filter(|at| *at >= 5)
@@ -181,7 +185,7 @@ fn tool_category(name: &str, kind: &Value, item_type: &Value) -> Option<Cat> {
     Some(Cat::Other)
 }
 
-fn tool_name(payload: &Value) -> Option<String> {
+pub(crate) fn tool_name(payload: &Value) -> Option<String> {
     let data = &payload["data"];
     if let Some(named) = txt(&data["toolName"], 80) {
         return Some(named);
@@ -222,11 +226,11 @@ fn tool_state(status: &Value) -> NodeState {
     }
 }
 
-/// The state a `task.*` activity gives its step, if it says one.
-fn task_state(kind: &str, status: &Value) -> Option<NodeState> {
-    let status = status.as_str();
+/// The state a `task.*` activity gives its step, if it says one. `status` is the payload's own
+/// field: absent is not the same as null or a non-string, which the TypeScript reads as stopped.
+fn task_state(kind: &str, status: Option<&Value>) -> Option<NodeState> {
     if kind == "task.completed" || (kind == "task.updated" && status.is_some()) {
-        return Some(match status {
+        return Some(match status.and_then(Value::as_str) {
             Some("completed") => NodeState::Completed,
             Some("failed" | "partial" | "blocked") => NodeState::Failed,
             _ => NodeState::Cancelled,
@@ -250,7 +254,7 @@ pub enum AgentStatus {
 }
 
 impl AgentStatus {
-    fn parse(text: &str) -> Option<Self> {
+    pub(crate) fn parse(text: &str) -> Option<Self> {
         Some(match text {
             "pending" => Self::Pending,
             "running" => Self::Running,
@@ -1043,7 +1047,7 @@ fn collect_tool_steps(activities: &[Activity]) -> Vec<TurnSteps> {
         {
             step.tokens = Some(tokens);
         }
-        if let Some(state) = task_state(&activity.kind, &payload["status"]) {
+        if let Some(state) = task_state(&activity.kind, payload.get("status")) {
             step.state = state;
             step.completed_at = (state != NodeState::Running).then(|| activity.created_at.clone());
             if state == NodeState::Failed {
@@ -1080,6 +1084,26 @@ pub enum Evidence {
     Audited,
 }
 
+/// Whether the server could verify a finished task, from the `proof` of its `task.completed`
+/// activity. A task from an older server has none, which proves nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Proof {
+    Verified,
+    NotVerified,
+    Inconclusive,
+}
+
+impl Proof {
+    fn from_payload(value: &Value) -> Option<Proof> {
+        match value.as_str()? {
+            "verified" => Some(Proof::Verified),
+            "not-verified" => Some(Proof::NotVerified),
+            "inconclusive" => Some(Proof::Inconclusive),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CrewUsage {
     tokens: u64,
@@ -1101,7 +1125,9 @@ struct CrewStep {
     outcome: Option<String>,
     tested: bool,
     verdict: Option<String>,
+    proof: Option<Proof>,
     usage: Option<CrewUsage>,
+    todos: Option<CrewTodos>,
 }
 
 /// The crew tasks of every lead turn, folded from the lead's task activities.
@@ -1137,7 +1163,9 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
                     outcome: None,
                     tested: false,
                     verdict: None,
+                    proof: None,
                     usage: None,
+                    todos: None,
                 },
             ));
             tasks.len() - 1
@@ -1153,6 +1181,20 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
         if let Some(thread_id) = txt(&payload["threadId"], 200) {
             task.thread_id = Some(thread_id);
         }
+        // The last write wins, but the final report's counts stay once it has come.
+        if task.outcome.is_none()
+            && matches!(activity.kind.as_str(), "task.progress" | "task.completed")
+            && let Some(todos) = CrewTodos::from_payload(payload)
+        {
+            task.todos = Some(todos);
+        }
+        // A stop was asked for; the final report follows once the member has wound down.
+        if activity.kind == "task.progress"
+            && task.outcome.is_none()
+            && payload["status"].as_str() == Some("stopped")
+        {
+            task.state = NodeState::Cancelled;
+        }
         if activity.kind == "task.completed" {
             // A crew report that stopped partway (partial, blocked) did not finish its task.
             task.state = match payload["status"].as_str() {
@@ -1163,6 +1205,7 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
             task.outcome = txt(&payload["status"], 20);
             task.tested = payload["tested"].as_bool() == Some(true);
             task.verdict = txt(&payload["verdict"], 20);
+            task.proof = Proof::from_payload(&payload["proof"]);
             let usage = &payload["usage"];
             task.usage = match (count(&usage["inputTokens"]), count(&usage["outputTokens"])) {
                 (Some(input), Some(output)) => Some(CrewUsage {
@@ -1828,6 +1871,48 @@ pub struct CrewTaskActions {
     pub retry: bool,
 }
 
+/// A crew task's TODO items by how far they got, from the server's `todo*` fields. What is
+/// neither verified, claimed, failed nor blocked is pending.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CrewTodos {
+    pub total: usize,
+    pub verified: usize,
+    pub claimed: usize,
+    pub failed: usize,
+    pub blocked: usize,
+    /// Files the task touched outside its scope (listed plus `more`).
+    pub out_of_scope: usize,
+}
+
+impl CrewTodos {
+    /// `None` for a payload without a positive `todoTotal`: such a task has no items.
+    fn from_payload(payload: &Value) -> Option<CrewTodos> {
+        let total = count(&payload["todoTotal"]).filter(|n| *n > 0)? as usize;
+        let field = |key: &str| count(&payload[key]).unwrap_or(0) as usize;
+        let scope = &payload["outOfScope"];
+        let files = scope["files"].as_array().map_or(0, Vec::len);
+        Some(CrewTodos {
+            total,
+            verified: field("todoVerified"),
+            claimed: field("todoClaimed"),
+            failed: field("todoFailed"),
+            blocked: field("todoBlocked"),
+            out_of_scope: files + count(&scope["more"]).unwrap_or(0) as usize,
+        })
+    }
+
+    /// Items counted as finished: verified or claimed, never more than the total. Drives the
+    /// lighter part of a two-tone bar and when the run glow stops; the percent counts `proven`.
+    pub fn finished(&self) -> usize {
+        (self.verified + self.claimed).min(self.total)
+    }
+
+    /// Items the server proved, never more than the total. A member's claim is not proof.
+    pub fn proven(&self) -> usize {
+        self.verified.min(self.total)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CrewTask {
     pub task_id: String,
@@ -1846,7 +1931,12 @@ pub struct CrewTask {
     pub tokens: Option<u64>,
     pub cost: Option<f64>,
     pub evidence: Option<Evidence>,
+    /// Whether the server could verify the finished task; `None` while it runs and from an
+    /// older server.
+    pub proof: Option<Proof>,
     pub actions: CrewTaskActions,
+    /// The latest TODO counts; `None` for a task that has no TODO list.
+    pub todos: Option<CrewTodos>,
     started_at: f64,
 }
 
@@ -1946,6 +2036,8 @@ pub fn crew_board(thread: &Thread, running: bool) -> Option<CrewBoard> {
             tokens: step.usage.map(|u| u.tokens),
             cost: step.usage.and_then(|u| u.cost),
             evidence: crew.evidence.get(&step.id).copied(),
+            proof: step.proof,
+            todos: step.todos,
             started_at: parse_iso_ms(&step.started_at).map_or(0.0, |v| v as f64),
         }
     };
@@ -2327,4 +2419,204 @@ pub fn is_crew_sub_thread(thread: &ThreadShell) -> bool {
         || ["Worker", "Expert", "Auditor"]
             .iter()
             .any(|role| thread.title.starts_with(&format!("Crew {role} · ")))
+}
+
+/// Golden vectors: `scripts/export-fixtures.mjs` feeds named inputs to the TypeScript
+/// `packages/client-runtime` (threadFlow.ts, crewBoard.ts) and writes what it answers to
+/// `fixtures/vectors/`. Each test runs the same inputs through the Rust port and compares.
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Map, json};
+    use std::path::Path;
+
+    fn vector(name: &str) -> Vec<Value> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures")
+            .join("vectors")
+            .join(name);
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        let mut file: Value = serde_json::from_str(&text).unwrap();
+        let Value::Array(cases) = file["cases"].take() else {
+            panic!("{path:?}: no cases");
+        };
+        assert!(!cases.is_empty(), "{path:?}: empty");
+        cases
+    }
+
+    fn lower(value: impl std::fmt::Debug) -> String {
+        format!("{value:?}").to_lowercase()
+    }
+
+    /// Drops nulls so an absent TS field and a `None` compare equal.
+    fn compact(value: Value) -> Value {
+        match value {
+            Value::Object(map) => Value::Object(
+                map.into_iter()
+                    .filter(|(_, v)| !v.is_null())
+                    .map(|(k, v)| (k, compact(v)))
+                    .collect(),
+            ),
+            Value::Array(items) => Value::Array(items.into_iter().map(compact).collect()),
+            other => other,
+        }
+    }
+
+    fn thread_of(case: &Value) -> Thread {
+        serde_json::from_value(case["thread"].clone())
+            .unwrap_or_else(|e| panic!("{}: thread: {e}", case["name"]))
+    }
+
+    fn proof_name(proof: Proof) -> &'static str {
+        match proof {
+            Proof::Verified => "verified",
+            Proof::NotVerified => "not-verified",
+            Proof::Inconclusive => "inconclusive",
+        }
+    }
+
+    fn doing_name(doing: Doing) -> String {
+        match doing {
+            Doing::Tool(cat) => lower(cat),
+            Doing::Thinking => "thinking".to_string(),
+            Doing::Waiting => "waiting".to_string(),
+        }
+    }
+
+    fn node_json(node: &Node) -> Value {
+        let mut value = json!({
+            "id": node.id,
+            "state": lower(node.state),
+            "wave": node.wave,
+            "role": lower(node.role),
+            "task": node.task,
+            "model": node.model,
+            "progress": node.progress,
+            "startedAt": node.started_at,
+            "completedAt": node.completed_at,
+            "tokens": node.tokens,
+            "costUsd": node.cost,
+            "evidence": node.evidence.map(lower),
+            "outcome": node.outcome,
+            "error": node.error,
+        });
+        if let Some(main) = &node.main {
+            let tools: Vec<Value> = main
+                .tools
+                .iter()
+                .map(|(cat, count)| json!({"category": lower(cat), "count": count}))
+                .collect();
+            let object: &mut Map<String, Value> = value.as_object_mut().unwrap();
+            object.insert("tools".into(), Value::Array(tools));
+            object.insert("doing".into(), json!(main.doing.map(doing_name)));
+            object.insert("delegated".into(), json!(main.delegated));
+        }
+        value
+    }
+
+    fn graph_json(graph: &Graph) -> Value {
+        json!({
+            "id": graph.id,
+            "kind": lower(graph.kind),
+            "name": graph.name,
+            "status": lower(graph.status),
+            "turnIndex": graph.turn_index,
+            "startedAt": graph.started_at,
+            "updatedAt": graph.updated_at,
+            "waveTitles": graph.wave_titles,
+            "nodes": graph.nodes.iter().map(node_json).collect::<Vec<_>>(),
+            "edges": graph.edges.iter().map(|(a, b)| json!([a, b])).collect::<Vec<_>>(),
+        })
+    }
+
+    #[test]
+    fn vector_tool_state_matches_ts() {
+        for case in vector("tool-state.json") {
+            let status = case.get("status").cloned().unwrap_or(Value::Null);
+            assert_eq!(
+                lower(tool_state(&status)),
+                case["expected"].as_str().unwrap(),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn vector_task_state_matches_ts() {
+        for case in vector("task-state.json") {
+            let kind = case["kind"].as_str().unwrap();
+            let got = task_state(kind, case.get("status")).map(lower);
+            assert_eq!(
+                got.as_deref(),
+                case["expected"].as_str(),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn vector_crew_board_matches_ts() {
+        for case in vector("crew-board.json") {
+            let name = case["name"].as_str().unwrap();
+            let thread = thread_of(&case);
+            let running = thread
+                .session
+                .as_ref()
+                .is_some_and(|s| s.status == "running");
+            let got = crew_board(&thread, running).map(|board| {
+                let tasks: Vec<Value> = board
+                    .tasks
+                    .iter()
+                    .map(|t| {
+                        json!({
+                            "taskId": t.task_id,
+                            "role": t.role,
+                            "phase": lower(t.phase),
+                            "evidence": t.evidence.map(lower),
+                            "proof": t.proof.map(proof_name),
+                            "tokens": t.tokens,
+                            "costUsd": t.cost,
+                            "todos": t.todos.map(|d| json!({
+                                "total": d.total,
+                                "verified": d.verified,
+                                "claimed": d.claimed,
+                                "failed": d.failed,
+                                "blocked": d.blocked,
+                            })),
+                        })
+                    })
+                    .collect();
+                json!({
+                    "tasks": tasks,
+                    "running": board.running,
+                    "settled": board.settled,
+                    "usage": board.usage.map(|(tokens, cost)| json!({"tokens": tokens, "costUsd": cost})),
+                })
+            });
+            assert_eq!(
+                compact(got.unwrap_or(Value::Null)),
+                compact(case["expected"].clone()),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn vector_thread_flow_matches_ts() {
+        for case in vector("thread-flow.json") {
+            let name = case["name"].as_str().unwrap();
+            let thread = thread_of(&case);
+            let got: Vec<Value> = flows(&thread, case["leadModel"].as_str())
+                .iter()
+                .map(graph_json)
+                .collect();
+            assert_eq!(
+                compact(Value::Array(got)),
+                compact(case["expected"].clone()),
+                "{name}"
+            );
+        }
+    }
 }

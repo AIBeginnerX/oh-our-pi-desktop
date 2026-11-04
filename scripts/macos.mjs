@@ -390,10 +390,7 @@ export async function doctor(paths) {
   const type = NodeOS.platform() === "darwin" ? fsType(cacheMount) : undefined;
   const problems = validateHost({ pnpmVersion: toolVersion("pnpm") });
   if (!toolVersion("rsync")) problems.push("rsync is required");
-  if (!skipsRust(process.env) && !toolVersion("cargo"))
-    problems.push(
-      "Rust (cargo) is required: https://rustup.rs (OOP_SKIP_RUST=1 skips the Rust terminal)",
-    );
+  if (!toolVersion("cargo")) problems.push("Rust (cargo) is required: https://rustup.rs");
   if (type && type.toLowerCase() !== "apfs")
     problems.push(`Cache must be on local APFS (found ${type})`);
   if (type === undefined && NodeOS.platform() === "darwin")
@@ -564,8 +561,6 @@ async function install(paths, runner) {
       "@t3tools/scripts...",
       "--filter",
       "t3...",
-      "--filter",
-      "oop-tui...",
     ],
     { cwd: paths.checkout, env: checkoutEnvironment(paths, process.env) },
   );
@@ -581,16 +576,12 @@ export async function build(paths, runner) {
 
 // The Rust terminal client (apps/oop-tui-rs, `oop-rs`) and the native terminal program
 // (apps/oop-terminal, `OOP Terminal.app`) are built here and handed to the artifact builder with
-// OOP_RS_BIN and OOP_TERMINAL_APP, which bundles them next to the TypeScript terminal app. The
+// OOP_RS_BIN and OOP_TERMINAL_APP. oop-rs is the only terminal, so its build is mandatory. The
 // build runs in the checkout, whose target/ folders the rsync neither copies nor deletes, so
-// repeated builds stay incremental. OOP_SKIP_RUST=1 ships the TypeScript terminal alone.
+// repeated builds stay incremental.
 export const RUST_CLIENT_DIR = "apps/oop-tui-rs";
 export const RUST_TERMINAL_DIR = "apps/oop-terminal";
 export const TERMINAL_APP_BUNDLE_NAME = "OOP Terminal.app";
-
-export function skipsRust(env) {
-  return SKIP_BUILD_TRUE.has(env.OOP_SKIP_RUST);
-}
 
 /** The release version reaches cargo as OOP_VERSION; ~/.cargo/bin is added for a rustup toolchain. */
 export function rustBuildEnvironment(baseEnv, version, home = NodeOS.homedir()) {
@@ -655,15 +646,9 @@ export async function buildRustClients(
   printedVersion = (binary) =>
     NodeChildProcess.execFileSync(binary, ["--version"], { encoding: "utf8" }).trim(),
 ) {
-  if (skipsRust(baseEnv)) {
-    console.log("OOP_SKIP_RUST is set: the terminal stays TypeScript only.");
-    return {};
-  }
   const cliDir = NodePath.join(paths.checkout, RUST_CLIENT_DIR);
-  if (!(await exists(NodePath.join(cliDir, "Cargo.toml")))) {
-    console.log(`No ${RUST_CLIENT_DIR} in this source: the terminal stays TypeScript only.`);
-    return {};
-  }
+  if (!(await exists(NodePath.join(cliDir, "Cargo.toml"))))
+    throw new Error(`${RUST_CLIENT_DIR} is missing from this source: oop-rs is the only terminal.`);
   const env = rustBuildEnvironment(baseEnv, version);
   const cargo = async (cwd) =>
     runner("cargo", cargoReleaseArgs({ locked: await exists(NodePath.join(cwd, "Cargo.lock")) }), {

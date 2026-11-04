@@ -1004,7 +1004,7 @@ impl Screen for ThreadsScreen {
                     return false;
                 }
                 if lead == 1 && at == 0 {
-                    app.start_draft(&self.project_id);
+                    app.new_thread_in(Some(self.project_id.clone()));
                     return true;
                 }
                 match at.checked_sub(lead).and_then(|i| rows.get(i)) {
@@ -1522,7 +1522,10 @@ mod tests {
         assert_eq!(app.active, Active::Thread("first".into()));
         crate::cmd::run(&mut app, "t", "");
         press(&mut app, KeyCode::Enter);
+        // "New thread" asks for the folder first, the project of this list leading.
         assert!(app.screen.is_none());
+        assert!(matches!(app.modal, Some(crate::app::Modal::Pick(_))));
+        press(&mut app, KeyCode::Enter);
         assert_eq!(app.active, Active::Draft("p1".into()));
     }
 

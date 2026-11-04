@@ -431,4 +431,37 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
       }),
     );
   });
+  describe("deleteThreadCheckpointRefs", () => {
+    it.effect("removes only the named thread's refs, not look-alike threads", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        // base64url("abc") is a string prefix of base64url("abcd").
+        const doomed = ThreadId.make("abc");
+        const lookAlike = ThreadId.make("abcd");
+        const doomedRefs = [0, 1, 2].map((turn) => checkpointRefForThreadTurn(doomed, turn));
+        const survivorRefs = [0, 1].map((turn) => checkpointRefForThreadTurn(lookAlike, turn));
+        for (const checkpointRef of [...doomedRefs, ...survivorRefs]) {
+          yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef });
+        }
+        yield* git(tmp, ["update-ref", "refs/t3/unrelated", "HEAD"]);
+
+        yield* checkpointStore.deleteThreadCheckpointRefs({ cwd: tmp, threadId: doomed });
+
+        for (const checkpointRef of doomedRefs) {
+          expect(yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef })).toBe(false);
+        }
+        for (const checkpointRef of survivorRefs) {
+          expect(yield* checkpointStore.hasCheckpointRef({ cwd: tmp, checkpointRef })).toBe(true);
+        }
+        expect(yield* git(tmp, ["rev-parse", "--verify", "refs/t3/unrelated"])).not.toBe("");
+        // A thread without refs is a no-op.
+        yield* checkpointStore.deleteThreadCheckpointRefs({
+          cwd: tmp,
+          threadId: ThreadId.make("never-captured"),
+        });
+      }),
+    );
+  });
 });

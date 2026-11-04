@@ -1,6 +1,13 @@
 {
   "customNotices": [
     {
+      "bundles": ["desktop", "web"],
+      "license": "MIT",
+      "name": "pstack verification skills by Lauren Tan",
+      "noticeFile": "apps/server/src/skills/bundled/pstack-LICENSE",
+      "sourceUrl": "https://github.com/cursor/plugins/tree/main/pstack"
+    },
+    {
       "bundles": ["assets", "desktop", "web"],
       "license": "CC0-1.0",
       "name": "Notification Sound 1 by deadrobotmusic",

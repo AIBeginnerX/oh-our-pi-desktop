@@ -117,7 +117,7 @@ try {
     $command = Join-Path $binDir "oop.cmd"
     $appDir = Join-Path $root "OOP app (x86)"
     $appExe = Join-Path $appDir "OOP.exe"
-    $bundle = Join-Path $appDir "resources\oop\oop.mjs"
+    $bundle = Join-Path $appDir "resources\oop\oop-rs.exe"
     New-Item -ItemType Directory -Path (Split-Path -Parent $bundle) -Force | Out-Null
     [IO.File]::WriteAllText($appExe, "fixture app")
     # Plain ASCII paths are written as they are, with any % doubled (the test folder is ASCII).
@@ -125,30 +125,28 @@ try {
     $bundleText = $bundle.Replace("%", "%%")
     $script:uninstallEntries = @([PSCustomObject]@{ DisplayName = "OOP"; DisplayIcon = "`"$appExe`",0" })
 
-    # An app older than the terminal app has nothing to run.
+    # An app without the Rust client has nothing to run.
     & $script
     if (Test-Path -LiteralPath $command) { throw "A terminal command was written for an app without the terminal app." }
     Write-Host "PASS no terminal command for an app without the terminal app"
 
-    [IO.File]::WriteAllText($bundle, "// fixture terminal app")
+    [IO.File]::WriteAllText($bundle, "fixture rust client")
     & $script
     $launcher = Get-Content -LiteralPath $command -Raw
     foreach ($expected in @(
         "rem oop-desktop-terminal-launcher",
         "setlocal",
-        "set `"OOP_TS_ENTRY=$bundleText`"",
-        "set `"OOP_TS_NODE=$appExeText`"",
-        "set `"OOP_TS_NODE_ELECTRON=1`"",
-        "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
-        "set ELECTRON_RUN_AS_NODE=1",
-        "`"$appExeText`" `"$bundleText`" %*",
+        "set OOP_IN_DESKTOP_APP=1",
+        "`"$bundleText`" %*",
         "exit /b %ERRORLEVEL%"
     )) {
         if (-not $launcher.Contains($expected)) { throw "The terminal command lacks: $expected" }
     }
-    if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set ELECTRON_RUN_AS_NODE=1")) { throw "ELECTRON_RUN_AS_NODE is set outside setlocal." }
-    if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set `"OOP_TS_NODE=")) { throw "OOP_TS_NODE is set outside setlocal." }
-    Write-Host "PASS terminal command runs the app's runtime on the bundled terminal app, scoped to that process"
+    foreach ($gone in @("OOP_TS_", "OOP_TUI", "oop.mjs", "ELECTRON_RUN_AS_NODE", "typescript")) {
+        if ($launcher.Contains($gone)) { throw "The terminal command still mentions $gone." }
+    }
+    if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set OOP_IN_DESKTOP_APP=1")) { throw "OOP_IN_DESKTOP_APP is set outside setlocal." }
+    Write-Host "PASS terminal command runs the app's Rust client, scoped to that process"
 
     & $script
     Write-Host "PASS reinstalling replaces our own terminal command"
@@ -180,14 +178,14 @@ try {
     $homeExe = Join-Path $homeApp "OOP.exe"
     New-Item -ItemType Directory -Path (Join-Path $homeApp "resources\oop") -Force | Out-Null
     [IO.File]::WriteAllText($homeExe, "fixture app")
-    [IO.File]::WriteAllText((Join-Path $homeApp "resources\oop\oop.mjs"), "// fixture terminal app")
+    [IO.File]::WriteAllText((Join-Path $homeApp "resources\oop\oop-rs.exe"), "fixture rust client")
     $script:uninstallEntries = @([PSCustomObject]@{ DisplayName = "OOP"; DisplayIcon = "`"$homeExe`",0" })
     Remove-Item -LiteralPath $command -Force
     & $script
     $bytes = [IO.File]::ReadAllBytes($command)
     if (@($bytes | Where-Object { $_ -gt 127 }).Count -ne 0) { throw "The terminal command holds a non-ASCII byte." }
     $homeLauncher = [Text.Encoding]::ASCII.GetString($bytes)
-    $homeExpected = '"%LOCALAPPDATA%\Programs\OOP\OOP.exe" "%LOCALAPPDATA%\Programs\OOP\resources\oop\oop.mjs" %*'
+    $homeExpected = '"%LOCALAPPDATA%\Programs\OOP\resources\oop\oop-rs.exe" %*'
     if (-not $homeLauncher.Contains($homeExpected)) { throw "The terminal command does not name the app through %LOCALAPPDATA%." }
     if (-not $homeLauncher.Contains('if not exist "%LOCALAPPDATA%\Programs\OOP\OOP.exe" (')) { throw "The existence check does not use %LOCALAPPDATA%." }
     Write-Host "PASS an app under a non-ASCII user folder is named through %LOCALAPPDATA%, with an ASCII-only file"
@@ -197,7 +195,7 @@ try {
     $strayExe = Join-Path $strayApp "OOP.exe"
     New-Item -ItemType Directory -Path (Join-Path $strayApp "resources\oop") -Force | Out-Null
     [IO.File]::WriteAllText($strayExe, "fixture app")
-    [IO.File]::WriteAllText((Join-Path $strayApp "resources\oop\oop.mjs"), "// fixture terminal app")
+    [IO.File]::WriteAllText((Join-Path $strayApp "resources\oop\oop-rs.exe"), "fixture rust client")
     $script:uninstallEntries = @([PSCustomObject]@{ DisplayName = "OOP"; DisplayIcon = "`"$strayExe`",0" })
     Remove-Item -LiteralPath $command -Force
     & $script

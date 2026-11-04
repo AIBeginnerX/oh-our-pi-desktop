@@ -1,6 +1,6 @@
 //! `/diff`, `/undo` and `/history`: the thread operations that read or rewind what the server
-//! holds. Ported from apps/oop-tui/src/app/controller.ts (runDiffCommand, runUndoCommand, sendUndo,
-//! noteRewind, runHistoryCommand) and undoFlow.ts.
+//! holds. Ported from the former TypeScript terminal's controller (runDiffCommand, runUndoCommand,
+//! sendUndo, noteRewind, runHistoryCommand) and its undo flow.
 //!
 //! The TypeScript terminal writes their output into the scrollback. This screen draws the whole
 //! thread itself, so a report is a note under the conversation (`notes.rs`), and `/history` loads
@@ -502,6 +502,7 @@ pub fn undo(app: &mut App) {
         items,
         cursor: 0,
         data,
+        typed: None,
     }));
 }
 

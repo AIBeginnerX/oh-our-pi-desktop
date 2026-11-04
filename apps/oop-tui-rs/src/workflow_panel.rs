@@ -1,6 +1,6 @@
 //! The Workflow panel: the thread's flows (one per turn, one per provider workflow) drawn as the
 //! desktop board does, waves from top to bottom with a card for each agent and a connector between
-//! waves. A port of apps/oop-tui/src/app/workflowPanel.ts as a pure function from the read model
+//! waves. Ported from the former TypeScript terminal's workflow panel as a pure function from the read model
 //! to lines. The flow shown is the one pinned with `/dag-workflow N|next|prev` or else the live one.
 //! Left out: the switch/close hint row under the tabs (the caller owns the keys).
 
@@ -51,8 +51,8 @@ pub fn lines(
             &ctx,
             s("No work to draw yet", "그릴 작업이 아직 없습니다"),
             s(
-                "Steps appear here once an agent uses a tool or starts a subagent or workflow.",
-                "에이전트가 도구를 쓰거나 서브에이전트·workflow 를 시작하면 단계가 여기에 나타납니다.",
+                "Steps of the latest work appear here once an agent uses a tool or starts a subagent or workflow.",
+                "에이전트가 도구를 쓰거나 서브에이전트·workflow 를 시작하면 최신 작업의 단계가 여기에 나타납니다.",
             ),
             room,
         ));
@@ -717,7 +717,7 @@ mod tests {
         let empty = Thread::default();
         let text = render(&empty, 0, 60, 20);
         assert!(has(&text, "No work to draw yet"));
-        assert!(has(&text, "Steps appear here"));
+        assert!(has(&text, "Steps of the latest"));
         let mut waiting = input(&empty, &[], 0);
         waiting.loading = true;
         let text = plain(&lines(&waiting, 60, 20, &LAVENDER, &UNICODE));
@@ -788,7 +788,7 @@ mod tests {
     fn snapshot_60x20() {
         let text = render(&scenes::parallel(), 45, 60, 20);
         let expected = [
-            " Workflow │ Agents",
+            " Workflow │ Agents │ Savvy │ Files",
             " ━━━━━━━━──────────────────────────────────────────────────",
             " ◐ Turn 1 · Crew  Working",
             " 2 running",

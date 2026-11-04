@@ -91,6 +91,7 @@ import {
   NoOpProviderEventLoggers,
   ProviderEventLoggers,
 } from "./provider/Layers/ProviderEventLoggers.ts";
+import { ProviderService } from "./provider/Services/ProviderService.ts";
 import { ProviderAuthService } from "./provider/Services/ProviderAuthService.ts";
 import { ProviderInstanceRegistry } from "./provider/Services/ProviderInstanceRegistry.ts";
 import * as ProviderSessionDirectory from "./provider/Services/ProviderSessionDirectory.ts";
@@ -179,6 +180,7 @@ const makeFakeAdapter = (input?: AdapterInput): AdapterHandles => {
       : undefined;
 
   const memoryAdmission: ProviderMemoryAdmissionSupport = {
+    skillTrials: true,
     sessionGeneration: (threadId) => sessionIdentity.get(threadId)?.generation,
     nativeSessionId: (cursor) => nativeSessionIdOf(cursor),
   };
@@ -310,6 +312,7 @@ const unusedTextGeneration: TextGeneration["Service"] = {
   generatePrContent: () => Effect.die("unused generatePrContent"),
   generateBranchName: () => Effect.die("unused generateBranchName"),
   generateThreadTitle: () => Effect.die("unused generateThreadTitle"),
+  generateWorkLessons: () => Effect.die("unused generateWorkLessons"),
 };
 
 const makeInstance = (
@@ -1056,6 +1059,128 @@ it.effect("settles a stored pending turn start synchronously through the real en
         WHERE thread_id = ${threadId} AND message_id = ${messageId}
       `;
       assert.deepStrictEqual(storedMessages, [{ count: 1 }]);
+    }).pipe(Effect.provide(supply));
+  }),
+);
+
+// A committed turn start whose session never reached `starting` leaves a ready
+// or absent session behind, so no orphan scan sees it and the message would
+// never get an answer. Startup must fail it visibly without resending it.
+const seedPendingTurnStartWithoutSession = (
+  engine: OrchestrationEngineService["Service"],
+  threadId: ThreadId,
+  sessionStatus: "ready" | null,
+) =>
+  Effect.gen(function* () {
+    const projectId = ProjectId.make(`project-${String(threadId)}`);
+    yield* engine.dispatch({
+      type: "project.create",
+      commandId: CommandId.make(`${String(threadId)}-project`),
+      projectId,
+      title: "Startup pending start",
+      workspaceRoot: `/tmp/${String(threadId)}`,
+      createdAt,
+    });
+    yield* engine.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make(`${String(threadId)}-create`),
+      threadId,
+      projectId,
+      title: "Startup pending start",
+      modelSelection: { instanceId, model: "gpt-5-codex" },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdAt,
+    });
+    if (sessionStatus !== null) {
+      yield* engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make(`${String(threadId)}-ready`),
+        threadId,
+        session: {
+          threadId,
+          status: sessionStatus,
+          providerName: "codex",
+          providerInstanceId: instanceId,
+          runtimeMode: "full-access",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      });
+    }
+    yield* engine.dispatch({
+      type: "thread.turn.start",
+      commandId: CommandId.make(`${String(threadId)}-turn-start`),
+      threadId,
+      message: {
+        messageId: MessageId.make(`message-${String(threadId)}`),
+        role: "user",
+        text: "answer me",
+        attachments: [],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt,
+    });
+  });
+
+it.effect("fails a stored pending turn start that no session claims, without resending", () =>
+  Effect.gen(function* () {
+    const { handles, supply } = makeSupplyLayer({ continueAfterRestart: true });
+    const lostWithoutSession = ThreadId.make("pending-start-no-session");
+    const lostWithReadySession = ThreadId.make("pending-start-ready-session");
+    const liveSession = ThreadId.make("pending-start-live-session");
+
+    return yield* Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const providerService = yield* ProviderService;
+      const turnRepository = yield* ProjectionTurnRepository;
+
+      yield* seedPendingTurnStartWithoutSession(engine, lostWithoutSession, null);
+      yield* seedPendingTurnStartWithoutSession(engine, lostWithReadySession, "ready");
+      yield* seedPendingTurnStartWithoutSession(engine, liveSession, "ready");
+      yield* providerService.startSession(liveSession, {
+        threadId: liveSession,
+        provider: codexDriver,
+        providerInstanceId: instanceId,
+        runtimeMode: "full-access",
+      });
+      const startsBefore = handles.counts.startSession;
+
+      for (const threadId of [lostWithoutSession, lostWithReadySession, liveSession]) {
+        const seeded = yield* turnRepository.getPendingTurnStartByThreadId({ threadId });
+        assert.isTrue(Option.isSome(seeded));
+      }
+
+      yield* ServerRuntimeStartup.reconcilePendingTurnStarts;
+
+      for (const threadId of [lostWithoutSession, lostWithReadySession]) {
+        const pending = yield* turnRepository.getPendingTurnStartByThreadId({ threadId });
+        assert.isTrue(Option.isNone(pending));
+        const detail = yield* (yield* ProjectionSnapshotQuery).getThreadDetailById(threadId);
+        assert.isTrue(Option.isSome(detail));
+        if (Option.isSome(detail)) {
+          const failure = detail.value.activities.find(
+            (activity) => activity.kind === "provider.turn.start.failed",
+          );
+          assert.isDefined(failure);
+          assert.deepStrictEqual(payloadRecord(failure?.payload).requestId, `message-${threadId}`);
+        }
+      }
+
+      // The thread whose provider session is alive still owns its pending start.
+      const stillPending = yield* turnRepository.getPendingTurnStartByThreadId({
+        threadId: liveSession,
+      });
+      assert.isTrue(Option.isSome(stillPending));
+
+      // Failing a start never resends it or opens a provider session.
+      assert.equal(handles.counts.sendTurn, 0);
+      assert.equal(handles.counts.startSession, startsBefore);
     }).pipe(Effect.provide(supply));
   }),
 );

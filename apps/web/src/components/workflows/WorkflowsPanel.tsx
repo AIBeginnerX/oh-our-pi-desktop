@@ -1,3 +1,4 @@
+import { runningCrewTaskCount } from "@t3tools/client-runtime/crew-board";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
   actorFlows,
@@ -26,7 +27,8 @@ import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { ScrollArea } from "../ui/scroll-area";
-import { CrewTaskActions } from "./CrewTaskActions";
+import { CrewStopAll, CrewTaskActions } from "./CrewTaskActions";
+import { DecisionLogDialog } from "./DecisionLogDialog";
 import { hasElapsed, LiveElapsed } from "./LiveElapsed";
 import { WORKFLOW_STATE_TONE, WorkflowBoard, workflowCostLabel } from "./WorkflowBoard";
 import {
@@ -35,8 +37,10 @@ import {
   flowName,
   modelText,
   nodeName,
+  proofText,
   roleText,
   stateText,
+  todoText,
   toolSummaryText,
   type Translate,
 } from "./workflowText";
@@ -85,6 +89,9 @@ export function WorkflowsPanel(props: {
   const graph = flows.find((flow) => flow.id === focusedId) ?? null;
   const { visible, earlier } = boundFlows(flows, focusedId);
   const select = (id: string) => setChosenId(id === liveId ? null : id);
+  // The log reads the activities when it opens and never follows a running crew.
+  const [logOpen, setLogOpen] = useState(false);
+  const hasCrew = flows.some((flow) => flow.kind === "crew");
 
   return (
     <ScrollArea className="min-h-0 flex-1">
@@ -138,6 +145,16 @@ export function WorkflowsPanel(props: {
                   {t("Follow live")}
                 </Button>
               ) : null}
+              {hasCrew ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={() => setLogOpen(true)}
+                >
+                  {t("Decision log")}
+                </Button>
+              ) : null}
             </div>
             {graph === null ? null : (
               <FlowView
@@ -150,6 +167,9 @@ export function WorkflowsPanel(props: {
           </>
         )}
       </div>
+      {logOpen ? (
+        <DecisionLogDialog activities={props.activities} onOpenChange={setLogOpen} />
+      ) : null}
     </ScrollArea>
   );
 }
@@ -239,6 +259,13 @@ function FlowView(props: {
               {countsText(counts, t)}
             </span>
           )}
+          {graph.kind === "crew" && props.environmentId !== null && props.threadId !== null ? (
+            <CrewStopAll
+              environmentId={props.environmentId}
+              leadThreadId={props.threadId}
+              running={runningCrewTaskCount(parts)}
+            />
+          ) : null}
           {graph.steps === undefined ? null : (
             <Button
               size="xs"
@@ -398,6 +425,8 @@ function NodeDetails({ node, t }: { node: WorkflowNode; t: Translate }) {
         label={t("Evidence")}
         value={info.evidence === undefined ? undefined : t(info.evidence)}
       />
+      <Field label={t("Checklist")} value={todoText(info, t)} />
+      <Field label={t("Proof")} value={proofText(info, t)} />
       <Field label={t("Tool calls")} value={info.toolUses} />
       <Field label={t("Detail")} value={info.description} />
       <Field

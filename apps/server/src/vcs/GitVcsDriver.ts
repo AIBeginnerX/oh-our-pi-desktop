@@ -33,11 +33,9 @@ import {
   type VcsStatusResult,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
-import {
-  makeGitVcsDriverCore,
-  PATCH_RENDER_PREFIX_ARGS,
-  splitNullSeparatedGitStdoutPaths,
-} from "./GitVcsDriverCore.ts";
+import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
+import { PATCH_RENDER_PREFIX_ARGS } from "./gitDriverConstants.ts";
+import { splitNullSeparatedGitStdoutPaths } from "./gitOutputParsers.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
@@ -1495,6 +1493,34 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         );
       },
     ),
+
+    deleteCheckpointRefsUnderPrefix: Effect.fn(
+      "GitVcsDriver.checkpoints.deleteCheckpointRefsUnderPrefix",
+    )(function* (input) {
+      const operation = "GitVcsDriver.checkpoints.deleteCheckpointRefsUnderPrefix";
+      const listed = yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ["for-each-ref", "--format=%(refname)", input.prefix],
+      });
+      // for-each-ref already matches whole path components only; the filter
+      // keeps that guarantee explicit.
+      const refs = listed.stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((ref) => ref.startsWith(`${input.prefix}/`));
+      yield* Effect.forEach(
+        refs,
+        (ref) =>
+          execute({
+            operation,
+            cwd: input.cwd,
+            args: ["update-ref", "-d", ref],
+            allowNonZeroExit: true,
+          }),
+        { discard: true },
+      );
+    }),
   };
 
   return {

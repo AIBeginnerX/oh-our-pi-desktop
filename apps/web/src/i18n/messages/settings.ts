@@ -214,6 +214,150 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "检查提供商更新",
     es: "Buscar actualizaciones de proveedores",
   },
+  "Auto-select related memories": {
+    ko: "관련 기억 자동 선택",
+    ja: "関連メモリを自動選択",
+    "zh-CN": "自动选择相关记忆",
+    es: "Seleccionar memorias relacionadas automáticamente",
+  },
+  "auto-select related memories": {
+    ko: "관련 기억 자동 선택",
+    ja: "関連メモリの自動選択",
+    "zh-CN": "自动选择相关记忆",
+    es: "selección automática de memorias relacionadas",
+  },
+  "While you type, pre-select up to three related project memories as chips you can remove before sending.":
+    {
+      ko: "입력하는 동안 관련 프로젝트 기억을 최대 3개까지 칩으로 미리 선택합니다. 보내기 전에 칩을 지울 수 있습니다.",
+      ja: "入力中に関連するプロジェクトメモリを最大 3 件まで、送信前に削除できるチップとして事前選択します。",
+      "zh-CN": "输入时最多将三条相关项目记忆预先选为标签，发送前可移除。",
+      es: "Mientras escribes, preselecciona hasta tres memorias del proyecto relacionadas como chips que puedes quitar antes de enviar.",
+    },
+  "Work analyser": {
+    ko: "작업 분석기",
+    ja: "作業アナライザー",
+    "zh-CN": "工作分析器",
+    es: "Analizador de trabajo",
+  },
+  "work analyser": {
+    ko: "작업 분석기",
+    ja: "作業アナライザー",
+    "zh-CN": "工作分析器",
+    es: "analizador de trabajo",
+  },
+  'Lets "Analyse recent work" in a project\'s memory settings send structured summaries of recent work (check results, review verdicts, reverts; no chat text) to the text-generation model. Suggestions wait for your approval.':
+    {
+      ko: '프로젝트 기억 설정의 "최근 작업 분석"이 최근 작업의 구조화된 요약(검사 결과, 리뷰 판정, 되돌리기, 대화 내용 제외)을 텍스트 생성 모델로 보내도록 허용합니다. 제안은 승인을 기다립니다.',
+      ja: "プロジェクトのメモリ設定にある「最近の作業を分析」が、最近の作業の構造化された要約（チェック結果、レビュー判定、取り消し。チャット本文は含みません）をテキスト生成モデルへ送ることを許可します。提案は承認待ちになります。",
+      "zh-CN":
+        "允许项目记忆设置中的“分析最近工作”将最近工作的结构化摘要（检查结果、审查结论、回退，不含聊天文本）发送给文本生成模型。建议需经你批准。",
+      es: "Permite que «Analizar trabajo reciente», en los ajustes de memoria del proyecto, envíe al modelo de generación de texto resúmenes estructurados del trabajo reciente (resultados de comprobaciones, veredictos de revisión, reversiones; sin texto del chat). Las sugerencias esperan tu aprobación.",
+    },
+  "Analyse recent work": {
+    ko: "최근 작업 분석",
+    ja: "最近の作業を分析",
+    "zh-CN": "分析最近工作",
+    es: "Analizar trabajo reciente",
+  },
+  "Analysing…": {
+    ko: "분석 중…",
+    ja: "分析中…",
+    "zh-CN": "正在分析…",
+    es: "Analizando…",
+  },
+  "Suggests lessons that recur across this project's recent threads, using only check results, review verdicts and reverts. Suggestions wait for your approval. Uses the text-generation model.":
+    {
+      ko: "이 프로젝트의 최근 스레드에서 반복되는 교훈을 제안합니다. 검사 결과, 리뷰 판정, 되돌리기만 사용하며 제안은 승인을 기다립니다. 텍스트 생성 모델을 사용합니다.",
+      ja: "このプロジェクトの最近のスレッドで繰り返される教訓を提案します。使用するのはチェック結果、レビュー判定、取り消しのみで、提案は承認待ちになります。テキスト生成モデルを使用します。",
+      "zh-CN":
+        "根据检查结果、审查结论和回退，建议在此项目最近线程中反复出现的经验。建议需经你批准。使用文本生成模型。",
+      es: "Sugiere lecciones que se repiten en los hilos recientes de este proyecto, usando solo resultados de comprobaciones, veredictos de revisión y reversiones. Las sugerencias esperan tu aprobación. Usa el modelo de generación de texto.",
+    },
+  "Turn on Work analyser in General settings first.": {
+    ko: "먼저 일반 설정에서 작업 분석기를 켜세요.",
+    ja: "先に一般設定で作業アナライザーをオンにしてください。",
+    "zh-CN": "请先在常规设置中开启工作分析器。",
+    es: "Activa primero el analizador de trabajo en los ajustes generales.",
+  },
+  "Nothing new to suggest": {
+    ko: "새로 제안할 내용이 없습니다",
+    ja: "新しい提案はありません",
+    "zh-CN": "没有新的建议",
+    es: "Nada nuevo que sugerir",
+  },
+  "{count} suggestion(s) added for review": {
+    ko: "검토할 제안 {count}개가 추가되었습니다",
+    ja: "レビュー待ちの提案を {count} 件追加しました",
+    "zh-CN": "已添加 {count} 条建议待审阅",
+    es: "{count} sugerencia(s) añadida(s) para revisar",
+  },
+  "Derived from recent work by the work analyser and approved by you. It may be wrong; edit or delete it if so.":
+    {
+      ko: "작업 분석기가 최근 작업에서 도출했고 사용자가 승인한 기억입니다. 틀릴 수 있으니 틀리면 수정하거나 삭제하세요.",
+      ja: "作業アナライザーが最近の作業から導き、あなたが承認したメモリです。誤っている場合は編集または削除してください。",
+      "zh-CN": "由工作分析器从最近工作中得出并经你批准的记忆。可能有误，如有误请编辑或删除。",
+      es: "Memoria derivada del trabajo reciente por el analizador de trabajo y aprobada por ti. Puede ser incorrecta; edítala o elimínala si es así.",
+    },
+  "Seen in:": {
+    ko: "확인된 스레드:",
+    ja: "確認されたスレッド:",
+    "zh-CN": "出现于：",
+    es: "Visto en:",
+  },
+  "Thread {index}": {
+    ko: "스레드 {index}",
+    ja: "スレッド {index}",
+    "zh-CN": "线程 {index}",
+    es: "Hilo {index}",
+  },
+  Derived: {
+    ko: "파생",
+    ja: "派生",
+    "zh-CN": "派生",
+    es: "Derivada",
+  },
+  "A procedure seen in recent work. Save it from the thread's skill draft.": {
+    ko: "최근 작업에서 확인된 절차입니다. 스레드의 스킬 초안에서 저장하세요.",
+    ja: "最近の作業で見られた手順です。スレッドのスキル下書きから保存してください。",
+    "zh-CN": "最近工作中出现的流程。请从该线程的技能草稿中保存。",
+    es: "Un procedimiento visto en el trabajo reciente. Guárdalo desde el borrador de habilidad del hilo.",
+  },
+  "Suggested from recent work. If approved, it expires {days} days later unless you change that.": {
+    ko: "최근 작업에서 제안되었습니다. 승인하면 변경하지 않는 한 {days}일 뒤 만료됩니다.",
+    ja: "最近の作業から提案されました。承認すると、変更しない限り {days} 日後に期限切れになります。",
+    "zh-CN": "根据最近工作提出的建议。批准后，除非你更改，否则 {days} 天后过期。",
+    es: "Sugerida a partir del trabajo reciente. Si la apruebas, caduca {days} días después salvo que lo cambies.",
+  },
+  "Similar existing memory: {title}": {
+    ko: "비슷한 기존 기억: {title}",
+    ja: "似た既存のメモリ: {title}",
+    "zh-CN": "相似的现有记忆：{title}",
+    es: "Memoria existente similar: {title}",
+  },
+  "Suggestion dismissed": {
+    ko: "제안을 닫았습니다",
+    ja: "提案を却下しました",
+    "zh-CN": "已忽略建议",
+    es: "Sugerencia descartada",
+  },
+  Dismiss: {
+    ko: "닫기",
+    ja: "却下",
+    "zh-CN": "忽略",
+    es: "Descartar",
+  },
+  "Open thread": {
+    ko: "스레드 열기",
+    ja: "スレッドを開く",
+    "zh-CN": "打开线程",
+    es: "Abrir hilo",
+  },
+  "Content already sent to a provider can't be recalled.": {
+    ko: "이미 프로바이더에 보낸 내용은 회수할 수 없습니다.",
+    ja: "すでにプロバイダーへ送信された内容は取り消せません。",
+    "zh-CN": "已发送给提供商的内容无法撤回。",
+    es: "El contenido que ya se envió a un proveedor no se puede recuperar.",
+  },
   "Continue threads after restarts": {
     ko: "재시작 후 스레드 계속",
     ja: "再起動後もスレッドを続行",

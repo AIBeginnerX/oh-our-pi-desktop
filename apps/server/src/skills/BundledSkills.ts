@@ -22,6 +22,9 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
+import { ARENA_SKILL_MARKDOWN } from "./bundled/arenaSkill.ts";
+import { CREATE_VERIFICATION_SKILL_MARKDOWN } from "./bundled/createVerificationSkill.ts";
+import { MAINTAIN_VERIFICATION_SKILL_MARKDOWN } from "./bundled/maintainVerificationSkill.ts";
 import { PIXELGUI_SKILL_MARKDOWN } from "./bundled/pixelguiSkill.ts";
 
 interface BundledSkill {
@@ -31,6 +34,9 @@ interface BundledSkill {
 
 export const BUNDLED_SKILLS: ReadonlyArray<BundledSkill> = [
   { name: "pixelgui", markdown: PIXELGUI_SKILL_MARKDOWN },
+  { name: "create-verification-skill", markdown: CREATE_VERIFICATION_SKILL_MARKDOWN },
+  { name: "maintain-verification-skill", markdown: MAINTAIN_VERIFICATION_SKILL_MARKDOWN },
+  { name: "arena", markdown: ARENA_SKILL_MARKDOWN },
 ];
 
 const TARGETS: ReadonlyArray<BundledSkillTarget> = ["claude", "agents"];

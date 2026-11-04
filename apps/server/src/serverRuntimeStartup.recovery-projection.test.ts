@@ -290,6 +290,7 @@ const unusedCheckpointStore: CheckpointStore.CheckpointStore["Service"] = {
   restoreCheckpoint: () => Effect.die("unused"),
   diffCheckpoints: () => Effect.die("unused"),
   deleteCheckpointRefs: () => Effect.die("unused"),
+  deleteThreadCheckpointRefs: () => Effect.die("unused"),
 };
 
 const makeIngestionLayer = (provider: ProviderService.ProviderService["Service"]) =>

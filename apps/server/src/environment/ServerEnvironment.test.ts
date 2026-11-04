@@ -46,6 +46,7 @@ const makeServerEnvironmentLayer = (baseDir: string) =>
 // to satisfy `make`'s context requirements.
 const unreachableSendLedger = {
   commitDispatch: () => Effect.die("unreachable"),
+  recordRecall: () => Effect.die("unreachable"),
   captureMutationFence: () => {
     throw new Error("unreachable");
   },
@@ -60,6 +61,8 @@ const unreachableSendLedger = {
   reconcileOtherOwners: () => Effect.die("unreachable"),
   acknowledge: () => Effect.die("unreachable"),
   affectedState: () => Effect.die("unreachable"),
+  sentToThread: () => Effect.die("unreachable"),
+  sentForMessage: () => Effect.die("unreachable"),
 } satisfies ProjectMemorySendLedger["Service"];
 
 const emptySecretStoreLayer = Layer.succeed(
@@ -216,7 +219,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         manage: true,
         send: false,
         threadRecovery: true,
+        sentToThread: true,
         proposals: true,
+        analyser: true,
       });
       // Same version-skew contract as memory: manage plus explicit trial, and older servers
       // leave the key absent instead of advertising a partial surface.
@@ -304,7 +309,9 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         manage: true,
         send: true,
         threadRecovery: true,
+        sentToThread: true,
         proposals: true,
+        analyser: true,
         sendDriverKinds: ["claudeAgent"],
       });
 

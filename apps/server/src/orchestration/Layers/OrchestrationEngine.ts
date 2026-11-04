@@ -1267,6 +1267,38 @@ const makeOrchestrationEngine = Effect.gen(function* () {
               }
             }
 
+            // The decider's duplicate-message guard reads the command read
+            // model, which starts without message history after a restart, and
+            // message rows upsert by id, so a reused id would overwrite the
+            // stored text. The durable row decides here, ahead of the first
+            // append, and refuses with the decider's own error.
+            if (envelope.command.type === "thread.message.user.append") {
+              const command = envelope.command;
+              const storedMessage = yield* threadMessageRepository
+                .getByMessageId({ messageId: command.message.messageId })
+                .pipe(
+                  Effect.catchCause((cause): Effect.Effect<never, OrchestrationDispatchError> => {
+                    skillGateInterrupted ||= Cause.hasInterrupts(cause);
+                    return Cause.hasInterrupts(cause) || !Cause.hasFails(cause)
+                      ? Effect.failCause(cause)
+                      : Effect.fail(
+                          new OrchestrationCommandStateUnavailableError({
+                            commandType: command.type,
+                            cause,
+                          }),
+                        );
+                  }),
+                );
+              // Rows are keyed by the global message id, so a row on any
+              // thread refuses: an upsert would move it off its thread.
+              if (Option.isSome(storedMessage)) {
+                return yield* new OrchestrationCommandInvariantError({
+                  commandType: command.type,
+                  detail: `Message '${command.message.messageId}' already exists on thread '${storedMessage.value.threadId}'.`,
+                });
+              }
+            }
+
             // The skill send gate is the authoritative admission point for
             // managed `project-skill` context records — inside this
             // transaction, ahead of the first append. A genuinely new user

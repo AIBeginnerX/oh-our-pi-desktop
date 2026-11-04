@@ -1,4 +1,4 @@
-//! The `/stats` screen's numbers and rows: a port of apps/oop-tui/src/render/statsView.ts. Three
+//! The `/stats` screen's numbers and rows: ported from the former TypeScript terminal's stats view. Three
 //! tabs over the tool calls the thread's activities record. Every number comes from an activity;
 //! nothing is estimated, and the hour is the viewer's local one.
 
@@ -17,7 +17,7 @@ const BOX_COLUMNS: usize = 48;
 /// Below this the tool tab stacks its list over its box instead of putting them side by side.
 const SIDE_BY_SIDE_FROM: usize = 60;
 
-// ---- words (render.stats.* of apps/oop-tui/src/i18n/render.ts) ------------------------------------
+// ---- words (the render.stats.* keys of the former TypeScript terminal) ------------------------------------
 
 fn tab_labels() -> [&'static str; 3] {
     [

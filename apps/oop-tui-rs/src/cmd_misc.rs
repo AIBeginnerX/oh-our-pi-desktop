@@ -64,6 +64,7 @@ pub fn theme(app: &mut App, argument: &str) {
                 cursor: names.iter().position(|n| *n == current).unwrap_or(0),
                 items,
                 data: names,
+                typed: None,
             }));
         }
         Some(name) => apply_theme(app, name, &|key| std::env::var(key).ok()),

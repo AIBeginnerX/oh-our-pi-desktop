@@ -97,6 +97,11 @@ export default defineConfig({
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
       "*.icon/**",
+      "evals/memory/tasks/**",
+      // Results record this file's sha256, so its bytes stay as measured.
+      "evals/memory/placebo.json",
+      // Written by apps/oop-tui-rs/scripts/export-fixtures.mjs, whose --check compares bytes.
+      "apps/oop-tui-rs/fixtures/**",
     ],
     sortPackageJson: {},
     overrides: [
@@ -121,6 +126,7 @@ export default defineConfig({
       "apps/mobile/android/**",
       "apps/mobile/ios/**",
       "apps/mobile/uniwind-types.d.ts",
+      "evals/memory/tasks/**",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
     jsPlugins: ["./oxlint-plugin-t3code/index.ts", "@shadcn/lint"],

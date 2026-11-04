@@ -22,7 +22,7 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-import type { CrewEvidence } from "./crewBoard.ts";
+import type { CrewEvidence, CrewOverall, CrewProofVerdict, CrewTodoCounts } from "./crewBoard.ts";
 
 export type WorkflowNodeState =
   | "pending"
@@ -89,6 +89,12 @@ export interface WorkflowNodeInfo {
   readonly unpriced?: boolean;
   /** On a crew task: how far its result can be trusted. */
   readonly evidence?: CrewEvidence;
+  /** On a finished crew task: whether OOP could verify it; absent from an older server. */
+  readonly proof?: CrewProofVerdict;
+  /** On a crew task that has a TODO list: its items by how far they got. */
+  readonly todos?: CrewTodoCounts;
+  /** On a crew brain node: the crew's items finished over all its items, once any task has a list. */
+  readonly overall?: CrewOverall;
   /** On a crew task: what the board's Stop, Open, and Retry act on. */
   readonly crew?: WorkflowCrewTask;
 }

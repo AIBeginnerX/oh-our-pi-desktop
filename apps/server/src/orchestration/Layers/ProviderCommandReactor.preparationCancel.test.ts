@@ -387,6 +387,7 @@ describe("ProviderCommandReactor preparation cancellation", () => {
                 const real = yield* ProjectMemorySendGate;
                 let threadHoldCalls = 0;
                 return ProjectMemorySendGate.of({
+                  sentForMessage: real.sentForMessage,
                   threadHold: (threadId) => {
                     threadHoldCalls += 1;
                     const held = real.threadHold(threadId);
@@ -407,6 +408,7 @@ describe("ProviderCommandReactor preparation cancellation", () => {
                   },
                   driverAllowed: real.driverAllowed,
                   admit: real.admit,
+                  recordRecall: real.recordRecall,
                   settle: real.settle,
                   revalidate: real.revalidate,
                   revalidateForAdmission: real.revalidateForAdmission,

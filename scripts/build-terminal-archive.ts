@@ -5,29 +5,27 @@
  * pnpm: one archive per platform that the terminal installers (install-terminal.sh / .ps1 in the
  * public repository) download.
  *
- * `oop` talks to a local server and, when none runs, starts its own through OOP_DAEMON_ENTRY
- * (apps/oop-tui/src/link/daemon.ts), which names a server script that the program running `oop`
+ * `oop` (the Rust client, apps/oop-tui-rs) talks to a local server and, when none runs, starts its
+ * own through OOP_DAEMON_ENTRY, which names a server script that the program running `oop`
  * executes. The archive therefore carries the same pieces the desktop app does, laid out so the
  * existing lookup works unchanged (the pairing step recognises `.../apps/server/dist/bin.mjs` in the
- * server's command line, see parseServerScript in link/localAccess.ts):
+ * server's command line, see parse_server_script in apps/oop-tui-rs/src/server.rs):
  *
  *   node | node.exe               the official Node.js runtime, checksum-verified against nodejs.org
  *   NODE_LICENSE                  its license
- *   oop.mjs                       apps/oop-tui/dist/oop.mjs, a single file
- *   oop-rs | oop-rs.exe           the Rust terminal client (apps/oop-tui-rs), when built for the platform
+ *   oop-rs | oop-rs.exe           the Rust terminal client (apps/oop-tui-rs): the only terminal
  *   apps/server/dist/             the server bundle, its web client and the resource monitor
  *   node_modules/                 the native packages the server bundle keeps external
  *
- * Needs `vp run --filter t3 --filter oop-tui build` first. The runtime externals come from
- * build-cli-archive.ts, so they are staged and signed exactly like the server archives.
+ * Needs `vp run --filter t3 build` first. The runtime externals come from build-cli-archive.ts, so
+ * they are staged and signed exactly like the server archives.
  *
  *   node scripts/build-terminal-archive.ts --platform mac|linux|win --arch arm64|x64 \
- *     --version X.Y.Z [--output-dir DIR] [--node-version X.Y.Z] [--resource-monitor FILE] \
- *     [--oop-rs FILE]
+ *     --version X.Y.Z --oop-rs FILE [--output-dir DIR] [--node-version X.Y.Z] \
+ *     [--resource-monitor FILE]
  *
- * `--oop-rs` is the `cargo build --release` output of apps/oop-tui-rs for the same platform and
- * architecture. The installers' `oop` command runs it and falls back to oop.mjs, which also runs
- * the subcommands the Rust client lacks (OOP_TS_ENTRY). Without it the archive is TypeScript only.
+ * `--oop-rs` is required: the `cargo build --release` output of apps/oop-tui-rs for the same
+ * platform and architecture. There is no archive without it.
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
@@ -189,12 +187,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const nodeVersion = values["node-version"] ?? process.versions.node;
   if (!/^\d+\.\d+\.\d+$/u.test(nodeVersion)) throw new Error("--node-version must be X.Y.Z.");
 
+  const oopRs = values["oop-rs"];
+  if (!oopRs) {
+    throw new Error(
+      "--oop-rs FILE is required: the Rust terminal client (`cargo build --release` in apps/oop-tui-rs) is the only terminal, so there is no archive without it.",
+    );
+  }
+  if (!NodeFS.existsSync(NodePath.resolve(oopRs))) {
+    throw new Error(`--oop-rs names ${oopRs}, which does not exist.`);
+  }
+
   const serverDist = NodePath.join(ROOT, "apps/server/dist");
-  const oopBundle = NodePath.join(ROOT, "apps/oop-tui/dist/oop.mjs");
   for (const [file, hint] of [
     [NodePath.join(serverDist, "bin.mjs"), "vp run --filter t3 build"],
     [NodePath.join(serverDist, "client/index.html"), "vp run --filter t3 build"],
-    [oopBundle, "vp run --filter oop-tui build"],
   ] as const) {
     if (!NodeFS.existsSync(file)) throw new Error(`Missing ${file}. Run \`${hint}\` first.`);
   }
@@ -203,7 +209,6 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
     const contentDir = NodePath.join(scratch, "oop-terminal");
     NodeFS.mkdirSync(contentDir);
-    NodeFS.copyFileSync(oopBundle, NodePath.join(contentDir, "oop.mjs"));
     NodeFS.cpSync(serverDist, NodePath.join(contentDir, "apps/server/dist"), {
       recursive: true,
       filter: (source) => !source.endsWith(".map"),
@@ -216,11 +221,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       NodeFS.copyFileSync(monitor, target);
       if (platform !== "win") NodeFS.chmodSync(target, 0o755);
     }
-    if (values["oop-rs"]) {
-      const target = NodePath.join(contentDir, rustClientName(platform));
-      NodeFS.copyFileSync(NodePath.resolve(values["oop-rs"]), target);
-      if (platform !== "win") NodeFS.chmodSync(target, 0o755);
-    }
+    const rustTarget = NodePath.join(contentDir, rustClientName(platform));
+    NodeFS.copyFileSync(NodePath.resolve(oopRs), rustTarget);
+    if (platform !== "win") NodeFS.chmodSync(rustTarget, 0o755);
     await stageNode({ nodeVersion, platform, arch, contentDir, scratch });
 
     if (!values["skip-externals"]) {

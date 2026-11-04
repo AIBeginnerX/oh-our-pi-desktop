@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { t as tr, useT } from "../../i18n";
 import {
   DEFAULT_SERVER_SETTINGS,
@@ -10,8 +11,12 @@ import {
   type ScopedThreadRef,
 } from "@t3tools/contracts";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  EMPTY_AUTO_SELECT_STATE,
+  planAutoSelection,
+} from "@t3tools/client-runtime/project-memory-auto-select";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { BookMarkedIcon, CheckIcon, LightbulbIcon } from "lucide-react";
+import { BookMarkedIcon, CheckIcon, HistoryIcon, LightbulbIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useCallback, type ReactNode } from "react";
 
 import type { ComposerProjectMemoryReference, ComposerThreadTarget } from "~/composerDraftStore";
@@ -21,6 +26,7 @@ import {
   reconcileProjectMemoryDraftReferences,
 } from "~/lib/composerContextRecords";
 import { projectMemory } from "~/state/projectMemory";
+import { useEnvironmentSettings } from "~/hooks/useSettings";
 import { useEnvironmentQuery } from "~/state/query";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { environmentServerConfigsAtom, serverEnvironment } from "~/state/server";
@@ -39,6 +45,7 @@ import {
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { ProjectMemorySentToThread } from "./ProjectMemorySentToThread";
 import { suggestProjectMemories } from "./projectMemorySuggestions";
 
 /**
@@ -259,6 +266,9 @@ export interface ProjectMemoryPickerScope {
   readonly draftKey: string;
 }
 
+/** Wait for a pause in typing so a chip is never inserted under a moving caret. */
+const AUTO_SELECT_DEBOUNCE_MS = 800;
+
 const EMPTY_PROJECT_MEMORY_REFERENCES: ReadonlyArray<ComposerProjectMemoryReference> = [];
 
 /**
@@ -284,7 +294,12 @@ export function useProjectMemoryDraftLink(input: {
   readServerThreadProjectId?: () => ProjectId | null;
 }): {
   selected: ReadonlyArray<ComposerProjectMemoryReference>;
-  toggle: (memoryId: string, selectedVersion: number, scope: ProjectMemoryPickerScope) => boolean;
+  toggle: (
+    memoryId: string,
+    selectedVersion: number,
+    scope: ProjectMemoryPickerScope,
+    options?: { readonly insertAtCaret?: boolean },
+  ) => boolean;
   remove: (contextId: string, scope: ProjectMemoryPickerScope) => void;
 } {
   const selected = useComposerDraftStore(
@@ -343,7 +358,12 @@ export function useProjectMemoryDraftLink(input: {
       scope.draftKey === current.draftKey
     );
   };
-  const toggle = (memoryId: string, selectedVersion: number, scope: ProjectMemoryPickerScope) => {
+  const toggle = (
+    memoryId: string,
+    selectedVersion: number,
+    scope: ProjectMemoryPickerScope,
+    options?: { readonly insertAtCaret?: boolean },
+  ) => {
     if (!scopeMatches(scope)) {
       return false;
     }
@@ -360,7 +380,11 @@ export function useProjectMemoryDraftLink(input: {
     }
     return useComposerDraftStore
       .getState()
-      .addProjectMemoryReference(liveTargetRef.current, { memoryId, selectedVersion });
+      .addProjectMemoryReference(
+        liveTargetRef.current,
+        { memoryId, selectedVersion },
+        options?.insertAtCaret === undefined ? undefined : { insertAtCaret: options.insertAtCaret },
+      );
   };
   const remove = (contextId: string, scope: ProjectMemoryPickerScope) => {
     if (!scopeMatches(scope)) {
@@ -550,6 +574,15 @@ function ProjectMemoryComposerControlBody(props: {
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [showSent, setShowSent] = useState(false);
+  // The "sent to this thread" view needs a server thread (a draft has sent
+  // nothing) and a server that serves it; older servers just don't get the entry.
+  const sentThreadId =
+    typeof props.composerDraftTarget === "string" ? null : props.composerDraftTarget.threadId;
+  const serverConfig = useAtomValue(serverEnvironment.configValueAtom(props.environmentId));
+  const sentSupported =
+    sentThreadId !== null &&
+    serverConfig?.environment.capabilities.projectMemory?.sentToThread === true;
   const link = useProjectMemoryDraftLink({
     environmentId: props.environmentId,
     projectId: props.projectId,
@@ -562,15 +595,29 @@ function ProjectMemoryComposerControlBody(props: {
     projectId: props.projectId,
     draftKey: composerTargetKey(props.composerDraftTarget),
   };
-  // Suggests the best-matching memory for what is being typed; the list read is the same
-  // cached atom the title provider uses, so typing never adds a server query.
+  // Suggests related memories for what is being typed. The list is read once per project
+  // (with bodies, so title and body are both scored) and cached, so typing never adds a
+  // server query.
   const draft = useComposerDraftStore(
     (state) => state.getComposerDraft(props.composerDraftTarget)?.prompt ?? "",
   );
+  // Visible auto-selection: related memories become ordinary removable chips, added through
+  // the same toggle (provider re-check included) and sent through the same reference path.
+  // Off unless the environment setting is on; a chip the user removes is not added back.
+  const autoSelectEnabled = useEnvironmentSettings(
+    props.environmentId,
+    (settings) => settings.autoSelectProjectMemories,
+  );
+  // Bodies are only requested when auto-select will score them. Without them the input is
+  // the same as the picker list's, so both read one cached title list.
   const memories = useEnvironmentQuery(
     projectMemory.list({
       environmentId: props.environmentId,
-      input: { projectId: props.projectId, limit: PROJECT_MEMORY_MAX_LIMIT },
+      input: {
+        projectId: props.projectId,
+        limit: PROJECT_MEMORY_MAX_LIMIT,
+        ...(autoSelectEnabled && props.gate.pickerEnabled ? { includeBody: true } : {}),
+      },
     }),
   ).data?.items;
   const suggestion = useMemo(
@@ -585,6 +632,54 @@ function ProjectMemoryComposerControlBody(props: {
         : undefined,
     [draft, memories, link.selected, props.gate.pickerEnabled],
   );
+  // Dismissed chips live on the draft, so they survive switching threads and remounting.
+  const draftKey = scope.draftKey;
+  const autoSelectStateRef = useRef(EMPTY_AUTO_SELECT_STATE);
+  const draftTargetRef = useRef(props.composerDraftTarget);
+  draftTargetRef.current = props.composerDraftTarget;
+  useEffect(() => {
+    const stored = useComposerDraftStore.getState().getComposerDraft(draftTargetRef.current);
+    // `added` is restored too: chips attached before a remount still count against the budget.
+    autoSelectStateRef.current = {
+      ...EMPTY_AUTO_SELECT_STATE,
+      added: new Set(stored?.autoSelectAdded),
+      dismissed: new Set(stored?.autoSelectDismissed),
+    };
+  }, [draftKey]);
+  useEffect(() => {
+    if (draft.trim().length === 0 && link.selected.length === 0) {
+      autoSelectStateRef.current = EMPTY_AUTO_SELECT_STATE;
+      useComposerDraftStore
+        .getState()
+        .setAutoSelectState(draftTargetRef.current, { dismissed: [], added: [] });
+      return;
+    }
+    const timer = setTimeout(() => {
+      const plan = planAutoSelection({
+        enabled: autoSelectEnabled,
+        providerAllowed: props.gate.pickerEnabled,
+        draft,
+        memories: memories ?? [],
+        selectedMemoryIds: new Set(link.selected.map((reference) => reference.memoryId)),
+        state: autoSelectStateRef.current,
+        nowMs: Date.now(),
+      });
+      autoSelectStateRef.current = plan.state;
+      // Persist only ids that still exist, so the draft's list cannot grow past the memory list.
+      const known = memories ? new Set<string>(memories.map((item) => item.memoryId)) : null;
+      const persistable = (ids: ReadonlySet<string>) =>
+        [...ids].filter((id) => known === null || known.has(id));
+      useComposerDraftStore.getState().setAutoSelectState(draftTargetRef.current, {
+        dismissed: persistable(plan.state.dismissed),
+        added: [...plan.state.added],
+      });
+      for (const item of plan.add) {
+        link.toggle(item.memoryId, item.version, scope, { insertAtCaret: false });
+      }
+    }, AUTO_SELECT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+    // `link.toggle` re-reads live state at call time; its identity changes every render.
+  }, [draft, memories, link.selected, autoSelectEnabled, props.gate.pickerEnabled, draftKey]);
   return (
     <>
       {suggestion ? (
@@ -604,7 +699,13 @@ function ProjectMemoryComposerControlBody(props: {
       ) : null}
       {/* An already-open picker closes when support disappears (render-driven);
           the toggle/remove callbacks still re-verify at mutation time. */}
-      <Popover open={open && props.gate.pickerEnabled} onOpenChange={setOpen}>
+      <Popover
+        open={open && props.gate.pickerEnabled}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setShowSent(false);
+        }}
+      >
         <PopoverTrigger
           render={
             <Button
@@ -622,14 +723,42 @@ function ProjectMemoryComposerControlBody(props: {
           <BookMarkedIcon />
         </PopoverTrigger>
         <PopoverPopup side="top" align="end" width="sm" padding="compact">
-          <ProjectMemoryPicker
-            environmentId={props.environmentId}
-            projectId={props.projectId}
-            scope={scope}
-            selected={link.selected}
-            onToggle={link.toggle}
-            onRemove={link.remove}
-          />
+          {sentThreadId !== null && sentSupported && showSent ? (
+            <ProjectMemorySentToThread
+              environmentId={props.environmentId}
+              projectId={props.projectId}
+              threadId={sentThreadId}
+              onBack={() => setShowSent(false)}
+              onNavigate={() => {
+                setOpen(false);
+                setShowSent(false);
+              }}
+            />
+          ) : (
+            <div className="flex flex-col gap-1">
+              <ProjectMemoryPicker
+                environmentId={props.environmentId}
+                projectId={props.projectId}
+                scope={scope}
+                selected={link.selected}
+                onToggle={link.toggle}
+                onRemove={link.remove}
+              />
+              {sentSupported ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  className="w-fit"
+                  data-memory-sent-trigger="true"
+                  onClick={() => setShowSent(true)}
+                >
+                  <HistoryIcon />
+                  {t("Sent to this thread")}
+                </Button>
+              ) : null}
+            </div>
+          )}
         </PopoverPopup>
       </Popover>
     </>

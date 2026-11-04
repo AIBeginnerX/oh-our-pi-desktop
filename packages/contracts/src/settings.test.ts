@@ -81,6 +81,9 @@ describe("opt-in agent behaviour settings", () => {
   it("are off for new and existing settings without a saved preference", () => {
     expect(decodeServerSettings({}).continueUnfinishedPlans).toBe(false);
     expect(DEFAULT_SERVER_SETTINGS.continueUnfinishedPlans).toBe(false);
+    expect(decodeServerSettings({}).autoSelectProjectMemories).toBe(false);
+    expect(DEFAULT_SERVER_SETTINGS.autoSelectProjectMemories).toBe(false);
+    expect(DEFAULT_SERVER_SETTINGS.projectMemoryAnalyser).toBe(false);
     expect(decodeClientSettings({}).turnStallNoticeEnabled).toBe(false);
     expect(decodeClientSettings({ sendShortcut: "mod-enter" }).turnStallNoticeEnabled).toBe(false);
   });

@@ -36,6 +36,32 @@ describe("Crew recovery checkpoint codec", () => {
     }),
   );
 
+  it.effect("keeps the proof of a finished task", () =>
+    Effect.gen(function* () {
+      const checkpoint = {
+        version: 1 as const,
+        taskId: "task-1",
+        leadThreadId: ThreadId.make("lead-1"),
+        leadTurnId: null,
+        role: "worker" as const,
+        subject: "worker task",
+        attempts: [],
+        report: {
+          taskId: "task-1",
+          role: "worker" as const,
+          status: "completed" as const,
+          result: "worker result",
+          proof: { verdict: "inconclusive" as const, reason: "2 items claimed without proof" },
+        },
+        collected: false,
+        ended: true,
+        auditState: "none" as const,
+      };
+      const restored = yield* decodeTask(yield* encodeTask(checkpoint));
+      assert.deepEqual(restored.report?.proof, checkpoint.report.proof);
+    }),
+  );
+
   it.effect("keeps the write scope and structured report, and still reads older checkpoints", () =>
     Effect.gen(function* () {
       const report = {
@@ -99,6 +125,43 @@ describe("Crew recovery checkpoint codec", () => {
         auditState: "none" as const,
       };
       assert.deepEqual(yield* decodeTask(yield* encodeTask(checkpoint)), checkpoint);
+    }),
+  );
+
+  it.effect("keeps a task's TODO list, workspace base, and scope report across a restart", () =>
+    Effect.gen(function* () {
+      const checkpoint = {
+        version: 1 as const,
+        taskId: "task-1",
+        leadThreadId: ThreadId.make("lead-1"),
+        leadTurnId: null,
+        role: "worker" as const,
+        subject: "worker task",
+        todos: [
+          {
+            id: "t1",
+            text: "add tests",
+            check: { command: "vp test run a", files: ["a.test.ts"] },
+            status: "failed" as const,
+            note: "added",
+            detail: "The command exited with code 1.",
+          },
+          { id: "t2", text: "plain", status: "pending" as const },
+        ],
+        todoBase: { cwd: "/repo", tree: "abc123" },
+        outOfScope: { files: ["x.ts"], more: 0, shared: true },
+        attempts: [],
+        report: null,
+        collected: false,
+        ended: false,
+        auditState: "none" as const,
+      };
+      assert.deepEqual(yield* decodeTask(yield* encodeTask(checkpoint)), checkpoint);
+      const older = yield* decodeTask(
+        '{"version":1,"taskId":"task-1","leadThreadId":"lead-1","leadTurnId":null,"role":"worker","subject":"worker task","attempts":[],"report":null,"collected":false,"ended":false,"auditState":"none"}',
+      );
+      assert.isUndefined(older.todos);
+      assert.isUndefined(older.todoBase);
     }),
   );
 

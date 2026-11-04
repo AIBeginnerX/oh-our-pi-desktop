@@ -1,4 +1,4 @@
-//! OOP 라벤더 다크 테마. `apps/oop-tui/src/render/theme.ts` 의 `oop` 토큰에서 가져왔다.
+//! OOP 라벤더 다크 테마. `apps/oop-tui-rs/src/theme.rs` 의 `oop` 토큰에서 가져왔다.
 
 use alacritty_terminal::term::color::Colors;
 use alacritty_terminal::vte::ansi::{Color, Rgb};

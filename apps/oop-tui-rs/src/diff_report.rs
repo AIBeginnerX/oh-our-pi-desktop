@@ -1,6 +1,6 @@
 //! What `/diff` writes under the conversation: a heading with the turn's totals, the files it
-//! touched and the diff under them, drawn like the TypeScript terminal's (apps/oop-tui/src/render/
-//! diffReport.ts and diff.ts): line numbers once a hunk header is seen, the added and removed
+//! touched and the diff under them, drawn like the former TypeScript terminal's diff report:
+//! line numbers once a hunk header is seen, the added and removed
 //! lines on a tinted background, and the changed words of a lone removed/added pair marked.
 
 use crate::panels_common::{fill, s};

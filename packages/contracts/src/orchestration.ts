@@ -125,6 +125,32 @@ export const ModelSelection = ModelSelectionSource.pipe(
 );
 export type ModelSelection = typeof ModelSelection.Type;
 
+/** How unpinned crew roles are filled from the models this environment has ready. */
+export const CrewPreset = Schema.Literals(["recommended", "speed", "quality", "budget"]);
+export type CrewPreset = typeof CrewPreset.Type;
+
+/**
+ * Roles the user chose by hand; a pinned role ignores the preset. In a thread's crew, null
+ * means Auto for that role even when the defaults pin it.
+ */
+export const CrewPinnedRoles = Schema.Struct({
+  worker: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  expert: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  auditor: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+});
+export type CrewPinnedRoles = typeof CrewPinnedRoles.Type;
+
+/**
+ * A thread's own crew: what the user changed inside that thread, layered over the default crew
+ * in the server settings. Lives here rather than in `crew.ts` because the thread schemas embed it.
+ */
+export const CrewThreadOverride = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  preset: Schema.optionalKey(CrewPreset),
+  pinned: Schema.optionalKey(CrewPinnedRoles),
+});
+export type CrewThreadOverride = typeof CrewThreadOverride.Type;
+
 export const RuntimeMode = Schema.Literals([
   "approval-required",
   "auto-accept-edits",
@@ -853,6 +879,8 @@ export const OrchestrationThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // The lead thread a crew sub-task belongs to; clients nest it there. Optional for older servers.
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  // The thread's own crew; absent or null means it runs the default crew. Optional for older servers.
+  crew: Schema.optional(Schema.NullOr(CrewThreadOverride)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
@@ -925,6 +953,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  crew: Schema.optional(Schema.NullOr(CrewThreadOverride)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   titleState: Schema.optional(Schema.NullOr(ThreadTitleState)),
   session: Schema.NullOr(OrchestrationSession),
@@ -1143,6 +1172,8 @@ const ThreadCreateCommand = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Set by the server for crew sub-task threads: the lead thread that delegated them. */
   parentThreadId: Schema.optional(ThreadId),
+  /** The crew the thread starts with, when the user set one before its first message. */
+  crew: Schema.optional(CrewThreadOverride),
   createdAt: IsoDateTime,
   historyImport: Schema.optional(Schema.Literal(true)),
 });
@@ -1307,6 +1338,15 @@ const ThreadRuntimeModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadCrewSetCommand = Schema.Struct({
+  type: Schema.Literal("thread.crew.set"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  /** The complete next crew of the thread; null puts the thread back on the default crew. */
+  crew: Schema.NullOr(CrewThreadOverride),
+  createdAt: IsoDateTime,
+});
+
 const ThreadInteractionModeSetCommand = Schema.Struct({
   type: Schema.Literal("thread.interaction-mode.set"),
   commandId: CommandId,
@@ -1323,6 +1363,7 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  crew: Schema.optional(CrewThreadOverride),
   createdAt: IsoDateTime,
 });
 
@@ -1471,6 +1512,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
   ThreadRuntimeModeSetCommand,
+  ThreadCrewSetCommand,
   ThreadInteractionModeSetCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
@@ -1505,6 +1547,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadPullRequestLinkCommand,
   ThreadPullRequestUnlinkCommand,
   ThreadRuntimeModeSetCommand,
+  ThreadCrewSetCommand,
   ThreadInteractionModeSetCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
@@ -1760,6 +1803,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.pull-request-unlinked",
   "thread.pull-request-synced",
   "thread.runtime-mode-set",
+  "thread.crew-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
   "thread.turn-start-requested",
@@ -1825,6 +1869,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   parentThreadId: Schema.optional(ThreadId),
+  crew: Schema.optional(CrewThreadOverride),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1951,6 +1996,12 @@ export type ThreadPullRequestSyncedPayload = typeof ThreadPullRequestSyncedPaylo
 export const ThreadRuntimeModeSetPayload = Schema.Struct({
   threadId: ThreadId,
   runtimeMode: RuntimeMode,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadCrewSetPayload = Schema.Struct({
+  threadId: ThreadId,
+  crew: Schema.NullOr(CrewThreadOverride),
   updatedAt: IsoDateTime,
 });
 
@@ -2194,6 +2245,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.runtime-mode-set"),
     payload: ThreadRuntimeModeSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.crew-set"),
+    payload: ThreadCrewSetPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

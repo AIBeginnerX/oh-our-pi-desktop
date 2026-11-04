@@ -19,6 +19,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkLessonsPrompt,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
@@ -39,6 +40,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
+  "generateWorkLessons",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
@@ -528,10 +530,23 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
+    Effect.fn("OpenCodeTextGeneration.generateWorkLessons")(function* (input) {
+      const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
+      return yield* runOpenCodeJson({
+        operation: "generateWorkLessons",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkLessons,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

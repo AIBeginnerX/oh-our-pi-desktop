@@ -1,0 +1,90 @@
+{
+  "cases": [
+    {
+      "name": "completed",
+      "status": "completed",
+      "expected": "completed"
+    },
+    {
+      "name": "failed",
+      "status": "failed",
+      "expected": "failed"
+    },
+    {
+      "name": "error",
+      "status": "error",
+      "expected": "failed"
+    },
+    {
+      "name": "declined",
+      "status": "declined",
+      "expected": "failed"
+    },
+    {
+      "name": "cancelled",
+      "status": "cancelled",
+      "expected": "cancelled"
+    },
+    {
+      "name": "stopped",
+      "status": "stopped",
+      "expected": "cancelled"
+    },
+    {
+      "name": "inProgress",
+      "status": "inProgress",
+      "expected": "running"
+    },
+    {
+      "name": "running",
+      "status": "running",
+      "expected": "running"
+    },
+    {
+      "name": "pending",
+      "status": "pending",
+      "expected": "running"
+    },
+    {
+      "name": "in_progress",
+      "status": "in_progress",
+      "expected": "running"
+    },
+    {
+      "name": "capitalised COMPLETED is not completed",
+      "status": "COMPLETED",
+      "expected": "running"
+    },
+    {
+      "name": "padded completed is not completed",
+      "status": " completed",
+      "expected": "running"
+    },
+    {
+      "name": "empty string",
+      "status": "",
+      "expected": "running"
+    },
+    {
+      "name": "null status",
+      "status": null,
+      "expected": "running"
+    },
+    {
+      "name": "number status",
+      "status": 1,
+      "expected": "running"
+    },
+    {
+      "name": "object status",
+      "status": {
+        "value": "completed"
+      },
+      "expected": "running"
+    },
+    {
+      "name": "missing status",
+      "expected": "running"
+    }
+  ]
+}

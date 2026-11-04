@@ -42,11 +42,26 @@ export const make = Effect.gen(function* () {
           ${checkpoint.record_json}, ${checkpoint.created_at}
         )
       `.pipe(Effect.asVoid, Effect.mapError(failed("CrewRuntimeState.prepareFollowUp"))),
-    readFollowUps: sql<CrewFollowUpCheckpoint>`
+    readPendingFollowUps: (leadThreadId) =>
+      sql<CrewFollowUpCheckpoint>`
+        SELECT delivery_id, lead_thread_id, command_id, message_id, record_json,
+               created_at, delivered_at, rejected_at
+        FROM crew_followups
+        WHERE lead_thread_id = ${leadThreadId} AND delivered_at IS NULL AND rejected_at IS NULL
+        ORDER BY created_at, delivery_id
+      `.pipe(Effect.mapError(failed("CrewRuntimeState.readPendingFollowUps"))),
+    readSettledFollowUps: sql<CrewFollowUpCheckpoint>`
       SELECT delivery_id, lead_thread_id, command_id, message_id, record_json,
              created_at, delivered_at, rejected_at
-      FROM crew_followups ORDER BY created_at, delivery_id
-    `.pipe(Effect.mapError(failed("CrewRuntimeState.readFollowUps"))),
+      FROM crew_followups
+      WHERE delivered_at IS NOT NULL OR rejected_at IS NOT NULL
+      ORDER BY created_at, delivery_id
+    `.pipe(Effect.mapError(failed("CrewRuntimeState.readSettledFollowUps"))),
+    deleteFollowUp: (deliveryId) =>
+      sql`DELETE FROM crew_followups WHERE delivery_id = ${deliveryId}`.pipe(
+        Effect.asVoid,
+        Effect.mapError(failed("CrewRuntimeState.deleteFollowUp")),
+      ),
     acknowledgeFollowUp: (deliveryId, deliveredAt) =>
       sql`
         UPDATE crew_followups SET delivered_at = ${deliveredAt}

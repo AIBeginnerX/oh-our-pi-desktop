@@ -5,6 +5,7 @@
 //! mid-stream) renders as a code block so far. Wide characters are measured by cell and wrapped
 //! mid-word where there are no spaces to break at.
 
+use crate::chart;
 use crate::text::{char_width, sanitize, width};
 use crate::theme::{Symbols, Theme};
 use ratatui::style::{Modifier, Style};
@@ -13,6 +14,20 @@ use ratatui::text::{Line, Span};
 type Styled = Vec<(char, Style)>;
 
 pub fn render(text: &str, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'static>> {
+    render_streaming(text, w, th, sym, false)
+}
+
+/// `render`, for a reply that may still be written: while `streaming`, a ```chart or ```mermaid
+/// fence that has not closed is one placeholder row (its half-written JSON is not drawn and does not
+/// flicker), and it becomes the figure when the closing fence arrives. A closed one that cannot be
+/// drawn (invalid JSON, unknown type) stays the plain code block.
+pub fn render_streaming(
+    text: &str,
+    w: usize,
+    th: &Theme,
+    sym: &Symbols,
+    streaming: bool,
+) -> Vec<Line<'static>> {
     let w = w.max(8);
     let ascii = sym.rule == "-";
     let text = sanitize(text);
@@ -31,18 +46,31 @@ pub fn render(text: &str, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'stat
                 code.push(strip_indent(lines[i], indent));
                 i += 1;
             }
+            let closed = i < lines.len();
             i += 1; // the closing fence (or past the end for an open one)
+            let word = lang.split_whitespace().next().unwrap_or("");
+            if chart::is_visual(word) {
+                if !closed && streaming {
+                    out.extend(chart::placeholder(word, th, sym));
+                    continue;
+                }
+                if let Some(figure) = chart::block(word, &code.join("\n"), w, th, sym) {
+                    out.extend(figure);
+                    continue;
+                }
+            }
             out.extend(code_block(&lang, &code, w, th));
             continue;
         }
         if is_table_row(trimmed) && i + 1 < lines.len() && is_table_rule(lines[i + 1].trim()) {
+            let rule = lines[i + 1].trim();
             let mut rows: Vec<&str> = vec![trimmed];
             i += 2;
             while i < lines.len() && is_table_row(lines[i].trim_start()) {
                 rows.push(lines[i].trim_start());
                 i += 1;
             }
-            out.extend(table(&rows, w, th, ascii));
+            out.extend(table(&rows, rule, w, th, ascii));
             continue;
         }
         out.extend(block_line(line, w, th, ascii));
@@ -317,59 +345,119 @@ fn highlight(line: &str, lang: &str, plate: Style, th: &Theme) -> Styled {
     out
 }
 
-fn table(rows: &[&str], w: usize, th: &Theme, ascii: bool) -> Vec<Line<'static>> {
-    let cells: Vec<Vec<String>> = rows
+#[derive(Clone, Copy)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+fn split_row(row: &str) -> Vec<&str> {
+    row.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(str::trim)
+        .collect()
+}
+
+/// A table as a box: aligned columns (the delimiter row's colons set left, centre or right), rules
+/// between the header and the body, cells wrapped inside their column, every width a display width
+/// so Korean text lines up. A table too wide even for narrow columns is shown as plain rows.
+fn table(rows: &[&str], rule: &str, w: usize, th: &Theme, ascii: bool) -> Vec<Line<'static>> {
+    let aligns: Vec<Align> = split_row(rule)
         .iter()
-        .map(|r| {
-            r.trim()
-                .trim_matches('|')
-                .split('|')
-                .map(|c| c.trim().to_string())
-                .collect()
+        .map(|c| match (c.starts_with(':'), c.ends_with(':')) {
+            (true, true) => Align::Center,
+            (false, true) => Align::Right,
+            _ => Align::Left,
         })
         .collect();
-    let columns = cells.iter().map(Vec::len).max().unwrap_or(0);
-    let mut widths = vec![1usize; columns];
-    for row in &cells {
-        for (c, cell) in row.iter().enumerate() {
-            widths[c] = widths[c].max(width(cell));
-        }
-    }
-    // Shrink the widest columns until the row fits; cells are cut with an ellipsis.
-    let overhead = 3 * columns.saturating_sub(1);
-    while widths.iter().sum::<usize>() + overhead > w && widths.iter().any(|x| *x > 4) {
-        let widest = (0..columns).max_by_key(|c| widths[*c]).unwrap_or(0);
-        widths[widest] -= 1;
-    }
-    let (bar, rule, cross) = if ascii {
-        (" | ", "-", "-+-")
-    } else {
-        (" │ ", "─", "─┼─")
-    };
-    let sep = Span::styled(bar, th.dim_style());
-    let mut out = Vec::new();
-    for (r, row) in cells.iter().enumerate() {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        for (c, column_width) in widths.iter().enumerate().take(columns) {
-            if c > 0 {
-                spans.push(sep.clone());
-            }
-            let cell = row.get(c).map(String::as_str).unwrap_or("");
-            let cut = crate::text::truncate(cell, *column_width);
-            let pad = " ".repeat(column_width.saturating_sub(width(&cut)));
-            let style = if r == 0 {
+    let cells: Vec<Vec<Styled>> = rows
+        .iter()
+        .enumerate()
+        .map(|(r, row)| {
+            let base = if r == 0 {
                 Style::new().add_modifier(Modifier::BOLD)
             } else {
                 Style::new()
             };
-            spans.push(Span::styled(format!("{cut}{pad}"), style));
-        }
-        out.push(Line::from(spans));
-        if r == 0 {
-            let rules: Vec<String> = widths.iter().map(|x| rule.repeat(*x)).collect();
-            out.push(Line::from(Span::styled(rules.join(cross), th.dim_style())));
+            split_row(row)
+                .into_iter()
+                .map(|c| inline(c, base, th))
+                .collect()
+        })
+        .collect();
+    let columns = cells.iter().map(Vec::len).max().unwrap_or(0);
+    let cell_width = |cell: &Styled| cell.iter().map(|(c, _)| char_width(*c)).sum::<usize>();
+    let mut widths = vec![1usize; columns];
+    for row in &cells {
+        for (c, cell) in row.iter().enumerate() {
+            widths[c] = widths[c].max(cell_width(cell));
         }
     }
+    // Shrink the widest columns until the box fits; their cells wrap.
+    let overhead = 3 * columns + 1;
+    while widths.iter().sum::<usize>() + overhead > w && widths.iter().any(|x| *x > 2) {
+        let widest = (0..columns).max_by_key(|c| widths[*c]).unwrap_or(0);
+        widths[widest] -= 1;
+    }
+    if widths.iter().sum::<usize>() + overhead > w {
+        return rows
+            .iter()
+            .flat_map(|row| {
+                let text = split_row(row).join(" │ ");
+                wrap_prefixed(&inline(&text, Style::new(), th), w, vec![], vec![])
+            })
+            .collect();
+    }
+    // corners (tl, tr, bl, br), tees (top, left, bottom), cross, right tee.
+    let (v, h, corners, tees, cross, right) = if ascii {
+        ("|", "-", ["+"; 4], ["+"; 3], "+", "+")
+    } else {
+        ("│", "─", ["┌", "┐", "└", "┘"], ["┬", "├", "┴"], "┼", "┤")
+    };
+    let edge = |left: &str, mid: &str, right: &str| {
+        let parts: Vec<String> = widths.iter().map(|x| h.repeat(x + 2)).collect();
+        Line::from(Span::styled(
+            format!("{left}{}{right}", parts.join(mid)),
+            th.dim_style(),
+        ))
+    };
+    let side = Span::styled(v, th.dim_style());
+    let mut out = vec![edge(corners[0], tees[0], corners[1])];
+    for (r, row) in cells.iter().enumerate() {
+        let wrapped: Vec<Vec<Styled>> = (0..columns)
+            .map(|c| wrap_styled(row.get(c).unwrap_or(&Vec::new()), widths[c]))
+            .collect();
+        let height = wrapped.iter().map(Vec::len).max().unwrap_or(1);
+        for k in 0..height {
+            let mut spans = vec![side.clone(), Span::raw(" ")];
+            for (c, cell) in wrapped.iter().enumerate() {
+                if c > 0 {
+                    spans.push(Span::raw(" "));
+                    spans.push(side.clone());
+                    spans.push(Span::raw(" "));
+                }
+                let line = cell.get(k).cloned().unwrap_or_default();
+                let pad = widths[c].saturating_sub(cell_width(&line));
+                let (before, after) = match aligns.get(c).copied().unwrap_or(Align::Left) {
+                    Align::Left => (0, pad),
+                    Align::Right => (pad, 0),
+                    Align::Center => (pad / 2, pad - pad / 2),
+                };
+                spans.push(Span::raw(" ".repeat(before)));
+                spans.extend(group(&line));
+                spans.push(Span::raw(" ".repeat(after)));
+            }
+            spans.push(Span::raw(" "));
+            spans.push(side.clone());
+            out.push(Line::from(spans));
+        }
+        if r == 0 && cells.len() > 1 {
+            out.push(edge(tees[1], cross, right));
+        }
+    }
+    out.push(edge(corners[2], tees[2], corners[3]));
     out
 }
 
@@ -694,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn tables_align_and_links_show_their_target() {
+    fn tables_are_boxes_with_aligned_columns_and_links_show_their_target() {
         let out = render(
             "| a | bb |\n|---|---|\n| 1 | 22 |\n\nsee [docs](https://x.y/z)",
             40,
@@ -702,10 +790,145 @@ mod tests {
             &crate::theme::UNICODE,
         );
         let rows = plain(&out);
-        assert_eq!(rows[0], "a │ bb");
-        assert!(rows[1].contains('┼'));
-        assert_eq!(rows[2], "1 │ 22");
-        assert_eq!(rows[4], "see docs (https://x.y/z)");
+        assert_eq!(rows[0], "┌───┬────┐");
+        assert_eq!(rows[1], "│ a │ bb │");
+        assert_eq!(rows[2], "├───┼────┤");
+        assert_eq!(rows[3], "│ 1 │ 22 │");
+        assert_eq!(rows[4], "└───┴────┘");
+        assert_eq!(rows[6], "see docs (https://x.y/z)");
+    }
+
+    #[test]
+    fn table_columns_follow_the_delimiter_row_and_cjk_display_width() {
+        let out = render(
+            "| 이름 | 값 | 비고 |\n|:--|--:|:-:|\n| 가나다 | 1 | ok |\n| a | 12345 | **굵게** |",
+            60,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        );
+        let rows = plain(&out);
+        // Every row of the box is the same number of cells wide, Korean included.
+        let w = width(&rows[0]);
+        assert!(rows.iter().all(|r| width(r) == w), "{rows:?}");
+        assert!(
+            rows[3].contains("│ 가나다 │") && rows[4].contains("│ a      │"),
+            "{rows:?}"
+        );
+        // Right aligned numbers, centred remark, inline markup resolved (no asterisks).
+        assert!(rows[3].contains("│     1 │") && rows[4].contains("│ 12345 │"));
+        assert!(!rows.iter().any(|r| r.contains("**")));
+        let bold = out[4]
+            .spans
+            .iter()
+            .any(|s| s.content.contains("굵게") && s.style.add_modifier.contains(Modifier::BOLD));
+        assert!(bold);
+    }
+
+    #[test]
+    fn a_wide_table_wraps_its_cells_inside_the_width() {
+        let out = render(
+            "| key | description |\n|---|---|\n| a | a very long description that has to wrap onto several rows |",
+            30,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        );
+        let rows = plain(&out);
+        assert!(out.iter().all(|l| cells(l) <= 30), "{rows:?}");
+        assert!(rows.len() > 6, "{rows:?}");
+        assert!(rows.join(" ").contains("several"));
+        // Too narrow even for that: plain rows, nothing lost.
+        let tight = plain(&render(
+            "| aaa | bbb | ccc |\n|---|---|---|\n| 1 | 2 | 3 |",
+            8,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        ));
+        assert!(tight.join("").contains('3'));
+    }
+
+    // --- chart and mermaid fences ------------------------------------------------------------
+
+    const CHART: &str = "```chart\n{\"type\":\"bar\",\"labels\":[\"a\",\"b\"],\"series\":[{\"name\":\"x\",\"data\":[3,5]}]}\n```";
+
+    #[test]
+    fn a_closed_chart_fence_is_a_figure_not_a_code_plate() {
+        let out = render(
+            &format!("before\n{CHART}\nafter"),
+            60,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        );
+        let rows = plain(&out);
+        assert_eq!(rows[0], "before");
+        assert_eq!(rows.last().unwrap(), "after");
+        assert!(rows.iter().any(|r| r.contains("┼") && r.contains("───")));
+        assert!(
+            !rows.iter().any(|r| r.contains("chart") || r.contains('{')),
+            "{rows:?}"
+        );
+        assert!(out.iter().all(|l| cells(l) <= 60));
+        let flow = render(
+            "```mermaid\ngraph TD\nA[Start] --> B[End]\n```",
+            60,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        );
+        assert!(plain(&flow).join("\n").contains("Start"));
+    }
+
+    #[test]
+    fn an_open_chart_fence_while_streaming_is_one_stable_placeholder() {
+        let th = &LAVENDER;
+        let sym = &crate::theme::UNICODE;
+        let mut shown = Vec::new();
+        // The reply arrives a few characters at a time; the chart is never half drawn.
+        let full = format!("intro\n{CHART}\n");
+        for cut in (full.find("```chart").unwrap() + 8..full.len() - 4).step_by(7) {
+            let out = render_streaming(&full[..cut], 60, th, sym, true);
+            let rows = plain(&out);
+            assert_eq!(rows.len(), 2, "{rows:?}");
+            assert_eq!(rows[0], "intro");
+            assert!(rows[1].starts_with("▎ chart"), "{rows:?}");
+            shown.push(rows);
+        }
+        assert!(
+            shown.windows(2).all(|p| p[0] == p[1]),
+            "no flicker between chunks"
+        );
+        let closed = plain(&render_streaming(&full, 60, th, sym, true));
+        assert!(closed.len() > 4);
+        // A finished message that never closed its fence shows what it has as code, or the figure.
+        let unclosed = "```chart\n{\"type\":\"bar\",";
+        assert_eq!(
+            plain(&render_streaming(unclosed, 60, th, sym, false)).len(),
+            2
+        );
+        assert_eq!(
+            plain(&render_streaming(unclosed, 60, th, sym, true)).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn invalid_chart_json_falls_back_to_the_code_block() {
+        let out = render(
+            "```chart\n{not json}\n```\n```mermaid\nsequenceDiagram\nA->>B: hi\n```",
+            40,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+        );
+        let rows = plain(&out);
+        assert!(rows[0].contains("chart") && rows[1].contains("{not json}"));
+        assert!(
+            rows.iter().any(|r| r.contains("mermaid"))
+                && rows.iter().any(|r| r.contains("sequenceDiagram"))
+        );
+        assert!(
+            out[1]
+                .spans
+                .iter()
+                .all(|s| s.style.bg == Some(LAVENDER.code_bg))
+        );
     }
 
     #[test]
@@ -743,7 +966,8 @@ mod tests {
         assert_eq!(rows[0], "* one");
         assert_eq!(rows[1], "| quote");
         assert!(rows[2].starts_with("---"));
-        assert_eq!(rows[3], "a | bb");
-        assert_eq!(rows[4], "--+---");
+        assert_eq!(rows[3], "+---+----+");
+        assert_eq!(rows[4], "| a | bb |");
+        assert_eq!(rows[5], "+---+----+");
     }
 }

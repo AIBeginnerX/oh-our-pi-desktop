@@ -79,6 +79,7 @@ import {
   ProjectMemorySendPolicy,
   layer as projectMemorySendGateLayer,
 } from "../../memory/ProjectMemorySendGate.ts";
+import { withCrewMemoryReferences } from "../../crew/crewLogic.ts";
 import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import { TerminalManager } from "../../terminal/Manager.ts";
@@ -491,9 +492,11 @@ describe("ProviderCommandReactor memory handoff integration", () => {
               Effect.gen(function* () {
                 const real = yield* ProjectMemorySendGate;
                 return ProjectMemorySendGate.of({
+                  sentForMessage: real.sentForMessage,
                   threadHold: real.threadHold,
                   driverAllowed: real.driverAllowed,
                   admit: real.admit,
+                  recordRecall: real.recordRecall,
                   settle: (attemptSeq, outcome) =>
                     real
                       .settle(attemptSeq, outcome)
@@ -747,9 +750,9 @@ describe("ProviderCommandReactor memory handoff integration", () => {
 
   type Harness = Effect.Success<ReturnType<typeof buildReactorHarness>>;
 
-  const withReactorHarness = (
+  const withReactorHarness = <E>(
     input: ReactorHarnessInput | undefined,
-    body: (harness: Harness) => Effect.Effect<void, unknown>,
+    body: (harness: Harness) => Effect.Effect<void, E>,
   ) =>
     Effect.gen(function* () {
       const harness = yield* buildReactorHarness(input);
@@ -1265,6 +1268,91 @@ describe("ProviderCommandReactor memory handoff integration", () => {
               messageId: "m-gen",
             });
             yield* expectNoSecretLeakage(harness);
+          }),
+        );
+      }),
+  );
+
+  effectIt.live(
+    "admits a crew member's memory references on the member's own thread: own ledger rows and own hold",
+    () =>
+      Effect.gen(function* () {
+        const afterSettle = yield* Deferred.make<void>();
+        yield* withReactorHarness({ afterSettle }, (harness) =>
+          Effect.gen(function* () {
+            yield* insertProjectMemory(harness, { memoryId: "mem-crew" });
+            const child = ThreadId.make("crew-child-1");
+            yield* harness.engine.dispatch({
+              type: "thread.create",
+              commandId: CommandId.make("cmd-crew-create"),
+              threadId: child,
+              projectId: asProjectId("project-1"),
+              title: "Crew Worker · task",
+              modelSelection: { instanceId: CODEX_INSTANCE, model: "gpt-5-codex" },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              branch: null,
+              worktreePath: null,
+              parentThreadId: THREAD_ID,
+              createdAt: memoryNow,
+            });
+            // The message CrewService sends: the plain brief plus id+version references.
+            const message = withCrewMemoryReferences("Do the task.", [
+              { memoryId: "mem-crew", selectedVersion: 1 },
+            ]);
+            yield* harness.engine.dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.make("cmd-crew-turn"),
+              threadId: child,
+              message: {
+                messageId: asMessageId("m-crew"),
+                role: "user",
+                text: message.text,
+                attachments: [],
+                ...(message.context === undefined ? {} : { context: message.context }),
+              },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              createdAt: memoryNow,
+            });
+            yield* Deferred.await(afterSettle);
+
+            expect(harness.codexA.sendTurnEntries).toBe(1);
+            const published = harness.codexA.sendTurn.mock.calls[0]?.[0];
+            expect(published?.threadId).toBe(child);
+            expect(published?.input).toContain("mem-crew v1");
+            expect(published?.input).toContain(SECRET_BODY);
+            const attempts = yield* harness.sql<{
+              readonly threadId: string;
+              readonly state: string;
+            }>`SELECT thread_id AS "threadId", state FROM project_memory_send_attempts`;
+            expect(attempts).toEqual([{ threadId: child, state: "provider_accepted" }]);
+            const items = yield* harness.sql<{ readonly memoryVersion: number }>`
+              SELECT memory_version AS "memoryVersion" FROM project_memory_send_items
+            `;
+            expect(items.map((row) => row.memoryVersion)).toEqual([1]);
+
+            // Editing the memory holds the member's thread, and only that thread.
+            const updated = yield* harness.ledger.withMemoryMutation(
+              harness.memoryRepository.update({
+                projectId: asProjectId("project-1"),
+                memoryId: ProjectMemoryId.make("mem-crew"),
+                expectedVersion: 1,
+                title: "Rotated title",
+                body: "Rotated body",
+                kind: "fact",
+                validUntil: null,
+                estimatedTokens: 0,
+                now: "2026-01-01T00:00:02.000Z",
+              }),
+            );
+            expect(updated.status).toBe("applied");
+            expect((yield* harness.ledger.affectedState({ threadId: child, limit: 1 })).held).toBe(
+              true,
+            );
+            expect(
+              (yield* harness.ledger.affectedState({ threadId: THREAD_ID, limit: 1 })).held,
+            ).toBe(false);
           }),
         );
       }),

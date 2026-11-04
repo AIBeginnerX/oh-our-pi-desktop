@@ -1,11 +1,11 @@
-//! The colours. One built-in theme, `lavender`: the tokens of the TypeScript terminal's default
-//! `oop` theme (apps/oop-tui/src/render/theme.ts), whose brand colour is the lavender `#a78bfa` and
+//! The colours. One built-in theme, `lavender`: the tokens of the former TypeScript terminal's default
+//! `oop` theme, whose brand colour is the lavender `#a78bfa` and
 //! which has no magenta in it. `settings.json` may name it `lavender` or `oop`; any other name falls
 //! back to it with a warning (custom theme files are not read by this build).
 
 use ratatui::style::{Color, Style};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Theme {
     pub brand: Color,
     pub brand_dim: Color,
@@ -30,6 +30,10 @@ const fn hex(rgb: u32) -> Color {
     Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }
 
+// The user's own text (`user_fg`, in a box tinted `user_bg`; the composer types in the same ink) is a
+// tint of the theme's own brand colour, never that colour itself, light enough on a dark ground and
+// dark enough on a light one to read at 4.5:1 or better on `user_bg` (tests below hold every theme to
+// that). The tint is the theme's own ground, a step off `code_bg`.
 pub const LAVENDER: Theme = Theme {
     brand: hex(0xa78bfa),
     brand_dim: hex(0x7253b9),
@@ -44,7 +48,7 @@ pub const LAVENDER: Theme = Theme {
     keyword: hex(0xc084fc),
     string: hex(0x86efac),
     number: hex(0xfbbf24),
-    user_fg: hex(0xfcd34d),
+    user_fg: hex(0xc4b5fd),
     user_bg: hex(0x1e2433),
     code_bg: hex(0x1a1f2c),
     gradient: [hex(0x7253b9), hex(0xa78bfa), hex(0x38bdf8), hex(0x34d399)],
@@ -201,7 +205,7 @@ const OOP_LIGHT: Theme = Theme {
     keyword: hex(0x7e22ce),
     string: hex(0x15803d),
     number: hex(0xb45309),
-    user_fg: hex(0x92400e),
+    user_fg: hex(0x4c1d95),
     user_bg: hex(0xeef0f6),
     code_bg: hex(0xf1f3f8),
     gradient: [hex(0x7253b9), hex(0x5b6fd6), hex(0x0284c7), hex(0x059669)],
@@ -221,7 +225,7 @@ const AURORA: Theme = Theme {
     keyword: hex(0x5eead4),
     string: hex(0xbef264),
     number: hex(0xfacc15),
-    user_fg: hex(0xf9a8d4),
+    user_fg: hex(0x99f6e4),
     user_bg: hex(0x16282a),
     code_bg: hex(0x12211f),
     gradient: [hex(0x0d9488), hex(0x5eead4), hex(0xa3e635), hex(0x86efac)],
@@ -241,7 +245,7 @@ const SUNSET: Theme = Theme {
     keyword: hex(0xf472b6),
     string: hex(0xfdba74),
     number: hex(0xfde047),
-    user_fg: hex(0x7dd3fc),
+    user_fg: hex(0xfdba74),
     user_bg: hex(0x2b2124),
     code_bg: hex(0x241b1f),
     gradient: [hex(0xf97316), hex(0xfb7185), hex(0xe879f9), hex(0xa78bfa)],
@@ -259,7 +263,9 @@ const COLORBLIND: Theme = Theme {
     keyword: hex(0xcc79a7),
     string: hex(0x56b4e9),
     number: hex(0xf0e442),
-    user_fg: hex(0xf0e442),
+    user_fg: hex(0x9ad4f5),
+    user_bg: hex(0x14283a),
+    code_bg: hex(0x101f2e),
     gradient: [hex(0x0072b2), hex(0x56b4e9), hex(0xcc79a7), hex(0xf0e442)],
     ..LAVENDER
 };
@@ -649,7 +655,7 @@ pub fn startup(
 
 /// The marks the screen is drawn with: the TypeScript terminal's unicode set, or the ASCII set
 /// `settings.json` asks for (`"symbols": "ascii"`) for terminals that cannot draw the others.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Symbols {
     pub bullet: &'static str,
     pub prompt: &'static str,
@@ -745,6 +751,62 @@ mod tests {
         assert_eq!(LAVENDER.for_level(0).brand, Color::Reset);
         assert!(LAVENDER.fills_user() && !LAVENDER.for_level(1).fills_user());
         assert_eq!(indexed(255, 255, 255), 231);
+    }
+
+    /// WCAG contrast ratio of two truecolors.
+    fn contrast(a: Color, b: Color) -> f64 {
+        let (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) = (a, b) else {
+            panic!("truecolor themes only: {a:?} {b:?}");
+        };
+        let lum = |r: u8, g: u8, b: u8| {
+            let channel = |v: u8| {
+                let v = f64::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+        };
+        let (x, y) = (lum(ar, ag, ab), lum(br, bg, bb));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn every_theme_has_its_own_user_ink_that_reads_on_its_own_tint() {
+        let names = ["oop", "oop-light", "aurora", "sunset", "colorblind"];
+        let mut seen = Vec::new();
+        for name in names {
+            let theme = builtin(name).unwrap();
+            let ratio = contrast(theme.user_fg, theme.user_bg);
+            assert!(
+                ratio >= 4.5,
+                "{name}: user text on its tint is {ratio:.2}:1"
+            );
+            assert_ne!(theme.user_fg, theme.brand, "{name}: not the brand's hue");
+            assert_ne!(theme.user_fg, theme.accent, "{name}: not the accent's hue");
+            assert_ne!(theme.user_fg, theme.user_bg, "{name}");
+            assert_ne!(
+                theme.user_bg, theme.code_bg,
+                "{name}: a step off the code plate"
+            );
+            seen.push((theme.user_fg, theme.user_bg));
+        }
+        // Switching the theme changes the user's ink and its tint.
+        for (i, a) in seen.iter().enumerate() {
+            for b in &seen[i + 1..] {
+                assert!(a.0 != b.0 && a.1 != b.1, "{a:?} and {b:?} look alike");
+            }
+        }
+        // The light theme's tint is light and its text dark, so the box reads on a white terminal.
+        let light = builtin("oop-light").unwrap();
+        assert!(contrast(light.user_bg, Color::Rgb(255, 255, 255)) < 1.2);
+        assert!(contrast(light.user_fg, Color::Rgb(255, 255, 255)) >= 4.5);
+        // The 256-colour fold keeps the difference; 16 colours and no colour leave the tint out.
+        let folded = builtin("sunset").unwrap().for_level(2);
+        assert!(matches!(folded.user_fg, Color::Indexed(_)) && folded.fills_user());
+        assert!(!builtin("oop").unwrap().for_level(1).fills_user());
     }
 
     #[test]

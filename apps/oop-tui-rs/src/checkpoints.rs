@@ -1,5 +1,5 @@
-//! Which turn `/diff` shows and `/undo` would undo, read from the thread's checkpoints: a port of
-//! apps/oop-tui/src/app/checkpoints.ts. Pure functions over the folded thread, so the rules (a
+//! Which turn `/diff` shows and `/undo` would undo, read from the thread's checkpoints: ported from
+//! the former TypeScript terminal. Pure functions over the folded thread, so the rules (a
 //! newest turn without a checkpoint is explained, not skipped) are tested without a server.
 
 use crate::panels_common::{fill, s};

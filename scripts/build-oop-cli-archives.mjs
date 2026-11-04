@@ -327,14 +327,10 @@ export async function main(argv = process.argv.slice(2)) {
   const bin = NodePath.join(ROOT, "node_modules", ".bin");
   const basePath = `${bin}${NodePath.delimiter}${process.env.PATH}`;
   if (!options.skipBundle)
-    run(
-      "vp",
-      ["run", "--filter", "t3", ...(options.terminal ? ["--filter", "oop-tui"] : []), "build"],
-      {
-        cwd: ROOT,
-        env: { ...process.env, PATH: basePath },
-      },
-    );
+    run("vp", ["run", "--filter", "t3", "build"], {
+      cwd: ROOT,
+      env: { ...process.env, PATH: basePath },
+    });
   const node = seaNode();
   const docker = dockerEnv();
   ensureAmd64(docker);

@@ -113,14 +113,13 @@ thread's idle agent session and closes its terminals. Archived threads remain se
 message text from the command palette, where they are labelled **Archived**; choosing one restores
 it. **Settings → Archived threads** also restores them. A restored thread comes back as active
 work. Turn **Auto-archive settled threads** off, or change the number of days, in
-**Settings → General** on web and desktop. The mobile app has no switch for it yet; the value set on
-web or desktop applies to the environment, so it covers mobile too.
+**Settings → General** on web and desktop. The relay mobile web has the same switch;
+the React Native app has none.
 
-Change the auto-settle rules in **Settings → General** on web and desktop, or **Settings → Thread behavior** on mobile.
-They continue to run when your apps are closed. On web and desktop, choose an environment at the
+Change the auto-settle rules in **Settings → General** on web and desktop, including
+the relay mobile web. They continue to run when your apps are closed. Choose an environment at the
 top to change only its rules, or **All environments** to update connected environments together.
-Mixed values show where the selected environments disagree. Mobile applies these
-rules to connected environments that support shared settings. Offline environments
+Mixed values show where the selected environments disagree. Offline environments
 and older servers keep their previous values. Changing a rule does not reopen
 already settled threads.
 

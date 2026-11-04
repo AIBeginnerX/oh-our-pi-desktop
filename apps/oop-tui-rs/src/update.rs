@@ -457,10 +457,10 @@ pub fn runs_from_terminal_install(env: impl Fn(&str) -> Option<String>) -> bool 
     env("OOP_TERMINAL_INSTALL").as_deref() == Some("1")
 }
 
-/// Whether the TypeScript terminal runs inside the desktop app's runtime (the launcher says so with
-/// `OOP_TS_NODE_ELECTRON=1`), which is how the bundled terminal is started.
+/// Whether this terminal is the one bundled in the desktop app (the app's `oop` launcher says so
+/// with `OOP_IN_DESKTOP_APP=1`), so that updating the app updates it too.
 pub fn runs_in_desktop_app(env: impl Fn(&str) -> Option<String>) -> bool {
-    env("OOP_TS_NODE_ELECTRON").as_deref() == Some("1")
+    env("OOP_IN_DESKTOP_APP").as_deref() == Some("1")
 }
 
 const RAW: &str = "https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts";
@@ -697,6 +697,8 @@ mod tests {
         assert!(update_how_to(true, false).contains("oop stop"));
         let env = |k: &str| (k == "OOP_TERMINAL_INSTALL").then(|| "1".to_string());
         assert!(runs_from_terminal_install(env) && !runs_in_desktop_app(env));
+        let app = |k: &str| (k == "OOP_IN_DESKTOP_APP").then(|| "1".to_string());
+        assert!(runs_in_desktop_app(app) && !runs_from_terminal_install(app));
     }
 
     #[test]

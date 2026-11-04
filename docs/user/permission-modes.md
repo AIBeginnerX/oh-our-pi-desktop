@@ -24,6 +24,9 @@ Providers enforce permissions differently. Some read-only actions can proceed in
 **Auto** uses automatic review on Codex, Claude, and Cursor; providers without an equivalent,
 including OpenCode and Antigravity, fall back to asking.
 
+Cursor treats **Auto-accept edits** like **Supervised**: it still asks before each edit, and only
+**Full access** approves edits without asking.
+
 For Grok, **Always allow this session** remembers the matching command or tool input. Other
 actions still require approval.
 

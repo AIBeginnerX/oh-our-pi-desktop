@@ -1,0 +1,2412 @@
+{
+  "cases": [
+    {
+      "name": "no activities",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [],
+        "latestTurn": null,
+        "session": null
+      },
+      "expected": null
+    },
+    {
+      "name": "task activities without a crew role are not crew",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-306",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "x"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-1",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "worker running while the turn runs",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-307",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "title": "Fix parser",
+              "model": "gpt-5"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-1",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "running"
+          }
+        ],
+        "running": 1,
+        "settled": 0
+      }
+    },
+    {
+      "name": "worker running when the turn ended reads stopped",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-308",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "title": "Fix parser"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "stopped"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "stop asked for: progress status stopped before the report",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-309",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-310",
+            "tone": "info",
+            "kind": "task.progress",
+            "summary": "task.progress",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "stopped"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-1",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "stopped"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "completed and reported, verified proof, priced usage, todo counts",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-311",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "threadId": "crew-1"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-312",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "proof": "verified",
+              "todoTotal": 3,
+              "todoVerified": 2,
+              "todoClaimed": 1,
+              "usage": {
+                "inputTokens": 100,
+                "outputTokens": 50,
+                "costUsd": 0.25
+              }
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-1",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "proof": "verified",
+            "tokens": 150,
+            "costUsd": 0.25,
+            "todos": {
+              "total": 3,
+              "verified": 2,
+              "claimed": 1,
+              "failed": 0,
+              "blocked": 0
+            }
+          }
+        ],
+        "running": 0,
+        "settled": 1,
+        "usage": {
+          "tokens": 150,
+          "costUsd": 0.25
+        }
+      }
+    },
+    {
+      "name": "completed with passing tests is tested",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-313",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-314",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "tested": true
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "tested"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "approving audit after the worker makes it audited; the auditor has none",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-315",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-316",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "tested": true
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          },
+          {
+            "id": "act-317",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:10.000Z"
+          },
+          {
+            "id": "act-318",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor",
+              "status": "completed",
+              "verdict": "approve"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:20.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "audited"
+          },
+          {
+            "taskId": "a1",
+            "role": "auditor",
+            "phase": "completed"
+          }
+        ],
+        "running": 0,
+        "settled": 2
+      }
+    },
+    {
+      "name": "rejecting audit leaves the worker tested",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-319",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-320",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "tested": true
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          },
+          {
+            "id": "act-321",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:10.000Z"
+          },
+          {
+            "id": "act-322",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor",
+              "status": "completed",
+              "verdict": "reject"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:20.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "tested"
+          },
+          {
+            "taskId": "a1",
+            "role": "auditor",
+            "phase": "completed"
+          }
+        ],
+        "running": 0,
+        "settled": 2
+      }
+    },
+    {
+      "name": "an audit that finished before the worker does not count",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-323",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-324",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor",
+              "status": "completed",
+              "verdict": "approve"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-325",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-326",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "a1",
+            "role": "auditor",
+            "phase": "completed"
+          },
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          }
+        ],
+        "running": 0,
+        "settled": 2
+      }
+    },
+    {
+      "name": "the latest audit after the worker decides",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-327",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-328",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-329",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-330",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "a1",
+              "crewRole": "auditor",
+              "status": "completed",
+              "verdict": "approve"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:20.000Z"
+          },
+          {
+            "id": "act-331",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "a2",
+              "crewRole": "auditor"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:21.000Z"
+          },
+          {
+            "id": "act-332",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "a2",
+              "crewRole": "auditor",
+              "status": "completed",
+              "verdict": "reject"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:30.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "a1",
+            "role": "auditor",
+            "phase": "completed"
+          },
+          {
+            "taskId": "a2",
+            "role": "auditor",
+            "phase": "completed"
+          }
+        ],
+        "running": 0,
+        "settled": 3
+      }
+    },
+    {
+      "name": "every report status",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-333",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-completed",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-334",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-completed",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-335",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-partial",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          },
+          {
+            "id": "act-336",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-partial",
+              "crewRole": "worker",
+              "status": "partial"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:04.000Z"
+          },
+          {
+            "id": "act-337",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-blocked",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-338",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-blocked",
+              "crewRole": "worker",
+              "status": "blocked"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-339",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-failed",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:07.000Z"
+          },
+          {
+            "id": "act-340",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-failed",
+              "crewRole": "worker",
+              "status": "failed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:08.000Z"
+          },
+          {
+            "id": "act-341",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-stopped",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          },
+          {
+            "id": "act-342",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-stopped",
+              "crewRole": "worker",
+              "status": "stopped"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:10.000Z"
+          },
+          {
+            "id": "act-343",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-error",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:11.000Z"
+          },
+          {
+            "id": "act-344",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-error",
+              "crewRole": "worker",
+              "status": "error"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:12.000Z"
+          },
+          {
+            "id": "act-345",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-declined",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:13.000Z"
+          },
+          {
+            "id": "act-346",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-declined",
+              "crewRole": "worker",
+              "status": "declined"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:14.000Z"
+          },
+          {
+            "id": "act-347",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-cancelled",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:15.000Z"
+          },
+          {
+            "id": "act-348",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-cancelled",
+              "crewRole": "worker",
+              "status": "cancelled"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:16.000Z"
+          },
+          {
+            "id": "act-349",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w-weird",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:17.000Z"
+          },
+          {
+            "id": "act-350",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w-weird",
+              "crewRole": "worker",
+              "status": "weird"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:18.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w-completed",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "w-partial",
+            "role": "worker",
+            "phase": "partial",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "w-blocked",
+            "role": "worker",
+            "phase": "blocked"
+          },
+          {
+            "taskId": "w-failed",
+            "role": "worker",
+            "phase": "failed"
+          },
+          {
+            "taskId": "w-stopped",
+            "role": "worker",
+            "phase": "stopped"
+          },
+          {
+            "taskId": "w-error",
+            "role": "worker",
+            "phase": "stopped"
+          },
+          {
+            "taskId": "w-declined",
+            "role": "worker",
+            "phase": "stopped"
+          },
+          {
+            "taskId": "w-cancelled",
+            "role": "worker",
+            "phase": "stopped"
+          },
+          {
+            "taskId": "w-weird",
+            "role": "worker",
+            "phase": "stopped"
+          }
+        ],
+        "running": 0,
+        "settled": 9
+      }
+    },
+    {
+      "name": "every proof verdict",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-351",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w0",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-352",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w0",
+              "crewRole": "worker",
+              "status": "completed",
+              "proof": "verified"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-353",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          },
+          {
+            "id": "act-354",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "proof": "not-verified"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:04.000Z"
+          },
+          {
+            "id": "act-355",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-356",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "worker",
+              "status": "completed",
+              "proof": "inconclusive"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-357",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w3",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:07.000Z"
+          },
+          {
+            "id": "act-358",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w3",
+              "crewRole": "worker",
+              "status": "completed",
+              "proof": "maybe"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:08.000Z"
+          },
+          {
+            "id": "act-359",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w4",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          },
+          {
+            "id": "act-360",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w4",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:10.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w0",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "proof": "verified"
+          },
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "proof": "not-verified"
+          },
+          {
+            "taskId": "w2",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "proof": "inconclusive"
+          },
+          {
+            "taskId": "w3",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "w4",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          }
+        ],
+        "running": 0,
+        "settled": 5
+      }
+    },
+    {
+      "name": "todo counts: clamped, floored, ignored when not positive numbers",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-361",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-full",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-362",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-full",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": 4,
+              "todoVerified": 2,
+              "todoClaimed": 1,
+              "todoFailed": 1,
+              "todoBlocked": 0
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-363",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-floored",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          },
+          {
+            "id": "act-364",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-floored",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": 5.9,
+              "todoVerified": 2.7
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:04.000Z"
+          },
+          {
+            "id": "act-365",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-zero total",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-366",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-zero total",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": 0,
+              "todoVerified": 1
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-367",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-negative",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:07.000Z"
+          },
+          {
+            "id": "act-368",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-negative",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": -3
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:08.000Z"
+          },
+          {
+            "id": "act-369",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-string total",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          },
+          {
+            "id": "act-370",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-string total",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": "4"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:10.000Z"
+          },
+          {
+            "id": "act-371",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-bad part",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:11.000Z"
+          },
+          {
+            "id": "act-372",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-bad part",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": 3,
+              "todoVerified": -1,
+              "todoClaimed": "x",
+              "todoFailed": null
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:12.000Z"
+          },
+          {
+            "id": "act-373",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "todo-more proven than total",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:13.000Z"
+          },
+          {
+            "id": "act-374",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "todo-more proven than total",
+              "crewRole": "worker",
+              "status": "completed",
+              "todoTotal": 2,
+              "todoVerified": 5,
+              "todoClaimed": 5
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:14.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "todo-full",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "todos": {
+              "total": 4,
+              "verified": 2,
+              "claimed": 1,
+              "failed": 1,
+              "blocked": 0
+            }
+          },
+          {
+            "taskId": "todo-floored",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "todos": {
+              "total": 5,
+              "verified": 2,
+              "claimed": 0,
+              "failed": 0,
+              "blocked": 0
+            }
+          },
+          {
+            "taskId": "todo-zero total",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "todo-negative",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "todo-string total",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "todo-bad part",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "todos": {
+              "total": 3,
+              "verified": 0,
+              "claimed": 0,
+              "failed": 0,
+              "blocked": 0
+            }
+          },
+          {
+            "taskId": "todo-more proven than total",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "todos": {
+              "total": 2,
+              "verified": 5,
+              "claimed": 5,
+              "failed": 0,
+              "blocked": 0
+            }
+          }
+        ],
+        "running": 0,
+        "settled": 7
+      }
+    },
+    {
+      "name": "todo counts follow progress; the final report's counts stay",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-375",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-376",
+            "tone": "info",
+            "kind": "task.progress",
+            "summary": "task.progress",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "todoTotal": 4,
+              "todoVerified": 1
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-377",
+            "tone": "info",
+            "kind": "task.progress",
+            "summary": "task.progress",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "todoTotal": 4,
+              "todoVerified": 3
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          },
+          {
+            "id": "act-378",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:04.000Z"
+          },
+          {
+            "id": "act-379",
+            "tone": "info",
+            "kind": "task.progress",
+            "summary": "task.progress",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "todoTotal": 4,
+              "todoVerified": 0
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-380",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-381",
+            "tone": "info",
+            "kind": "task.progress",
+            "summary": "task.progress",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "worker",
+              "todoTotal": 2,
+              "todoClaimed": 2
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:07.000Z"
+          },
+          {
+            "id": "act-382",
+            "tone": "info",
+            "kind": "task.progress",
+            "summary": "task.progress",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "worker",
+              "summary": "no counts this time"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:08.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-1",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "todos": {
+              "total": 4,
+              "verified": 3,
+              "claimed": 0,
+              "failed": 0,
+              "blocked": 0
+            }
+          },
+          {
+            "taskId": "w2",
+            "role": "worker",
+            "phase": "running",
+            "todos": {
+              "total": 2,
+              "verified": 0,
+              "claimed": 2,
+              "failed": 0,
+              "blocked": 0
+            }
+          }
+        ],
+        "running": 1,
+        "settled": 1
+      }
+    },
+    {
+      "name": "usage: priced and unpriced tasks add up, bad usage is none",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-383",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-384",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "usage": {
+                "inputTokens": 1000,
+                "outputTokens": 500,
+                "costUsd": 0.5
+              }
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-385",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "expert"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          },
+          {
+            "id": "act-386",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "expert",
+              "status": "completed",
+              "usage": {
+                "inputTokens": 200,
+                "outputTokens": 100
+              }
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:04.000Z"
+          },
+          {
+            "id": "act-387",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w3",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:05.000Z"
+          },
+          {
+            "id": "act-388",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w3",
+              "crewRole": "worker",
+              "status": "completed",
+              "usage": {
+                "inputTokens": "1",
+                "outputTokens": 2
+              }
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          },
+          {
+            "id": "act-389",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w4",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:07.000Z"
+          },
+          {
+            "id": "act-390",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w4",
+              "crewRole": "worker",
+              "status": "completed",
+              "usage": {
+                "inputTokens": 10,
+                "outputTokens": 5,
+                "costUsd": 0.25
+              }
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:08.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "tokens": 1500,
+            "costUsd": 0.5
+          },
+          {
+            "taskId": "w2",
+            "role": "expert",
+            "phase": "completed",
+            "evidence": "reported",
+            "tokens": 300
+          },
+          {
+            "taskId": "w3",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "w4",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "tokens": 15,
+            "costUsd": 0.25
+          }
+        ],
+        "running": 0,
+        "settled": 4,
+        "usage": {
+          "tokens": 1815,
+          "costUsd": 0.75
+        }
+      }
+    },
+    {
+      "name": "usage with no reported cost at all",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-391",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-392",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "usage": {
+                "inputTokens": 300,
+                "outputTokens": 100
+              }
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "tokens": 400
+          }
+        ],
+        "running": 0,
+        "settled": 1,
+        "usage": {
+          "tokens": 400
+        }
+      }
+    },
+    {
+      "name": "no usage on any task",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-393",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-394",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "unknown and expert roles",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-395",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "e1",
+              "crewRole": "expert"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-396",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "e1",
+              "crewRole": "expert",
+              "status": "completed",
+              "tested": true
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-397",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "r1",
+              "crewRole": "reviewer"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          },
+          {
+            "id": "act-398",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "r1",
+              "crewRole": "reviewer",
+              "status": "partial"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:04.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "e1",
+            "role": "expert",
+            "phase": "completed",
+            "evidence": "tested"
+          },
+          {
+            "taskId": "r1",
+            "role": "reviewer",
+            "phase": "partial",
+            "evidence": "reported"
+          }
+        ],
+        "running": 0,
+        "settled": 2
+      }
+    },
+    {
+      "name": "parallel tasks, one still running",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-399",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-400",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w2",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-401",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:06.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-1",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          },
+          {
+            "taskId": "w2",
+            "role": "worker",
+            "phase": "running"
+          }
+        ],
+        "running": 1,
+        "settled": 1
+      }
+    },
+    {
+      "name": "the last task.completed wins",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-402",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-403",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "failed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-404",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
+              "proof": "verified"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:03.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported",
+            "proof": "verified"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "the newest crew turn is the board",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-405",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "old",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-406",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "old",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          },
+          {
+            "id": "act-407",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "new",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-2",
+            "createdAt": "2026-01-01T00:00:11.000Z"
+          },
+          {
+            "id": "act-408",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "new",
+              "crewRole": "worker",
+              "status": "failed"
+            },
+            "turnId": "turn-2",
+            "createdAt": "2026-01-01T00:00:12.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-2",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:10.000Z",
+          "startedAt": "2026-01-01T00:00:10.000Z",
+          "completedAt": "2026-01-01T00:00:20.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "new",
+            "role": "worker",
+            "phase": "failed"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "a running lead turn with no crew leaves an earlier turn's unreported task stopped",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-409",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "old",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-410",
+            "tone": "tool",
+            "kind": "tool.completed",
+            "summary": "tool.completed",
+            "payload": {
+              "toolCallId": "c1",
+              "status": "completed"
+            },
+            "turnId": "turn-2",
+            "createdAt": "2026-01-01T00:00:11.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-2",
+          "state": "running",
+          "requestedAt": "2026-01-01T00:00:10.000Z",
+          "startedAt": "2026-01-01T00:00:10.000Z",
+          "completedAt": null
+        },
+        "session": {
+          "status": "running",
+          "activeTurnId": "turn-2",
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "old",
+            "role": "worker",
+            "phase": "stopped"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "a task with no turn is untracked",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-411",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": null,
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-412",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed"
+            },
+            "turnId": null,
+            "createdAt": "2026-01-01T00:00:02.000Z"
+          }
+        ],
+        "latestTurn": null,
+        "session": null
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "reported"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    }
+  ]
+}

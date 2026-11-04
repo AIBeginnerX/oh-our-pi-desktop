@@ -8,6 +8,7 @@ import {
   WS_METHODS,
   type ProjectId as ProjectIdType,
   type ProjectMemoryId,
+  type ProjectMemorySentToThread,
   type ProjectMemorySummary,
   type ProjectMemoryThreadState,
 } from "@t3tools/contracts";
@@ -107,6 +108,8 @@ function makeMemoryClient() {
   let failThreadStateFromCall = Number.POSITIVE_INFINITY;
   let heldThreadStateProject: ProjectIdType | null = null;
   const releaseHeldThreadState = Latch.makeUnsafe();
+  const sends = new Map<string, Array<{ memoryId: string; version: number }>>();
+  let sentToThreadCalls = 0;
   const ackInputs: Array<{
     projectId: ProjectIdType;
     threadId: string;
@@ -215,6 +218,30 @@ function makeMemoryClient() {
       }
       return threadStateResult(input);
     },
+    [WS_METHODS.projectMemorySentToThread]: (input: {
+      projectId: ProjectIdType;
+      threadId: string;
+    }) => {
+      sentToThreadCalls += 1;
+      const store = storeFor(input.projectId);
+      return Effect.succeed({
+        items: (sends.get(threadKey(input.projectId, input.threadId)) ?? []).map((send) => {
+          const memory = store.get(send.memoryId);
+          return {
+            memoryId: send.memoryId as ProjectMemoryId,
+            version: send.version,
+            sentAt: "2026-10-11T00:00:00.000Z",
+            via: "message" as const,
+            state: "provider_accepted" as const,
+            ...(memory === undefined ? {} : { title: memory.title }),
+            changedSinceSent: memory === undefined || memory.version > send.version,
+            deleted: memory === undefined,
+          };
+        }),
+        truncated: false,
+        held: false,
+      } satisfies ProjectMemorySentToThread);
+    },
     [WS_METHODS.projectMemoryAcknowledgeThread]: (input: {
       projectId: ProjectIdType;
       threadId: string;
@@ -269,6 +296,16 @@ function makeMemoryClient() {
     },
     setThreadState: (projectId: string, threadId: string, state: ProjectMemoryThreadState) => {
       threadStates.set(threadKey(ProjectId.make(projectId), threadId), state);
+    },
+    setSent: (
+      projectId: string,
+      threadId: string,
+      items: Array<{ memoryId: string; version: number }>,
+    ) => {
+      sends.set(threadKey(ProjectId.make(projectId), threadId), items);
+    },
+    get sentToThreadCalls() {
+      return sentToThreadCalls;
     },
     get threadStateCalls() {
       return threadStateCalls;
@@ -735,6 +772,63 @@ describe("project memory state", () => {
         expect(listed.truncated).toBe(false);
         expect(searched.truncated).toBe(false);
         expect(listAtom).not.toBe(searchAtom);
+      }),
+    ),
+  );
+
+  it.effect("an edit and a delete refresh a mounted sent-to-thread view", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { atoms, registry, memoryClient } = yield* makeHarness();
+        memoryClient.seed("project-1", "memory-1", "Runbook");
+        memoryClient.setSent("project-1", "thread-1", [{ memoryId: "memory-1", version: 1 }]);
+        const sentAtom = atoms.sentToThread(threadScope("project-1", "thread-1"));
+        const mounted = registry.mount(sentAtom);
+        yield* Effect.addFinalizer(() => Effect.sync(mounted));
+
+        const before = yield* AtomRegistry.getResult(registry, sentAtom, {
+          suspendOnWaiting: true,
+        });
+        expect(before.items.map((item) => [item.changedSinceSent, item.deleted])).toEqual([
+          [false, false],
+        ]);
+
+        const edit = (title: string) =>
+          Effect.promise(() =>
+            runAtomCommand(registry, atoms.update, {
+              environmentId: ENVIRONMENT_ID,
+              input: {
+                projectId: ProjectId.make("project-1"),
+                memoryId: "memory-1" as ProjectMemoryId,
+                expectedVersion: 1,
+                title,
+              },
+            }),
+          );
+        expect((yield* edit("Runbook v2"))._tag).toBe("Success");
+        const edited = yield* AtomRegistry.getResult(registry, sentAtom, {
+          suspendOnWaiting: true,
+        });
+        expect(
+          edited.items.map((item) => [item.title, item.changedSinceSent, item.deleted]),
+        ).toEqual([["Runbook v2", true, false]]);
+
+        const deleted = yield* Effect.promise(() =>
+          runAtomCommand(registry, atoms.delete, {
+            environmentId: ENVIRONMENT_ID,
+            input: {
+              projectId: ProjectId.make("project-1"),
+              memoryId: "memory-1" as ProjectMemoryId,
+              expectedVersion: 2,
+            },
+          }),
+        );
+        expect(deleted._tag).toBe("Success");
+        const gone = yield* AtomRegistry.getResult(registry, sentAtom, {
+          suspendOnWaiting: true,
+        });
+        expect(gone.items.map((item) => [item.deleted, item.title])).toEqual([[true, undefined]]);
+        expect(memoryClient.sentToThreadCalls).toBe(3);
       }),
     ),
   );

@@ -48,6 +48,7 @@ export type UpdateThreadMetadataInput = CommandInput<"thread.meta.update">;
 export type LinkThreadPullRequestInput = CommandInput<"thread.pull-request.link">;
 export type UnlinkThreadPullRequestInput = CommandInput<"thread.pull-request.unlink">;
 export type SetThreadRuntimeModeInput = CommandInput<"thread.runtime-mode.set">;
+export type SetThreadCrewInput = CommandInput<"thread.crew.set">;
 export type SetThreadInteractionModeInput = CommandInput<"thread.interaction-mode.set">;
 export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
@@ -292,6 +293,19 @@ export const setThreadRuntimeMode: (input: SetThreadRuntimeModeInput) => Command
   return yield* dispatch({
     ...input,
     type: "thread.runtime-mode.set",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+/** Sets the thread's own crew, or with `crew: null` puts it back on the default crew. */
+export const setThreadCrew: (input: SetThreadCrewInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.setThreadCrew",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.crew.set",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

@@ -1,0 +1,430 @@
+{
+  "cases": [
+    {
+      "name": "task.started completed",
+      "kind": "task.started",
+      "status": "completed",
+      "expected": "running"
+    },
+    {
+      "name": "task.started failed",
+      "kind": "task.started",
+      "status": "failed",
+      "expected": "running"
+    },
+    {
+      "name": "task.started partial",
+      "kind": "task.started",
+      "status": "partial",
+      "expected": "running"
+    },
+    {
+      "name": "task.started blocked",
+      "kind": "task.started",
+      "status": "blocked",
+      "expected": "running"
+    },
+    {
+      "name": "task.started stopped",
+      "kind": "task.started",
+      "status": "stopped",
+      "expected": "running"
+    },
+    {
+      "name": "task.started cancelled",
+      "kind": "task.started",
+      "status": "cancelled",
+      "expected": "running"
+    },
+    {
+      "name": "task.started error",
+      "kind": "task.started",
+      "status": "error",
+      "expected": "running"
+    },
+    {
+      "name": "task.started running",
+      "kind": "task.started",
+      "status": "running",
+      "expected": "running"
+    },
+    {
+      "name": "task.started empty string",
+      "kind": "task.started",
+      "status": "",
+      "expected": "running"
+    },
+    {
+      "name": "task.started null",
+      "kind": "task.started",
+      "status": null,
+      "expected": "running"
+    },
+    {
+      "name": "task.started number",
+      "kind": "task.started",
+      "status": 0,
+      "expected": "running"
+    },
+    {
+      "name": "task.started missing",
+      "kind": "task.started",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress completed",
+      "kind": "task.progress",
+      "status": "completed",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress failed",
+      "kind": "task.progress",
+      "status": "failed",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress partial",
+      "kind": "task.progress",
+      "status": "partial",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress blocked",
+      "kind": "task.progress",
+      "status": "blocked",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress stopped",
+      "kind": "task.progress",
+      "status": "stopped",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress cancelled",
+      "kind": "task.progress",
+      "status": "cancelled",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress error",
+      "kind": "task.progress",
+      "status": "error",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress running",
+      "kind": "task.progress",
+      "status": "running",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress empty string",
+      "kind": "task.progress",
+      "status": "",
+      "expected": "running"
+    },
+    {
+      "name": "task.progress null",
+      "kind": "task.progress",
+      "status": null,
+      "expected": "running"
+    },
+    {
+      "name": "task.progress number",
+      "kind": "task.progress",
+      "status": 0,
+      "expected": "running"
+    },
+    {
+      "name": "task.progress missing",
+      "kind": "task.progress",
+      "expected": "running"
+    },
+    {
+      "name": "task.updated completed",
+      "kind": "task.updated",
+      "status": "completed",
+      "expected": "completed"
+    },
+    {
+      "name": "task.updated failed",
+      "kind": "task.updated",
+      "status": "failed",
+      "expected": "failed"
+    },
+    {
+      "name": "task.updated partial",
+      "kind": "task.updated",
+      "status": "partial",
+      "expected": "failed"
+    },
+    {
+      "name": "task.updated blocked",
+      "kind": "task.updated",
+      "status": "blocked",
+      "expected": "failed"
+    },
+    {
+      "name": "task.updated stopped",
+      "kind": "task.updated",
+      "status": "stopped",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated cancelled",
+      "kind": "task.updated",
+      "status": "cancelled",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated error",
+      "kind": "task.updated",
+      "status": "error",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated running",
+      "kind": "task.updated",
+      "status": "running",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated empty string",
+      "kind": "task.updated",
+      "status": "",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated null",
+      "kind": "task.updated",
+      "status": null,
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated number",
+      "kind": "task.updated",
+      "status": 0,
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.updated missing",
+      "kind": "task.updated",
+      "expected": null
+    },
+    {
+      "name": "task.completed completed",
+      "kind": "task.completed",
+      "status": "completed",
+      "expected": "completed"
+    },
+    {
+      "name": "task.completed failed",
+      "kind": "task.completed",
+      "status": "failed",
+      "expected": "failed"
+    },
+    {
+      "name": "task.completed partial",
+      "kind": "task.completed",
+      "status": "partial",
+      "expected": "failed"
+    },
+    {
+      "name": "task.completed blocked",
+      "kind": "task.completed",
+      "status": "blocked",
+      "expected": "failed"
+    },
+    {
+      "name": "task.completed stopped",
+      "kind": "task.completed",
+      "status": "stopped",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed cancelled",
+      "kind": "task.completed",
+      "status": "cancelled",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed error",
+      "kind": "task.completed",
+      "status": "error",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed running",
+      "kind": "task.completed",
+      "status": "running",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed empty string",
+      "kind": "task.completed",
+      "status": "",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed null",
+      "kind": "task.completed",
+      "status": null,
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed number",
+      "kind": "task.completed",
+      "status": 0,
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.completed missing",
+      "kind": "task.completed",
+      "expected": "cancelled"
+    },
+    {
+      "name": "task.stopped completed",
+      "kind": "task.stopped",
+      "status": "completed",
+      "expected": null
+    },
+    {
+      "name": "task.stopped failed",
+      "kind": "task.stopped",
+      "status": "failed",
+      "expected": null
+    },
+    {
+      "name": "task.stopped partial",
+      "kind": "task.stopped",
+      "status": "partial",
+      "expected": null
+    },
+    {
+      "name": "task.stopped blocked",
+      "kind": "task.stopped",
+      "status": "blocked",
+      "expected": null
+    },
+    {
+      "name": "task.stopped stopped",
+      "kind": "task.stopped",
+      "status": "stopped",
+      "expected": null
+    },
+    {
+      "name": "task.stopped cancelled",
+      "kind": "task.stopped",
+      "status": "cancelled",
+      "expected": null
+    },
+    {
+      "name": "task.stopped error",
+      "kind": "task.stopped",
+      "status": "error",
+      "expected": null
+    },
+    {
+      "name": "task.stopped running",
+      "kind": "task.stopped",
+      "status": "running",
+      "expected": null
+    },
+    {
+      "name": "task.stopped empty string",
+      "kind": "task.stopped",
+      "status": "",
+      "expected": null
+    },
+    {
+      "name": "task.stopped null",
+      "kind": "task.stopped",
+      "status": null,
+      "expected": null
+    },
+    {
+      "name": "task.stopped number",
+      "kind": "task.stopped",
+      "status": 0,
+      "expected": null
+    },
+    {
+      "name": "task.stopped missing",
+      "kind": "task.stopped",
+      "expected": null
+    },
+    {
+      "name": "task.other completed",
+      "kind": "task.other",
+      "status": "completed",
+      "expected": null
+    },
+    {
+      "name": "task.other failed",
+      "kind": "task.other",
+      "status": "failed",
+      "expected": null
+    },
+    {
+      "name": "task.other partial",
+      "kind": "task.other",
+      "status": "partial",
+      "expected": null
+    },
+    {
+      "name": "task.other blocked",
+      "kind": "task.other",
+      "status": "blocked",
+      "expected": null
+    },
+    {
+      "name": "task.other stopped",
+      "kind": "task.other",
+      "status": "stopped",
+      "expected": null
+    },
+    {
+      "name": "task.other cancelled",
+      "kind": "task.other",
+      "status": "cancelled",
+      "expected": null
+    },
+    {
+      "name": "task.other error",
+      "kind": "task.other",
+      "status": "error",
+      "expected": null
+    },
+    {
+      "name": "task.other running",
+      "kind": "task.other",
+      "status": "running",
+      "expected": null
+    },
+    {
+      "name": "task.other empty string",
+      "kind": "task.other",
+      "status": "",
+      "expected": null
+    },
+    {
+      "name": "task.other null",
+      "kind": "task.other",
+      "status": null,
+      "expected": null
+    },
+    {
+      "name": "task.other number",
+      "kind": "task.other",
+      "status": 0,
+      "expected": null
+    },
+    {
+      "name": "task.other missing",
+      "kind": "task.other",
+      "expected": null
+    }
+  ]
+}

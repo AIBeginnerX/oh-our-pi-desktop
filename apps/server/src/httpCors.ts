@@ -6,3 +6,6 @@ export const browserApiCorsAllowedHeaders = [
   "content-type",
   "dpop",
 ] as const;
+
+/** Custom-scheme origins of the Electron renderer (packaged and dev). */
+export const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];

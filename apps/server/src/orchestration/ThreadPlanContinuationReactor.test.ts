@@ -38,7 +38,9 @@ const THREAD_ID = ThreadId.make("thread-1");
 type Shell = Parameters<typeof decidePlanContinuation>[0]["shell"];
 type Detail = Pick<OrchestrationThread, "messages" | "activities">;
 
-const shell = (overrides: Partial<Shell> = {}): Shell =>
+const shell = (
+  overrides: Partial<Shell> & { readonly crew?: OrchestrationThread["crew"] } = {},
+): Shell =>
   ({
     title: "Fix the login flow",
     interactionMode: "default",
@@ -381,12 +383,9 @@ describe("ThreadPlanContinuationReactor", () => {
 
   it.effect("dispatches nothing while Crew is on for the thread", () =>
     Effect.gen(function* () {
-      const crewOn = {
-        ...DEFAULT_SERVER_SETTINGS.crew,
-        threads: { [THREAD_ID]: { enabled: true } },
-      };
       const result = yield* runTurnEnd({
-        settings: { continueUnfinishedPlans: true, crew: crewOn as never },
+        settings: { continueUnfinishedPlans: true },
+        shell: shell({ crew: { enabled: true } }),
       });
       expect(result.commands).toEqual([]);
       const wholeServer = yield* runTurnEnd({
@@ -396,6 +395,19 @@ describe("ThreadPlanContinuationReactor", () => {
         },
       });
       expect(wholeServer.commands).toEqual([]);
+    }),
+  );
+
+  it.effect("lets a thread that switched Crew off continue when the default has it on", () =>
+    Effect.gen(function* () {
+      const result = yield* runTurnEnd({
+        settings: {
+          continueUnfinishedPlans: true,
+          crew: { ...DEFAULT_SERVER_SETTINGS.crew, enabled: true },
+        },
+        shell: shell({ crew: { enabled: false } }),
+      });
+      expect(result.commands).not.toEqual([]);
     }),
   );
 

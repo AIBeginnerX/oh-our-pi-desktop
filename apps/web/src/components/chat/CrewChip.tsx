@@ -2,23 +2,29 @@ import {
   CREW_ROLES,
   type CrewPreset,
   type CrewRole,
-  type CrewSettings,
+  type CrewThreadOverride,
   type EnvironmentId,
   type ModelSelection,
   type ServerProvider,
-  type ThreadId,
 } from "@t3tools/contracts";
 import {
+  applyCrewChange,
+  crewAsDefault,
   crewModelOptions,
   recommendCrew,
   resolveCrew,
+  type CrewChange,
   type CrewModelOption,
 } from "@t3tools/shared/crew";
 import { CheckIcon, SparklesIcon, UsersRoundIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { useComposerDraftStore, type ComposerThreadTarget } from "~/composerDraftStore";
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
+import { useThreadShell } from "~/state/entities";
+import { threadEnvironment } from "~/state/threads";
+import { useAtomCommand } from "~/state/use-atom-command";
 
 import { Button } from "../ui/button";
 import {
@@ -33,7 +39,9 @@ import {
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { SelectButton } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
+import { crewLeadAvailability } from "./CrewChip.logic";
 
 const PRESETS: ReadonlyArray<{ value: CrewPreset; label: string; hint: string }> = [
   { value: "recommended", label: "OOP pick", hint: "Balanced team chosen by OOP" },
@@ -54,90 +62,79 @@ const AUTO = "auto";
 const keyOf = (selection: ModelSelection) => `${selection.instanceId}\u0000${selection.model}`;
 
 /**
- * The crew for this thread at a glance, and the place to change it: one click for a preset,
- * one more for any single role. Changes apply to this thread; a draft changes the default.
+ * The crew for this chat at a glance, and the place to change it: one click for a preset, one
+ * more for any single role. A change belongs to this chat alone (a chat not yet started keeps it
+ * until its first message); only "Use this crew for new chats" edits the default every other chat
+ * falls back to, and "Use the default crew" hands this chat back to it.
  */
 export function CrewChip(props: {
   readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId | null;
+  readonly target: ComposerThreadTarget;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly brain: ModelSelection;
   readonly disabled?: boolean;
 }) {
-  const settings = useEnvironmentSettings(props.environmentId, (value) => value.crew);
+  const defaults = useEnvironmentSettings(props.environmentId, (value) => value.crew);
   const updateSettings = useUpdateEnvironmentSettings(props.environmentId);
+  const setThreadCrew = useAtomCommand(threadEnvironment.setCrew, "thread crew set");
+  const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  // A chat exists on the server once it has a shell; until then its crew waits in the draft.
+  const shell = useThreadShell(typeof props.target === "string" ? null : props.target);
+  const draftCrew = useComposerDraftStore((store) =>
+    typeof props.target === "string"
+      ? store.getDraftSession(props.target)?.crew
+      : store.getDraftSessionByRef(props.target)?.crew,
+  );
+  const ownCrew: CrewThreadOverride | null | undefined = shell === null ? draftCrew : shell.crew;
   const options = useMemo(() => crewModelOptions(props.providers), [props.providers]);
   const crew = useMemo(
     () =>
       resolveCrew({
-        settings,
-        threadId: props.threadId,
+        settings: defaults,
+        override: ownCrew,
         providers: props.providers,
         brain: props.brain,
       }),
-    [settings, props.threadId, props.providers, props.brain],
+    [defaults, ownCrew, props.providers, props.brain],
   );
-  const override = props.threadId === null ? undefined : settings.threads[props.threadId];
   const autoPicks = useMemo(
     () => recommendCrew(options, props.brain, crew.preset),
     [options, props.brain, crew.preset],
   );
 
-  /**
-   * In a thread the change lands in its override, where a null pin means Auto even if the
-   * defaults pin that role; without a thread it changes the defaults themselves.
-   */
-  const write = (change: {
-    enabled?: boolean;
-    preset?: CrewPreset;
-    pins?: Partial<Record<CrewRole, ModelSelection | null>>;
-  }) => {
-    const scoped = {
-      ...(change.enabled === undefined ? {} : { enabled: change.enabled }),
-      ...(change.preset === undefined ? {} : { preset: change.preset }),
-    };
-    if (props.threadId === null) {
-      let pinned: CrewSettings["pinned"] = { ...settings.pinned };
-      for (const role of CREW_ROLES) {
-        const selection = change.pins?.[role];
-        if (selection === undefined) continue;
-        if (selection === null) {
-          const { [role]: _cleared, ...rest } = pinned;
-          pinned = rest;
-        } else {
-          pinned = { ...pinned, [role]: selection };
-        }
-      }
-      updateSettings({ crew: { ...settings, ...scoped, pinned } });
+  /** Stores the chat's complete next crew; null hands the chat back to the default. */
+  const setOwnCrew = (next: CrewThreadOverride | null) => {
+    if (shell !== null && typeof props.target !== "string") {
+      void setThreadCrew({
+        environmentId: props.environmentId,
+        input: { threadId: props.target.threadId, crew: next },
+      });
       return;
     }
-    updateSettings({
-      crew: {
-        ...settings,
-        threads: {
-          ...settings.threads,
-          [props.threadId]: {
-            ...override,
-            ...scoped,
-            pinned: { ...override?.pinned, ...change.pins },
-          },
-        },
-      },
-    });
+    setDraftThreadContext(props.target, { crew: next });
   };
+  const write = (change: CrewChange) => setOwnCrew(applyCrewChange(ownCrew, change));
 
-  const makeDefault = () => {
-    if (props.threadId === null) return;
-    let pinned: CrewSettings["pinned"] = {};
-    for (const role of CREW_ROLES) {
-      const option = crew.roles[role];
-      if (crew.pinned.has(role) && option !== null)
-        pinned = { ...pinned, [role]: option.selection };
-    }
-    updateSettings({
-      crew: { ...settings, enabled: crew.enabled, preset: crew.preset, pinned },
-    });
-  };
+  const makeDefault = () => updateSettings({ crew: crewAsDefault(defaults, crew) });
+
+  // Only a Claude or Codex model can lead; the server decides, and a chat on another provider
+  // gets a chip that says why instead of a crew that would never be told about its tools.
+  const lead = crewLeadAvailability(props.providers, props.brain);
+  if (!lead.canLead) {
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={<span className="inline-flex shrink-0 cursor-not-allowed" tabIndex={0} />}
+        >
+          <ComposerControl disabled aria-label={`OOP Crew unavailable: ${lead.reason}`}>
+            <ComposerControlIcon icon={UsersRoundIcon} />
+            <span className="text-xs text-muted-foreground">Crew</span>
+          </ComposerControl>
+        </TooltipTrigger>
+        <TooltipPopup side="top">{lead.reason}</TooltipPopup>
+      </Tooltip>
+    );
+  }
 
   return (
     <Popover>
@@ -179,6 +176,11 @@ export function CrewChip(props: {
               <PopoverTitle>OOP Crew</PopoverTitle>
               <div className="text-xs text-muted-foreground">
                 This chat's model leads; the crew takes the work it hands out.
+              </div>
+              <div className="text-2xs text-muted-foreground">
+                {crew.source === "thread"
+                  ? "This chat has its own crew."
+                  : "Using the default crew. A change here applies to this chat only."}
               </div>
             </div>
             <Switch
@@ -242,15 +244,24 @@ export function CrewChip(props: {
             ))}
           </div>
 
-          {props.threadId !== null ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {crew.source === "thread" ? (
+              <button
+                type="button"
+                onClick={() => setOwnCrew(null)}
+                className="text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                Use the default crew
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={makeDefault}
-              className="self-start text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              className="text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             >
               Use this crew for new chats
             </button>
-          ) : null}
+          </div>
         </div>
       </PopoverPopup>
     </Popover>

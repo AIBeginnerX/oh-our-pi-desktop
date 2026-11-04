@@ -245,6 +245,10 @@ describe("ProviderCommandReactor", () => {
   });
 
   async function createHarness(input?: {
+    /** Provider snapshots that carry drivers and models, for the OOP Crew brief. */
+    readonly crewProviders?: ReadonlyArray<unknown>;
+    /** The default crew is on, so a lead turn carries the OOP Crew brief. */
+    readonly crewOn?: boolean;
     readonly baseDir?: string;
     readonly initialTitle?: string;
     readonly deferReactorStart?: boolean;
@@ -483,7 +487,7 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
     );
-    const providerSnapshots = [
+    const providerSnapshots = input?.crewProviders ?? [
       {
         instanceId: modelSelection.instanceId,
         ...(input?.requiresNewThreadForModelChange === true
@@ -650,6 +654,7 @@ describe("ProviderCommandReactor", () => {
                   yield* Deferred.await(park.release);
                 });
               return ProjectMemorySendGate.of({
+                sentForMessage: real.sentForMessage,
                 threadHold: (threadId) => {
                   threadHoldCalls += 1;
                   const parkConfig = input?.memoryGate?.parkThreadHoldAtCall;
@@ -677,6 +682,7 @@ describe("ProviderCommandReactor", () => {
                       return parkEffect(park).pipe(Effect.as(result));
                     }),
                   ),
+                recordRecall: real.recordRecall,
                 settle: (attemptSeq, outcome) =>
                   real
                     .settle(attemptSeq, outcome)
@@ -808,7 +814,9 @@ describe("ProviderCommandReactor", () => {
     // and subscriptions start inside start(), which only opt-in tests call.
     // The fixed CheckpointStore mock covers its sole ambient dependency these
     // cases never reach: they emit no diff events and test no checkpoints.
-    const serverSettingsLayer = ServerSettingsService.layerTest();
+    const serverSettingsLayer = ServerSettingsService.layerTest(
+      input?.crewOn === true ? { crew: { enabled: true } } : {},
+    );
     const layer = Layer.merge(providerCommandReactorLayer, ProviderRuntimeIngestionLive)
       .pipe(
         Layer.provideMerge(reactorOrchestrationLayer),
@@ -4474,6 +4482,149 @@ describe("ProviderCommandReactor", () => {
       ),
     });
   });
+
+  const crewProvider = (instanceId: string, driver: string, slugs: ReadonlyArray<string>) => ({
+    instanceId,
+    driver,
+    enabled: true,
+    installed: true,
+    status: "ready",
+    auth: { status: "authenticated" },
+    models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, isLegacy: false })),
+  });
+
+  effectIt.effect("tells the model once that OOP Crew is off after it had been on", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          crewOn: true,
+          crewProviders: [
+            crewProvider("codex", "codex", ["gpt-5-codex", "gpt-5.4-mini"]),
+            crewProvider("claude", "claudeAgent", ["claude-opus-5", "claude-haiku-5"]),
+          ],
+        }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      const sendMessage = (n: number) =>
+        Effect.gen(function* () {
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cmd-crew-off-turn-${n}`),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId(`user-message-crew-off-${n}`),
+              role: "user",
+              text: `message ${n}`,
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+          yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === n));
+          return String(
+            (harness.sendTurn.mock.calls[n - 1]?.[0] as { input?: string } | undefined)?.input,
+          );
+        });
+
+      expect(yield* sendMessage(1)).toContain("OOP Crew is on");
+      yield* harness.engine.dispatch({
+        type: "thread.crew.set",
+        commandId: CommandId.make("cmd-crew-off"),
+        threadId: ThreadId.make("thread-1"),
+        crew: { enabled: false, pinned: {} },
+        createdAt: now,
+      });
+      const afterOff = yield* sendMessage(2);
+      expect(afterOff).toContain("OOP Crew is now off");
+      expect(afterOff).not.toContain("OOP Crew is on");
+      expect(afterOff).toContain("message 2");
+      const later = yield* sendMessage(3);
+      expect(later).not.toContain("OOP Crew");
+    }),
+  );
+
+  effectIt.effect(
+    "sends no off note while the provider snapshot briefly lacks the thread's instance",
+    () =>
+      Effect.gen(function* () {
+        const providers = [
+          crewProvider("codex", "codex", ["gpt-5-codex", "gpt-5.4-mini"]),
+          crewProvider("claude", "claudeAgent", ["claude-opus-5", "claude-haiku-5"]),
+        ];
+        const harness = yield* Effect.promise(() =>
+          createHarness({ crewOn: true, crewProviders: providers }),
+        );
+        const now = "2026-01-01T00:00:00.000Z";
+        const sendMessage = (n: number) =>
+          Effect.gen(function* () {
+            yield* harness.engine.dispatch({
+              type: "thread.turn.start",
+              commandId: CommandId.make(`cmd-crew-blip-turn-${n}`),
+              threadId: ThreadId.make("thread-1"),
+              message: {
+                messageId: asMessageId(`user-message-crew-blip-${n}`),
+                role: "user",
+                text: `message ${n}`,
+                attachments: [],
+              },
+              interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+              runtimeMode: "approval-required",
+              createdAt: now,
+            });
+            yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === n));
+            return String(
+              (harness.sendTurn.mock.calls[n - 1]?.[0] as { input?: string } | undefined)?.input,
+            );
+          });
+
+        expect(yield* sendMessage(1)).toContain("OOP Crew is on");
+        // The snapshot loses the thread's instance for one turn while crew is still on.
+        const [removed] = providers.splice(0, 1);
+        const duringBlip = yield* sendMessage(2);
+        expect(duringBlip).not.toContain("OOP Crew");
+        providers.unshift(removed!);
+        // The earlier note is still in the conversation: no off note, no repeat.
+        const afterBlip = yield* sendMessage(3);
+        expect(afterBlip).not.toContain("OOP Crew");
+      }),
+  );
+
+  effectIt.effect("sends no OOP Crew note to a thread whose provider cannot lead a crew", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          crewOn: true,
+          threadModelSelection: {
+            instanceId: ProviderInstanceId.make("cursor"),
+            model: "composer-2",
+          },
+          crewProviders: [
+            crewProvider("cursor", "cursor", ["composer-2"]),
+            crewProvider("claude", "claudeAgent", ["claude-opus-5", "claude-haiku-5"]),
+          ],
+        }),
+      );
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-crew-cursor-turn"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-crew-cursor"),
+          role: "user",
+          text: "hello cursor",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      });
+      yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === 1));
+      expect(
+        String((harness.sendTurn.mock.calls[0]?.[0] as { input?: string } | undefined)?.input),
+      ).toBe("hello cursor");
+    }),
+  );
 
   it("forwards plan interaction mode to the provider turn request", async () => {
     const harness = await createHarness();

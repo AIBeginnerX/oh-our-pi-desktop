@@ -310,6 +310,7 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    generateWorkLessons: () => Effect.succeed({ lessons: [] }),
     ...overrides,
   };
 
@@ -358,6 +359,7 @@ function createTextGeneration(
             }),
         ),
       ),
+    generateWorkLessons: () => Effect.die("unused generateWorkLessons"),
   };
 }
 

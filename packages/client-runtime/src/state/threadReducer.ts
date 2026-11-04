@@ -136,6 +136,7 @@ export function applyThreadDetailEvent(
           unsettledAt: null,
           activeOrderKey: null,
           autoSettleDisabledAt: null,
+          crew: event.payload.crew ?? null,
           snoozedUntil: null,
           snoozedAt: null,
           deletedAt: null,
@@ -337,6 +338,16 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           runtimeMode: event.payload.runtimeMode,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
+    case "thread.crew-set":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          crew: event.payload.crew,
           updatedAt: event.payload.updatedAt,
         },
       };

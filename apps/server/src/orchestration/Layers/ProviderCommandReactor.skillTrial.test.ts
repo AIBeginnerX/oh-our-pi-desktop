@@ -226,6 +226,7 @@ function makeFakeCodexAdapter(
       : undefined;
 
   const memoryAdmission: ProviderMemoryAdmissionSupport = {
+    skillTrials: true,
     sessionGeneration: (threadId) => sessionIdentity.get(threadId)?.generation,
     nativeSessionId: (cursor) => nativeSessionIdOf(cursor),
   };

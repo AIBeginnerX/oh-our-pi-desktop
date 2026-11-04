@@ -3,6 +3,7 @@ import {
   CheckpointRef,
   CommandId,
   CorrelationId,
+  type CrewThreadOverride,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
@@ -241,6 +242,91 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-parent-thread-"
           { threadId: lead, parentThreadId: null },
         ]);
       }),
+    );
+  },
+);
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-thread-crew-")))(
+  "thread crew projection",
+  (it) => {
+    it.effect(
+      "stores each thread's own crew, replaces it on a new one and clears it on reset",
+      () =>
+        Effect.gen(function* () {
+          const projectionPipeline = yield* OrchestrationProjectionPipeline;
+          const eventStore = yield* OrchestrationEventStore;
+          const sql = yield* SqlClient.SqlClient;
+          const at = "2026-11-03T10:00:00.000Z";
+          const created = (threadId: ThreadId, crew?: CrewThreadOverride) =>
+            eventStore.append({
+              type: "thread.created",
+              eventId: EventId.make(`evt-crew-${threadId}`),
+              aggregateKind: "thread",
+              aggregateId: threadId,
+              occurredAt: at,
+              commandId: CommandId.make(`cmd-crew-${threadId}`),
+              causationEventId: null,
+              correlationId: null,
+              metadata: {},
+              payload: {
+                threadId,
+                projectId: ProjectId.make("project-crew"),
+                title: threadId,
+                modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: null,
+                worktreePath: null,
+                ...(crew === undefined ? {} : { crew }),
+                createdAt: at,
+                updatedAt: at,
+              },
+            });
+          const crewSet = (threadId: ThreadId, step: number, crew: CrewThreadOverride | null) =>
+            eventStore.append({
+              type: "thread.crew-set",
+              eventId: EventId.make(`evt-crew-set-${threadId}-${step}`),
+              aggregateKind: "thread",
+              aggregateId: threadId,
+              occurredAt: at,
+              commandId: CommandId.make(`cmd-crew-set-${threadId}-${step}`),
+              causationEventId: null,
+              correlationId: null,
+              metadata: {},
+              payload: { threadId, crew, updatedAt: at },
+            });
+          const changed = ThreadId.make("crew-changed");
+          const untouched = ThreadId.make("crew-untouched");
+          const reset = ThreadId.make("crew-reset");
+          const started = ThreadId.make("crew-started-with");
+          yield* created(changed);
+          yield* created(untouched);
+          yield* created(reset);
+          yield* created(started, { preset: "quality" });
+          yield* crewSet(changed, 1, { enabled: true, preset: "speed" });
+          yield* crewSet(changed, 2, { enabled: true, preset: "budget" });
+          yield* crewSet(reset, 1, { enabled: true });
+          yield* crewSet(reset, 2, null);
+          yield* projectionPipeline.bootstrap;
+
+          const rows = yield* sql<{
+            readonly threadId: string;
+            readonly crew: string | null;
+          }>`
+          SELECT thread_id AS "threadId", crew_json AS "crew"
+          FROM projection_threads
+          ORDER BY thread_id
+        `;
+          assert.deepEqual(
+            rows.map((row) => [row.threadId, row.crew === null ? null : JSON.parse(row.crew)]),
+            [
+              [changed, { enabled: true, preset: "budget" }],
+              [reset, null],
+              [started, { preset: "quality" }],
+              [untouched, null],
+            ],
+          );
+        }),
     );
   },
 );

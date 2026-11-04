@@ -245,7 +245,7 @@ const make = Effect.gen(function* () {
     const turn = thread.value.latestTurn;
     const resolved = resolveCrew({
       settings: settings.crew,
-      threadId,
+      override: thread.value.crew,
       providers: yield* providerRegistry.getProviders,
       brain: thread.value.modelSelection,
     });

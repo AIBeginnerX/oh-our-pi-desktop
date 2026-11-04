@@ -38,6 +38,33 @@ export type CrewMergeResult =
       readonly patchPath: string;
     };
 
+/** What keeping a candidate's worktree came to: nothing changed (so it was removed), or kept. */
+export type CrewKeepResult =
+  | { readonly kept: false }
+  | {
+      readonly kept: true;
+      /** The member's full patch; null when git could not write it. */
+      readonly patchPath: string | null;
+    };
+
+/**
+ * What the lead reads at the end of a candidate's report: its changes were not applied, and how
+ * to look at them and clean up.
+ */
+export function candidateNote(
+  worktree: CrewWorktree,
+  result: Extract<CrewKeepResult, { readonly kept: true }>,
+): string {
+  const patch = result.patchPath;
+  return [
+    "",
+    "",
+    `CANDIDATE: changes were NOT applied. ${patch === null ? "The patch could not be written; read the worktree." : `Patch: ${patch} (\`git apply --check\` it).`}`,
+    `Worktree: ${worktree.path} (run tests there; installed dependencies are not in it).`,
+    `After you pick, remove with: git -C ${worktree.repoRoot} worktree remove --force ${worktree.path}${patch === null ? "" : ` && rm -f ${patch}`}`,
+  ].join("\n");
+}
+
 /** The files `git apply` refused, read from its stderr. */
 export function applyConflictFiles(stderr: string): ReadonlyArray<string> {
   const files = stderr.split("\n").flatMap((line) => {
@@ -131,18 +158,20 @@ export const makeCrewWorktrees = Effect.gen(function* () {
       Effect.ignore,
     );
 
-  const attemptMerge = Effect.fn("CrewWorktree.attemptMerge")(function* (worktree: CrewWorktree) {
+  /**
+   * Writes everything the member changed, new files included, as a patch from the worktree's
+   * base. A worktree with no changes is removed instead. Staging happens inside the crew worktree,
+   * never in the lead's index.
+   */
+  const writePatch = Effect.fn("CrewWorktree.writePatch")(function* (worktree: CrewWorktree) {
     const patchPath = patchPathOf(worktree);
-    // A worktree that is already gone was merged and removed before a restart interrupted us.
-    if (!(yield* fs.exists(worktree.path))) return { merged: true } as const;
-    // Stage inside the crew worktree (never the lead's index) so new files reach the diff.
     yield* run("stage", worktree.path, ["add", "-A"]);
     const unchanged =
       (yield* probe("changed", worktree.path, ["diff", "--cached", "--quiet", worktree.base]))
         .exitCode === 0;
     if (unchanged) {
       yield* discard(worktree);
-      return { merged: true } as const;
+      return null;
     }
     // --output keeps the patch out of the stdout decoder, which would mangle non-UTF-8 content.
     yield* run("diff", worktree.path, [
@@ -154,6 +183,14 @@ export const makeCrewWorktrees = Effect.gen(function* () {
       `--output=${patchPath}`,
       worktree.base,
     ]);
+    return patchPath;
+  });
+
+  const attemptMerge = Effect.fn("CrewWorktree.attemptMerge")(function* (worktree: CrewWorktree) {
+    // A worktree that is already gone was merged and removed before a restart interrupted us.
+    if (!(yield* fs.exists(worktree.path))) return { merged: true } as const;
+    const patchPath = yield* writePatch(worktree);
+    if (patchPath === null) return { merged: true } as const;
     // Plain `apply` writes the working tree only: the lead's index and staged state stay as they
     // were (`--3way` and `--index` would stage), and it applies all or nothing, so a conflict
     // leaves the lead's files untouched.
@@ -198,5 +235,23 @@ export const makeCrewWorktrees = Effect.gen(function* () {
         ),
       );
 
-  return { create, mergeBack, discard };
+  /**
+   * For a candidate: writes the member's patch and keeps the worktree, and never touches the
+   * lead's workspace. A worktree with no changes is removed. A git failure keeps the worktree
+   * too, since the candidate's work is still in it.
+   */
+  const keep = (worktree: CrewWorktree): Effect.Effect<CrewKeepResult> =>
+    Effect.gen(function* () {
+      if (!(yield* fs.exists(worktree.path))) return { kept: false } as const;
+      const patchPath = yield* writePatch(worktree);
+      return patchPath === null ? ({ kept: false } as const) : ({ kept: true, patchPath } as const);
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("crew candidate patch could not be written", { error }).pipe(
+          Effect.as({ kept: true, patchPath: null } as const),
+        ),
+      ),
+    );
+
+  return { create, mergeBack, keep, discard };
 });

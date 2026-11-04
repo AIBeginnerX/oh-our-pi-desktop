@@ -1,7 +1,7 @@
 //! `/implement`: what the desktop app's Implement button sends. The plan goes as the message
 //! `PLEASE IMPLEMENT THIS PLAN:` and the plan, in the plain mode, naming the plan as its source so
 //! the server marks it built. The thread leaves plan mode first, as the app's does. Ported from
-//! `implementPlan` of apps/oop-tui/src/app/controller.ts.
+//! `implementPlan` of the former TypeScript terminal.
 
 use crate::app::{App, DISPATCH_RPC, Msg};
 use crate::commands::{self, Ctx, Turn};
@@ -138,6 +138,8 @@ pub fn run(app: &mut App) {
     app.notice = None;
     app.scroll.set(0);
     app.awaiting = Some(app.tick);
+    app.sent = Some((message_id.clone(), app.tick));
+    let sent_id = message_id;
     let tx = app.sender();
     tokio::spawn(async move {
         let mut result = Ok(());
@@ -152,6 +154,7 @@ pub fn run(app: &mut App) {
                 result: Ok(()),
                 open: None,
                 answered: None,
+                sent: None,
             },
             // The mode the screen showed is back, since the turn does not run under the other.
             Err(reason) => Msg::Ext(Box::new(move |app| {
@@ -159,6 +162,9 @@ pub fn run(app: &mut App) {
                     app.interaction_intent = before;
                 }
                 app.awaiting = None;
+                if app.sent.as_ref().map(|(id, _)| id) == Some(&sent_id) {
+                    app.sent = None;
+                }
                 app.notice = Some(reason);
             })),
         };
@@ -248,6 +254,7 @@ mod tests {
         );
         assert_eq!(app.interaction_mode(), "default");
         assert!(app.awaiting.is_some());
+        assert!(app.sent.is_some(), "the old state gives way at once");
         next(&mut app, &mut rx).await;
         let seen = seen.lock().unwrap();
         let sent: Vec<&str> = seen

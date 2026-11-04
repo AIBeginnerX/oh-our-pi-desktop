@@ -11,7 +11,7 @@ describe("makeSearchPlan", () => {
 
   it("sends 3+ codepoint terms to FTS as quoted phrases", () => {
     const plan = makeSearchPlan("rollback migration");
-    expect(plan.ftsMatch).toBe('"rollback" "migration"');
+    expect(plan.ftsMatch).toBe('"rollback" OR "migration"');
     expect(plan.likePatterns).toEqual([]);
   });
 
@@ -24,7 +24,8 @@ describe("makeSearchPlan", () => {
 
   it("handles single Korean syllables via LIKE", () => {
     const plan = makeSearchPlan("맥 상태");
-    expect(plan.likePatterns).toEqual(["%맥%", "%상태%"]);
+    expect(plan.likePatterns).toEqual(["%상태%"]);
+    expect(makeSearchPlan("맥").likePatterns).toEqual(["%맥%"]);
     expect(plan.ftsMatch).toBeNull();
   });
 
@@ -43,7 +44,7 @@ describe("makeSearchPlan", () => {
     // 100% and task_name are >= 3 code points: the wildcard-looking
     // characters are inert inside a quoted FTS phrase.
     const plan = makeSearchPlan("100% task_name");
-    expect(plan.ftsMatch).toBe('"100%" "task_name"');
+    expect(plan.ftsMatch).toBe('"100%" OR "task_name"');
     expect(plan.likePatterns).toEqual([]);
   });
 
@@ -61,26 +62,36 @@ describe("makeSearchPlan", () => {
   it("quotes FTS phrases so FTS syntax and column names are inert", () => {
     const plan = makeSearchPlan('body:foo "bar" AND');
     // Every term is individually quoted; nothing can break out as an operator.
-    expect(plan.ftsMatch).toBe('"body:foo" """bar""" "AND"');
+    expect(plan.ftsMatch).toBe('"body:foo" OR """bar""" OR "AND"');
     expect(plan.likePatterns).toEqual([]);
   });
 
   it("has no negation operator — a leading - is literal", () => {
     // -wip is 4 code points: still a literal phrase, not an exclusion.
     const plan = makeSearchPlan("--- -wip");
-    expect(plan.ftsMatch).toBe('"---" "-wip"');
+    expect(plan.ftsMatch).toBe('"---" OR "-wip"');
     expect(plan.likePatterns).toEqual([]);
   });
 
   it("has no OR operator — OR is a literal 2-codepoint term", () => {
     const plan = makeSearchPlan("deploy OR rollback");
-    expect(plan.ftsMatch).toBe('"deploy" "rollback"');
+    expect(plan.ftsMatch).toBe('"deploy" OR "rollback"');
     expect(plan.likePatterns).toEqual(["%OR%"]);
   });
 
   it("routes punctuation-only short terms to LIKE", () => {
-    const plan = makeSearchPlan("** *");
-    expect(plan.likePatterns).toEqual(["%**%", "%*%"]);
+    const plan = makeSearchPlan("** ??");
+    expect(plan.likePatterns).toEqual(["%**%", "%??%"]);
     expect(plan.ftsMatch).toBeNull();
+  });
+
+  it("drops one-character terms when a longer term exists", () => {
+    expect(makeSearchPlan("a 이 login").ftsMatch).toBe('"login"');
+    expect(makeSearchPlan("a 이 login").likePatterns).toEqual([]);
+    expect(makeSearchPlan("좀 배포").likePatterns).toEqual(["%배포%"]);
+    // Alone, a single character is still what the user asked for ...
+    expect(makeSearchPlan("a").likePatterns).toEqual(["%a%"]);
+    // ... except for an agent's recall, which never matches on it.
+    expect(planHasTerms(makeSearchPlan("a", { strict: true }))).toBe(false);
   });
 });

@@ -41,6 +41,7 @@ import {
   ThreadMetaUpdatedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
+  ThreadCrewSetPayload,
   ThreadSettledPayload,
   ThreadPinnedPayload,
   ThreadPinReorderedPayload,
@@ -485,6 +486,7 @@ export function projectEvent(
             activeOrderKey: null,
             autoSettleDisabledAt: null,
             parentThreadId: payload.parentThreadId ?? null,
+            crew: payload.crew ?? null,
             snoozedUntil: null,
             snoozedAt: null,
             deletedAt: null,
@@ -781,6 +783,17 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             runtimeMode: payload.runtimeMode,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.crew-set":
+      return decodeForEvent(ThreadCrewSetPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            crew: payload.crew,
             updatedAt: payload.updatedAt,
           }),
         })),

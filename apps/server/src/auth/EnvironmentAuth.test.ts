@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { AuthAdministrativeScopes } from "@t3tools/contracts";
-import { expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
@@ -572,4 +572,197 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         ),
       ),
   );
+
+  describe("WebSocket upgrade origin check", () => {
+    type UpgradeRequest = Parameters<
+      EnvironmentAuth.EnvironmentAuth["Service"]["authenticateWebSocketUpgrade"]
+    >[0];
+    const makeUpgradeRequest = (input: {
+      readonly cookies?: Record<string, string>;
+      readonly headers?: Record<string, string>;
+      readonly url?: string;
+    }) =>
+      ({
+        cookies: input.cookies ?? {},
+        headers: { host: "127.0.0.1:13773", ...input.headers },
+        url: input.url ?? "/ws",
+      }) as unknown as UpgradeRequest;
+    const webConfig = {
+      mode: "web" as const,
+      devUrl: new URL("http://127.0.0.1:5173"),
+      devAllowedOrigins: ["https://host.example.ts.net"],
+    };
+
+    it.effect("rejects a cookie upgrade from a foreign origin", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const pairing = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+        const exchange = yield* serverAuth.createBrowserSession(
+          pairing.credential,
+          requestMetadata,
+        );
+        const exit = yield* Effect.exit(
+          serverAuth.authenticateWebSocketUpgrade(
+            makeUpgradeRequest({
+              cookies: { [sessions.cookieName]: exchange.sessionToken },
+              headers: { origin: "http://127.0.0.1:9999" },
+            }),
+          ),
+        );
+        expect(exit._tag).toBe("Failure");
+      }).pipe(Effect.provide(makeEnvironmentAuthLayer(webConfig))),
+    );
+
+    for (const [label, origin] of [
+      ["same origin as Host", "http://127.0.0.1:13773"],
+      ["dev origin", "http://127.0.0.1:5173"],
+      ["configured dev origin", "https://host.example.ts.net"],
+      ["desktop renderer origin", "t3code://app"],
+      ["no Origin header", undefined],
+    ] as const) {
+      it.effect(`accepts a cookie upgrade from ${label}`, () =>
+        Effect.gen(function* () {
+          const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+          const sessions = yield* SessionStore.SessionStore;
+          const pairing = yield* serverAuth.issuePairingCredential({
+            scopes: ["orchestration:read"],
+          });
+          const exchange = yield* serverAuth.createBrowserSession(
+            pairing.credential,
+            requestMetadata,
+          );
+          const session = yield* serverAuth.authenticateWebSocketUpgrade(
+            makeUpgradeRequest({
+              cookies: { [sessions.cookieName]: exchange.sessionToken },
+              headers: origin === undefined ? {} : { origin },
+            }),
+          );
+          expect(session.scopes).toEqual(["orchestration:read"]);
+        }).pipe(Effect.provide(makeEnvironmentAuthLayer(webConfig))),
+      );
+    }
+
+    const cookieUpgradeExit = (headers: Record<string, string>) =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const pairing = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+        const exchange = yield* serverAuth.createBrowserSession(
+          pairing.credential,
+          requestMetadata,
+        );
+        return yield* Effect.exit(
+          serverAuth.authenticateWebSocketUpgrade(
+            makeUpgradeRequest({
+              cookies: { [sessions.cookieName]: exchange.sessionToken },
+              headers,
+            }),
+          ),
+        );
+      });
+
+    for (const [label, headers, accepted] of [
+      [
+        "origin matching X-Forwarded-Host",
+        { origin: "https://app.example.com", "x-forwarded-host": "app.example.com" },
+        true,
+      ],
+      [
+        "origin matching the first X-Forwarded-Host entry",
+        {
+          origin: "https://app.example.com",
+          "x-forwarded-host": "app.example.com, proxy.internal",
+        },
+        true,
+      ],
+      [
+        "origin matching Forwarded host",
+        {
+          origin: "https://app.example.com",
+          forwarded: 'for=1.2.3.4;host="app.example.com";proto=https',
+        },
+        true,
+      ],
+      [
+        "origin not matching X-Forwarded-Host",
+        { origin: "https://evil.example", "x-forwarded-host": "app.example.com" },
+        false,
+      ],
+      [
+        "origin not matching Forwarded host",
+        { origin: "https://evil.example", forwarded: "host=app.example.com" },
+        false,
+      ],
+    ] as const) {
+      it.effect(`${accepted ? "accepts" : "rejects"} a cookie upgrade with ${label}`, () =>
+        Effect.gen(function* () {
+          const exit = yield* cookieUpgradeExit(headers);
+          expect(exit._tag).toBe(accepted ? "Success" : "Failure");
+        }).pipe(Effect.provide(makeEnvironmentAuthLayer(webConfig))),
+      );
+    }
+
+    it.effect("rejects a dev-cookie upgrade from a foreign origin", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const exchange = yield* serverAuth.createBrowserSession(
+          "reusable-dev-auth-token-that-is-long-enough",
+          requestMetadata,
+        );
+        const exit = yield* Effect.exit(
+          serverAuth.authenticateWebSocketUpgrade(
+            makeUpgradeRequest({
+              cookies: { [exchange.cookieName ?? "missing"]: exchange.sessionToken },
+              headers: { origin: "http://evil.example" },
+            }),
+          ),
+        );
+        expect(exit._tag).toBe("Failure");
+      }).pipe(
+        Effect.provide(
+          makeEnvironmentAuthLayer({
+            ...webConfig,
+            devAuthToken: Redacted.make("reusable-dev-auth-token-that-is-long-enough"),
+          }),
+        ),
+      ),
+    );
+
+    it.effect("keeps ticket and bearer upgrades independent of Origin", () =>
+      Effect.gen(function* () {
+        const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+        const sessions = yield* SessionStore.SessionStore;
+        const pairing = yield* serverAuth.issuePairingCredential({
+          scopes: ["orchestration:read"],
+        });
+        const exchange = yield* serverAuth.createBrowserSession(
+          pairing.credential,
+          requestMetadata,
+        );
+        const verified = yield* sessions.verify(exchange.sessionToken);
+        const ticket = yield* serverAuth.issueWebSocketTicket(verified);
+        const viaTicket = yield* serverAuth.authenticateWebSocketUpgrade(
+          makeUpgradeRequest({
+            url: `/ws?wsTicket=${encodeURIComponent(ticket.ticket)}`,
+            headers: { origin: "http://evil.example" },
+          }),
+        );
+        const viaBearer = yield* serverAuth.authenticateWebSocketUpgrade(
+          makeUpgradeRequest({
+            headers: {
+              origin: "http://evil.example",
+              authorization: `Bearer ${exchange.sessionToken}`,
+            },
+          }),
+        );
+        expect(viaTicket.sessionId).toBe(verified.sessionId);
+        expect(viaBearer.sessionId).toBe(verified.sessionId);
+      }).pipe(Effect.provide(makeEnvironmentAuthLayer(webConfig))),
+    );
+  });
 });

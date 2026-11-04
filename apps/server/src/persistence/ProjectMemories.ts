@@ -7,10 +7,14 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 
 import {
+  PROJECT_MEMORY_ANALYSER_PENDING_MAX,
   PROJECT_MEMORY_PENDING_PROPOSALS_MAX,
+  ProjectMemoryEvidence,
+  type ProjectMemoryProposalAnalysis,
   type ProjectMemory,
   ProjectMemoryId,
   ProjectMemoryKind,
+  ProjectMemoryDerivedFrom,
   ProjectMemoryOrigin,
   type ProjectMemoryProposal,
   ProjectMemoryProposalId,
@@ -35,7 +39,11 @@ export const InsertProjectMemoryInput = Schema.Struct({
   kind: ProjectMemoryKind,
   title: Schema.String,
   body: Schema.String,
-  origin: ProjectMemoryOrigin,
+  // `derived` is stored here but is not a wire origin: see `ProjectMemoryDerivedFrom`.
+  origin: Schema.Union([
+    ProjectMemoryOrigin,
+    Schema.Struct({ type: Schema.Literal("derived"), evidence: ProjectMemoryDerivedFrom }),
+  ]),
   validUntil: Schema.NullOr(Schema.String),
   estimatedTokens: NonNegativeInt,
   now: Schema.String,
@@ -92,6 +100,16 @@ export const InsertProjectMemoryProposalInput = Schema.Struct({
   body: Schema.String,
   reason: Schema.String,
   now: Schema.String,
+  /** Present on work-analyser suggestions; counted against their own cap. */
+  analysis: Schema.optionalKey(
+    Schema.Struct({
+      target: Schema.Literals(["memory", "skill"]),
+      evidence: Schema.Array(ProjectMemoryEvidence),
+      /** The evidence was chosen because the lesson named its check, not as a stand-in. */
+      evidenceNamed: Schema.Boolean,
+      relatedMemoryIds: Schema.Array(ProjectMemoryId),
+    }),
+  ),
 });
 export type InsertProjectMemoryProposalInput = typeof InsertProjectMemoryProposalInput.Type;
 
@@ -157,10 +175,34 @@ export class ProjectMemoryRepository extends Context.Service<
     readonly getProposal: (
       input: ProjectMemoryProposalKeyInput,
     ) => Effect.Effect<Option.Option<ProjectMemoryProposal>, ProjectMemoryRepositoryError>;
+    /** Whether the suggestion's evidence was named by the lesson (false when absent). */
+    readonly isProposalEvidenceNamed: (
+      input: ProjectMemoryProposalKeyInput,
+    ) => Effect.Effect<boolean, ProjectMemoryRepositoryError>;
     /** True when a row was deleted. */
     readonly deleteProposal: (
       input: ProjectMemoryProposalKeyInput,
     ) => Effect.Effect<boolean, ProjectMemoryRepositoryError>;
+    /** Whether a rejected suggestion with this normalized-text hash was recorded. */
+    readonly hasTombstone: (input: {
+      readonly projectId: ProjectId;
+      readonly bodyHash: string;
+    }) => Effect.Effect<boolean, ProjectMemoryRepositoryError>;
+    readonly insertTombstone: (input: {
+      readonly projectId: ProjectId;
+      readonly bodyHash: string;
+      readonly now: string;
+    }) => Effect.Effect<void, ProjectMemoryRepositoryError>;
+    /** Highest event sequence the work analyser has covered; 0 before any run. */
+    readonly getAnalysisCursor: (input: {
+      readonly projectId: ProjectId;
+    }) => Effect.Effect<number, ProjectMemoryRepositoryError>;
+    /** Moves the cursor forward only; a lower sequence is ignored. */
+    readonly advanceAnalysisCursor: (input: {
+      readonly projectId: ProjectId;
+      readonly sequence: number;
+      readonly now: string;
+    }) => Effect.Effect<void, ProjectMemoryRepositoryError>;
   }
 >()("t3/persistence/ProjectMemories/ProjectMemoryRepository") {}
 
@@ -172,7 +214,16 @@ const ProjectMemoryProposalDbRow = Schema.Struct({
   body: Schema.String,
   reason: Schema.String,
   createdAt: Schema.String,
+  source: Schema.Literals(["agent", "analyser"]),
+  target: Schema.Literals(["memory", "skill"]),
+  evidenceJson: Schema.NullOr(Schema.String),
+  relatedMemoryIdsJson: Schema.NullOr(Schema.String),
 });
+
+const EvidenceFromJson = Schema.fromJsonString(Schema.Array(ProjectMemoryEvidence));
+const MemoryIdsFromJson = Schema.fromJsonString(Schema.Array(ProjectMemoryId));
+const encodeEvidence = Schema.encodeEffect(EvidenceFromJson);
+const encodeMemoryIds = Schema.encodeEffect(MemoryIdsFromJson);
 
 const ProjectMemoryDbRow = Schema.Struct({
   memoryRowid: Schema.Int,
@@ -185,6 +236,7 @@ const ProjectMemoryDbRow = Schema.Struct({
   originType: Schema.Literals(["manual", "message"]),
   originThreadId: Schema.NullOr(ThreadId),
   originMessageId: Schema.NullOr(MessageId),
+  originEvidenceJson: Schema.NullOr(Schema.String),
   validUntil: Schema.NullOr(Schema.String),
   estimatedTokens: NonNegativeInt,
   createdAt: Schema.String,
@@ -202,6 +254,7 @@ const ProjectMemoryRawDbRow = Schema.Struct({
   originType: Schema.Unknown,
   originThreadId: Schema.Unknown,
   originMessageId: Schema.Unknown,
+  originEvidenceJson: Schema.Unknown,
   validUntil: Schema.Unknown,
   estimatedTokens: Schema.Unknown,
   createdAt: Schema.Unknown,
@@ -216,9 +269,21 @@ const decodeProjectMemoryDbRow = Schema.decodeUnknownEffect(ProjectMemoryDbRow);
 const toProjectMemory = (
   row: typeof ProjectMemoryDbRow.Type,
 ): Effect.Effect<ProjectMemory, PersistenceDecodeError> => {
+  // A derived memory keeps `origin_type = 'manual'` (see migration 068) and
+  // is told apart by its evidence.
+  const evidence =
+    row.originEvidenceJson === null
+      ? Option.none()
+      : Schema.decodeUnknownOption(EvidenceFromJson)(row.originEvidenceJson);
+  const derivedFrom =
+    row.originEvidenceJson !== null && Option.isSome(evidence) && evidence.value.length > 0
+      ? evidence.value
+      : null;
   const origin: ProjectMemoryOrigin | null =
     row.originType === "manual"
-      ? { type: "manual" }
+      ? row.originEvidenceJson === null || derivedFrom !== null
+        ? { type: "manual" }
+        : null
       : row.originThreadId !== null && row.originMessageId !== null
         ? { type: "message", threadId: row.originThreadId, messageId: row.originMessageId }
         : null;
@@ -226,7 +291,7 @@ const toProjectMemory = (
     return Effect.fail(
       new PersistenceDecodeError({
         operation: "ProjectMemoryRepository.decodeRow",
-        issue: "message-origin row missing its source ids",
+        issue: "origin row missing its source ids or evidence",
         correlation: { memoryId: row.memoryId },
       }),
     );
@@ -243,6 +308,7 @@ const toProjectMemory = (
     estimatedTokens: row.estimatedTokens,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
+    ...(derivedFrom === null ? {} : { derivedFrom }),
   });
 };
 
@@ -281,6 +347,7 @@ export const make = Effect.gen(function* () {
     origin_type AS "originType",
     origin_thread_id AS "originThreadId",
     origin_message_id AS "originMessageId",
+    origin_evidence_json AS "originEvidenceJson",
     valid_until AS "validUntil",
     estimated_tokens AS "estimatedTokens",
     created_at AS "createdAt",
@@ -298,6 +365,7 @@ export const make = Effect.gen(function* () {
     m.origin_type AS "originType",
     m.origin_thread_id AS "originThreadId",
     m.origin_message_id AS "originMessageId",
+    m.origin_evidence_json AS "originEvidenceJson",
     m.valid_until AS "validUntil",
     m.estimated_tokens AS "estimatedTokens",
     m.created_at AS "createdAt",
@@ -384,27 +452,36 @@ export const make = Effect.gen(function* () {
     Request: SearchProjectMemoriesInput,
     Result: ProjectMemoryRawDbRow,
     execute: (input) => {
-      const clauses = [
-        sql`m.project_id = ${input.projectId}`,
-        liveProjectClause,
-        ...(input.ftsMatch === null
-          ? []
-          : [
-              sql`m.memory_rowid IN (
-                SELECT rowid FROM project_memory_fts
-                WHERE project_memory_fts MATCH ${input.ftsMatch}
-              )`,
-            ]),
-        ...input.likePatterns.map(
-          (pattern) =>
-            sql`(m.title LIKE ${pattern} ESCAPE '!' OR m.body LIKE ${pattern} ESCAPE '!')`,
-        ),
-      ];
+      // A memory matches when any term does. FTS terms are ranked by BM25 (a title hit
+      // counts three times a body hit; lower scores are better), and each matching
+      // short term, which the trigram index cannot hold, improves the score by one.
+      const likeHits = input.likePatterns.map(
+        (pattern) => sql`(m.title LIKE ${pattern} ESCAPE '!' OR m.body LIKE ${pattern} ESCAPE '!')`,
+      );
+      const matches = [...(input.ftsMatch === null ? [] : [sql`f.rid IS NOT NULL`]), ...likeHits];
+      const score = likeHits.reduce(
+        (total, hit) => sql`${total} - (CASE WHEN ${hit} THEN 1 ELSE 0 END)`,
+        input.ftsMatch === null ? sql`0` : sql`COALESCE(f.score, 0)`,
+      );
+      // Without a term there is no score, and a bare `ORDER BY 0` is an SQLite error.
       return sql`
         SELECT ${memoryColumns}
         FROM project_memories m
-        WHERE ${sql.and(clauses)}
-        ORDER BY m.updated_at DESC, m.memory_rowid DESC
+        ${
+          input.ftsMatch === null
+            ? sql``
+            : sql`LEFT JOIN (
+                SELECT rowid AS rid, bm25(project_memory_fts, 3.0, 1.0) AS score
+                FROM project_memory_fts
+                WHERE project_memory_fts MATCH ${input.ftsMatch}
+              ) f ON f.rid = m.memory_rowid`
+        }
+        WHERE ${sql.and([
+          sql`m.project_id = ${input.projectId}`,
+          liveProjectClause,
+          ...(matches.length === 0 ? [] : [sql.or(matches)]),
+        ])}
+        ORDER BY ${matches.length === 0 ? sql`` : sql`${score} ASC,`} m.updated_at DESC, m.memory_rowid DESC
         LIMIT ${input.limit + 1}
       `;
     },
@@ -419,29 +496,32 @@ export const make = Effect.gen(function* () {
           // interleave a tombstone between the statements. On zero inserted
           // rows the diagnostic SELECT reports which condition failed — the
           // transaction keeps that read consistent.
+          const originEvidenceJson =
+            input.origin.type === "derived" ? yield* encodeEvidence(input.origin.evidence) : null;
           const rows = yield* sql<typeof ProjectMemoryRawDbRow.Type>`
             INSERT INTO project_memories (
               memory_id, project_id, kind, title, body, version,
-              origin_type, origin_thread_id, origin_message_id,
+              origin_type, origin_thread_id, origin_message_id, origin_evidence_json,
               valid_until, estimated_tokens, created_at, updated_at
             )
             SELECT
               ${input.memoryId}, ${input.projectId}, ${input.kind}, ${input.title},
               ${input.body}, 1,
-              ${input.origin.type},
+              ${input.origin.type === "message" ? "message" : "manual"},
               ${input.origin.type === "message" ? input.origin.threadId : null},
               ${input.origin.type === "message" ? input.origin.messageId : null},
+              ${originEvidenceJson},
               ${input.validUntil}, ${input.estimatedTokens}, ${input.now}, ${input.now}
             WHERE
               ${liveProjectFor(input.projectId)}
               AND ${
-                input.origin.type === "manual"
-                  ? sql`1 = 1`
-                  : messageProvenanceFor({
+                input.origin.type === "message"
+                  ? messageProvenanceFor({
                       projectId: input.projectId,
                       threadId: input.origin.threadId,
                       messageId: input.origin.messageId,
                     })
+                  : sql`1 = 1`
               }
             RETURNING ${returningMemoryColumns}
           `;
@@ -673,10 +753,53 @@ export const make = Effect.gen(function* () {
     title AS "title",
     body AS "body",
     reason AS "reason",
-    created_at AS "createdAt"
+    created_at AS "createdAt",
+    source AS "source",
+    target AS "target",
+    evidence_json AS "evidenceJson",
+    related_memory_ids_json AS "relatedMemoryIdsJson"
   `;
 
-  const decodeProposal = Schema.decodeUnknownEffect(ProjectMemoryProposalDbRow);
+  const decodeProposalRow = Schema.decodeUnknownEffect(ProjectMemoryProposalDbRow);
+  const decodeEvidence = Schema.decodeUnknownEffect(EvidenceFromJson);
+  const decodeMemoryIds = Schema.decodeUnknownEffect(MemoryIdsFromJson);
+
+  // Related memories are read live, so one the user deleted since the
+  // suggestion was made simply drops out of the side-by-side view.
+  const decodeProposal = (
+    raw: unknown,
+  ): Effect.Effect<ProjectMemoryProposal, ProjectMemoryRepositoryError | Schema.SchemaError> =>
+    Effect.gen(function* () {
+      const row = yield* decodeProposalRow(raw);
+      const base = {
+        proposalId: row.proposalId,
+        projectId: row.projectId,
+        threadId: row.threadId,
+        title: row.title,
+        body: row.body,
+        reason: row.reason,
+        createdAt: row.createdAt,
+      };
+      if (row.source === "agent" || row.evidenceJson === null) return base;
+      const evidence = yield* decodeEvidence(row.evidenceJson);
+      const relatedIds =
+        row.relatedMemoryIdsJson === null ? [] : yield* decodeMemoryIds(row.relatedMemoryIdsJson);
+      const related: Array<ProjectMemoryProposalAnalysis["related"][number]> = [];
+      for (const memoryId of relatedIds) {
+        const memory = yield* getById({ projectId: row.projectId, memoryId });
+        if (Option.isSome(memory)) {
+          related.push({
+            memoryId,
+            title: memory.value.title,
+            body: memory.value.body,
+          });
+        }
+      }
+      return {
+        ...base,
+        analysis: { target: row.target, evidence, related },
+      };
+    });
 
   const insertProposal: ProjectMemoryRepository["Service"]["insertProposal"] = (input) =>
     sql
@@ -684,18 +807,35 @@ export const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // The pending cap and the live-project check ride on the INSERT
           // itself, so two racing proposals cannot both squeeze past the cap.
+          const evidenceJson =
+            input.analysis === undefined ? null : yield* encodeEvidence(input.analysis.evidence);
+          const relatedMemoryIdsJson =
+            input.analysis === undefined
+              ? null
+              : yield* encodeMemoryIds(input.analysis.relatedMemoryIds);
           const rows = yield* sql`
             INSERT INTO project_memory_proposals (
-              proposal_id, project_id, thread_id, title, body, reason, created_at
+              proposal_id, project_id, thread_id, title, body, reason, created_at,
+              source, target, evidence_json, related_memory_ids_json, evidence_named
             )
             SELECT
               ${input.proposalId}, ${input.projectId}, ${input.threadId}, ${input.title},
-              ${input.body}, ${input.reason}, ${input.now}
+              ${input.body}, ${input.reason}, ${input.now},
+              ${input.analysis === undefined ? "agent" : "analyser"},
+              ${input.analysis?.target ?? "memory"},
+              ${evidenceJson},
+              ${relatedMemoryIdsJson},
+              ${input.analysis?.evidenceNamed === true ? 1 : 0}
             WHERE ${liveProjectFor(input.projectId)}
               AND (
                 SELECT COUNT(*) FROM project_memory_proposals
                 WHERE project_id = ${input.projectId}
-              ) < ${PROJECT_MEMORY_PENDING_PROPOSALS_MAX}
+                  AND source = ${input.analysis === undefined ? "agent" : "analyser"}
+              ) < ${
+                input.analysis === undefined
+                  ? PROJECT_MEMORY_PENDING_PROPOSALS_MAX
+                  : PROJECT_MEMORY_ANALYSER_PENDING_MAX
+              }
             RETURNING ${proposalColumns}
           `;
           const row = rows[0];
@@ -757,6 +897,24 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const isProposalEvidenceNamed: ProjectMemoryRepository["Service"]["isProposalEvidenceNamed"] = (
+    input,
+  ) =>
+    sql<{ readonly named: number }>`
+      SELECT evidence_named AS "named"
+      FROM project_memory_proposals
+      WHERE project_id = ${input.projectId} AND proposal_id = ${input.proposalId}
+    `.pipe(
+      Effect.map((rows) => rows[0]?.named === 1),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.isProposalEvidenceNamed:query",
+          "ProjectMemoryRepository.isProposalEvidenceNamed:decodeRow",
+          { projectId: input.projectId },
+        ),
+      ),
+    );
+
   const deleteProposal: ProjectMemoryRepository["Service"]["deleteProposal"] = (input) =>
     sql<{ readonly proposalId: string }>`
       DELETE FROM project_memory_proposals
@@ -773,6 +931,75 @@ export const make = Effect.gen(function* () {
       ),
     );
 
+  const hasTombstone: ProjectMemoryRepository["Service"]["hasTombstone"] = (input) =>
+    sql`
+      SELECT 1 AS "found" FROM project_memory_tombstones
+      WHERE project_id = ${input.projectId} AND body_hash = ${input.bodyHash}
+    `.pipe(
+      Effect.map((rows) => rows.length > 0),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.hasTombstone:query",
+          "ProjectMemoryRepository.hasTombstone:decodeRow",
+          { projectId: input.projectId },
+        ),
+      ),
+    );
+
+  const insertTombstone: ProjectMemoryRepository["Service"]["insertTombstone"] = (input) =>
+    sql`
+      INSERT OR IGNORE INTO project_memory_tombstones (project_id, body_hash, created_at)
+      VALUES (${input.projectId}, ${input.bodyHash}, ${input.now})
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.insertTombstone:query",
+          "ProjectMemoryRepository.insertTombstone:decodeRow",
+          { projectId: input.projectId },
+        ),
+      ),
+    );
+
+  const getAnalysisCursor: ProjectMemoryRepository["Service"]["getAnalysisCursor"] = ({
+    projectId,
+  }) =>
+    sql<{ readonly sequence: number }>`
+      SELECT last_event_sequence AS "sequence"
+      FROM project_memory_analysis_cursors
+      WHERE project_id = ${projectId}
+    `.pipe(
+      Effect.map((rows) => rows[0]?.sequence ?? 0),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.getAnalysisCursor:query",
+          "ProjectMemoryRepository.getAnalysisCursor:decodeRow",
+          { projectId },
+        ),
+      ),
+    );
+
+  const advanceAnalysisCursor: ProjectMemoryRepository["Service"]["advanceAnalysisCursor"] = (
+    input,
+  ) =>
+    sql`
+      INSERT INTO project_memory_analysis_cursors (project_id, last_event_sequence, updated_at)
+      SELECT ${input.projectId}, ${input.sequence}, ${input.now}
+      WHERE ${liveProjectFor(input.projectId)}
+      ON CONFLICT (project_id) DO UPDATE
+      SET last_event_sequence = excluded.last_event_sequence, updated_at = excluded.updated_at
+      WHERE excluded.last_event_sequence > project_memory_analysis_cursors.last_event_sequence
+    `.pipe(
+      Effect.asVoid,
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectMemoryRepository.advanceAnalysisCursor:query",
+          "ProjectMemoryRepository.advanceAnalysisCursor:decodeRow",
+          { projectId: input.projectId },
+        ),
+      ),
+    );
+
   return {
     insert,
     getById,
@@ -783,7 +1010,12 @@ export const make = Effect.gen(function* () {
     insertProposal,
     listProposals,
     getProposal,
+    isProposalEvidenceNamed,
     deleteProposal,
+    hasTombstone,
+    insertTombstone,
+    getAnalysisCursor,
+    advanceAnalysisCursor,
   } satisfies ProjectMemoryRepository["Service"];
 });
 

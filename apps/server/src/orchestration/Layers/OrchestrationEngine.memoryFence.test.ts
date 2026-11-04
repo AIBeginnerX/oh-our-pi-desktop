@@ -359,9 +359,9 @@ describe("OrchestrationEngine memory provenance fence", () => {
   );
 
   // Message upserts key on the global message id, so replaying an existing
-  // user id onto another thread rewrites that row's membership. A fence
-  // captured before the move must break; a fresh id must not.
-  effectIt.effect("breaks the fence when a user message moves across threads", () =>
+  // user id onto another thread would rewrite that row's membership. The
+  // engine refuses it; a fresh id commits without touching the fence.
+  effectIt.effect("refuses a user message id reused across threads and keeps the fence", () =>
     Effect.gen(function* () {
       const engine = yield* OrchestrationEngineService;
       const sendLedger = yield* ProjectMemorySendLedger;
@@ -397,22 +397,24 @@ describe("OrchestrationEngine memory provenance fence", () => {
       });
       expect(sendLedger.mutationFenceHolds(controlFence)).toBe(true);
 
-      // The decider only checks duplicates inside the target thread, so the
-      // same id lands a thread.message-sent that moves the durable user row.
-      const movedFence = sendLedger.captureMutationFence();
-      yield* engine.dispatch({
-        type: "thread.message.user.append",
-        commandId: CommandId.make("move-append-target"),
-        threadId: targetThreadId,
-        message: { messageId, text: "moved", attachments: [] },
-        createdAt: NOW,
-      });
-      expect(sendLedger.mutationFenceHolds(movedFence)).toBe(false);
-      const movedRow = yield* messages.getByMessageId({ messageId });
-      expect(Option.isSome(movedRow)).toBe(true);
-      if (Option.isSome(movedRow)) {
-        expect(movedRow.value.threadId).toBe(targetThreadId);
-        expect(movedRow.value.role).toBe("user");
+      // The durable row is keyed by the global message id, so replaying the
+      // id onto another thread is refused ahead of any append: the row stays
+      // on its thread.
+      const moved = yield* Effect.exit(
+        engine.dispatch({
+          type: "thread.message.user.append",
+          commandId: CommandId.make("move-append-target"),
+          threadId: targetThreadId,
+          message: { messageId, text: "moved", attachments: [] },
+          createdAt: NOW,
+        }),
+      );
+      expect(Exit.isFailure(moved)).toBe(true);
+      const keptRow = yield* messages.getByMessageId({ messageId });
+      expect(Option.isSome(keptRow)).toBe(true);
+      if (Option.isSome(keptRow)) {
+        expect(keptRow.value.threadId).toBe(sourceThreadId);
+        expect(keptRow.value.text).toBe("origin");
       }
     }).pipe(Effect.provide(makeOrchestrationLayer())),
   );
@@ -454,7 +456,6 @@ describe("OrchestrationEngine memory provenance fence", () => {
         message: { messageId, text: "origin", attachments: [] },
         createdAt: NOW,
       });
-      const head = yield* engine.latestSequence;
       const command = {
         type: "thread.message.user.append" as const,
         commandId: CommandId.make("classify-append-target"),
@@ -506,13 +507,15 @@ describe("OrchestrationEngine memory provenance fence", () => {
         true,
       );
 
+      // Once the read recovers the reused id is refused as a duplicate and the
+      // row stays on its original thread.
       failMessageReads.current = false;
-      const accepted = yield* engine.dispatch(command);
-      expect(accepted.sequence).toBeGreaterThan(head);
-      const movedRow = yield* messages.getByMessageId({ messageId });
-      expect(Option.isSome(movedRow)).toBe(true);
-      if (Option.isSome(movedRow)) {
-        expect(movedRow.value.threadId).toBe(targetThreadId);
+      const retried = yield* Effect.exit(engine.dispatch(command));
+      expect(Exit.isFailure(retried)).toBe(true);
+      const keptRow = yield* messages.getByMessageId({ messageId });
+      expect(Option.isSome(keptRow)).toBe(true);
+      if (Option.isSome(keptRow)) {
+        expect(keptRow.value.threadId).toBe(sourceThreadId);
       }
     }).pipe(
       Effect.provide(

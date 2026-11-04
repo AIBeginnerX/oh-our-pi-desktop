@@ -1,6 +1,6 @@
 {
-  "sequence": 49,
-  "eventId": "evt-49",
+  "sequence": 50,
+  "eventId": "evt-50",
   "aggregateKind": "thread",
   "aggregateId": "thread-1",
   "occurredAt": "2026-01-01T00:00:05.000Z",

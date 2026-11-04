@@ -327,3 +327,43 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+// ---------------------------------------------------------------------------
+// Work lessons
+// ---------------------------------------------------------------------------
+
+export interface WorkLessonsPromptInput {
+  /** JSON array of per-thread digests labelled T1, T2, … */
+  digest: string;
+}
+
+export function buildWorkLessonsPrompt(input: WorkLessonsPromptInput) {
+  const prompt = [
+    "You review structured summaries of recent coding-agent work in one project and propose reusable lessons.",
+    "Each summary is JSON for one thread, labelled T1, T2, … It holds check results, audit verdicts, reverts, interrupts, changed file paths and cost. It contains no conversation text.",
+    "Return a JSON object with key: lessons.",
+    "Each lesson has: category (fact, prohibition, preference or procedure), text, threads.",
+    "Rules:",
+    "- Propose at most 3 lessons. Return an empty list when nothing repeats.",
+    "- A lesson must be supported by at least two different threads; list their labels in threads.",
+    "- Use only what the summaries show: a check that failed then passed, an audit that asked for changes, a revert, an interrupt followed by the user steering. Do not guess preferences or intentions.",
+    "- fact: something about the project that held across threads. prohibition: something that caused a revert or a failed audit. preference: how the user steered the work, only if an interrupt or a withdrawn result shows it. procedure: a repeatable sequence of steps that led to an accepted result with passing checks.",
+    "- Write each text as one short, self-contained sentence or numbered steps. Name check names and file paths exactly as given.",
+    "- Do not include secrets, personal data or anything not in the summaries.",
+    "",
+    "Summaries:",
+    limitSection(input.digest, 30_000),
+  ].join("\n");
+
+  const outputSchema = Schema.Struct({
+    lessons: Schema.Array(
+      Schema.Struct({
+        category: Schema.Literals(["fact", "prohibition", "preference", "procedure"]),
+        text: Schema.String,
+        threads: Schema.Array(Schema.String),
+      }),
+    ),
+  });
+
+  return { prompt, outputSchema };
+}

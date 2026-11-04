@@ -1074,6 +1074,131 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
+  it("rejects a user message that reuses a stored message id after a restart", async () => {
+    const directory = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "t3-duplicate-message-"),
+    );
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    let system = await createOrchestrationSystem(databasePath);
+    const threadId = ThreadId.make("duplicate-message-thread");
+    const messageId = asMessageId("duplicate-message");
+    const append = (commandId: string, text: string) =>
+      system.engine.dispatch({
+        type: "thread.message.user.append",
+        commandId: CommandId.make(commandId),
+        threadId,
+        message: { messageId, text, attachments: [] },
+        createdAt: now(),
+      });
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("duplicate-message-project"),
+          projectId: asProjectId("duplicate-message-project"),
+          title: "Duplicate message",
+          workspaceRoot: "/tmp/duplicate-message",
+          createdAt: now(),
+        }),
+      );
+      await system.run(
+        system.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("duplicate-message-create"),
+          threadId,
+          projectId: asProjectId("duplicate-message-project"),
+          title: "Duplicate message",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      );
+      await system.run(append("duplicate-message-first", "original"));
+
+      // The restarted command read model starts without message history, so
+      // only the durable row can still tell the second append is a duplicate.
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+
+      await expect(system.run(append("duplicate-message-second", "overwritten"))).rejects.toThrow(
+        `Message '${messageId}' already exists on thread '${threadId}'.`,
+      );
+      const detail = await system.readThread(threadId);
+      const messages = Option.isSome(detail) ? detail.value.messages : [];
+      expect(messages.map((message) => message.text)).toEqual(["original"]);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a user message that reuses another thread's message id after a restart", async () => {
+    const directory = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "t3-cross-thread-message-"),
+    );
+    const databasePath = NodePath.join(directory, "state.sqlite");
+    let system = await createOrchestrationSystem(databasePath);
+    const firstThreadId = ThreadId.make("cross-thread-message-first");
+    const secondThreadId = ThreadId.make("cross-thread-message-second");
+    const messageId = asMessageId("cross-thread-message");
+    const append = (commandId: string, threadId: ThreadId, text: string) =>
+      system.engine.dispatch({
+        type: "thread.message.user.append",
+        commandId: CommandId.make(commandId),
+        threadId,
+        message: { messageId, text, attachments: [] },
+        createdAt: now(),
+      });
+    const createThread = (threadId: ThreadId) =>
+      system.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`create-${threadId}`),
+        threadId,
+        projectId: asProjectId("cross-thread-message-project"),
+        title: "Cross thread message",
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt: now(),
+      });
+    try {
+      await system.run(
+        system.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cross-thread-message-project"),
+          projectId: asProjectId("cross-thread-message-project"),
+          title: "Cross thread message",
+          workspaceRoot: "/tmp/cross-thread-message",
+          createdAt: now(),
+        }),
+      );
+      await system.run(createThread(firstThreadId));
+      await system.run(createThread(secondThreadId));
+      await system.run(append("cross-thread-message-first", firstThreadId, "original"));
+
+      await system.dispose();
+      system = await createOrchestrationSystem(databasePath);
+
+      await expect(
+        system.run(append("cross-thread-message-second", secondThreadId, "stolen")),
+      ).rejects.toThrow(`Message '${messageId}' already exists on thread '${firstThreadId}'.`);
+      const first = await system.readThread(firstThreadId);
+      const firstMessages = Option.isSome(first) ? first.value.messages : [];
+      expect(firstMessages.map((message) => message.text)).toEqual(["original"]);
+      const second = await system.readThread(secondThreadId);
+      const secondMessages = Option.isSome(second) ? second.value.messages : [];
+      expect(secondMessages).toEqual([]);
+    } finally {
+      await system.dispose();
+      await NodeFSP.rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(["unlink", "relink", "branch", "worktree", "project", "delete"] as const)(
     "rejects PR discovery completed after a newer %s command",
     async (change) => {

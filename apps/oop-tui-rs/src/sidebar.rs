@@ -1,5 +1,5 @@
 //! The thread list as the desktop sidebar builds it: a port of `buildSidebar`
-//! (apps/oop-tui/src/app/sidebarModel.ts) with the sort helpers of
+//! (from the former TypeScript terminal) with the sort helpers of
 //! packages/client-runtime/src/state/threadSort.ts and the snooze rules of threadSettled.ts.
 //!
 //! Archived threads and crew tasks leave the list (a crew task is counted under its lead unless it

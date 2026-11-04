@@ -431,6 +431,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     scope: "environment-defaults",
   },
   {
+    id: "auto-select-project-memories",
+    title: "Auto-select related memories",
+    to: "/settings/general",
+    searchTerms: ["project memory composer chips suggest related relevant pre-select send"],
+    scope: "environment-defaults",
+  },
+  {
+    id: "project-memory-analyser",
+    title: "Work analyser",
+    to: "/settings/general",
+    searchTerms: ["project memory analyse recent work lessons suggestions text generation"],
+    scope: "environment-defaults",
+  },
+  {
     id: "continue-threads-after-server-update",
     title: "Continue threads after restarts",
     to: "/settings/general",

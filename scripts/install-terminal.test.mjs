@@ -23,22 +23,18 @@ const run = (command, args, env = process.env) =>
     child.once("close", (code) => resolve({ code, output }));
   });
 
-// The archive is built for real with tar. Its "node" is a script standing in for the runtime: it
-// prints the version for `--version` (what the installer runs once) and otherwise shows what the
-// launcher passed. The real node, oop.mjs and server are the release job's business.
-async function makeArchive(root, { version, runs = true, complete = true, rust = "none" }) {
+// The archive is built for real with tar. Its "node" is a script standing in for the runtime and
+// its "oop-rs" one for the Rust client: "works" prints the version for `--version` (what the
+// installer runs once) and otherwise shows how the launcher started it. The real node, oop-rs and
+// server are the release job's business.
+async function makeArchive(root, { version, rust = "works" }) {
   const stage = path.join(root, "archive-stage", "oop-terminal");
   await fs.rm(path.join(root, "archive-stage"), { recursive: true, force: true });
   await fs.mkdir(path.join(stage, "apps", "server", "dist"), { recursive: true });
-  const node = runs
-    ? `#!/bin/sh\ncase "$2" in --version) echo ${version}; exit 0;; esac\nprintf 'entry=%s\\n' "$OOP_DAEMON_ENTRY"\nfor a in "$@"; do printf '[%s]\\n' "$a"; done\n`
-    : "#!/bin/sh\necho 'dyld: Library not loaded' >&2\nexit 3\n";
-  await fs.writeFile(path.join(stage, "node"), node, { mode: 0o755 });
-  if (complete) await fs.writeFile(path.join(stage, "oop.mjs"), "// fixture terminal app\n");
-  // The Rust client: "works" prints the version and otherwise shows how the launcher started it.
+  await fs.writeFile(path.join(stage, "node"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   if (rust !== "none") {
     const body = {
-      works: `case "$1" in --version) echo ${version}; exit 0;; esac\nprintf 'rust ts-entry=%s node=%s electron=%s daemon=%s path0=%s\\n' "$OOP_TS_ENTRY" "$OOP_TS_NODE" "\${OOP_TS_NODE_ELECTRON-unset}" "$OOP_DAEMON_ENTRY" "\${PATH%%:*}"\nfor a in "$@"; do printf '[%s]\\n' "$a"; done\n`,
+      works: `case "$1" in --version) echo ${version}; exit 0;; esac\nprintf 'rust daemon=%s install=%s ts=%s tui=%s path0=%s\\n' "$OOP_DAEMON_ENTRY" "$OOP_TERMINAL_INSTALL" "\${OOP_TS_ENTRY-unset}" "\${OOP_TUI-unset}" "\${PATH%%:*}"\nfor a in "$@"; do printf '[%s]\\n' "$a"; done\n`,
       broken: "echo 'dyld: Library not loaded' >&2\nexit 3\n",
       "wrong-version": "echo 9.9.9\n",
     }[rust];
@@ -147,13 +143,13 @@ test(
     assert.match(result.output, /Uninstall: oop stop; rm -rf /);
     const launch = await run(path.join(setup.binDir, "oop"), ["--continue", "two words"], setup.env);
     assert.equal(launch.code, 0, launch.output);
-    assert.match(launch.output, new RegExp(`entry=${setup.installDir}/apps/server/dist/bin.mjs`.replaceAll(".", "\\.")));
+    assert.match(launch.output, new RegExp(`daemon=${setup.installDir}/apps/server/dist/bin.mjs`.replaceAll(".", "\\.")));
     assert.match(launch.output, /\[--continue\]\n\[two words\]/);
-    assert.match(launch.output, /oop\.mjs\]/);
+    assert.match(launch.output, /install=1 ts=unset tui=unset path0=.*install dir\n/);
     assert.equal(await fs.readFile(path.join(setup.installDir, ".oop-terminal-install"), "utf8"), "1.2.3\n");
     // The user's own OOP_DAEMON_ENTRY (a test server) wins over the bundled one.
     const named = await run(path.join(setup.binDir, "oop"), ["x"], { ...setup.env, OOP_DAEMON_ENTRY: "/mine/bin.mjs" });
-    assert.match(named.output, /entry=\/mine\/bin\.mjs/);
+    assert.match(named.output, /daemon=\/mine\/bin\.mjs/);
     // Nothing is left beside the install folder, and no shell profile was touched.
     const leftovers = (await fs.readdir(path.dirname(setup.installDir))).filter((name) => name.startsWith(".oop-terminal-new"));
     assert.deepEqual(leftovers, []);
@@ -258,9 +254,10 @@ test("an app that does not run, is incomplete or reports another version changes
   assert.equal((await setup.install()).code, 0);
   const before = await fs.readFile(path.join(setup.binDir, "oop"), "utf8");
   for (const [archive, message] of [
-    [{ version: "1.2.3", runs: false }, /does not run on this computer .*dyld: Library not loaded/s],
-    [{ version: "1.2.3", complete: false }, /not a complete terminal app/],
+    [{ version: "1.2.3", rust: "broken" }, /does not run on this computer .*dyld: Library not loaded/s],
+    [{ version: "1.2.3", rust: "none" }, /not a complete terminal app/],
     [{ version: "9.9.9" }, /reports "9\.9\.9", not 1\.2\.3/],
+    [{ version: "1.2.3", rust: "wrong-version" }, /reports "9\.9\.9", not 1\.2\.3/],
   ]) {
     setup.state.setBytes(await makeArchive(setup.root, archive));
     const result = await setup.install();
@@ -283,39 +280,31 @@ test("the launcher says so when the terminal app folder is gone", { timeout: 60_
   assert.match(result.output, /terminal app was not found/);
 });
 
-test("an archive with the Rust client installs it and the command runs it, with a TypeScript escape hatch", { timeout: 60_000 }, async (t) => {
-  const setup = await fixture(t, { archive: { rust: "works" } });
+test("the launcher runs the Rust client alone, whatever the old escape hatches say", { timeout: 60_000 }, async (t) => {
+  const setup = await fixture(t);
   const result = await setup.install();
   assert.equal(result.code, 0, result.output);
   assert.match(result.output, /\(Rust client\)/);
-  // A stale Electron flag from the environment (a shell started by the desktop app) must not reach
-  // the bundled plain node.
+  const text = await fs.readFile(path.join(setup.binDir, "oop"), "utf8");
+  assert.doesNotMatch(text, /OOP_TS_|OOP_TUI|oop\.mjs|exec "\\$root\/node"/);
+  // A stale OOP_TUI=ts or OOP_TS_ENTRY from the environment changes nothing: there is nothing else to run.
   const rust = await run(path.join(setup.binDir, "oop"), ["--continue", "two words"], {
     ...setup.env,
-    OOP_TS_NODE_ELECTRON: "1",
+    OOP_TUI: "ts",
   });
   assert.equal(rust.code, 0, rust.output);
-  assert.ok(rust.output.includes(`rust ts-entry=${setup.installDir}/oop.mjs `), rust.output);
-  // oop-rs runs the TypeScript subcommands with the bundled node, which is not Electron.
-  assert.ok(rust.output.includes(` node=${setup.installDir}/node electron=unset `), rust.output);
   assert.ok(rust.output.includes(`daemon=${setup.installDir}/apps/server/dist/bin.mjs `), rust.output);
   // The bundled Node.js comes first on PATH, because the Rust client starts the server with "node".
   assert.ok(rust.output.includes(`path0=${setup.installDir}\n`), rust.output);
   assert.ok(rust.output.includes("[--continue]\n[two words]\n"), rust.output);
-  const ts = await run(path.join(setup.binDir, "oop"), ["x"], { ...setup.env, OOP_TUI: "ts" });
-  assert.match(ts.output, /entry=.*bin\.mjs\n\[.*oop\.mjs\]\n\[x\]/);
-  assert.doesNotMatch(ts.output, /rust ts-entry/);
 });
 
-test("a Rust client that does not run here is left out and the command stays TypeScript", { timeout: 60_000 }, async (t) => {
-  for (const rust of ["broken", "wrong-version"]) {
+test("an archive without a working Rust client is refused, never installed as TypeScript only", { timeout: 60_000 }, async (t) => {
+  for (const rust of ["broken", "wrong-version", "none"]) {
     const setup = await fixture(t, { archive: { rust } });
     const result = await setup.install();
-    assert.equal(result.code, 0, result.output);
-    assert.match(result.output, /Rust terminal client does not run on this computer/);
-    assert.match(result.output, /\(TypeScript client\)/);
-    assert.equal(await exists(path.join(setup.installDir, "oop-rs")), false);
-    const launch = await run(path.join(setup.binDir, "oop"), ["--continue"], setup.env);
-    assert.match(launch.output, /oop\.mjs\]\n\[--continue\]/);
+    assert.notEqual(result.code, 0, result.output);
+    assert.equal(await exists(setup.installDir), false);
+    assert.equal(await exists(path.join(setup.binDir, "oop")), false);
   }
 });

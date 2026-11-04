@@ -2,15 +2,17 @@
 //! `recommendCrew` in packages/shared/src/crew.ts and of `crewRolesOf` in the TypeScript terminal's
 //! controller. A role is whatever the user pinned for it, else what the preset picks from the models
 //! this environment can run right now. The crew is shown only when it is on for the thread and the
-//! thread's own model can use the crew tools.
+//! thread's own model can lead a crew (the server says so per provider). A thread's own crew (kept with the thread by the
+//! server) wins over the default crew in the settings.
 
 use crate::flow::CrewRoleModel;
 use serde_json::Value;
 
 pub const ROLES: [&str; 3] = ["worker", "expert", "auditor"];
 
-/// Brains that receive OOP's crew tools; a copy of the server's `CREW_BRAIN_DRIVERS`.
-const BRAIN_DRIVERS: [&str; 3] = ["claudeAgent", "codex", "antigravity"];
+/// Drivers that can lead a crew; used only when the server does not say (`canLeadCrew` on the
+/// provider), and a copy of `canLeadCrew` in packages/shared/src/crew.ts.
+const BRAIN_DRIVERS: [&str; 2] = ["claudeAgent", "codex"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelOption {
@@ -198,7 +200,7 @@ fn pin<'a>(
     role: &str,
     thread: Option<&'a Value>,
 ) -> Option<(&'a str, &'a str)> {
-    // A thread's pin (null means Auto) over the defaults' pin.
+    // A thread's pin (null means Auto) over the default's pin.
     let pinned = thread
         .and_then(|t| t["pinned"].as_object())
         .and_then(|p| p.get(role))
@@ -212,6 +214,8 @@ pub struct Resolved {
     pub roles: [Option<ModelOption>; 3],
     /// The roles a model was pinned for (and still can run) rather than left to the preset.
     pub pinned: [bool; 3],
+    /// The thread has a crew of its own, rather than running the default.
+    pub own: bool,
 }
 
 /// What the preset alone would put in each role, which Auto stands for.
@@ -220,10 +224,10 @@ pub fn auto_picks(config: &Value, brain: Brain, preset: &str) -> [Option<ModelOp
     recommend(&options, brain, preset).map(|pick| pick.map(|i| options[i].clone()))
 }
 
-/// The crew a thread runs with: its override over the defaults, then pins over the preset.
-pub fn resolve(config: &Value, thread_id: Option<&str>, brain: Brain) -> Resolved {
+/// The crew a thread runs with: its own crew (`own`) over the default, then pins over the preset.
+pub fn resolve(config: &Value, own: Option<&Value>, brain: Brain) -> Resolved {
     let settings = &config["settings"]["crew"];
-    let thread = thread_id.and_then(|id| settings["threads"].get(id));
+    let thread = own.filter(|crew| crew.is_object());
     let enabled = thread
         .and_then(|t| t["enabled"].as_bool())
         .or_else(|| settings["enabled"].as_bool())
@@ -252,6 +256,7 @@ pub fn resolve(config: &Value, thread_id: Option<&str>, brain: Brain) -> Resolve
         preset: preset.to_string(),
         roles,
         pinned: pinned_roles,
+        own: thread.is_some(),
     }
 }
 
@@ -261,20 +266,25 @@ pub fn brain_cannot(config: &Value, brain: Brain) -> bool {
     let Some((instance, _)) = brain else {
         return true;
     };
-    config["providers"]
+    let provider = config["providers"]
         .as_array()
         .into_iter()
         .flatten()
-        .find(|p| p["instanceId"].as_str() == Some(instance))
+        .find(|p| p["instanceId"].as_str() == Some(instance));
+    if let Some(can_lead) = provider.and_then(|p| p["canLeadCrew"].as_bool()) {
+        return !can_lead;
+    }
+    // A provider the snapshot does not list is not blamed: the server refuses anyway.
+    provider
         .and_then(|p| p["driver"].as_str())
-        .is_none_or(|driver| !BRAIN_DRIVERS.contains(&driver))
+        .is_some_and(|driver| !BRAIN_DRIVERS.contains(&driver))
 }
 
 /// The crew's roles with their models for the thread on screen: `None` when the crew is off for it
 /// or cannot run on its model. `on_thread` is false on the lists (no thread to blame).
 pub fn roles_of(
     config: &Value,
-    thread_id: Option<&str>,
+    own: Option<&Value>,
     brain: Brain,
     on_thread: bool,
 ) -> Option<Vec<CrewRoleModel>> {
@@ -284,7 +294,7 @@ pub fn roles_of(
     if on_thread && brain_cannot(config, brain) {
         return None;
     }
-    let crew = resolve(config, thread_id, brain);
+    let crew = resolve(config, own, brain);
     crew.enabled.then(|| {
         ROLES
             .iter()
@@ -335,9 +345,9 @@ mod tests {
     #[test]
     fn the_crew_is_off_by_default_and_shows_roles_when_on() {
         let brain = Some(("claude", "claude-sonnet-5-5"));
-        assert!(roles_of(&config(json!({})), Some("t1"), brain, true).is_none());
+        assert!(roles_of(&config(json!({})), None, brain, true).is_none());
         let on = config(json!({"enabled": true, "preset": "recommended"}));
-        let roles = roles_of(&on, Some("t1"), brain, true).unwrap();
+        let roles = roles_of(&on, None, brain, true).unwrap();
         assert_eq!(
             roles.iter().map(|r| r.role).collect::<Vec<_>>(),
             ["worker", "expert", "auditor"]
@@ -351,25 +361,63 @@ mod tests {
     }
 
     #[test]
-    fn a_thread_override_and_pins_win() {
+    fn a_thread_own_crew_and_pins_win_and_another_thread_keeps_the_default() {
         let cfg = config(json!({
             "enabled": false,
             "pinned": {"worker": {"instanceId": "codex", "model": "gpt-5-mini"}},
-            "threads": {"t1": {"enabled": true, "pinned": {"expert": {"instanceId": "claude", "model": "claude-opus-5-5"}}}}
         }));
+        let own = json!({"enabled": true, "pinned": {"expert": {"instanceId": "claude", "model": "claude-opus-5-5"}}});
         let brain = Some(("claude", "claude-sonnet-5-5"));
-        assert!(roles_of(&cfg, Some("t2"), brain, true).is_none());
-        let roles = roles_of(&cfg, Some("t1"), brain, true).unwrap();
+        // a thread without a crew of its own (None, or the server's null) runs the default
+        assert!(roles_of(&cfg, None, brain, true).is_none());
+        assert!(roles_of(&cfg, Some(&Value::Null), brain, true).is_none());
+        let roles = roles_of(&cfg, Some(&own), brain, true).unwrap();
         assert_eq!(roles[0].model.as_deref(), Some("GPT-5 mini"));
         assert_eq!(roles[1].model.as_deref(), Some("Opus 5.5"));
+        assert!(resolve(&cfg, Some(&own), brain).own);
+        assert!(!resolve(&cfg, None, brain).own);
         // a null pin in the thread puts a default pin back on Auto
         let cfg = config(json!({
             "enabled": true,
             "pinned": {"worker": {"instanceId": "codex", "model": "gpt-5-mini"}},
-            "threads": {"t1": {"pinned": {"worker": null}}}
         }));
-        let roles = roles_of(&cfg, Some("t1"), brain, true).unwrap();
+        let auto = json!({"pinned": {"worker": null}});
+        let roles = roles_of(&cfg, Some(&auto), brain, true).unwrap();
         assert_eq!(roles[0].model.as_deref(), Some("Haiku 5.5"));
+    }
+
+    #[test]
+    fn the_server_capability_decides_who_can_lead_and_the_driver_list_is_the_fallback() {
+        let with = |instance: &str, driver: &str, can: Option<bool>| {
+            let mut provider = json!({"instanceId": instance, "driver": driver});
+            if let Some(can) = can {
+                provider["canLeadCrew"] = json!(can);
+            }
+            json!({"providers": [provider]})
+        };
+        // The field wins over the driver in both directions.
+        assert!(!brain_cannot(
+            &with("a", "cursor", Some(true)),
+            Some(("a", "m"))
+        ));
+        assert!(brain_cannot(
+            &with("a", "codex", Some(false)),
+            Some(("a", "m"))
+        ));
+        // Absent (an older server): Claude and Codex only, so Antigravity and Cursor cannot.
+        assert!(!brain_cannot(
+            &with("a", "claudeAgent", None),
+            Some(("a", "m"))
+        ));
+        assert!(!brain_cannot(&with("a", "codex", None), Some(("a", "m"))));
+        assert!(brain_cannot(
+            &with("a", "antigravity", None),
+            Some(("a", "m"))
+        ));
+        assert!(brain_cannot(&with("a", "cursor", None), Some(("a", "m"))));
+        // A provider the snapshot does not list is not blamed: the server refuses anyway.
+        assert!(!brain_cannot(&with("a", "cursor", None), Some(("b", "m"))));
+        assert!(!brain_cannot(&json!({"providers": []}), Some(("a", "m"))));
     }
 
     #[test]

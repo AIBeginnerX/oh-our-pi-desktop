@@ -107,3 +107,96 @@ export function crewTaskActions(task: {
       task.role !== "auditor" && task.outcome !== undefined && RETRYABLE_OUTCOMES.has(task.outcome),
   };
 }
+
+/** How many of a flow's crew tasks have no final report yet, which is what Stop all would reach. */
+export const runningCrewTaskCount = (
+  nodes: ReadonlyArray<{
+    readonly info: { readonly crew?: { readonly outcome?: string | undefined } | undefined };
+  }>,
+) =>
+  nodes.filter((node) => node.info.crew !== undefined && node.info.crew.outcome === undefined)
+    .length;
+
+/** A crew task's TODO items by how far they got; what is none of these is pending. */
+export interface CrewTodoCounts {
+  readonly total: number;
+  readonly verified: number;
+  readonly claimed: number;
+  readonly failed: number;
+  readonly blocked: number;
+}
+
+const count = (value: unknown) =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+
+/** The counts a task activity's payload carries; undefined without a positive `todoTotal`. */
+export function crewTodoCounts(
+  payload: Readonly<Record<string, unknown>>,
+): CrewTodoCounts | undefined {
+  const total = count(payload.todoTotal);
+  if (total === undefined || total === 0) return undefined;
+  return {
+    total,
+    verified: count(payload.todoVerified) ?? 0,
+    claimed: count(payload.todoClaimed) ?? 0,
+    failed: count(payload.todoFailed) ?? 0,
+    blocked: count(payload.todoBlocked) ?? 0,
+  };
+}
+
+/**
+ * Items counted as finished: verified or claimed, never more than the total. Fills the lighter
+ * part of a two-tone bar; the percent counts only `crewTodosProven`.
+ */
+export const crewTodosFinished = (todos: CrewTodoCounts) =>
+  Math.min(todos.verified + todos.claimed, todos.total);
+
+/** Items the server proved, never more than the total. A member's own claim is not proof. */
+export const crewTodosProven = (todos: CrewTodoCounts) => Math.min(todos.verified, todos.total);
+
+/** Whether the server could verify a finished task, as its `task.completed` activity says. */
+export type CrewProofVerdict = "verified" | "not-verified" | "inconclusive";
+
+/** The task-level proof a payload carries; undefined from an older server, which proves nothing. */
+export const crewProofOf = (value: unknown): CrewProofVerdict | undefined =>
+  value === "verified" || value === "not-verified" || value === "inconclusive" ? value : undefined;
+
+/** Proven items as a whole percent, rounded down, so 100 means every item is proven. */
+export const crewPercent = (done: number, total: number) =>
+  total <= 0 ? 0 : Math.floor((Math.min(done, total) * 100) / total);
+
+export interface CrewOverall {
+  /** Proven items. */
+  readonly done: number;
+  readonly total: number;
+  readonly percent: number;
+}
+
+/**
+ * How far a lead turn's crew got, by items: every task's proven items over all its items, a
+ * task without a list counting as one item that is done when it completed and its proof is
+ * "verified" or absent. An auditor never gets a proof (its verdict stands in), and an older
+ * server sends none, so counting only "verified" would hold an approved crew short of 100%.
+ * "not-verified" and "inconclusive" stay not done.
+ * Undefined when no task has a list, because then there is nothing finer than tasks to count.
+ */
+export function crewOverall(
+  tasks: ReadonlyArray<{
+    readonly todos?: CrewTodoCounts | undefined;
+    readonly outcome?: string | undefined;
+    readonly proof?: CrewProofVerdict | undefined;
+  }>,
+): CrewOverall | undefined {
+  if (!tasks.some((task) => task.todos !== undefined)) return undefined;
+  let done = 0;
+  let total = 0;
+  for (const task of tasks) {
+    done += task.todos
+      ? crewTodosProven(task.todos)
+      : task.outcome === "completed" && (task.proof === "verified" || task.proof === undefined)
+        ? 1
+        : 0;
+    total += task.todos?.total ?? 1;
+  }
+  return { done, total, percent: crewPercent(done, total) };
+}

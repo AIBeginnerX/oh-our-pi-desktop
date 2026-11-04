@@ -243,7 +243,7 @@ function translateLegacyProjectOverridePatch(
     for (const [projectId, value] of Object.entries(map)) {
       if (canonicalProjectIds.has(projectId)) continue;
       const entry: ProjectSettingsOverrides = {
-        ...(entries.get(projectId) ?? currentEntries[projectId] ?? {}),
+        ...(entries.get(projectId) ?? currentEntries[projectId]),
       };
       if (value === null || value === undefined) {
         delete entry[key];
@@ -279,7 +279,7 @@ export function applyServerSettingsPatch(
     usagePriceOverrides: usagePriceOverridesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
-    // Whole replacement: a role or thread the client cleared must not survive a merge.
+    // Whole replacement: a role the client cleared must not survive a merge.
     crew: crewPatch,
     // Whole replacement for the same reason: a cleared thread goal must not survive a merge.
     threadGoals: threadGoalsPatch,

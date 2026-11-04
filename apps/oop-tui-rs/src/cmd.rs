@@ -19,6 +19,7 @@ pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
         "history" => crate::cmd_history::history(app, argument),
         "diff" => crate::cmd_history::diff(app, argument),
         "undo" => crate::cmd_history::undo(app),
+        "replay" => crate::replay::command(app),
         _ => return false,
     }
     true
@@ -30,6 +31,7 @@ pub fn picked(app: &mut App, pick: &Pick, index: usize) {
         "theme" => crate::cmd_misc::theme_picked(app, pick, index),
         "undo" => crate::cmd_history::undo_picked(app, pick, index),
         "crew" => crate::cmd_crew::picked(app, pick, index),
+        crate::folder::ID => crate::folder::picked(app, pick, index),
         _ => {}
     }
 }

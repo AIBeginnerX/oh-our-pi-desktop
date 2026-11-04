@@ -1703,6 +1703,29 @@ describe("composerDraftStore project draft thread mapping", () => {
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.startFromOrigin).toBe(false);
   });
 
+  it("keeps a chat's own crew with its draft and hands the draft back to the default on null", () => {
+    const store = useComposerDraftStore.getState();
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    expect(store.getDraftSession(draftId)?.crew).toBeUndefined();
+
+    store.setDraftThreadContext(draftId, { crew: { enabled: true, preset: "speed" } });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.crew).toEqual({
+      enabled: true,
+      preset: "speed",
+    });
+
+    // other context changes and re-selecting the same draft keep the crew
+    store.setDraftThreadContext(draftId, { branch: "feature/crew" });
+    store.setProjectDraftThreadId(projectRef, draftId, { threadId });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.crew).toEqual({
+      enabled: true,
+      preset: "speed",
+    });
+
+    store.setDraftThreadContext(draftId, { crew: null });
+    expect(useComposerDraftStore.getState().getDraftSession(draftId)?.crew).toBeUndefined();
+  });
+
   it("preserves existing branch and worktree when setProjectDraftThreadId receives undefined", () => {
     const store = useComposerDraftStore.getState();
     store.setProjectDraftThreadId(projectRef, draftId, {

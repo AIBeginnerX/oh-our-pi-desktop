@@ -3,8 +3,7 @@
 # Windows x64 only. OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # OOP_INSTALL_DIR is the folder the terminal app is unpacked into (default %LOCALAPPDATA%\oop-terminal\app);
 # OOP_BIN_DIR is where oop.cmd goes (default %LOCALAPPDATA%\oop-terminal). PATH is never edited.
-# The command runs the Rust terminal client (oop-rs.exe) when the archive has one and the TypeScript
-# terminal (oop.mjs, with the bundled Node.js) otherwise; OOP_TUI=ts forces the latter.
+# The command runs the Rust terminal client (oop-rs.exe); an archive without a working one is refused.
 # Running it again reinstalls (replaces the unpacked folder). An "oop" that OOP did not create is
 # never overwritten. To uninstall: oop stop; Remove-Item -Recurse -Force "$env:LOCALAPPDATA\oop-terminal"
 & {
@@ -32,7 +31,8 @@
     $root = if ($env:OOP_INSTALL_DIR) { $env:OOP_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA "oop-terminal\app" }
     $target = Join-Path $binDir "oop.cmd"
     # True for a launcher this script or install-desktop.ps1 wrote, or the oop.cmd that the
-    # repository's own terminal installer writes (it runs a sibling oop.mjs with node).
+    # repository's own source installer wrote before the Rust client (it runs a sibling oop.mjs
+    # with node), which is replaced.
     function Test-OurOopCommand([string]$path) {
         $text = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
         if (-not $text) { return $false }
@@ -99,30 +99,15 @@
         & (Join-Path $env:SystemRoot "System32\tar.exe") -xf $archive -C $staging
         if ($LASTEXITCODE -ne 0) { throw "Could not unpack $asset; nothing was installed." }
         $new = Join-Path $staging "oop-terminal"
-        foreach ($required in @("node.exe", "oop.mjs", "apps\server\dist\bin.mjs")) {
+        foreach ($required in @("node.exe", "oop-rs.exe", "apps\server\dist\bin.mjs")) {
             if (-not (Test-Path -LiteralPath (Join-Path $new $required) -PathType Leaf)) { throw "$asset is not a complete terminal app; nothing was installed." }
         }
         # Run it once where it stands, so a missing system component shows up now and not at the first "oop".
         $versionFile = Join-Path $temp "version.txt"
-        $check = Start-Process -FilePath (Join-Path $new "node.exe") -ArgumentList "`"$(Join-Path $new 'oop.mjs')`"", "--version" -RedirectStandardOutput $versionFile -Wait -PassThru -NoNewWindow
+        $check = Start-Process -FilePath (Join-Path $new "oop-rs.exe") -ArgumentList "--version" -RedirectStandardOutput $versionFile -Wait -PassThru -NoNewWindow
         if ($check.ExitCode -ne 0) { throw "The downloaded terminal app does not run on this computer (exit code $($check.ExitCode)); nothing was installed." }
         $printed = (Get-Content -LiteralPath $versionFile | Select-Object -Last 1)
         if ($printed -ne $version) { throw "The downloaded terminal app reports `"$printed`", not $version; nothing was installed." }
-        # The Rust client is optional. One that does not run here or reports another version is left
-        # out, and the command falls back to the TypeScript terminal.
-        $rustExe = Join-Path $new "oop-rs.exe"
-        if (Test-Path -LiteralPath $rustExe -PathType Leaf) {
-            $rustFile = Join-Path $temp "rust-version.txt"
-            $rustPrinted = ""
-            try {
-                $rustCheck = Start-Process -FilePath $rustExe -ArgumentList "--version" -RedirectStandardOutput $rustFile -Wait -PassThru -NoNewWindow
-                if ($rustCheck.ExitCode -eq 0) { $rustPrinted = (Get-Content -LiteralPath $rustFile | Select-Object -Last 1) }
-            } catch { }
-            if ($rustPrinted -ne $version) {
-                Write-Host "Note: the Rust terminal client does not run on this computer; installing the TypeScript terminal only."
-                Remove-Item -LiteralPath $rustExe -Force
-            }
-        }
         Set-Content -LiteralPath (Join-Path $new $installMark) -Value $version -Encoding Ascii
 
         # Replace the old folder in two renames and put it back if the second one fails.
@@ -138,31 +123,22 @@
         }
 
         # The command. oop.cmd points the terminal at the server that came with it (OOP_DAEMON_ENTRY),
-        # which is how "oop" starts a background server when no desktop app is running, and at the
-        # TypeScript terminal (OOP_TS_ENTRY) for the subcommands the Rust client lacks, which it runs with
-        # the bundled Node.js (OOP_TS_NODE, never Electron). The label-and-goto
-        # form keeps %PATH% (which may contain parentheses) out of any parenthesized block.
+        # which is how "oop" starts a background server when no desktop app is running. The bundled
+        # node.exe goes first on PATH because the Rust client starts that server with "node".
         $lines = @(
             "@echo off",
             "rem $launcherMark (written by install-terminal.ps1; safe to delete)",
             "setlocal",
-            "if not exist `"$cmdRoot\node.exe`" (",
-            "  echo oop: the OOP terminal app was not found. Run the install command again. 1>&2",
-            "  exit /b 9009",
-            ")",
+            "if not exist `"$cmdRoot\node.exe`" goto missing",
+            "if not exist `"$cmdRoot\oop-rs.exe`" goto missing",
             "if not defined OOP_DAEMON_ENTRY set `"OOP_DAEMON_ENTRY=$cmdRoot\apps\server\dist\bin.mjs`"",
-            "set `"OOP_TS_ENTRY=$cmdRoot\oop.mjs`"",
-            "set `"OOP_TS_NODE=$cmdRoot\node.exe`"",
-            "set `"OOP_TS_NODE_ELECTRON=`"",
             "set `"OOP_TERMINAL_INSTALL=1`"",
-            "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
-            "if not exist `"$cmdRoot\oop-rs.exe`" goto typescript",
             "set `"PATH=$cmdRoot;%PATH%`"",
             "`"$cmdRoot\oop-rs.exe`" %*",
             "exit /b %ERRORLEVEL%",
-            ":typescript",
-            "`"$cmdRoot\node.exe`" `"$cmdRoot\oop.mjs`" %*",
-            "exit /b %ERRORLEVEL%"
+            ":missing",
+            "echo oop: the OOP terminal app was not found. Run the install command again. 1>&2",
+            "exit /b 9009"
         )
         $commandTemp = Join-Path $binDir (".oop." + [Guid]::NewGuid().ToString("N") + ".tmp")
         Set-Content -LiteralPath $commandTemp -Value $lines -Encoding Ascii

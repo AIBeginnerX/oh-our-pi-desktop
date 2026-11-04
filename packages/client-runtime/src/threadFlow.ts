@@ -9,9 +9,14 @@ import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
 import {
   crewEvidence,
+  crewOverall,
+  crewProofOf,
+  crewTodoCounts,
   crewTurnUsage,
   type CrewEvidenceTask,
+  type CrewProofVerdict,
   type CrewTaskUsage,
+  type CrewTodoCounts,
 } from "./crewBoard.ts";
 import type {
   AgentPanelModel,
@@ -280,7 +285,11 @@ type CrewStep = ToolStep & {
   outcome?: string | undefined;
   tested?: boolean;
   verdict?: string | undefined;
+  /** The server's proof verdict from task.completed; absent from an older server. */
+  proof?: CrewProofVerdict | undefined;
   usage?: CrewTaskUsage | undefined;
+  /** The latest TODO counts; absent for a task without a list. */
+  todos?: CrewTodoCounts | undefined;
 };
 
 interface ToolStep {
@@ -652,12 +661,28 @@ function collectCrewTasks(
     // Each attempt of a task runs in its own thread; the latest one is the one to open or stop.
     const threadId = text(payload.threadId, 200);
     if (threadId !== undefined) task.threadId = threadId;
+    // The last write wins, but the final report's counts stay once it has come.
+    if (
+      task.outcome === undefined &&
+      (activity.kind === "task.progress" || activity.kind === "task.completed")
+    ) {
+      task.todos = crewTodoCounts(payload) ?? task.todos;
+    }
+    // A stop was asked for; the final report follows once the member has wound down.
+    if (
+      activity.kind === "task.progress" &&
+      task.outcome === undefined &&
+      payload.status === "stopped"
+    ) {
+      task.state = "cancelled";
+    }
     if (activity.kind === "task.completed") {
       task.state = crewTaskState(payload.status);
       task.completedAt = activity.createdAt;
       task.outcome = text(payload.status, 20);
       task.tested = payload.tested === true;
       task.verdict = text(payload.verdict, 20);
+      task.proof = crewProofOf(payload.proof);
       task.usage = crewUsage(payload.usage);
     }
   }
@@ -696,6 +721,8 @@ function crewTurn(turnTasks: ReadonlyArray<CrewStep>) {
       ...optional("tokens", task.usage?.tokens),
       ...optional("costUsd", task.usage?.costUsd),
       ...optional("evidence", evidence.get(task.id)),
+      ...optional("proof", task.proof),
+      ...optional("todos", task.todos),
       crew: {
         taskId: task.id,
         role: task.role,
@@ -736,6 +763,7 @@ export function crewGraphs(
         ...optional("tokens", usage?.tokens),
         ...optional("costUsd", usage?.costUsd),
         ...(usage?.unpriced === true ? { unpriced: true } : {}),
+        ...optional("overall", crewOverall(sorted)),
       },
     };
     const nodes: WorkflowNode[] = [

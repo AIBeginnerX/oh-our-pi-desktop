@@ -50,11 +50,8 @@ import {
   LINUX_CAPTURE_EXTRA_RESOURCES,
   LINUX_FILE_EXCLUSIONS,
   TERMINAL_APP_BUNDLE_NAME,
-  TERMINAL_APP_BUNDLE_SOURCE,
-  terminalAppBundleImports,
   TERMINAL_APP_EXTRA_RESOURCES,
   TERMINAL_APP_RESOURCE_DIR,
-  TERMINAL_APP_RESOURCE_NAME,
   WINDOWS_NATIVE_ASAR_UNPACK_GLOB,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_RESOURCE,
@@ -332,15 +329,6 @@ export class ClerkPasskeyNativePackageMissingError extends Schema.TaggedError<Cl
 ) {
   override get message(): string {
     return `Clerk passkey native package is missing: ${this.packageName}`;
-  }
-}
-
-export class TerminalAppBundleIncompleteError extends Schema.TaggedError<TerminalAppBundleIncompleteError>()(
-  "TerminalAppBundleIncompleteError",
-  { imports: Schema.Array(Schema.String) },
-) {
-  override get message() {
-    return `The terminal app bundle still imports ${this.imports.join(", ")}. Install the dependencies of oop-tui and build it again.`;
   }
 }
 
@@ -821,7 +809,6 @@ const DesktopBuildInputArtifact = Schema.Literals([
   "desktop-resources",
   "server-dist",
   "bundled-server-client",
-  "terminal-app",
 ]);
 type DesktopBuildInputArtifact = typeof DesktopBuildInputArtifact.Type;
 const desktopBuildInputArtifactNames = {
@@ -829,7 +816,6 @@ const desktopBuildInputArtifactNames = {
   "desktop-resources": "desktopResources",
   "server-dist": "serverDist",
   "bundled-server-client": "bundled server client",
-  "terminal-app": "terminal app bundle",
 } satisfies Record<DesktopBuildInputArtifact, string>;
 
 /**
@@ -2664,38 +2650,29 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
 });
 
 /**
- * Copies the built terminal app (apps/oop-tui) to resources/oop/oop.mjs. The file is a single
- * bundle with its dependencies inlined, run by the app's own runtime, so nothing else ships.
- *
- * With `rust`, the Rust client goes next to it as resources/oop/oop-rs[.exe], and on macOS the
- * native terminal program as resources/oop/OOP Terminal.app. The `oop` command prefers the Rust
- * client and falls back to oop.mjs, which also serves the subcommands the Rust client lacks.
+ * Copies the Rust terminal client to resources/oop/oop-rs[.exe] (the only terminal there is) plus the oop.mjs compatibility shim, and
+ * on macOS the native terminal program as resources/oop/OOP Terminal.app.
  */
 export const stageTerminalApp = Effect.fn("stageTerminalApp")(function* (input: {
-  readonly repoRoot: string;
   readonly stageResourcesDir: string;
   readonly platform?: typeof BuildPlatform.Type;
-  readonly rust?: RustClientSources;
+  readonly rust: RustClientSources;
 }) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const sourcePath = path.join(input.repoRoot, TERMINAL_APP_BUNDLE_SOURCE);
-  const imports = terminalAppBundleImports(yield* fs.readFileString(sourcePath));
-  if (imports.length > 0) return yield* new TerminalAppBundleIncompleteError({ imports });
   const destinationDirectory = path.join(input.stageResourcesDir, TERMINAL_APP_RESOURCE_DIR);
   yield* fs.remove(destinationDirectory, { recursive: true, force: true }).pipe(Effect.ignore);
   yield* fs.makeDirectory(destinationDirectory, { recursive: true });
-  const destinationPath = path.join(destinationDirectory, TERMINAL_APP_RESOURCE_NAME);
-  yield* fs.copyFile(sourcePath, destinationPath);
-  yield* fs.chmod(destinationPath, 0o644);
-
   const platform = input.platform ?? "mac";
-  if (input.rust?.oopRs !== undefined) {
-    const rustPath = path.join(destinationDirectory, rustClientBinaryName(platform));
-    yield* fs.copyFile(input.rust.oopRs, rustPath);
-    yield* fs.chmod(rustPath, 0o755);
-  }
-  if (input.rust?.terminalApp !== undefined) {
+  const rustPath = path.join(destinationDirectory, rustClientBinaryName(platform));
+  yield* fs.copyFile(input.rust.oopRs, rustPath);
+  yield* fs.chmod(rustPath, 0o755);
+  // Hand-written launchers still run resources/oop/oop.mjs; the shim just execs oop-rs.
+  yield* fs.copyFile(
+    path.join(yield* RepoRoot, "apps/desktop/resources/oop-shim/oop.mjs"),
+    path.join(destinationDirectory, "oop.mjs"),
+  );
+  if (input.rust.terminalApp !== undefined) {
     // ditto keeps symlinks, modes and the code signature of the bundle exactly as built.
     yield* runCommand(
       ChildProcess.make("ditto", [
@@ -3904,12 +3881,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     { artifact: "desktop-resources", artifactPath: distDirs.desktopResources },
     { artifact: "server-dist", artifactPath: distDirs.serverDist },
   ];
-  if (terminalAppBundled) {
-    requiredBuildInputs.push({
-      artifact: "terminal-app",
-      artifactPath: path.join(repoRoot, TERMINAL_APP_BUNDLE_SOURCE),
-    });
-  }
   for (const input of requiredBuildInputs) {
     if (!(yield* fs.exists(input.artifactPath))) {
       return yield* new MissingDesktopBuildInputError({
@@ -4046,11 +4017,9 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       join: path.join,
     });
     yield* Effect.log(
-      rust.oopRs === undefined
-        ? "[desktop-artifact] No Rust terminal client was built; the oop command stays TypeScript."
-        : `[desktop-artifact] Bundling the Rust terminal client ${rust.oopRs}${rust.terminalApp === undefined ? "" : ` and ${rust.terminalApp}`}.`,
+      `[desktop-artifact] Bundling the Rust terminal client ${rust.oopRs}${rust.terminalApp === undefined ? "" : ` and ${rust.terminalApp}`}.`,
     );
-    yield* stageTerminalApp({ repoRoot, stageResourcesDir, platform: options.platform, rust });
+    yield* stageTerminalApp({ stageResourcesDir, platform: options.platform, rust });
   }
   if (options.platform === "linux") {
     for (const backend of ["kde", "hyprland"] as const)

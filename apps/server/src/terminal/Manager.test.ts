@@ -41,6 +41,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "./Manager.ts";
 import * as PtyAdapter from "./PtyAdapter.ts";
+import { BoundedTerminalHistory } from "./TerminalHistory.ts";
 
 class WaitForConditionError extends Data.TaggedError("WaitForConditionError")<{
   readonly message: string;
@@ -352,11 +353,7 @@ it("preserves line and byte limits across arbitrary chunks, Unicode, ANSI sequen
   for (const maxBytes of [0, 3, 8, 64, Infinity]) {
     for (const maxLines of [0, 1, 3, 5, 5_000]) {
       let expected = retainedHistory("before\ninitial\n", maxLines, maxBytes);
-      const history = new TerminalManager.BoundedTerminalHistory(
-        maxLines,
-        "before\ninitial\n",
-        maxBytes,
-      );
+      const history = new BoundedTerminalHistory(maxLines, "before\ninitial\n", maxBytes);
       expect(history.value()).toBe(expected);
 
       for (let step = 0; step < 300; step += 1) {
@@ -377,7 +374,7 @@ it("preserves line and byte limits across arbitrary chunks, Unicode, ANSI sequen
 it("bounds long partial lines and joins surrogate pairs across chunk boundaries", () => {
   const maxBytes = 65_539;
   let expected = "";
-  const history = new TerminalManager.BoundedTerminalHistory(5_000, "", maxBytes);
+  const history = new BoundedTerminalHistory(5_000, "", maxBytes);
   const writes = [
     "a".repeat(16_383) + "😀" + "b".repeat(70_000),
     "\r" + "c".repeat(70_000) + "\ud83d",
@@ -395,7 +392,7 @@ it("bounds long partial lines and joins surrogate pairs across chunk boundaries"
 it("preserves retained lines as older storage is compacted", () => {
   for (const maxLines of [3, 5_000]) {
     let expected = "";
-    const history = new TerminalManager.BoundedTerminalHistory(maxLines, expected);
+    const history = new BoundedTerminalHistory(maxLines, expected);
     for (let batch = 0; batch < 40; batch += 1) {
       const chunk = Array.from({ length: 300 }, (_, line) => `${batch}:${line}\n`).join("");
       history.append(chunk);

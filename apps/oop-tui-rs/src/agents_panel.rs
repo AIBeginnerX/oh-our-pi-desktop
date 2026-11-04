@@ -1,6 +1,6 @@
 //! The Agents panel: the lead and every agent it runs as cards, the newest turn's work as a lane of
 //! small steps, the workflows with their phases, the crew's roles, and the totals pinned under the
-//! list. A port of apps/oop-tui/src/app/agentsPanel.ts (`deriveAgentsView`, `renderAgentsPanel`) as
+//! list. Ported from the former TypeScript terminal's agents panel (`deriveAgentsView`, `renderAgentsPanel`) as
 //! a pure function from the read model to lines. Left out: the "open a thread" note (the caller
 //! owns it), the view memo and line memo (`AgentsPanel`
 //! class; a pure function has nothing to cache), and the tab-bar switch key hint.
@@ -67,8 +67,8 @@ pub fn lines(
             &ctx,
             s("No agents yet", "에이전트가 아직 없습니다"),
             s(
-                "Once this thread runs, its agents, subagents and workflows appear here with their state, what they are doing and token use.",
-                "이 스레드가 실행되면 에이전트와 서브에이전트·workflow 가 상태, 하는 일, 토큰 사용량과 함께 여기에 나타납니다.",
+                "Once the latest work runs, its agents, subagents and workflows appear here with their state, what they are doing and token use.",
+                "최신 작업이 실행되면 그 작업의 에이전트와 서브에이전트·workflow 가 상태, 하는 일, 토큰 사용량과 함께 여기에 나타납니다.",
             ),
             room,
         ));
@@ -416,6 +416,12 @@ fn facts_of(agent: &Subagent, task: Option<&CrewTask>) -> Vec<String> {
         facts.push(fill(
             s("Evidence: {text}", "근거: {text}"),
             &[("text", evidence_word(evidence).to_string())],
+        ));
+    }
+    if let Some(proof) = task.and_then(|t| t.proof) {
+        facts.push(fill(
+            s("Proof: {text}", "증명: {text}"),
+            &[("text", proof_word(proof).to_string())],
         ));
     }
     facts
@@ -1281,7 +1287,7 @@ mod tests {
         let empty = Thread::default();
         let text = render(&input(&empty, &[], 0), 60, 20);
         assert!(has(&text, "No agents yet"));
-        assert!(has(&text, "Once this thread runs"));
+        assert!(has(&text, "Once the latest work runs"));
         let mut waiting = input(&empty, &[], 0);
         waiting.loading = true;
         let text = render(&waiting, 60, 20);
@@ -1350,7 +1356,7 @@ mod tests {
         )];
         let text = render(&input(&thread, &shells, 45), 60, 20);
         let expected = [
-            " Workflow │ Agents",
+            " Workflow │ Agents │ Savvy │ Files",
             " ───────────━━━━━━─────────────────────────────────────────",
             "",
             "↑ 3 lines above",

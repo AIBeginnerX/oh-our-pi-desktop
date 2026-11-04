@@ -3,7 +3,13 @@
 
 mod agents_panel;
 mod app;
+mod chart;
 mod checkpoints;
+mod cli_config;
+mod cli_doctor;
+mod cli_stop;
+mod cli_text;
+mod cli_update;
 mod clipboard;
 mod cmd;
 mod cmd_crew;
@@ -14,13 +20,17 @@ mod cmd_misc;
 mod cmd_provider;
 mod cmd_stats;
 mod commands;
+mod composer;
 mod config_fold;
 mod crew;
 mod crew_text;
 mod diff_report;
+mod files_panel;
 #[cfg(test)]
 mod fixtures;
 mod flow;
+mod flowgraph;
+mod folder;
 mod http;
 mod i18n;
 mod input;
@@ -28,8 +38,19 @@ mod link;
 mod lists;
 mod markdown;
 mod notes;
+mod notify;
 mod panels_common;
+mod panes;
+mod paste;
 mod pet;
+mod provider_args;
+mod provider_cmd;
+mod provider_plan;
+mod provider_spec;
+mod provider_text;
+mod provider_wizard;
+mod replay;
+mod savvy_panel;
 mod screen;
 mod selection;
 mod server;
@@ -38,6 +59,7 @@ mod settings;
 mod settings_write;
 mod side;
 mod sidebar;
+mod slash;
 mod state;
 mod stats_view;
 mod tasks_pane;
@@ -49,6 +71,7 @@ mod transcript;
 mod ui;
 mod update;
 mod wire;
+mod work_scope;
 mod workflow_panel;
 
 use app::{App, LinkStatus, Msg};
@@ -57,38 +80,54 @@ use std::io::Write;
 use std::time::Duration;
 use tokio::sync::mpsc::unbounded_channel;
 
+/// The window title (OSC 0), written when it changes. The title the shell had is pushed on the
+/// terminal's title stack before the first is set and popped on the way out; a terminal without a
+/// title stack ignores both and keeps the last title. A terminal with no colour, or one that says
+/// it is `dumb`, did not ask for a title and would show it as stray text, so it gets none.
+struct WindowTitle {
+    enabled: bool,
+    last: Option<String>,
+}
+
+impl WindowTitle {
+    const PUSH: &'static str = "\x1b[22;0t";
+    const POP: &'static str = "\x1b[23;0t";
+
+    fn new(colored: bool, term: Option<&str>) -> Self {
+        WindowTitle {
+            enabled: colored && term != Some("dumb"),
+            last: None,
+        }
+    }
+
+    fn sync(&mut self, title: String, out: &mut impl Write) {
+        if !self.enabled || self.last.as_ref() == Some(&title) {
+            return;
+        }
+        if self.last.is_none() {
+            let _ = out.write_all(Self::PUSH.as_bytes());
+        }
+        let _ = out.write_all(
+            format!("\x1b]0;{}\x07", text::sanitize(&title).replace('\n', " ")).as_bytes(),
+        );
+        let _ = out.flush();
+        self.last = Some(title);
+    }
+
+    /// A terminal without a title stack ignores the pop, so the title is blanked first.
+    fn restore(&mut self, out: &mut impl Write) {
+        if self.last.take().is_some() {
+            let _ = out.write_all(format!("\x1b]0;\x07{}", Self::POP).as_bytes());
+            let _ = out.flush();
+        }
+    }
+}
+
 /// The OOP release this binary belongs to: `OOP_VERSION` or the root `OOP_RELEASE.json` at build
 /// time (see build.rs), so `--version` agrees with the TypeScript terminal and the desktop app.
 fn version() -> String {
     env!("OOP_RS_VERSION").to_string()
 }
-
-const HELP: &str = "oop-rs - the OOP terminal app
-
-Usage
-  oop-rs                         open the terminal app (connects to the OOP app on this computer,
-                                 or starts a server of its own)
-  oop-rs --continue              resume the latest thread of the project in this folder
-  oop-rs \"prompt\"                open a new thread in this folder's project and send that message
-  oop-rs status                  connect once and print the server, providers, projects, threads
-  oop-rs pair <token> --server <address>
-                                 trade a pairing token for a saved login on another computer
-  oop-rs config | doctor | stop | update | provider ...
-                                 run by the TypeScript terminal: OOP_TS_ENTRY is its file, run by
-                                 the node in OOP_TS_NODE (a path; default: node on PATH);
-                                 OOP_TS_NODE_ELECTRON=1 when that path is an Electron binary
-
-Options
-  -c, --continue                 resume the latest thread
-      --server <address>         use this server address (e.g. http://127.0.0.1:3773)
-      --home <folder>            use this OOP home folder (default: ~/.oop-desktop)
-      --mode <mode>              runtime mode for a new thread:
-                                 approval-required | auto-accept-edits | auto | full-access
-      --                         everything after is the prompt
-  -h, --help                     show this help
-  -v, --version                  show the version
-
-OOP_MOUSE=off turns the mouse off (wheel scrolling and drag-to-copy); /mouse does it while running.";
 
 const RUNTIME_MODES: [&str; 4] = [
     "approval-required",
@@ -97,7 +136,7 @@ const RUNTIME_MODES: [&str; 4] = [
     "full-access",
 ];
 /// The words that start a command of their own; any other first word begins a message.
-const HANDOFF_WORDS: [&str; 5] = ["config", "doctor", "stop", "update", "provider"];
+const COMMAND_WORDS: [&str; 6] = ["pair", "config", "doctor", "stop", "update", "provider"];
 
 enum Command {
     Help,
@@ -112,18 +151,38 @@ enum Command {
         server: Option<String>,
     },
     Pair {
-        token: String,
-        server: String,
+        target: String,
+        server: Option<String>,
+        home: Option<String>,
     },
-    /// A command the TypeScript terminal runs; `oop-rs` hands the whole command line to it.
-    Handoff(Vec<String>),
+    Config(cli_config::ConfigAction),
+    Doctor {
+        home: Option<String>,
+    },
+    Stop {
+        home: Option<String>,
+    },
+    Update {
+        server: Option<String>,
+        home: Option<String>,
+    },
+    Provider {
+        request: provider_args::ProviderRequest,
+        server: Option<String>,
+        home: Option<String>,
+    },
     Error(String),
 }
 
 fn parse_args(args: &[String]) -> Command {
+    use cli_text::{t, tf};
     let (mut home, mut server, mut mode) = (None, None, None);
     let mut continue_last = false;
     let mut positional: Vec<String> = Vec::new();
+    let mut provider_flags: Vec<provider_args::RawFlag> = Vec::new();
+    // After `--` every word is taken as it is, dashes included. `--` before any word makes the
+    // whole line a message (`oop -- stop`); after a command's name it only protects the words
+    // behind it.
     let mut literal = false;
     let mut message_first = false;
     let mut index = 0;
@@ -151,39 +210,61 @@ fn parse_args(args: &[String]) -> Command {
             index += 1;
             Some(next.clone())
         };
+        let switch = |name: &str| provider_args::RawFlag {
+            name: name.to_string(),
+            value: None,
+        };
         match name {
             "-h" | "--help" => return Command::Help,
             "-v" | "--version" => return Command::Version,
             "-c" | "--continue" => continue_last = true,
             "--server" => match value() {
                 Some(v) => server = Some(v),
-                None => return Command::Error("--server needs an address".into()),
+                None => return Command::Error(t("cli.err.serverNeedsAddress").into()),
             },
             "--home" => match value() {
                 Some(v) => home = Some(v),
-                None => return Command::Error("--home needs a folder".into()),
+                None => return Command::Error(t("cli.err.homeNeedsPath").into()),
             },
             "--mode" => match value().filter(|v| RUNTIME_MODES.contains(&v.as_str())) {
                 Some(v) => mode = Some(v),
                 None => {
-                    return Command::Error(format!("--mode takes {}", RUNTIME_MODES.join(" | ")));
+                    return Command::Error(tf(
+                        "cli.err.modeValues",
+                        &[("modes", RUNTIME_MODES.join(" | "))],
+                    ));
                 }
             },
-            // Options of `provider add|remove`, which the TypeScript terminal reads itself.
-            "-y" | "--yes" | "--dry-run" | "--id" | "--name" | "--set" | "--env" | "--secret"
-                if positional.first().is_some_and(|w| w == "provider") =>
-            {
-                if !matches!(name, "-y" | "--yes" | "--dry-run") {
-                    let _ = value();
+            "-y" | "--yes" => provider_flags.push(switch("--yes")),
+            "--dry-run" => provider_flags.push(switch("--dry-run")),
+            "--id" | "--name" | "--set" | "--env" | "--secret" => match value() {
+                Some(v) => provider_flags.push(provider_args::RawFlag {
+                    name: name.to_string(),
+                    value: Some(v),
+                }),
+                None => {
+                    return Command::Error(tf("cli.err.needsValue", &[("name", name.to_string())]));
                 }
-            }
+            },
             other if other.starts_with('-') && other.len() > 1 => {
-                return Command::Error(format!("unknown option {other}"));
+                return Command::Error(tf(
+                    "cli.err.unknownOption",
+                    &[(
+                        "name",
+                        provider_args::echo_word(arg).unwrap_or_else(|| other.to_string()),
+                    )],
+                ));
             }
             _ => positional.push(arg.clone()),
         }
     }
-    let Some(first) = positional.first().cloned() else {
+    let command = positional.first().cloned();
+    if let Some(flag) = provider_flags.first()
+        && command.as_deref() != Some("provider")
+    {
+        return Command::Error(tf("cli.err.unknownOption", &[("name", flag.name.clone())]));
+    }
+    let Some(command) = command else {
         return Command::Run {
             home,
             server,
@@ -194,178 +275,88 @@ fn parse_args(args: &[String]) -> Command {
             },
         };
     };
-    let command = !message_first;
-    if command && HANDOFF_WORDS.contains(&first.as_str()) {
-        return Command::Handoff(args.to_vec());
-    }
-    if command && first == "status" && positional.len() == 1 {
+    let rest = &positional[1..];
+    if !message_first && command == "status" && rest.is_empty() {
         return Command::Status { home, server };
     }
-    if command && first == "pair" {
-        let token = positional[1..].join("");
-        return match (token.is_empty(), server) {
-            (true, _) => Command::Error("pair needs a token".into()),
-            (false, Some(server)) => Command::Pair { token, server },
-            (false, None) => Command::Error("pair needs --server <address>".into()),
-        };
-    }
-    let prompt = positional.join(" ").trim().to_string();
-    if prompt.is_empty() {
-        return Command::Error("the prompt is empty".into());
-    }
-    // A lone word that looks like a command name is most likely a mistyped command, not a message.
-    if !message_first
-        && positional.len() == 1
-        && prompt
+    if message_first || !COMMAND_WORDS.contains(&command.as_str()) {
+        let prompt = positional.join(" ").trim().to_string();
+        if prompt.is_empty() {
+            return Command::Error(t("cli.err.emptyPrompt").into());
+        }
+        // A lone word that looks like a command name is most likely a mistyped command, not a
+        // message.
+        let wordlike = prompt
             .chars()
             .next()
             .is_some_and(|c| c.is_ascii_alphabetic())
-        && prompt
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
-        return Command::Error(format!("unknown command {prompt}; see --help"));
-    }
-    Command::Run {
-        home,
-        server,
-        launch: app::Launch {
-            continue_last,
-            mode,
-            prompt: Some(prompt),
-        },
-    }
-}
-
-/// How the TypeScript terminal is started for a handed-off command.
-#[derive(Debug, PartialEq, Eq)]
-struct HandoffPlan {
-    program: std::ffi::OsString,
-    args: Vec<std::ffi::OsString>,
-    /// Variables to set in the child, in addition to the ones it inherits.
-    envs: Vec<(&'static str, &'static str)>,
-}
-
-/// The node rule: a `.js`/`.mjs`/`.cjs` entry runs under `node_override` (the path in
-/// `OOP_TS_NODE`, when set and not empty), else under `node` from `PATH`. With `electron_as_node`
-/// (`OOP_TS_NODE_ELECTRON=1` exactly) the program is an Electron binary acting as node, so the
-/// child gets `ELECTRON_RUN_AS_NODE=1`. Any other entry (a packaged executable) is run as it is.
-fn handoff_plan(
-    entry: &std::path::Path,
-    args: &[String],
-    node_override: Option<std::ffi::OsString>,
-    electron_as_node: bool,
-) -> HandoffPlan {
-    let script = matches!(
-        entry.extension().and_then(|e| e.to_str()),
-        Some("js" | "mjs" | "cjs")
-    );
-    if !script {
-        return HandoffPlan {
-            program: entry.as_os_str().to_owned(),
-            args: args.iter().map(Into::into).collect(),
-            envs: Vec::new(),
+            && prompt
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !message_first && positional.len() == 1 && wordlike {
+            return Command::Error(tf(
+                "cli.err.unknownCommand",
+                &[(
+                    "word",
+                    provider_args::echo_word(&prompt).unwrap_or_else(|| prompt.clone()),
+                )],
+            ));
+        }
+        return Command::Run {
+            home,
+            server,
+            launch: app::Launch {
+                continue_last,
+                mode,
+                prompt: Some(prompt),
+            },
         };
     }
-    let program = node_override
-        .filter(|node| !node.is_empty())
-        .unwrap_or_else(|| "node".into());
-    let mut all: Vec<std::ffi::OsString> = vec![entry.as_os_str().to_owned()];
-    all.extend(args.iter().map(Into::into));
-    HandoffPlan {
-        program,
-        args: all,
-        envs: if electron_as_node {
-            vec![("ELECTRON_RUN_AS_NODE", "1")]
-        } else {
-            Vec::new()
-        },
-    }
-}
-
-/// Runs the TypeScript terminal for a command `oop-rs` does not carry: `OOP_TS_ENTRY` names its
-/// file (the packager sets it), and `OOP_TS_NODE` / `OOP_TS_NODE_ELECTRON` say which node runs it
-/// (see `handoff_plan`). On Unix this replaces the process, so the exit code and the terminal are
-/// the TypeScript app's.
-fn ts_command(args: &[String]) -> Result<(std::process::Command, String), String> {
-    let Some(entry) = std::env::var_os("OOP_TS_ENTRY").filter(|v| !v.is_empty()) else {
-        return Err(format!(
-            "`{}` is run by the TypeScript terminal; set OOP_TS_ENTRY to its file \
-             (and OOP_TS_NODE to the node that runs it, unless `node` is on PATH)",
-            args.first().map_or("", String::as_str)
-        ));
-    };
-    let path = std::path::PathBuf::from(&entry);
-    let plan = handoff_plan(
-        &path,
-        args,
-        std::env::var_os("OOP_TS_NODE"),
-        std::env::var("OOP_TS_NODE_ELECTRON").is_ok_and(|v| v == "1"),
-    );
-    let mut command = std::process::Command::new(&plan.program);
-    command.args(&plan.args).envs(plan.envs.iter().copied());
-    Ok((command, plan.program.to_string_lossy().into_owned()))
-}
-
-fn hand_off(args: &[String]) -> i32 {
-    let (mut command, program) = match ts_command(args) {
-        Ok(found) => found,
-        Err(message) => {
-            eprintln!("oop-rs: {message}");
-            return 2;
+    match command.as_str() {
+        "pair" => {
+            let target = rest.join("").trim().to_string();
+            if target.is_empty() {
+                return Command::Error(t("cli.err.pairNeedsTarget").into());
+            }
+            Command::Pair {
+                target,
+                server,
+                home,
+            }
         }
-    };
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let error = command.exec();
-        eprintln!("oop-rs: cannot run {program}: {error}");
-        1
-    }
-    #[cfg(not(unix))]
-    {
-        match command.status() {
-            Ok(status) => status.code().unwrap_or(1),
-            Err(error) => {
-                eprintln!("oop-rs: cannot run {program}: {error}");
-                1
+        "config" => {
+            use cli_config::ConfigAction;
+            let word = |at: usize| rest.get(at).cloned();
+            let action = match (rest.len(), word(0).as_deref()) {
+                (0, _) => Some(ConfigAction::List),
+                (1, Some("path")) => Some(ConfigAction::Path),
+                (2, Some("get")) => Some(ConfigAction::Get(rest[1].clone())),
+                (3, Some("set")) => Some(ConfigAction::Set(rest[1].clone(), rest[2].clone())),
+                _ => None,
+            };
+            match action {
+                Some(action) => Command::Config(action),
+                None => Command::Error(t("cli.err.usageConfig").into()),
+            }
+        }
+        "doctor" if rest.is_empty() => Command::Doctor { home },
+        "doctor" => Command::Error(t("cli.err.usageDoctor").into()),
+        "stop" if rest.is_empty() => Command::Stop { home },
+        "stop" => Command::Error(t("cli.err.usageStop").into()),
+        "update" if rest.is_empty() => Command::Update { server, home },
+        "update" => Command::Error(t("cli.err.usageUpdate").into()),
+        _ => {
+            match provider_args::resolve_request(rest, &provider_flags, provider_args::Origin::Cli)
+            {
+                Ok(request) => Command::Provider {
+                    request,
+                    server,
+                    home,
+                },
+                Err(message) => Command::Error(message),
             }
         }
     }
-}
-
-/// Runs a TypeScript command in the foreground while the screen is given back (`/provider`):
-/// the terminal is released, the command gets it, and Enter brings the screen back so its output
-/// can be read first. The reason when it could not be run or did not succeed.
-async fn run_ts_in_foreground(
-    guard: &mut terminal::Guard,
-    args: &[String],
-) -> (ratatui::DefaultTerminal, Option<String>) {
-    use std::sync::atomic::Ordering;
-    let command = ts_command(args);
-    // The key reader may be inside a poll: let it see the flag before the command reads the keys.
-    terminal::INPUT_PAUSED.store(true, Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(260)).await;
-    guard.suspend();
-    let outcome = tokio::task::block_in_place(|| match command {
-        Err(message) => Err(message),
-        Ok((mut command, program)) => match command.status() {
-            Ok(status) if status.success() => Ok(()),
-            Ok(status) => Err(format!("{program}: {status}")),
-            Err(error) => Err(format!("cannot run {program}: {error}")),
-        },
-    });
-    println!(
-        "\n{}",
-        panels_common::s(
-            "Press Enter to go back to OOP.",
-            "Enter 를 누르면 OOP 로 돌아갑니다."
-        )
-    );
-    let _ = std::io::stdin().read_line(&mut String::new());
-    let terminal = guard.resume();
-    terminal::INPUT_PAUSED.store(false, Ordering::SeqCst);
-    (terminal, outcome.err())
 }
 
 /// Resolves when the process is asked to end: SIGTERM or SIGHUP on Unix, a console close, logoff
@@ -404,9 +395,11 @@ async fn termination() {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // The language comes first: even a usage error is printed in it.
+    i18n::init(settings::startup_language(&settings::settings_path()).as_deref());
     let code = match parse_args(&args) {
         Command::Help => {
-            println!("{HELP}");
+            print!("{}", cli_text::t("cli.help"));
             0
         }
         Command::Version => {
@@ -414,24 +407,50 @@ async fn main() {
             0
         }
         Command::Error(message) => {
-            eprintln!("oop-rs: {message}");
+            eprint!("{message}\n\n{}", cli_text::t("cli.help"));
             2
         }
-        Command::Pair { token, server } => match server::pair_manually(&server, &token).await {
-            Ok(found) => {
-                println!("Paired with {} at {}.", found.label, found.origin);
-                0
+        Command::Pair {
+            target,
+            server,
+            home,
+        } => {
+            let (home, _) = server::server_home(home.as_deref());
+            match server::pair::pair_command(&target, server.as_deref(), &home).await {
+                Ok(label) => {
+                    println!("{}", server::pair::paired_message(&label));
+                    0
+                }
+                Err(message) => {
+                    eprintln!("{message}");
+                    1
+                }
             }
-            Err(error) => {
-                eprintln!("oop-rs: {error}");
-                1
-            }
-        },
-        Command::Handoff(args) => hand_off(&args),
+        }
+        Command::Config(action) => config(&action),
+        Command::Doctor { home } => doctor(home).await,
+        Command::Stop { home } => {
+            let (home, _) = server::server_home(home.as_deref());
+            cli_stop::run(&cli_stop::System { home: &home }).await
+        }
+        Command::Update { server, home } => {
+            let (home, _) = server::server_home(home.as_deref());
+            let ports = cli_update::System {
+                server: server.as_deref(),
+                home: &home,
+                config_dir: server::config_dir(),
+            };
+            cli_update::run(&version(), &ports).await
+        }
+        Command::Provider {
+            request,
+            server,
+            home,
+        } => provider_cmd::run_cli(request, server, home).await,
         Command::Status { home, server } => match status(home, server).await {
             Ok(()) => 0,
             Err(error) => {
-                eprintln!("oop-rs: {error}");
+                eprintln!("oop: {error}");
                 1
             }
         },
@@ -439,15 +458,65 @@ async fn main() {
             home,
             server,
             launch,
-        } => match run(home, server, launch).await {
-            Ok(()) => 0,
-            Err(error) => {
-                eprintln!("oop-rs: {error}");
-                1
+        } => {
+            use std::io::IsTerminal;
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+                eprintln!(
+                    "{}",
+                    panels_common::s(
+                        "oop only runs in an interactive terminal (standard input/output is not a terminal).",
+                        "oop 은 대화형 터미널에서만 실행됩니다. (표준 입출력이 터미널이 아닙니다.)"
+                    )
+                );
+                std::process::exit(2);
             }
-        },
+            match run(home, server, launch).await {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("oop: {error}");
+                    1
+                }
+            }
+        }
     };
     std::process::exit(code);
+}
+
+fn env_var(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// `oop config`: the settings file in the config directory, the environment as it is.
+fn config(action: &cli_config::ConfigAction) -> i32 {
+    cli_config::run(
+        action,
+        &mut cli_config::Io {
+            config_dir: server::config_dir(),
+            env: &env_var,
+            windows: cfg!(windows),
+            out: &mut |line| println!("{line}"),
+            err: &mut |line| eprintln!("{line}"),
+        },
+    )
+}
+
+/// `oop doctor`: checks only; it never starts the app, a server, or a pairing.
+async fn doctor(home: Option<String>) -> i32 {
+    use std::io::IsTerminal;
+    let (home, _) = server::server_home(home.as_deref());
+    let deps = cli_doctor::Deps {
+        config_dir: server::config_dir(),
+        env: &env_var,
+        os: cli_doctor::Os::current(),
+        is_tty: std::io::stdout().is_terminal(),
+        columns: ratatui::crossterm::terminal::size()
+            .map(|(columns, _)| usize::from(columns))
+            .ok()
+            .filter(|columns| *columns > 0)
+            .unwrap_or(cli_doctor::DEFAULT_COLUMNS),
+        standalone: Some(server::standalone_script()),
+    };
+    cli_doctor::run(&deps, &home).await
 }
 
 /// Puts a selection on the clipboard: OSC 52 straight to the terminal, then the platform's tool in
@@ -470,7 +539,23 @@ fn copy(job: app::CopyJob, tx: tokio::sync::mpsc::UnboundedSender<Msg>) {
     });
 }
 
+/// Reads the system clipboard for a paste the user asked for; the text comes back as a message.
+fn read_clipboard(tools: Vec<clipboard::Tool>, tx: tokio::sync::mpsc::UnboundedSender<Msg>) {
+    tokio::spawn(async move {
+        let result = clipboard::read_tools(&tools, clipboard::TOOL_TIMEOUT).await;
+        let _ = tx.send(Msg::Clip(result));
+    });
+}
+
+/// Reads the language setting first, as `run` does: a one-shot command's messages are translated
+/// too.
 async fn status(home: Option<String>, address: Option<String>) -> Result<(), String> {
+    i18n::init(
+        settings::read_settings(&settings::settings_path())
+            .0
+            .language
+            .as_deref(),
+    );
     let (home, isolated) = server::server_home(home.as_deref());
     let session = link::connect_once(
         &home,
@@ -540,16 +625,21 @@ async fn run(
         .into_owned();
     let user_home = server::user_home().to_string_lossy().into_owned();
     let (tx, mut rx) = unbounded_channel::<Msg>();
-    let (settings, warnings) = settings::read_settings(&settings::settings_path());
+    let (mut settings, warnings) = settings::read_settings(&settings::settings_path());
     // The language is fixed before the first string is looked up.
     i18n::init(settings.language.as_deref());
+    settings::resolve_env(
+        &mut settings,
+        &|name| std::env::var(name).ok(),
+        cfg!(windows),
+    );
     let mut app = App::new(&version(), &cwd, &user_home, tx.clone());
     app.configure(settings, warnings);
     app.theme = app.theme.for_level(app.misc.level);
     app.misc.startup_check = true;
     app.launch = Some(launch);
-    app.handoff_server = address.clone();
-    app.handoff_home = home_flag.clone();
+    app.provider_server = address.clone();
+    app.provider_home = home_flag.clone();
 
     // The guard takes raw mode, the alternate screen, mouse reporting and bracketed paste, and
     // gives all four back on drop or panic. Everything below leaves through it.
@@ -591,14 +681,21 @@ async fn run(
     let ended = termination();
     tokio::pin!(ended);
     let mut ticker = tokio::time::interval(Duration::from_millis(250));
+    let mut title = WindowTitle::new(app.misc.level > 0, std::env::var("TERM").ok().as_deref());
+    app.in_oop_terminal = std::env::var("TERM_PROGRAM").is_ok_and(|v| v == "OOP Terminal");
+    // Runs only while a chart or diagram is being revealed (under a second), never otherwise.
+    let mut reveal = tokio::time::interval(Duration::from_millis(60));
+    reveal.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut dirty = true;
     let result = loop {
+        chart::set_animations(app.settings.animations);
         if dirty {
             if let Err(error) = terminal.draw(|frame| ui::draw(frame, &app)) {
                 break Err(error.to_string());
             }
             dirty = false;
         }
+        title.sync(app.window_title(), &mut std::io::stdout());
         tokio::select! {
             Some(msg) = rx.recv() => {
                 app.handle(msg);
@@ -610,8 +707,12 @@ async fn run(
                 if let Some(job) = app.take_copy() {
                     copy(job, tx.clone());
                 }
-                if let Some(args) = app.pending_handoff.take() {
-                    let (back, failure) = run_ts_in_foreground(&mut guard, &args).await;
+                if let Some(tools) = composer::take_paste_request(&mut app) {
+                    read_clipboard(tools, tx.clone());
+                }
+                if let Some((request, server, home)) = cmd_provider::take_request(&mut app) {
+                    let (back, failure) =
+                        cmd_provider::run_in_foreground(&mut guard, request, server, home).await;
                     terminal = back;
                     let _ = terminal.clear();
                     match failure {
@@ -619,15 +720,31 @@ async fn run(
                         None => cmd_provider::after_return(&mut app),
                     }
                 }
+                if std::mem::take(&mut app.bell_pending) {
+                    let mut out = std::io::stdout();
+                    let _ = out.write_all(
+                        notify::bell_bytes(std::env::var("TERM").ok().as_deref()).as_bytes(),
+                    );
+                    let _ = out.flush();
+                }
+                if std::mem::take(&mut app.suspend_requested) {
+                    terminal = terminal::suspend_process(&mut guard).await;
+                }
                 dirty = true;
             }
             _ = ticker.tick() => dirty = app.on_tick(),
+            // The conversation's lines are cached by revision; a reveal frame is a new revision.
+            _ = reveal.tick(), if chart::animating() => {
+                app.conv.revision += 1;
+                dirty = true;
+            }
             _ = &mut ended => app.quit = true,
         }
         if app.quit {
             break Ok(());
         }
     };
+    title.restore(&mut std::io::stdout());
     match &app.link {
         LinkStatus::Failed(why) => result.and(Err(why.clone())),
         _ => result,
@@ -654,6 +771,37 @@ mod tests {
     }
 
     #[test]
+    fn the_title_is_pushed_once_set_on_change_and_popped_on_the_way_out() {
+        let text = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).unwrap();
+        let mut out = Vec::new();
+        let mut title = WindowTitle::new(true, Some("xterm-256color"));
+        title.sync("OOP — tagline".into(), &mut out);
+        assert_eq!(text(&out), "\x1b[22;0t\x1b]0;OOP — tagline\x07");
+        out.clear();
+        title.sync("OOP — tagline".into(), &mut out);
+        assert!(out.is_empty(), "the same title is not sent again");
+        title.sync("◆ OOP — tagline".into(), &mut out);
+        assert_eq!(text(&out), "\x1b]0;◆ OOP — tagline\x07");
+        out.clear();
+        title.restore(&mut out);
+        assert_eq!(text(&out), "\x1b]0;\x07\x1b[23;0t");
+        out.clear();
+        title.restore(&mut out);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_terminal_with_no_colour_or_a_dumb_one_gets_no_title() {
+        for (colored, term) in [(false, Some("xterm")), (true, Some("dumb"))] {
+            let mut out = Vec::new();
+            let mut title = WindowTitle::new(colored, term);
+            title.sync("OOP".into(), &mut out);
+            title.restore(&mut out);
+            assert!(out.is_empty());
+        }
+    }
+
+    #[test]
     fn arguments_parse() {
         assert!(matches!(
             parse_args(&args(&[])),
@@ -669,12 +817,16 @@ mod tests {
         ));
         assert!(matches!(
             parse_args(&args(&["pair", "T", "--server", "http://h:1"])),
-            Command::Pair { .. }
+            Command::Pair {
+                server: Some(_),
+                ..
+            }
         ));
         assert!(matches!(
             parse_args(&args(&["pair", "T"])),
-            Command::Error(_)
+            Command::Pair { server: None, .. }
         ));
+        assert!(matches!(parse_args(&args(&["pair"])), Command::Error(_)));
         assert!(matches!(parse_args(&args(&["--bogus"])), Command::Error(_)));
         assert!(matches!(parse_args(&args(&["-v"])), Command::Version));
     }
@@ -710,58 +862,112 @@ mod tests {
     }
 
     #[test]
-    fn the_commands_oop_rs_does_not_carry_go_to_the_typescript_terminal() {
+    fn the_shell_commands_are_read_with_their_words() {
+        use cli_config::ConfigAction as C;
+        let config = |words: &[&str]| match parse_args(&args(words)) {
+            Command::Config(action) => Some(action),
+            _ => None,
+        };
+        assert_eq!(config(&["config"]), Some(C::List));
+        assert_eq!(config(&["config", "path"]), Some(C::Path));
+        assert_eq!(
+            config(&["config", "get", "pet"]),
+            Some(C::Get("pet".into()))
+        );
+        assert_eq!(
+            config(&["config", "set", "pet", "off"]),
+            Some(C::Set("pet".into(), "off".into()))
+        );
         for words in [
-            &["doctor"][..],
-            &["config", "set", "pet", "off"],
-            &["stop"],
-            &["update"],
-            &["provider", "add", "--id", "x", "--yes"],
+            &["config", "get"][..],
+            &["config", "set", "pet"],
+            &["config", "path", "x"],
+            &["config", "nope"],
+            &["doctor", "x"],
+            &["stop", "x"],
+            &["update", "x"],
         ] {
             assert!(
-                matches!(parse_args(&args(words)), Command::Handoff(all) if all == args(words)),
+                matches!(parse_args(&args(words)), Command::Error(_)),
                 "{words:?}"
             );
         }
+        assert!(matches!(
+            parse_args(&args(&["doctor", "--home", "/h"])),
+            Command::Doctor { home: Some(_) }
+        ));
+        assert!(matches!(
+            parse_args(&args(&["stop"])),
+            Command::Stop { home: None }
+        ));
+        assert!(matches!(
+            parse_args(&args(&["update", "--server", "h:1"])),
+            Command::Update {
+                server: Some(_),
+                ..
+            }
+        ));
     }
 
     #[test]
-    fn a_script_entry_runs_under_the_node_the_rule_names() {
-        let words = args(&["doctor", "--json"]);
-        let entry = std::path::Path::new("/opt/oop/oop-tui.mjs");
-        let all = |plan: &HandoffPlan| -> Vec<String> {
-            plan.args
-                .iter()
-                .map(|a| a.to_string_lossy().into_owned())
-                .collect()
+    fn provider_words_and_flags_become_a_request_and_flags_belong_to_it_alone() {
+        use provider_args::ProviderRequest;
+        assert!(matches!(
+            parse_args(&args(&["provider"])),
+            Command::Provider {
+                request: ProviderRequest::List,
+                ..
+            }
+        ));
+        let Command::Provider {
+            request, server, ..
+        } = parse_args(&args(&[
+            "provider", "add", "codex", "--id", "x", "--yes", "--server", "h:1",
+        ]))
+        else {
+            panic!("not provider");
         };
-        // nothing set: `node` from PATH, no Electron variable
-        let plain = handoff_plan(entry, &words, None, false);
-        assert_eq!(plain.program, "node");
-        assert_eq!(all(&plain), ["/opt/oop/oop-tui.mjs", "doctor", "--json"]);
-        assert!(plain.envs.is_empty());
-        // an empty OOP_TS_NODE counts as unset
+        let ProviderRequest::Add { target, options } = request else {
+            panic!("not add");
+        };
+        assert!(target.is_some() && options.yes);
+        assert_eq!(options.id.as_deref(), Some("x"));
+        assert_eq!(server.as_deref(), Some("h:1"));
+        // a provider flag on another command is not taken
+        assert!(matches!(
+            parse_args(&args(&["stop", "--yes"])),
+            Command::Error(_)
+        ));
+        assert!(matches!(parse_args(&args(&["--yes"])), Command::Error(_)));
+        assert!(matches!(
+            parse_args(&args(&["provider", "add", "--id"])),
+            Command::Error(_)
+        ));
+    }
+
+    #[test]
+    fn a_usage_error_is_said_in_the_words_of_the_cli() {
+        let Command::Error(message) = parse_args(&args(&["staus"])) else {
+            panic!("not an error");
+        };
         assert_eq!(
-            handoff_plan(entry, &words, Some("".into()), false).program,
-            "node"
+            message,
+            "Unknown command: staus (to send a one-word message, use oop -- staus)"
         );
-        // OOP_TS_NODE names the program; without the flag no Electron variable is set
-        let bundled = handoff_plan(entry, &words, Some("/opt/oop/node".into()), false);
-        assert_eq!(bundled.program, "/opt/oop/node");
-        assert!(bundled.envs.is_empty());
-        // Electron acting as node
-        let electron = handoff_plan(entry, &words, Some("/Apps/OOP".into()), true);
-        assert_eq!(electron.program, "/Apps/OOP");
-        assert_eq!(electron.envs, [("ELECTRON_RUN_AS_NODE", "1")]);
-        // a packaged executable is run as it is, whatever the node rule says
-        let exe = handoff_plan(
-            std::path::Path::new("/opt/oop/oop-ts"),
-            &words,
-            Some("/opt/oop/node".into()),
-            true,
+        let Command::Error(message) = parse_args(&args(&["--mode", "yolo"])) else {
+            panic!("not an error");
+        };
+        assert_eq!(
+            message,
+            "--mode must be one of approval-required | auto-accept-edits | auto | full-access."
         );
-        assert_eq!(exe.program, "/opt/oop/oop-ts");
-        assert_eq!(all(&exe), ["doctor", "--json"]);
-        assert!(exe.envs.is_empty());
+        let Command::Error(message) = parse_args(&args(&["--server"])) else {
+            panic!("not an error");
+        };
+        assert_eq!(message, "--server needs an address.");
+        let Command::Error(message) = parse_args(&args(&["--bogus"])) else {
+            panic!("not an error");
+        };
+        assert_eq!(message, "Unknown option: --bogus");
     }
 }

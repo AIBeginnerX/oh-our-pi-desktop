@@ -26,6 +26,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkLessonsPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -405,10 +406,22 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
+    Effect.fn("AntigravityTextGeneration.generateWorkLessons")(function* (input) {
+      const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
+      return yield* runAntigravityJson({
+        operation: "generateWorkLessons",
+        prompt,
+        outputSchema: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkLessons,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

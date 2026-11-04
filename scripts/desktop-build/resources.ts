@@ -17,8 +17,8 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/resources/browser-secret/**/*",
   "!apps/desktop/prod-resources/browser-secret",
   "!apps/desktop/prod-resources/browser-secret/**/*",
-  // The terminal app ships once, loose, in resources/oop (oop.mjs, and the Rust client with
-  // OOP Terminal.app when a build carries them).
+  // The terminal app ships once, loose, in resources/oop (the Rust client oop-rs, with
+  // OOP Terminal.app on macOS).
   "!apps/desktop/resources/oop",
   "!apps/desktop/resources/oop/**/*",
   "!apps/desktop/prod-resources/oop",
@@ -140,54 +140,38 @@ export const DESKTOP_EXTRA_RESOURCES = [
     to: "resource-monitor",
   },
 ] as const;
-// The bundled terminal app (apps/oop-tui). The desktop runtime itself runs it
-// (ELECTRON_RUN_AS_NODE=1 <app> resources/oop/oop.mjs), so it needs no Node install. It is
-// never inside an asar: Windows keeps it loose next to the other resources, like the monitor.
-// Only OOP builds on macOS and Windows carry it; Linux AppImages keep their current behavior,
-// and the upstream T3 Code release pipelines do not build it.
-export const TERMINAL_APP_BUNDLE_SOURCE = "apps/oop-tui/dist/oop.mjs";
-/**
- * What a terminal app bundle still imports from outside itself. The bundle runs alone, so anything
- * but a Node built-in is a dependency the build could not find (the packager leaves those as
- * imports instead of failing) and the installed `oop` would crash on start.
- */
-export const terminalAppBundleImports = (bundle: string): ReadonlyArray<string> =>
-  [...bundle.matchAll(/^(?:import|export)\b[^"'\n]*(?:from\s+)?["']([^"']+)["']/gmu)]
-    .map((match) => match[1] ?? "")
-    .filter((specifier) => !specifier.startsWith("node:"));
-
 export const TERMINAL_APP_RESOURCE_DIR = "oop";
-export const TERMINAL_APP_RESOURCE_NAME = "oop.mjs";
 export const TERMINAL_APP_EXTRA_RESOURCES = [
   {
     from: `apps/desktop/prod-resources/${TERMINAL_APP_RESOURCE_DIR}`,
     to: TERMINAL_APP_RESOURCE_DIR,
   },
 ] as const;
+// Every OOP build carries the Rust terminal client (apps/oop-tui-rs, `oop-rs`) loose in
+// resources/oop, never inside an asar; the upstream T3 Code release pipelines do not build it. On
+// macOS the native terminal program (apps/oop-terminal, `OOP Terminal.app`) ships inside the same
+// folder. The client is a required input: the release script that built it names it with
+// OOP_RS_BIN (or it sits at the default `cargo build --release` path), and a build without it fails.
+// OOP_TERMINAL_APP stays optional.
 export const bundlesTerminalApp = (input: {
   readonly platform: BuildPlatform;
   readonly oopBrand: boolean;
-}): boolean => input.oopBrand && input.platform !== "linux";
+}): boolean => input.oopBrand;
 
-// The Rust terminal client (apps/oop-tui-rs) ships next to oop.mjs, and on macOS the native
-// terminal program (apps/oop-terminal, `OOP Terminal.app`) ships inside the same folder. Both are
-// optional inputs: the release script that built them names them with OOP_RS_BIN and
-// OOP_TERMINAL_APP, and a build without them keeps the TypeScript terminal alone.
 export const RUST_CLIENT_BINARY_SOURCE = "apps/oop-tui-rs/target/release/oop-rs";
 export const TERMINAL_APP_BUNDLE_NAME = "OOP Terminal.app";
 export const rustClientBinaryName = (platform: BuildPlatform): string =>
   platform === "win" ? "oop-rs.exe" : "oop-rs";
 
 export interface RustClientSources {
-  readonly oopRs: string | undefined;
+  readonly oopRs: string;
   readonly terminalApp: string | undefined;
 }
 
 /**
- * Which Rust pieces a build can stage. `oopRs` is OOP_RS_BIN, else the default `cargo build
- * --release` output of apps/oop-tui-rs; `terminalApp` is OOP_TERMINAL_APP and only counts on macOS.
- * A named path that does not exist is an error (the release script said it built it); an unnamed
- * default that is missing just means a TypeScript-only build.
+ * Which Rust pieces a build stages. `oopRs` is OOP_RS_BIN, else the default `cargo build
+ * --release` output of apps/oop-tui-rs; either must exist, or the build fails (there is no other
+ * terminal to fall back to). `terminalApp` is OOP_TERMINAL_APP and only counts on macOS.
  */
 export const resolveRustClientSources = (input: {
   readonly repoRoot: string;
@@ -203,8 +187,14 @@ export const resolveRustClientSources = (input: {
     "apps/oop-tui-rs/target/release",
     rustClientBinaryName(input.platform),
   );
-  const oopRs = explicitBinary ?? (input.exists(defaultBinary) ? defaultBinary : undefined);
+  const oopRs = explicitBinary ?? defaultBinary;
   const terminalApp = input.platform === "mac" ? named("OOP_TERMINAL_APP") : undefined;
+  if (explicitBinary === undefined && !input.exists(defaultBinary)) {
+    throw new Error(
+      `The Rust terminal client ${rustClientBinaryName(input.platform)} was not found at ${defaultBinary}. ` +
+        "Run `cargo build --release` in apps/oop-tui-rs, or name the binary with OOP_RS_BIN.",
+    );
+  }
   for (const [name, path] of [
     ["OOP_RS_BIN", explicitBinary],
     ["OOP_TERMINAL_APP", terminalApp],

@@ -1,6 +1,6 @@
 //! `/goal`: set, show, clear a thread's goal, or change how many times the thread continues by
-//! itself. A port of `runGoalCommand`, `showGoal`, `saveGoal`, `clearGoal` in the TypeScript
-//! controller and of apps/oop-tui/src/app/goal.ts. The goal lives in the server's settings
+//! itself. Ported from `runGoalCommand`, `showGoal`, `saveGoal`, `clearGoal` of the former
+//! TypeScript terminal and its goal module. The goal lives in the server's settings
 //! (`threadGoals`, keyed by thread id); the server itself starts the continuing turns, judges them
 //! and records `goal.*` activities, so this client only writes the goal and shows how it is going.
 
@@ -450,7 +450,7 @@ fn clear(app: &mut App) {
 
 // ---- the question `/goal` asks when there is no goal -------------------------------------------
 
-/// A one-question text field: Enter saves, Ctrl-J / Alt-Enter start a new line, Esc cancels.
+/// A one-question text field: Enter saves, Shift-Enter / Ctrl-J start a new line, Esc cancels.
 #[derive(Default)]
 pub struct GoalPrompt {
     input: Input,

@@ -3,8 +3,7 @@
 # OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # The app also carries the terminal app; this script adds an "oop" command for it in OOP_BIN_DIR
 # (default %LOCALAPPDATA%\oop-terminal), unless an "oop" that is not ours is already there. The
-# command runs the Rust terminal client (resources\oop\oop-rs.exe) when the app has one and the
-# TypeScript terminal otherwise; OOP_TUI=ts forces the latter.
+# command runs the app's Rust terminal client (resources\oop\oop-rs.exe).
 & {
     $ErrorActionPreference = "Stop"
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -41,7 +40,8 @@
         return $null
     }
     # True for a launcher this script or install-terminal.ps1 wrote, or the oop.cmd that the
-    # repository's own terminal installer writes (it runs a sibling oop.mjs with node).
+    # repository's own source installer wrote before the Rust client (it runs a sibling oop.mjs
+    # with node), which is replaced.
     function Test-OurOopCommand([string]$path) {
         $text = Get-Content -LiteralPath $path -Raw -ErrorAction SilentlyContinue
         if (-not $text) { return $false }
@@ -66,22 +66,21 @@
             $executable = Find-OopApp
             # Apps older than the terminal app have nothing to run.
             if (-not $executable) { return }
-            $bundle = Join-Path (Split-Path -Parent $executable) "resources\oop\oop.mjs"
+            $bundle = Join-Path (Split-Path -Parent $executable) "resources\oop\oop-rs.exe"
             if (-not (Test-Path -LiteralPath $bundle -PathType Leaf)) { return }
             $binDir = if ($env:OOP_BIN_DIR) { $env:OOP_BIN_DIR } else { Join-Path $env:LOCALAPPDATA "oop-terminal" }
             $target = Join-Path $binDir "oop.cmd"
             if ((Test-Path -LiteralPath $target) -and -not (Test-OurOopCommand $target)) {
-                Write-Host "Note: $target already exists and was not made by OOP, so it was left alone. The terminal app is $bundle."
+                Write-Host "Note: $target already exists and was not made by OOP, so it was left alone. The terminal client is $bundle."
                 return
             }
             # cmd.exe reads a batch file in whatever code page the console has, so the file holds only
             # ASCII. A path under %LOCALAPPDATA% or %ProgramFiles% is written with that variable, which
             # keeps a non-ASCII user folder out of the file; any other non-ASCII path gets no command.
             $exe = ConvertTo-CmdPath $executable
-            $mjs = ConvertTo-CmdPath $bundle
-            $rustClient = ConvertTo-CmdPath (Join-Path (Split-Path -Parent $bundle) "oop-rs.exe")
-            if (-not $exe -or -not $mjs -or -not $rustClient) {
-                Write-Host "Note: OOP is installed at a path with non-ASCII characters outside %LOCALAPPDATA% and %ProgramFiles%, so the `"oop`" command was not created. The terminal app is $bundle."
+            $rustClient = ConvertTo-CmdPath $bundle
+            if (-not $exe -or -not $rustClient) {
+                Write-Host "Note: OOP is installed at a path with non-ASCII characters outside %LOCALAPPDATA% and %ProgramFiles%, so the `"oop`" command was not created. The terminal client is $bundle."
                 return
             }
             $lines = @(
@@ -92,17 +91,8 @@
                 "  echo oop: OOP was not found. Install or update OOP Desktop. 1>&2",
                 "  exit /b 9009",
                 ")",
-                "rem oop-rs runs OOP_TS_ENTRY with OOP_TS_NODE; the app's own runtime is Electron acting as node",
-                "set `"OOP_TS_ENTRY=$mjs`"",
-                "set `"OOP_TS_NODE=$exe`"",
-                "set `"OOP_TS_NODE_ELECTRON=1`"",
-                "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
-                "if not exist `"$rustClient`" goto typescript",
-                "`"$rustClient`" %*",
-                "exit /b %ERRORLEVEL%",
-                ":typescript",
-                "set ELECTRON_RUN_AS_NODE=1",
-                "`"$exe`" `"$mjs`" %*",
+                "set OOP_IN_DESKTOP_APP=1",
+                "`\"$rustClient`\" %*",
                 "exit /b %ERRORLEVEL%"
             )
             New-Item -ItemType Directory -Force -Path $binDir | Out-Null

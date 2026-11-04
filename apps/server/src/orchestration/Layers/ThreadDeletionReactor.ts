@@ -6,9 +6,11 @@ import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
+import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import {
   ThreadDeletionReactor,
   type ThreadDeletionReactorShape,
@@ -41,6 +43,8 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const checkpointStore = yield* CheckpointStore.CheckpointStore;
+  const snapshotQuery = yield* ProjectionSnapshotQuery;
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
@@ -56,12 +60,50 @@ const make = Effect.gen(function* () {
       threadId,
     });
 
+  // Checkpoint refs live in the workspace repository, so a deleted thread would
+  // pin its snapshot commits there forever. A thread id re-created after the
+  // delete (a draft retry) owns the same ref namespace again and is left alone.
+  // A removed worktree shares its refs with the project repository, which is
+  // tried next.
+  const deleteCheckpointRefs = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
+    logCleanupCauseUnlessInterrupted({
+      effect: Effect.gen(function* () {
+        const { threads, projects } = yield* snapshotQuery.getCommandReadModel();
+        const thread = threads.find((entry) => entry.id === threadId);
+        if (thread === undefined || thread.deletedAt === null) return;
+        const workspaceRoot = projects.find(
+          (entry) => entry.id === thread.projectId,
+        )?.workspaceRoot;
+        const candidates = [thread.worktreePath, workspaceRoot].filter(
+          (cwd, index, all): cwd is string => cwd != null && all.indexOf(cwd) === index,
+        );
+        for (const cwd of candidates) {
+          const deleted = yield* checkpointStore.deleteThreadCheckpointRefs({ cwd, threadId }).pipe(
+            Effect.as(true),
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              (cause) =>
+                Effect.logDebug("thread deletion cleanup could not delete checkpoint refs", {
+                  threadId,
+                  cwd,
+                  cause: Cause.pretty(cause),
+                }).pipe(Effect.as(false)),
+            ),
+          );
+          if (deleted) return;
+        }
+      }),
+      message: "thread deletion cleanup skipped checkpoint ref deletion",
+      threadId,
+    });
+
   const processThreadDeleted = Effect.fn("processThreadDeleted")(function* (
     event: ThreadDeletedEvent,
   ) {
     const { threadId } = event.payload;
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
+    yield* deleteCheckpointRefs(threadId);
   });
 
   const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>

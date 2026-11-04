@@ -38,13 +38,13 @@ On a desktop host, open **Settings → Connections**, enable **Network access**,
 then create a pairing link using an address the other device can reach. Changing
 network access restarts the desktop app. You can turn it off in the same place.
 
-To use the desktop from a phone browser, click the phone icon next to Settings in
-the sidebar. It turns on network access if needed and shows a one-time QR code
-for this computer. Scan it with the phone camera.
+To use the desktop from a phone, click the phone icon next to Settings in the
+sidebar. It turns on network access if needed and shows a one-time QR code for
+this computer. Scan it with the phone camera. The code opens the relay mobile web
+in your phone browser, the only supported way to work from a phone, with the full
+web features. The native OOP app is no longer supported.
 
-With the OOP mobile app installed, pick **OOP app** in the same dialog and scan
-the code from the app's **Connect with QR code** screen instead. The dialog
-remembers your choice.
+Pick **Mobile web** in the dialog before scanning; it remembers the choice.
 
 To use it away from your Wi-Fi without router setup, deploy your own Cloudflare
 relay once (see `infra/oop-relay/README.md`), then enter its address under
@@ -68,9 +68,9 @@ t3 pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
-in the receiving app. Connection settings are under **Settings → Connections**
-on web and desktop and **Settings → Environments** on mobile. A loopback address
-such as `127.0.0.1` reaches only the device opening the link.
+in the receiving app. Connection settings are under **Settings → Connections**,
+including on a phone. A loopback address such as `127.0.0.1` reaches only the
+device opening the link.
 
 Pairing authorizes that device for future connections. Use a fresh one-time link
 for each new device; you do not need the original token to reconnect. Links
@@ -176,7 +176,7 @@ A session with an open connection stays listed after its access credential
 expires.
 
 To remove an environment from OOP Connect, open your account menu's **OOP Connect**
-page, or **Settings → OOP Connect** on mobile, and choose **Deregister**. This
+page and choose **Deregister**. This
 revokes its cloud access and frees its host space even when the environment is
 offline or has been wiped. Removing an environment from a device's connection
 settings only forgets it on that device; it stays registered to your account.

@@ -179,6 +179,8 @@ function makeFakeCodexAdapter(
   supportsConversationRollback?: boolean,
   options?: {
     readonly memoryAdmission?: boolean;
+    // Takes project memory but opts out of skill trials, like the real Codex adapter.
+    readonly skillTrials?: false;
     // Emit alongside the admission observation — mirrors a real adapter's
     // publish-time candidate.
     readonly submissionCandidate?: ProviderAdmissionObservation["submissionCandidate"];
@@ -220,6 +222,7 @@ function makeFakeCodexAdapter(
   const memoryAdmission: ProviderMemoryAdmissionSupport = {
     sessionGeneration: (threadId) => sessionIdentity.get(threadId)?.generation,
     nativeSessionId: (cursor) => nativeSessionIdOf(cursor),
+    skillTrials: options?.skillTrials !== false,
   };
   // Adapters that omit the support marker do not observe the publish-time
   // admission callback at all — mirroring real adapters that ignore the
@@ -6703,6 +6706,8 @@ const makeMemoryHandoffHarness = (
     // codexA resolves without `memoryAdmission` — memory-bearing handoffs
     // must fail closed while ordinary sends still publish.
     readonly omitAdapterAdmission?: boolean;
+    // codexA takes memory but opts out of skill trials.
+    readonly skillTrialsOptOut?: boolean;
     // The registry cannot answer synchronous ownership — same fail-closed
     // outcome as a stale adapter.
     readonly omitIsCurrentAdapter?: boolean;
@@ -6726,6 +6731,7 @@ const makeMemoryHandoffHarness = (
 ) => {
   const codexA = makeFakeCodexAdapter(CODEX_DRIVER, undefined, {
     memoryAdmission: options.omitAdapterAdmission !== true,
+    ...(options.skillTrialsOptOut === true ? { skillTrials: false as const } : {}),
   });
   const codexB = makeFakeCodexAdapter();
   const adapters = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>([
@@ -8413,6 +8419,34 @@ describe("ProviderServiceLive skill trial handoff fencing", () => {
       assert.equal(cursorAdapter.published.length, 1);
       const admission = codexA.sendTurn.mock.calls[0]?.[1];
       assert(admission !== undefined && typeof admission.admit === "function");
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("refuses a skill trial on an adapter that takes memory but opts out of trials", () => {
+    const { codexA, layer } = makeMemoryHandoffHarness({ skillTrialsOptOut: true });
+    return Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("skill-trial-opt-out");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const enter = vi.fn((_routed: ProviderService.ProviderSkillTrialRoute) =>
+        Effect.succeed(true),
+      );
+      const error = yield* provider
+        .sendTurn(
+          { threadId, input: "work" },
+          { skillTrialHandoff: skillHandoffFor(codexInstanceId, enter) },
+        )
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "ProviderSkillTrialHandoffRefusedError");
+      assert.equal((error as { reason?: string }).reason, "trials-unsupported");
+      // Refused before the claim and before the adapter saw the turn.
+      assert.equal(enter.mock.calls.length, 0);
+      assert.equal(codexA.sendTurn.mock.calls.length, 0);
     }).pipe(Effect.provide(layer));
   });
 

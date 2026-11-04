@@ -35,6 +35,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "./config.ts";
 import { flushCompileCache } from "./compileCache.ts";
@@ -44,6 +45,7 @@ import * as ProjectMemorySendGate from "./memory/ProjectMemorySendGate.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as OrchestrationReactor from "./orchestration/Services/OrchestrationReactor.ts";
+import { OrchestrationEventStore } from "./persistence/Services/OrchestrationEventStore.ts";
 import * as ProviderSafetyObservations from "./persistence/ProviderSafetyObservations.ts";
 import * as ProjectMemorySendLedger from "./persistence/ProjectMemorySendLedger.ts";
 import * as ProjectionTurnRepository from "./persistence/Services/ProjectionTurns.ts";
@@ -1108,6 +1110,95 @@ export const reconcileProviderSessions = Effect.gen(function* () {
   }
 });
 
+const PENDING_TURN_START_LOST_DETAIL =
+  "The server restarted before this message reached the provider. Send it again to continue.";
+
+/**
+ * A committed turn start only reaches a reactor through in-memory pub/sub, so
+ * a process exit between that commit and the session reaching `starting` loses
+ * it without a trace: the session is absent or ready, no orphan scan matches,
+ * and the pending row keeps the thread looking engaged. Fail every such start
+ * so the user sees it and can send again. Threads a live or engaged session
+ * still owns are left alone, and nothing is resent.
+ */
+export const reconcilePendingTurnStarts = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto;
+  const eventStore = yield* OrchestrationEventStore;
+  const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService;
+  const providerService = yield* ProviderService.ProviderService;
+  const query = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
+  const turnRepository = yield* ProjectionTurnRepository.ProjectionTurnRepository;
+
+  const pendingStarts = yield* turnRepository.listPendingTurnStarts();
+  if (pendingStarts.length === 0) return;
+  const liveThreadIds = new Set(
+    (yield* providerService.listSessions()).map((session) => session.threadId),
+  );
+  const { threads } = yield* query.getCommandReadModel();
+  const threadsById = new Map(threads.map((thread) => [thread.id, thread]));
+  const head = yield* orchestrationEngine.latestSequence;
+
+  for (const pending of pendingStarts) {
+    const thread = threadsById.get(pending.threadId);
+    if (thread === undefined || thread.deletedAt !== null || liveThreadIds.has(thread.id)) continue;
+    const session = thread.session;
+    if (
+      session !== null &&
+      (session.status === "starting" ||
+        session.status === "running" ||
+        session.activeTurnId !== null)
+    ) {
+      continue;
+    }
+    yield* Effect.gen(function* () {
+      const requestSequence = yield* Stream.runFold(
+        eventStore.readAggregateRange({
+          aggregateKind: "thread",
+          aggregateId: thread.id,
+          fromSequenceExclusive: 0,
+          toSequenceInclusive: head,
+        }),
+        () => 0,
+        (found, event) =>
+          event.type === "thread.turn-start-requested" &&
+          event.payload.messageId === pending.messageId
+            ? event.sequence
+            : found,
+      );
+      if (requestSequence === 0) return;
+      const failedAt = DateTime.formatIso(yield* DateTime.now);
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.start.fail",
+        commandId: CommandId.make(yield* crypto.randomUUIDv4),
+        threadId: thread.id,
+        messageId: pending.messageId,
+        requestSequence,
+        sessionSequence: null,
+        restoreStatus: "ready",
+        activityId: EventId.make(yield* crypto.randomUUIDv4),
+        summary: "Message not sent",
+        detail: PENDING_TURN_START_LOST_DETAIL,
+        createdAt: failedAt,
+        failedAt,
+      });
+    }).pipe(
+      Effect.catchCauseIf(
+        (cause) => !Cause.hasInterrupts(cause),
+        (cause) =>
+          Effect.logWarning("failed to settle lost pending turn start", {
+            threadId: thread.id,
+            cause,
+          }),
+      ),
+    );
+  }
+}).pipe(
+  Effect.catchCauseIf(
+    (cause) => !Cause.hasInterrupts(cause),
+    (cause) => Effect.logWarning("pending turn start startup reconciliation failed", { cause }),
+  ),
+);
+
 const decodeWorktreeSetupSnapshot = Schema.decodeUnknownOption(WorktreeSetupSnapshot);
 
 /**
@@ -1343,6 +1434,7 @@ export const make = (options?: StartupOptions) =>
       );
 
       yield* runStartupPhase("provider-sessions.reconcile", reconcileProviderSessions);
+      yield* runStartupPhase("pending-turn-starts.reconcile", reconcilePendingTurnStarts);
       yield* runStartupPhase("worktree-setups.reconcile", reconcileWorktreeSetups);
       // Before commands open, so a new run cannot meet a stale `running` record.
       yield* runStartupPhase("release-verifications.reconcile", releaseVerification.reconcile);

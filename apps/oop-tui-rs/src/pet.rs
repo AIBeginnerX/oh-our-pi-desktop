@@ -1,20 +1,24 @@
-//! The header's pet: Mocha, a warm coffee mug. Her coffee and steam take the colour of the provider
-//! that answers (Claude, OpenAI, a local model, or plain coffee brown); she steams when idle, brews
-//! while the model thinks, bounces while text arrives, stirs a spoon for a tool, jumps and changes
-//! colour when the model is switched, sleeps when you are away and trembles at an error.
+//! The header's pet: Mocha, a warm coffee mug. Every colour she wears is a token of the active
+//! theme (`fixtures/pet/mocha.json` says which token paints which pixel), so `/theme` recolours her
+//! at once and she reads on a light theme as well as a dark one; the model that answers does not
+//! change her colour. She steams when idle, brews while the model thinks, bounces while text
+//! arrives, stirs a spoon for a tool, jumps when the model is switched, sleeps when you are away and
+//! trembles at an error.
 //!
 //! Everything here is pure: the mood from what the app is doing, the frame a mood shows at a given
-//! time, and how a frame is drawn. The app owns the clock. The pictures, the palette and the timing
-//! are the data of `fixtures/pet/mocha.json`, which `apps/oop-tui/src/render/mochaArt.ts` is the
-//! source of (`scripts/export-fixtures.mjs` writes it), so this terminal and the TypeScript one draw
-//! the same frames; the tests compare every cell with what that file records.
+//! time, and how a frame is drawn. The app owns the clock. The pictures, the ink of each pixel kind
+//! and the timing are the data of `fixtures/pet/mocha.json`: exported once from the TypeScript
+//! terminal's renderer (since removed) and kept by hand here, with the cells that renderer drew as
+//! its golden part; the tests compare every cell with what that file records.
 //!
 //! A picture is 14 by 10 pixels, packed two to a cell: 14 cells by 5 rows. Where the terminal has a
 //! background colour (256 colours or more) a cell is one `▀` with two colours; without one (16
-//! colours, no colour, ASCII) it is one colour and the pixels give its shape. She does not walk: a
-//! mug stays on her coaster, and a bounce, a jump or a shake is drawn into the frames.
+//! colours, no colour, ASCII) it is one colour and the pixels give its shape. The colours come from
+//! the theme as the terminal's level folded it (`Theme::for_level`): 256 colours are the palette's
+//! nearest cells, 16 colours the `ansi` theme's names, no colour nothing at all. She does not walk:
+//! a mug stays on her coaster, and a bounce, a jump or a shake is drawn into the frames.
 
-use crate::theme;
+use crate::theme::Theme;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use serde::Deserialize;
@@ -55,32 +59,15 @@ impl PetState {
     }
 }
 
-/// Which colour the coffee and steam are in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tone {
-    Claude,
-    Openai,
-    Local,
-    Default,
-}
-
-impl Tone {
-    fn key(self) -> &'static str {
-        match self {
-            Tone::Claude => "claude",
-            Tone::Openai => "openai",
-            Tone::Local => "local",
-            Tone::Default => "default",
-        }
-    }
-}
-
 /// Cells of the full pet: 14 pixels wide, 10 tall, two pixels to a cell.
 pub const PET_WIDTH: usize = 14;
 #[cfg(test)]
 pub const PET_HEIGHT: usize = 5;
 /// The strip beside the header's notes: a gap before her and a free column next to the divider.
 pub const PET_TRACK_WIDTH: usize = PET_WIDTH + 2;
+/// The most cells a working pet may travel inside a wider strip than her own. The header grants as
+/// many as it has to spare (`ui.rs`); the strip she is given is the only limit she knows.
+pub const ROAM_MAX: usize = 12;
 /// Cells of the one-line pet used by the compact header, and of its strip.
 pub const PET_MINI_WIDTH: usize = 7;
 pub const PET_MINI_TRACK_WIDTH: usize = PET_MINI_WIDTH + 2;
@@ -91,53 +78,6 @@ pub const REST_AFTER_MS: i64 = 90_000;
 pub const GREETING_MS: i64 = 4_000;
 pub const SUCCESS_MS: i64 = 4_000;
 pub const SWITCH_MS: i64 = 1_000;
-
-// ---- which colour ------------------------------------------------------------------------
-
-const LOCAL_NAMES: [&str; 8] = [
-    "localai",
-    "local",
-    "ollama",
-    "lmstudio",
-    "lm-studio",
-    "llama.cpp",
-    "llama-cpp",
-    "llamacpp",
-];
-
-/// A local runtime's name standing as a word: not inside a longer run of letters.
-fn local_hint(text: &str) -> bool {
-    let text = text.to_lowercase();
-    LOCAL_NAMES.iter().any(|name| {
-        text.match_indices(name).any(|(at, _)| {
-            let before = text[..at].chars().next_back();
-            let after = text[at + name.len()..].chars().next();
-            !before.is_some_and(|c| c.is_ascii_lowercase())
-                && !after.is_some_and(|c| c.is_ascii_lowercase())
-        })
-    })
-}
-
-/// The colour for the model that answers, decided per provider adapter: Claude's is terracotta and
-/// Codex's emerald; a driver or instance named for a local runtime (Ollama, LM Studio, llama.cpp) is
-/// violet, and so is an OpenCode model served by one (`ollama/llama3`). Cursor, Grok, Antigravity and
-/// every other OpenCode model keep the default coffee brown: their models are not one vendor's.
-pub fn tone_of(driver: Option<&str>, instance_id: &str, model: &str) -> Tone {
-    let kind = driver.unwrap_or_default().to_lowercase();
-    if kind == "claudeagent" || kind == "claude" {
-        return Tone::Claude;
-    }
-    if kind == "codex" {
-        return Tone::Openai;
-    }
-    if local_hint(&kind) || (kind.is_empty() && local_hint(instance_id)) {
-        return Tone::Local;
-    }
-    if kind == "opencode" && local_hint(model.split('/').next().unwrap_or_default()) {
-        return Tone::Local;
-    }
-    Tone::Default
-}
 
 // ---- mood --------------------------------------------------------------------------------
 
@@ -158,7 +98,6 @@ pub enum Phase {
 pub struct Model {
     pub scope: String,
     pub key: String,
-    pub tone: Tone,
 }
 
 #[derive(Clone, Debug)]
@@ -182,8 +121,6 @@ pub struct Memory {
     was_working: bool,
     finished_at: Option<i64>,
     model: Option<Model>,
-    /// The colour the coffee was in before the last switch.
-    from: Tone,
     switched_at: Option<i64>,
 }
 
@@ -195,7 +132,6 @@ impl Memory {
             was_working: false,
             finished_at: None,
             model: None,
-            from: Tone::Default,
             switched_at: None,
         }
     }
@@ -214,16 +150,13 @@ impl Memory {
         }
         self.was_working = working;
         if let Some(seen) = &o.model {
-            match &self.model {
-                // The first model, or another thread's: she takes its colour without a show.
-                Some(model) if model.scope == seen.scope => {
-                    if model.key != seen.key {
-                        self.from = model.tone;
-                        self.switched_at = Some(now);
-                        self.active_at = now;
-                    }
-                }
-                _ => self.from = seen.tone,
+            // The first model, or another thread's, is no switch; the same thread's changing is.
+            if let Some(model) = &self.model
+                && model.scope == seen.scope
+                && model.key != seen.key
+            {
+                self.switched_at = Some(now);
+                self.active_at = now;
             }
             self.model = Some(seen.clone());
         }
@@ -262,19 +195,6 @@ impl Memory {
         PetState::Idle
     }
 
-    /// The colours `state` is drawn in: the coffee's own, and in a switch the one it is leaving.
-    pub fn look(&self, state: PetState) -> Look {
-        let tone = self.model.as_ref().map_or(Tone::Default, |m| m.tone);
-        Look {
-            tone,
-            from: if state == PetState::Switching {
-                self.from
-            } else {
-                tone
-            },
-        }
-    }
-
     /// Which frame `state` shows at `now`: a switch plays once from the moment of the change, every
     /// other state loops by the clock alone.
     pub fn frame(&self, state: PetState, now: i64) -> usize {
@@ -287,25 +207,13 @@ impl Memory {
     }
 }
 
-/// The colours a state is drawn in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Look {
-    pub tone: Tone,
-    /// `L` and `S` pixels use this colour and `l` and `s` use `tone`: a switch is a wave from one to
-    /// the other. Equal to `tone` in every state but a switch.
-    pub from: Tone,
-}
-
 // ---- the data ----------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Art {
-    palette: HashMap<String, String>,
-    liquid: HashMap<String, String>,
-    steam_lift: f64,
-    ansi16: HashMap<String, u8>,
-    ansi16_tone: HashMap<String, u8>,
+    /// The theme token (`brand`, `brandDim`, ...) every pixel kind is painted in.
+    inks: HashMap<String, String>,
     states: HashMap<String, StateArt>,
 }
 
@@ -360,6 +268,34 @@ fn clock(state: PetState, ms: i64) -> usize {
         }
     }
     0
+}
+
+/// How long a working pet stays on one cell while she paces her strip, or `None` where she stays
+/// put. The app wakes every 250 ms while a turn runs, so the quickest pace is one cell a tick; the
+/// slower ones are the quieter moods (a tool is a steadier walk, thinking a slow pace).
+fn pace_ms(state: PetState) -> Option<i64> {
+    match state {
+        PetState::Working => Some(250),
+        PetState::Tool => Some(330),
+        PetState::Thinking => Some(500),
+        _ => None,
+    }
+}
+
+/// How many cells right of the strip's left edge she stands at `now`, in `0..=roam`: while a turn
+/// runs she walks to one end and back, and in every other mood she stays where she is, so an idle
+/// header never moves. `roam` is what the strip has to spare, worked out from the width she is
+/// drawn in.
+pub fn offset(state: PetState, now: i64, roam: usize) -> usize {
+    let Some(pace) = pace_ms(state) else {
+        return 0;
+    };
+    if roam == 0 {
+        return 0;
+    }
+    let round = 2 * roam;
+    let at = usize::try_from(now.div_euclid(pace).rem_euclid(round as i64)).unwrap_or(0);
+    if at <= roam { at } else { round - at }
 }
 
 /// Milliseconds until the frame changes; the app wakes no sooner.
@@ -451,67 +387,62 @@ pub struct Draw {
     pub ascii: bool,
 }
 
-type Rgb = (u8, u8, u8);
-
-fn parse_hex(hex: &str) -> Rgb {
-    let packed = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
-    ((packed >> 16) as u8, (packed >> 8) as u8, packed as u8)
-}
-
-/// The steam: the coffee's colour lifted toward white, so it still shows on a dark background.
-fn lifted((r, g, b): Rgb) -> Rgb {
-    let lift = art().steam_lift;
-    let up = |v: u8| {
-        let v = f64::from(v);
-        (v + (255.0 - v) * lift).round() as u8
-    };
-    (up(r), up(g), up(b))
-}
-
-fn liquid(tone: Tone) -> Rgb {
-    parse_hex(&art().liquid[tone.key()])
-}
-
-/// The truecolor of a pixel; `None` for nothing. `L S` are the old colour of a switch, `l s` the new.
-fn pixel_rgb(ch: char, tone: Tone, from: Tone) -> Option<Rgb> {
-    match ch {
-        '.' => None,
-        'L' => Some(liquid(from)),
-        'l' => Some(liquid(tone)),
-        'S' => Some(lifted(liquid(from))),
-        's' => Some(lifted(liquid(tone))),
-        other => art()
-            .palette
-            .get(other.encode_utf8(&mut [0; 4]) as &str)
-            .map(|hex| parse_hex(hex)),
+/// The ink a theme colour is drawn in: the colour as the theme (already folded to the terminal's
+/// level) holds it, with the 16 names as their slots.
+fn ink_of(color: Color) -> Ink {
+    match color {
+        Color::Rgb(r, g, b) => Ink::Rgb(r, g, b),
+        Color::Indexed(n) => Ink::Indexed(n),
+        Color::Black => Ink::Ansi(0),
+        Color::Red => Ink::Ansi(1),
+        Color::Green => Ink::Ansi(2),
+        Color::Yellow => Ink::Ansi(3),
+        Color::Blue => Ink::Ansi(4),
+        Color::Magenta => Ink::Ansi(5),
+        Color::Cyan => Ink::Ansi(6),
+        Color::Gray => Ink::Ansi(7),
+        Color::DarkGray => Ink::Ansi(8),
+        Color::LightRed => Ink::Ansi(9),
+        Color::LightGreen => Ink::Ansi(10),
+        Color::LightYellow => Ink::Ansi(11),
+        Color::LightBlue => Ink::Ansi(12),
+        Color::LightMagenta => Ink::Ansi(13),
+        Color::LightCyan => Ink::Ansi(14),
+        Color::White => Ink::Ansi(15),
+        Color::Reset => Ink::None,
     }
 }
 
-/// The ink of a truecolor at a colour level (3 and 2 here; the 16 colours have their own table).
-fn ink_of((r, g, b): Rgb, level: u8) -> Ink {
-    match level {
-        3 => Ink::Rgb(r, g, b),
-        2 => Ink::Indexed(theme::indexed(r, g, b)),
-        _ => Ink::None,
+/// A theme token by the name the art data uses.
+fn token(theme: &Theme, name: &str) -> Color {
+    match name {
+        "brand" => theme.brand,
+        "brandDim" => theme.brand_dim,
+        "accent" => theme.accent,
+        "muted" => theme.muted,
+        "dim" => theme.dim,
+        "border" => theme.border,
+        "warning" => theme.warning,
+        "error" => theme.error,
+        "tool" => theme.tool,
+        other => panic!("fixtures/pet/mocha.json names a theme token this build lacks: {other}"),
     }
 }
 
-/// A pixel's ink in the flat renderer at 16 colours: its own table entry, the coffee's by provider.
-fn ansi16_of(ch: char, tone: Tone, from: Tone) -> Ink {
-    let art = art();
-    let index = match ch {
-        'L' | 'S' => art.ansi16_tone.get(from.key()),
-        'l' | 's' => art.ansi16_tone.get(tone.key()),
-        other => art.ansi16.get(other.encode_utf8(&mut [0; 4]) as &str),
-    };
-    index.map_or(Ink::None, |n| Ink::Ansi(*n))
+/// The ink of a pixel: the theme's token for its kind. `Ink::None` for a theme (the monochrome one)
+/// that paints nothing.
+pub fn pixel_ink(ch: char, theme: &Theme) -> Ink {
+    art()
+        .inks
+        .get(ch.encode_utf8(&mut [0; 4]) as &str)
+        .map_or(Ink::None, |name| ink_of(token(theme, name)))
 }
 
 /// Glyphs for the ASCII form, by pixel: both pixels of a cell, the upper one, the lower one.
 fn ascii_glyphs(ch: char) -> [char; 3] {
     match ch {
-        'L' | 'l' => ['=', '"', '_'],
-        'S' | 's' => [':', '\'', '.'],
+        'L' => ['=', '"', '_'],
+        'S' => [':', '\'', '.'],
         'Y' => ['*'; 3],
         'R' => ['v'; 3],
         'Z' => ['z'; 3],
@@ -531,13 +462,12 @@ fn weight(ch: char) -> u8 {
     }
 }
 
-/// The pixel rows (two to a cell row) drawn as cells. Where the terminal gives a background (256
+/// The pixel rows (two to a cell row) drawn as cells in `theme`'s colours. Where the terminal gives a background (256
 /// colours or more, Unicode symbols) two pixels of different colours are one `▀` with a foreground
 /// and a background, so every pixel keeps its colour. Without one (16 colours, no colour, ASCII) a
 /// cell has one colour and the pixels only decide its shape (`▀ ▄ █`, or `" _ #`): the eyes are
 /// left unpainted, a hole in the cup, and where two pixels differ the more important one wins.
-pub fn cells<S: AsRef<str>>(pixels: &[S], look: Look, draw: Draw) -> Vec<Vec<Cell>> {
-    let Look { tone, from } = look;
+pub fn cells<S: AsRef<str>>(pixels: &[S], theme: &Theme, draw: Draw) -> Vec<Vec<Cell>> {
     let rich = !draw.ascii && draw.level >= 2;
     let mut out = Vec::new();
     for pair in pixels.chunks_exact(2) {
@@ -547,10 +477,9 @@ pub fn cells<S: AsRef<str>>(pixels: &[S], look: Look, draw: Draw) -> Vec<Vec<Cel
             .zip(lower.chars())
             .map(|(top, bottom)| {
                 if rich {
-                    let a = pixel_rgb(top, tone, from);
-                    let b = pixel_rgb(bottom, tone, from);
-                    let ink = |rgb: Option<Rgb>| rgb.map_or(Ink::None, |c| ink_of(c, draw.level));
-                    let (fa, fb) = (ink(a), ink(b));
+                    let ink = |ch: char| (ch != '.').then(|| pixel_ink(ch, theme));
+                    let (a, b) = (ink(top), ink(bottom));
+                    let (fa, fb) = (a.unwrap_or(Ink::None), b.unwrap_or(Ink::None));
                     return match (a, b) {
                         (None, None) => Cell::EMPTY,
                         (Some(_), None) => Cell {
@@ -597,13 +526,10 @@ pub fn cells<S: AsRef<str>>(pixels: &[S], look: Look, draw: Draw) -> Vec<Vec<Cel
                         _ => '▄',
                     }
                 };
-                let fg = if draw.level == 1 {
-                    ansi16_of(shown, tone, from)
+                let fg = if draw.level == 0 {
+                    Ink::None
                 } else {
-                    match pixel_rgb(shown, tone, from) {
-                        Some(rgb) if draw.level != 0 => ink_of(rgb, draw.level),
-                        _ => Ink::None,
-                    }
+                    pixel_ink(shown, theme)
                 };
                 Cell {
                     glyph,
@@ -618,7 +544,7 @@ pub fn cells<S: AsRef<str>>(pixels: &[S], look: Look, draw: Draw) -> Vec<Vec<Cel
 }
 
 /// A row of cells as spans: runs of equal colours are one span, and a gap is left unpainted.
-fn spans_of(row: &[Cell]) -> Vec<Span<'static>> {
+pub fn spans_of(row: &[Cell]) -> Vec<Span<'static>> {
     let mut out: Vec<Span<'static>> = Vec::new();
     let mut run = String::new();
     let mut open: Option<(Ink, Ink)> = None;
@@ -653,38 +579,53 @@ fn spans_of(row: &[Cell]) -> Vec<Span<'static>> {
     out
 }
 
-fn strip(row: &[Cell], track: usize) -> Line<'static> {
-    let mut spans = vec![Span::raw(" ")];
+/// One row of the strip: `offset` cells further right than her place, never past the last free
+/// column, so a row is always exactly `track` wide (or as wide as the picture, where that is more).
+fn strip(row: &[Cell], track: usize, offset: usize) -> Line<'static> {
+    let lead = 1 + offset.min(track.saturating_sub(2 + row.len()));
+    let mut spans = vec![Span::raw(" ".repeat(lead))];
     spans.extend(spans_of(row));
-    spans.push(Span::raw(" ".repeat(track.saturating_sub(1 + row.len()))));
+    spans.push(Span::raw(
+        " ".repeat(track.saturating_sub(lead + row.len())),
+    ));
     Line::from(spans)
 }
 
-/// The pet as `PET_HEIGHT` lines of exactly `track` cells: a gap in front, the last column free.
+/// The pet as `PET_HEIGHT` lines of exactly `track` cells: a gap in front, the last column free,
+/// and `offset` more cells of gap where she has walked (cut to what the strip has to spare).
 pub fn lines(
     state: PetState,
     frame: usize,
-    look: Look,
+    theme: &Theme,
     track: usize,
+    offset: usize,
     draw: Draw,
 ) -> Vec<Line<'static>> {
-    cells(pixels(state, frame), look, draw)
+    cells(pixels(state, frame), theme, draw)
         .iter()
-        .map(|row| strip(row, track))
+        .map(|row| strip(row, track, offset))
         .collect()
 }
 
-/// The one-line pet, `PET_MINI_WIDTH` cells in a strip of `track`: a cup with her eyes and the
-/// state's mark.
-pub fn mini(state: PetState, frame: usize, look: Look, track: usize, draw: Draw) -> Line<'static> {
-    let rows = cells(mini_pixels(state, frame), look, draw);
-    strip(rows.first().map_or(&[][..], Vec::as_slice), track)
+/// The one-line pet, `PET_MINI_WIDTH` cells in a strip of `track`, `offset` cells further right
+/// than her place (cut to what the strip has to spare): a cup with her eyes and the state's mark.
+pub fn mini(
+    state: PetState,
+    frame: usize,
+    theme: &Theme,
+    track: usize,
+    offset: usize,
+    draw: Draw,
+) -> Line<'static> {
+    let rows = cells(mini_pixels(state, frame), theme, draw);
+    strip(rows.first().map_or(&[][..], Vec::as_slice), track, offset)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::text::width;
+    use crate::theme;
     use serde_json::Value;
 
     const ALL_STATES: [PetState; 10] = [
@@ -700,8 +641,21 @@ mod tests {
         PetState::Switching,
     ];
 
+    /// Every built-in theme but `ansi`, whose colours are the terminal's own names.
+    const RGB_THEMES: [&str; 5] = ["oop", "oop-light", "aurora", "sunset", "colorblind"];
+
+    const RICH: Draw = Draw {
+        level: 3,
+        ascii: false,
+    };
+
     fn fixture() -> Value {
         serde_json::from_str(include_str!("../fixtures/pet/mocha.json")).unwrap()
+    }
+
+    /// A built-in theme as a terminal of `level` shows it.
+    fn theme_at(name: &str, level: u8) -> Theme {
+        theme::builtin(name).unwrap().for_level(level)
     }
 
     fn plain(line: &Line) -> String {
@@ -718,12 +672,42 @@ mod tests {
         }
     }
 
-    fn model(scope: &str, key: &str, tone: Tone) -> Option<Model> {
+    fn model(scope: &str, key: &str) -> Option<Model> {
         Some(Model {
             scope: scope.into(),
             key: key.into(),
-            tone,
         })
+    }
+
+    fn rgb(ink: Ink) -> (u8, u8, u8) {
+        match ink {
+            Ink::Rgb(r, g, b) => (r, g, b),
+            other => panic!("not a truecolor ink: {other:?}"),
+        }
+    }
+
+    /// WCAG relative luminance and contrast ratio of two truecolors.
+    fn contrast(a: (u8, u8, u8), b: (u8, u8, u8)) -> f64 {
+        let channel = |v: u8| {
+            let v = f64::from(v) / 255.0;
+            if v <= 0.03928 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let lum = |(r, g, b): (u8, u8, u8)| {
+            0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+        };
+        let (hi, lo) = (lum(a).max(lum(b)), lum(a).min(lum(b)));
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    fn ground(theme: &Theme) -> (u8, u8, u8) {
+        match theme.user_bg {
+            Color::Rgb(r, g, b) => (r, g, b),
+            other => panic!("a truecolor theme has a truecolor ground: {other:?}"),
+        }
     }
 
     #[test]
@@ -741,6 +725,24 @@ mod tests {
             }
             for (frame, _) in script(state) {
                 assert!(*frame < n);
+            }
+        }
+    }
+
+    #[test]
+    fn every_pixel_kind_in_the_art_has_a_theme_token_to_be_painted_in() {
+        let lavender = theme::LAVENDER;
+        for state in ALL_STATES {
+            for i in 0..frame_count(state) {
+                for ch in pixels(state, i)
+                    .iter()
+                    .chain(mini_pixels(state, i))
+                    .flat_map(|r| r.chars())
+                {
+                    if ch != '.' {
+                        assert_ne!(pixel_ink(ch, &lavender), Ink::None, "{state:?}#{i}: {ch}");
+                    }
+                }
             }
         }
     }
@@ -780,36 +782,10 @@ mod tests {
 
     #[test]
     fn drawing_matches_the_fixture_cell_for_cell() {
-        let fixture = fixture();
-        let golden = &fixture["golden"];
-        let look = Look {
-            tone: Tone::Openai,
-            from: Tone::Claude,
-        };
-        let modes = [
-            (
-                "rich",
-                Draw {
-                    level: 3,
-                    ascii: false,
-                },
-            ),
-            (
-                "flat",
-                Draw {
-                    level: 0,
-                    ascii: false,
-                },
-            ),
-            (
-                "ascii",
-                Draw {
-                    level: 0,
-                    ascii: true,
-                },
-            ),
-        ];
-        for (mode, draw) in modes {
+        let golden = &fixture()["golden"];
+        for (mode, level, ascii) in [("rich", 3, false), ("flat", 0, false), ("ascii", 0, true)] {
+            let theme = theme_at("oop", level);
+            let draw = Draw { level, ascii };
             for state in ALL_STATES {
                 for (key, mini) in [(mode.to_string(), false), (format!("mini-{mode}"), true)] {
                     let want = golden["glyphs"][&key][state.key()].as_array().unwrap();
@@ -820,7 +796,7 @@ mod tests {
                         } else {
                             pixels(state, i)
                         };
-                        let got: Vec<String> = cells(rows, look, draw)
+                        let got: Vec<String> = cells(rows, &theme, draw)
                             .iter()
                             .map(|r| r.iter().map(|c| c.glyph).collect())
                             .collect();
@@ -835,41 +811,22 @@ mod tests {
                 }
             }
         }
-        let levels = [
-            (
-                "3",
-                Draw {
-                    level: 3,
-                    ascii: false,
-                },
-            ),
-            (
-                "1",
-                Draw {
-                    level: 1,
-                    ascii: false,
-                },
-            ),
-            (
-                "0",
-                Draw {
-                    level: 0,
-                    ascii: false,
-                },
-            ),
-            (
-                "ascii1",
-                Draw {
-                    level: 1,
-                    ascii: true,
-                },
-            ),
-        ];
-        for (name, draw) in levels {
+        let cases = golden["cells"].as_object().unwrap();
+        assert!(cases.len() >= 5);
+        for (name, states) in cases {
+            // `theme@level` or `theme@level:ascii`
+            let (theme_name, rest) = name.split_once('@').unwrap();
+            let (level, ascii) = match rest.split_once(':') {
+                Some((level, _)) => (level, true),
+                None => (rest, false),
+            };
+            let level: u8 = level.parse().unwrap();
+            let theme = theme_at(theme_name, level);
+            let draw = Draw { level, ascii };
             for state in ALL_STATES {
-                let want = &golden["cells"][name][state.key()];
+                let want = &states[state.key()];
                 for (which, rows) in [("full", pixels(state, 0)), ("mini", mini_pixels(state, 0))] {
-                    let got: Vec<String> = cells(rows, look, draw)
+                    let got: Vec<String> = cells(rows, &theme, draw)
                         .iter()
                         .map(|r| r.iter().map(Cell::encode).collect::<Vec<_>>().join(","))
                         .collect();
@@ -879,98 +836,126 @@ mod tests {
                         .iter()
                         .map(|v| v.as_str().unwrap())
                         .collect();
-                    assert_eq!(got, want, "level {name} {state:?} {which}");
+                    assert_eq!(got, want, "{name} {state:?} {which}");
                 }
             }
         }
     }
 
     #[test]
-    fn the_provider_decides_the_colour_the_same_way_as_the_typescript_terminal() {
-        let fixture = fixture();
-        let cases = fixture["toneCases"].as_array().unwrap();
-        assert!(cases.len() > 10);
-        for case in cases {
-            let driver = case[0].as_str();
-            let want = match case[3].as_str().unwrap() {
-                "claude" => Tone::Claude,
-                "openai" => Tone::Openai,
-                "local" => Tone::Local,
-                _ => Tone::Default,
-            };
-            assert_eq!(
-                tone_of(driver, case[1].as_str().unwrap(), case[2].as_str().unwrap()),
-                want,
-                "{case}"
-            );
+    fn every_builtin_theme_inks_each_pixel_kind_the_same_as_the_typescript_terminal() {
+        let inks = fixture()["golden"]["inks"].clone();
+        for name in theme::BUILTIN_NAMES {
+            let theme = theme_at(name, 3);
+            let want = inks[name].as_object().expect(name);
+            assert!(want.len() >= 12);
+            for (kind, ink) in want {
+                let ch = kind.chars().next().unwrap();
+                // `ansi` at truecolor holds named colours; both clients write them as `a<n>`.
+                assert_eq!(
+                    pixel_ink(ch, &theme).encode(),
+                    ink.as_str().unwrap(),
+                    "{name} {kind}"
+                );
+            }
         }
     }
 
     #[test]
-    fn the_palette_is_exact_in_truecolor_and_nearest_in_256() {
-        let look = Look {
-            tone: Tone::Claude,
-            from: Tone::Claude,
-        };
+    fn each_theme_gives_the_pet_its_own_body_eye_and_coffee_inks() {
+        let mut bodies = Vec::new();
+        for name in theme::BUILTIN_NAMES {
+            let theme = theme_at(name, 3);
+            let [body, eye, coffee] = ['B', 'E', 'L'].map(|ch| pixel_ink(ch, &theme));
+            assert!(
+                body != eye && body != coffee && eye != coffee,
+                "{name}: body {body:?}, eye {eye:?}, coffee {coffee:?}"
+            );
+            bodies.push((name, body, coffee));
+        }
+        // Changing the theme recolours her: no two themes share both the body and the coffee.
+        for (i, a) in bodies.iter().enumerate() {
+            for b in &bodies[i + 1..] {
+                assert!((a.1, a.2) != (b.1, b.2), "{} and {} look alike", a.0, b.0);
+            }
+        }
+        // And the drawn picture follows: the same frame in two themes has different colours.
+        let dark = cells(pixels(PetState::Idle, 0), &theme_at("oop", 3), RICH);
+        let other = cells(pixels(PetState::Idle, 0), &theme_at("sunset", 3), RICH);
+        assert_ne!(dark, other);
+        assert_eq!(
+            dark.iter().flatten().map(|c| c.glyph).collect::<String>(),
+            other.iter().flatten().map(|c| c.glyph).collect::<String>(),
+            "only the colours change, never the shape"
+        );
+    }
+
+    #[test]
+    fn she_is_legible_on_a_light_theme_and_on_dark_ones() {
+        // Against the theme's own ground (`user_bg`, the tint its text boxes sit on): the cup and
+        // the coffee stand out of it and the eyes stand out of the cup.
+        for name in RGB_THEMES {
+            let theme = theme_at(name, 3);
+            let ground = ground(&theme);
+            let [body, eye, coffee, steam, coaster] =
+                ['B', 'E', 'L', 'S', 'K'].map(|ch| rgb(pixel_ink(ch, &theme)));
+            assert!(contrast(body, ground) >= 3.0, "{name}: cup on its ground");
+            assert!(
+                contrast(coffee, ground) >= 3.0,
+                "{name}: coffee on its ground"
+            );
+            assert!(
+                contrast(steam, ground) >= 3.0,
+                "{name}: steam on its ground"
+            );
+            assert!(
+                contrast(coaster, ground) >= 3.0,
+                "{name}: coaster on its ground"
+            );
+            assert!(contrast(eye, body) >= 3.0, "{name}: eyes on the cup");
+        }
+        // The light theme really is light, so the test above covered one.
+        assert!(contrast(ground(&theme_at("oop-light", 3)), (255, 255, 255)) < 1.2);
+    }
+
+    #[test]
+    fn the_colour_level_folds_the_pet_the_way_it_folds_the_theme() {
         let rows = pixels(PetState::Idle, 0);
-        // the coffee is the provider's hex; a cup row over the coaster is cream on brown
-        let truecolor = cells(
-            rows,
-            look,
-            Draw {
-                level: 3,
+        let all_inks = |level: u8, name: &str| -> Vec<Ink> {
+            let draw = Draw {
+                level,
                 ascii: false,
-            },
-        );
-        assert!(
-            truecolor[1]
-                .iter()
-                .any(|c| c.fg == Ink::Rgb(0xD9, 0x77, 0x57) || c.bg == Ink::Rgb(0xD9, 0x77, 0x57))
-        );
-        assert!(
-            truecolor[4]
-                .iter()
-                .any(|c| c.fg == Ink::Rgb(0xD8, 0xCF, 0xC2) && c.bg == Ink::Rgb(0x8C, 0x5A, 0x3C))
-        );
-        let nearest = cells(
-            rows,
-            look,
-            Draw {
-                level: 2,
-                ascii: false,
-            },
-        );
-        assert!(
-            nearest
+            };
+            cells(rows, &theme_at(name, level), draw)
                 .iter()
                 .flatten()
-                .all(|c| !matches!(c.fg, Ink::Rgb(..)))
+                .flat_map(|c| [c.fg, c.bg])
+                .filter(|i| *i != Ink::None)
+                .collect()
+        };
+        // 256 colours: the nearest palette cell of each token, as the theme folds it.
+        let folded = all_inks(2, "oop-light");
+        assert!(!folded.is_empty() && folded.iter().all(|i| matches!(i, Ink::Indexed(_))));
+        let theme = theme_at("oop-light", 2);
+        assert_eq!(
+            pixel_ink('B', &theme),
+            Ink::Indexed(theme::indexed(0x72, 0x53, 0xb9))
         );
-        assert!(
-            nearest[4]
-                .iter()
-                .any(|c| c.bg == Ink::Indexed(theme::indexed(0x8C, 0x5A, 0x3C)))
-        );
-        // each provider has its own coffee
-        for (tone, hex) in [
-            (Tone::Claude, (0xD9, 0x77, 0x57)),
-            (Tone::Openai, (0x10, 0xA3, 0x7F)),
-            (Tone::Local, (0x7C, 0x3A, 0xED)),
-            (Tone::Default, (0x6F, 0x4E, 0x37)),
-        ] {
-            assert_eq!(liquid(tone), hex);
-        }
+        // 16 colours: the `ansi` theme's names, so it looks the same everywhere.
+        let sixteen = all_inks(1, "oop-light");
+        assert!(!sixteen.is_empty() && sixteen.iter().all(|i| matches!(i, Ink::Ansi(_))));
+        assert_eq!(pixel_ink('B', &theme_at("aurora", 1)), Ink::Ansi(13));
+        assert_eq!(pixel_ink('L', &theme_at("aurora", 1)), Ink::Ansi(6));
+        // No colour: nothing is inked, only the shapes are left.
+        assert!(all_inks(0, "oop").is_empty());
     }
 
     #[test]
     fn without_a_background_the_cup_is_one_colour_a_cell_and_the_eyes_are_holes() {
-        let look = Look {
-            tone: Tone::Local,
-            from: Tone::Local,
-        };
+        let theme = theme_at("oop", 1);
         let flat = cells(
             pixels(PetState::Idle, 0),
-            look,
+            &theme,
             Draw {
                 level: 1,
                 ascii: false,
@@ -981,40 +966,38 @@ mod tests {
         assert!(flat.iter().flatten().all(|c| c.bg == Ink::None));
         let mono = cells(
             pixels(PetState::Idle, 0),
-            look,
+            &theme_at("oop", 0),
             Draw {
                 level: 0,
                 ascii: false,
             },
         );
         assert!(mono.iter().flatten().all(|c| c.fg == Ink::None));
-        // the coffee is violet in 16 colours
-        assert!(flat.iter().flatten().any(|c| c.fg == Ink::Ansi(5)));
+        // the coffee is the theme's accent: cyan in the 16-colour theme
+        assert!(flat.iter().flatten().any(|c| c.fg == Ink::Ansi(6)));
     }
 
     #[test]
     fn ascii_frames_use_only_ascii_and_read_as_a_mug() {
-        let look = Look {
-            tone: Tone::Default,
-            from: Tone::Default,
-        };
+        let theme = theme_at("oop", 3);
         for state in ALL_STATES {
             for i in 0..frame_count(state) {
                 let draw = Draw {
                     level: 3,
                     ascii: true,
                 };
-                for line in lines(state, i, look, PET_TRACK_WIDTH, draw) {
+                for line in lines(state, i, &theme, PET_TRACK_WIDTH, 0, draw) {
                     assert!(plain(&line).is_ascii(), "{state:?}#{i}: {}", plain(&line));
                 }
-                assert!(plain(&mini(state, i, look, PET_MINI_TRACK_WIDTH, draw)).is_ascii());
+                assert!(plain(&mini(state, i, &theme, PET_MINI_TRACK_WIDTH, 0, draw)).is_ascii());
             }
         }
         let idle: Vec<String> = lines(
             PetState::Idle,
             0,
-            look,
+            &theme_at("oop", 0),
             PET_TRACK_WIDTH,
+            0,
             Draw {
                 level: 0,
                 ascii: true,
@@ -1028,32 +1011,17 @@ mod tests {
 
     #[test]
     fn drawn_rows_fill_the_strip_exactly() {
-        let look = Look {
-            tone: Tone::Claude,
-            from: Tone::Claude,
-        };
         for state in ALL_STATES {
-            for draw in [
-                Draw {
-                    level: 3,
-                    ascii: false,
-                },
-                Draw {
-                    level: 1,
-                    ascii: false,
-                },
-                Draw {
-                    level: 0,
-                    ascii: true,
-                },
-            ] {
-                let rows = lines(state, 0, look, PET_TRACK_WIDTH, draw);
+            for (level, ascii) in [(3, false), (1, false), (0, true)] {
+                let theme = theme_at("oop-light", level);
+                let draw = Draw { level, ascii };
+                let rows = lines(state, 0, &theme, PET_TRACK_WIDTH, 0, draw);
                 assert_eq!(rows.len(), PET_HEIGHT);
                 for line in &rows {
                     assert_eq!(width(&plain(line)), PET_TRACK_WIDTH, "{state:?}");
                     assert!(plain(line).starts_with(' ') && plain(line).ends_with(' '));
                 }
-                let one = mini(state, 0, look, PET_MINI_TRACK_WIDTH, draw);
+                let one = mini(state, 0, &theme, PET_MINI_TRACK_WIDTH, 0, draw);
                 assert_eq!(width(&plain(&one)), PET_MINI_TRACK_WIDTH);
             }
         }
@@ -1108,26 +1076,23 @@ mod tests {
     }
 
     #[test]
-    fn a_model_switch_in_place_jumps_and_changes_colour_but_a_new_thread_does_not() {
+    fn a_model_switch_in_place_makes_her_jump_but_a_new_thread_does_not() {
         let mut memory = Memory::new(0);
         let on = |m| Observation {
             model: m,
             ..quiet()
         };
         let t0 = GREETING_MS + 1;
-        memory.observe(&on(model("a", "codex/gpt", Tone::Openai)), t0);
+        memory.observe(&on(model("a", "codex/gpt")), t0);
         // the first model is no switch
         assert_eq!(memory.state(&quiet(), t0), PetState::Idle);
-        assert_eq!(memory.look(PetState::Idle).tone, Tone::Openai);
         // another thread's model is no switch either
-        memory.observe(&on(model("b", "claude/opus", Tone::Claude)), t0 + 10);
+        memory.observe(&on(model("b", "claude/opus")), t0 + 10);
         assert_eq!(memory.state(&quiet(), t0 + 10), PetState::Idle);
         // the same thread's model changing is
         let at = t0 + 5_000;
-        memory.observe(&on(model("b", "codex/gpt", Tone::Openai)), at);
+        memory.observe(&on(model("b", "codex/gpt")), at);
         assert_eq!(memory.state(&quiet(), at + 1), PetState::Switching);
-        let look = memory.look(PetState::Switching);
-        assert_eq!((look.from, look.tone), (Tone::Claude, Tone::Openai));
         // it plays once from the moment of the change: the first frame first, then on to the last
         assert_eq!(memory.frame(PetState::Switching, at), 0);
         assert_eq!(
@@ -1144,6 +1109,33 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_keeps_her_colours() {
+        // The jump is drawn into the frames; no frame of it holds a pixel kind of its own, so the
+        // colours of a switch are the colours of every other state.
+        let theme = theme_at("aurora", 3);
+        for i in 0..frame_count(PetState::Switching) {
+            for ch in pixels(PetState::Switching, i)
+                .iter()
+                .flat_map(|r| r.chars())
+            {
+                assert!(
+                    ch == '.' || art().inks.contains_key(&ch.to_string()),
+                    "{ch}"
+                );
+            }
+        }
+        let jump = cells(pixels(PetState::Switching, 3), &theme, RICH);
+        let idle = cells(pixels(PetState::Idle, 0), &theme, RICH);
+        let inks = |rows: &Vec<Vec<Cell>>| -> Vec<Ink> {
+            let mut all: Vec<Ink> = rows.iter().flatten().flat_map(|c| [c.fg, c.bg]).collect();
+            all.sort_by_key(|i| i.encode());
+            all.dedup();
+            all
+        };
+        assert_eq!(inks(&jump), inks(&idle));
+    }
+
+    #[test]
     fn the_clock_cycles_through_each_script() {
         assert_eq!(clock(PetState::Working, 0), 0);
         assert_eq!(clock(PetState::Working, 300), 1);
@@ -1154,13 +1146,98 @@ mod tests {
         assert_eq!(clock(PetState::Idle, 1600 + 1700 + 100), 2);
     }
 
+    #[test]
+    fn she_paces_her_strip_while_a_turn_runs_and_stays_put_otherwise() {
+        let reach = |state: PetState, roam: usize| -> (usize, usize) {
+            let seen: Vec<usize> = (0..400).map(|i| offset(state, i * 250, roam)).collect();
+            (*seen.iter().min().unwrap(), *seen.iter().max().unwrap())
+        };
+        for state in [PetState::Working, PetState::Tool, PetState::Thinking] {
+            assert_eq!(reach(state, ROAM_MAX), (0, ROAM_MAX), "{state:?}");
+        }
+        // The more lively moods walk faster than the quieter ones.
+        let steps = |state| {
+            (0..40)
+                .filter(|i| offset(state, i * 250, 12) != offset(state, (i + 1) * 250, 12))
+                .count()
+        };
+        assert!(steps(PetState::Working) > steps(PetState::Tool));
+        assert!(steps(PetState::Tool) > steps(PetState::Thinking));
+        // Calm moods never move, whatever the room.
+        for state in ALL_STATES {
+            if !matches!(
+                state,
+                PetState::Working | PetState::Tool | PetState::Thinking
+            ) {
+                assert_eq!(reach(state, ROAM_MAX), (0, 0), "{state:?}");
+            }
+        }
+        // With no room to spare she does not move either.
+        assert_eq!(reach(PetState::Working, 0), (0, 0));
+        // A step is one cell at most per tick: she walks, she does not teleport.
+        for now in (0..4000).step_by(250) {
+            let (a, b) = (
+                offset(PetState::Working, now, ROAM_MAX),
+                offset(PetState::Working, now + 250, ROAM_MAX),
+            );
+            assert!(a.abs_diff(b) <= 1);
+        }
+    }
+
+    #[test]
+    fn a_wider_strip_gives_a_working_pet_more_range_and_she_never_leaves_it() {
+        let theme = theme_at("oop", 0);
+        let draw = Draw {
+            level: 0,
+            ascii: false,
+        };
+        let left_edge = |track: usize, roam: usize, now: i64| {
+            let rows = lines(
+                PetState::Working,
+                0,
+                &theme,
+                track,
+                offset(PetState::Working, now, roam),
+                draw,
+            );
+            for row in &rows {
+                assert_eq!(width(&plain(row)), track, "track {track} roam {roam}");
+                assert!(plain(row).ends_with(' '));
+            }
+            plain(&rows[2]).chars().take_while(|c| *c == ' ').count()
+        };
+        let range = |track: usize, roam: usize| {
+            let lefts: Vec<usize> = (0..200).map(|i| left_edge(track, roam, i * 250)).collect();
+            lefts.iter().max().unwrap() - lefts.iter().min().unwrap()
+        };
+        let narrow = range(PET_TRACK_WIDTH, 0);
+        let wide = range(PET_TRACK_WIDTH + 8, 8);
+        let wider = range(PET_TRACK_WIDTH + ROAM_MAX, ROAM_MAX);
+        assert_eq!(narrow, 0);
+        assert!(wide > narrow && wider > wide, "{narrow} {wide} {wider}");
+        // Asked for more than the strip holds, she is cut to it, and tracks narrower than her
+        // own never overflow either.
+        for track in [
+            0,
+            1,
+            5,
+            PET_MINI_TRACK_WIDTH,
+            PET_TRACK_WIDTH,
+            PET_TRACK_WIDTH + 3,
+        ] {
+            let rows = lines(PetState::Working, 0, &theme, track, 99, draw);
+            for row in &rows {
+                assert!(width(&plain(row)) <= track.max(PET_WIDTH + 1), "{track}");
+            }
+        }
+        let rows = lines(PetState::Working, 0, &theme, PET_TRACK_WIDTH + 3, 99, draw);
+        assert!(rows.iter().all(|r| width(&plain(r)) == PET_TRACK_WIDTH + 3));
+    }
+
     /// Prints the gallery of every state: `cargo test gallery -- --nocapture`.
     #[test]
     fn gallery() {
-        let look = Look {
-            tone: Tone::Claude,
-            from: Tone::Claude,
-        };
+        let theme = theme_at("oop", 0);
         let draw = Draw {
             level: 0,
             ascii: false,
@@ -1168,7 +1245,7 @@ mod tests {
         for state in ALL_STATES {
             println!("== {}", state.key());
             let all: Vec<Vec<Vec<Cell>>> = (0..frame_count(state))
-                .map(|i| cells(pixels(state, i), look, draw))
+                .map(|i| cells(pixels(state, i), &theme, draw))
                 .collect();
             for row in 0..PET_HEIGHT {
                 let line: Vec<String> = all

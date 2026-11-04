@@ -124,6 +124,11 @@ export interface ProviderMemoryAdmissionSupport {
   readonly sessionGeneration: (threadId: ThreadId) => number | undefined;
   /** Pure parser: the native session id a resume cursor binds to. */
   readonly nativeSessionId: (resumeCursor: unknown) => string | undefined;
+  /**
+   * Project skill trials ride on the same hooks but are opt-in: an adapter that runs them sets
+   * this to true, and trials refuse before any claim on every other adapter.
+   */
+  readonly skillTrials?: boolean;
 }
 
 export interface ProviderAdapterShape<TError> {

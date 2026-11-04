@@ -84,6 +84,16 @@ pub struct App {
     start_dir: PathBuf,
 }
 
+/// 창 제목: 창 안 프로그램이 정한 제목에 ` — OOP Terminal`을 붙인다. 이미 제품 이름(OOP)을
+/// 담은 제목(OOP TUI의 태그라인)은 그대로 쓴다. 같은 이름이 두 번 보이지 않게 한다.
+fn window_title(pane: Option<&str>) -> String {
+    match pane.filter(|t| !t.is_empty()) {
+        Some(t) if t.contains("OOP") => t.to_string(),
+        Some(t) => format!("{t} — OOP Terminal"),
+        None => "OOP Terminal".to_string(),
+    }
+}
+
 fn home_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -580,12 +590,8 @@ impl Running {
         let title = self
             .panes
             .get(&self.layout.focus())
-            .and_then(|p| p.title.clone())
-            .filter(|t| !t.is_empty());
-        match title {
-            Some(t) => self.window.set_title(&format!("{t} — OOP Terminal")),
-            None => self.window.set_title("OOP Terminal"),
-        }
+            .and_then(|p| p.title.clone());
+        self.window.set_title(&window_title(title.as_deref()));
     }
 
     fn on_user_event(&mut self, event: UserEvent) {
@@ -768,12 +774,16 @@ impl Running {
                 }
             }
             Action::Copy => {
-                let text = self
-                    .panes
-                    .get(&self.layout.focus())
-                    .and_then(|p| p.term.lock().selection_to_string());
+                let pane = self.panes.get(&self.layout.focus());
+                let text = pane.and_then(|p| p.term.lock().selection_to_string());
                 if let Some(t) = text.filter(|t| !t.is_empty()) {
                     self.set_clipboard(&t);
+                } else if let Some(p) = pane {
+                    // 터미널 쪽 선택이 없으면 프로그램(oop 입력창)의 선택일 수 있다: 알려 준다.
+                    let mode = *p.term.lock().mode();
+                    if let Some(bytes) = keys::edit_chord('c', mode) {
+                        p.write(bytes);
+                    }
                 }
             }
             Action::Paste => {
@@ -1350,5 +1360,25 @@ impl Running {
             }
             Step::Wait(_) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::window_title;
+
+    #[test]
+    fn a_title_that_names_oop_is_not_suffixed_again() {
+        let tagline = "OOP — One desktop for every coding agent";
+        assert_eq!(window_title(Some(tagline)), tagline);
+        let busy = "◆ OOP — One desktop for every coding agent";
+        assert_eq!(window_title(Some(busy)), busy);
+    }
+
+    #[test]
+    fn other_titles_get_the_app_name_and_no_title_is_the_app_name() {
+        assert_eq!(window_title(Some("zsh")), "zsh — OOP Terminal");
+        assert_eq!(window_title(Some("")), "OOP Terminal");
+        assert_eq!(window_title(None), "OOP Terminal");
     }
 }

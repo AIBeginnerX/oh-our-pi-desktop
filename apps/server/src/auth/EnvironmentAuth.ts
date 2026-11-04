@@ -38,6 +38,7 @@ import * as ServerSecretStore from "./ServerSecretStore.ts";
 import * as SessionStore from "./SessionStore.ts";
 import { REUSABLE_DEV_SESSION_EXPIRES_AT, resolveReusableDevAuth } from "./ReusableDevAuth.ts";
 import { verifyRequestDpopProof } from "./dpop.ts";
+import { DESKTOP_RENDERER_ORIGINS } from "../httpCors.ts";
 import { layerConfig as SqlitePersistenceLayer } from "../persistence/Layers/Sqlite.ts";
 
 const DEFAULT_SESSION_SUBJECT = "cli-issued-session";
@@ -597,6 +598,20 @@ export function selectRequestCredential(
   return undefined;
 }
 
+/** Lower-cased hosts the request was addressed to: Host plus the first proxy-reported host. */
+function forwardedRequestHosts(headers: Readonly<Record<string, string | undefined>>): string[] {
+  const hosts: string[] = [];
+  const add = (value: string | undefined) => {
+    const host = value?.trim().replace(/^"|"$/g, "").toLowerCase();
+    if (host) hosts.push(host);
+  };
+  add(headers["host"]);
+  add(headers["x-forwarded-host"]?.split(",")[0]);
+  const forwardedHost = /(?:^|[;,\s])host=("[^"]*"|[^;,\s]*)/i.exec(headers["forwarded"] ?? "");
+  add(forwardedHost?.[1]);
+  return hosts;
+}
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
@@ -607,6 +622,42 @@ export const make = Effect.gen(function* () {
   const descriptor = yield* policy.getDescriptor();
   const config = yield* ServerConfig.ServerConfig;
   const devAuth = resolveReusableDevAuth(config);
+
+  const usesCookieCredential = (request: HttpServerRequest.HttpServerRequest): boolean => {
+    const selected = selectRequestCredential(
+      request,
+      sessions.cookieName,
+      sessions.legacyCookieName,
+    );
+    if (selected !== undefined) {
+      return selected.source === "cookie" || selected.source === "legacy-cookie";
+    }
+    return devAuth !== undefined && request.cookies[devAuth.cookieName] !== undefined;
+  };
+
+  const allowedUpgradeOrigins = new Set([
+    ...(config.devUrl ? [config.devUrl.origin] : []),
+    ...DESKTOP_RENDERER_ORIGINS,
+    ...config.devAllowedOrigins,
+  ]);
+
+  /**
+   * Same host:port as the request, or as the host a reverse proxy reports it forwarded
+   * (X-Forwarded-Host / Forwarded host=; a browser cannot set either on a WebSocket
+   * handshake), or a configured origin. Scheme is ignored behind TLS proxies.
+   */
+  const isAllowedUpgradeOrigin = (
+    origin: string,
+    headers: HttpServerRequest.HttpServerRequest["headers"],
+  ): boolean => {
+    if (allowedUpgradeOrigins.has(origin)) return true;
+    try {
+      const originHost = new URL(origin).host;
+      return forwardedRequestHosts(headers).some((host) => host === originHost);
+    } catch {
+      return false;
+    }
+  };
 
   const authenticateToken = (
     token: string,
@@ -1089,6 +1140,20 @@ export const make = Effect.gen(function* () {
             mapSessionVerificationErrors,
           );
         }
+      }
+
+      // Cookies ride along on cross-origin WebSocket upgrades (SameSite is port-agnostic),
+      // so a browser-sent Origin must be one we serve. Bearer/DPoP credentials are attached
+      // by the client itself and need no check; requests without Origin are not browsers.
+      const origin = request.headers["origin"];
+      if (
+        typeof origin === "string" &&
+        usesCookieCredential(request) &&
+        !isAllowedUpgradeOrigin(origin, request.headers)
+      ) {
+        return yield* new ServerAuthInvalidCredentialError({
+          diagnostic: "WebSocket upgrade origin is not allowed for cookie authentication.",
+        });
       }
 
       return yield* authenticateRequest(request);

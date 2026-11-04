@@ -22,7 +22,10 @@ import {
   type CommitProjectMemoryDispatchInput,
   type ProjectMemorySendCommittedMemory,
   type ProjectMemorySendHoldReason,
+  type ProjectMemorySentForMessageInput,
   type ProjectMemorySendSettleState,
+  type ProjectMemoryRecallRecordResult,
+  type RecordProjectMemoryRecallInput,
   type RevalidateProjectMemoryDispatchInput,
   ProjectMemorySendLedger,
   layer as sendLedgerLayer,
@@ -85,6 +88,11 @@ export class ProjectMemorySendGate extends Context.Service<
       threadId: ThreadId,
     ) => Effect.Effect<Option.Option<"affected" | "store-failed">>;
     readonly driverAllowed: (driverKind: ProviderDriverKind) => boolean;
+    // What one message really sent to the thread, by id and version. A store failure reads as
+    // nothing sent, so the caller forwards nothing.
+    readonly sentForMessage: (
+      input: ProjectMemorySentForMessageInput,
+    ) => Effect.Effect<ReadonlyArray<{ readonly memoryId: string; readonly version: number }>>;
     readonly admit: (input: CommitProjectMemoryDispatchInput) => Effect.Effect<
       | {
           readonly _tag: "Committed";
@@ -97,6 +105,15 @@ export class ProjectMemorySendGate extends Context.Service<
       attemptSeq: number,
       outcome: ProjectMemorySendSettleState,
     ) => Effect.Effect<void>;
+    // Ledgers the memories a pull tool (memory_recall) is about to hand to a
+    // provider and returns the recorded bodies. The caller has already
+    // checked the driver allowlist; a store failure is a hold, never a body.
+    readonly recordRecall: (
+      input: RecordProjectMemoryRecallInput,
+    ) => Effect.Effect<
+      | Extract<ProjectMemoryRecallRecordResult, { readonly status: "recorded" }>
+      | { readonly status: "held"; readonly reason: "context-mismatch" | "store-failed" }
+    >;
     // Admission-time revalidation: the ledger mutation fence is captured
     // synchronously before the hold read, so a mutation committed between
     // reads still breaks the returned stillValid. stillValid is the sync
@@ -137,6 +154,15 @@ export const make = Effect.gen(function* () {
 
   const driverAllowed = (driverKind: ProviderDriverKind) => policy.driverKinds.has(driverKind);
 
+  const sentForMessage = (input: ProjectMemorySentForMessageInput) =>
+    ledger
+      .sentForMessage(input)
+      .pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterrupts(cause) ? interruptOnly(cause) : Effect.succeed([]),
+        ),
+      );
+
   const admit = (
     input: CommitProjectMemoryDispatchInput,
   ): Effect.Effect<
@@ -162,6 +188,16 @@ export const make = Effect.gen(function* () {
       ),
       Effect.catchDefect(() =>
         Effect.succeed({ _tag: "Held" as const, reason: "store-failed" as const }),
+      ),
+    );
+
+  const recordRecall: ProjectMemorySendGate["Service"]["recordRecall"] = (input) =>
+    ledger.recordRecall(input).pipe(
+      Effect.catch(() =>
+        Effect.succeed({ status: "held" as const, reason: "store-failed" as const }),
+      ),
+      Effect.catchDefect(() =>
+        Effect.succeed({ status: "held" as const, reason: "store-failed" as const }),
       ),
     );
 
@@ -239,7 +275,9 @@ export const make = Effect.gen(function* () {
   return {
     threadHold,
     driverAllowed,
+    sentForMessage,
     admit,
+    recordRecall,
     settle,
     revalidateForAdmission,
     revalidate,
@@ -255,7 +293,9 @@ export const layer = Layer.effect(ProjectMemorySendGate, make).pipe(Layer.provid
 export const layerUnavailable = Layer.succeed(ProjectMemorySendGate)({
   threadHold: () => Effect.succeed(Option.none()),
   driverAllowed: () => false,
+  sentForMessage: () => Effect.succeed([]),
   admit: () => Effect.succeed({ _tag: "Held" as const, reason: "not-supported" as const }),
+  recordRecall: () => Effect.succeed({ status: "held" as const, reason: "store-failed" as const }),
   settle: () => Effect.void,
   revalidateForAdmission: () =>
     Effect.succeed({ _tag: "Held" as const, reason: "not-supported" as const }),

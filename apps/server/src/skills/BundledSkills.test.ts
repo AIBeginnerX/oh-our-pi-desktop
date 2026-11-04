@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
 
 import { discoverClaudeSkills } from "../provider/Drivers/ClaudeSkills.ts";
 import { PIXELGUI_SKILL_MARKDOWN } from "./bundled/pixelguiSkill.ts";
-import { installBundledSkill, listBundledSkills } from "./BundledSkills.ts";
+import { BUNDLED_SKILLS, installBundledSkill, listBundledSkills } from "./BundledSkills.ts";
 
 const tempHome = Effect.acquireRelease(
   Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-bundled-skill-"))),
@@ -63,6 +63,45 @@ describe("BundledSkills", () => {
         PIXELGUI_SKILL_MARKDOWN,
       );
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "ships the verification and arena skills, each installable and found by the provider scan",
+    () =>
+      Effect.gen(function* () {
+        const names = ["create-verification-skill", "maintain-verification-skill", "arena"];
+        const home = yield* tempHome;
+        const listed = yield* listBundledSkills(hostAt(home));
+        for (const name of names) {
+          const entry = listed.skills.find((skill) => skill.name === name);
+          assert.isDefined(entry);
+          assert.isAbove(entry!.description.length, 0);
+          assert.isFalse(entry!.description.startsWith('"'));
+        }
+
+        for (const name of names) {
+          const markdown = BUNDLED_SKILLS.find((skill) => skill.name === name)!.markdown;
+          assert.isTrue(markdown.startsWith(`---\nname: ${name}\n`));
+          assert.include(markdown, "Adapted from pstack by Lauren Tan (MIT)");
+          assert.notMatch(markdown, /\.cursor|bugbot|add-plugin/i);
+          for (const target of ["claude", "agents"] as const) {
+            yield* installBundledSkill(hostAt(home), { name, target });
+            const root = target === "claude" ? ".claude" : ".agents";
+            assert.equal(
+              yield* Effect.promise(() =>
+                NodeFSP.readFile(NodePath.join(home, root, "skills", name, "SKILL.md"), "utf8"),
+              ),
+              markdown,
+            );
+          }
+        }
+        const discovered = yield* discoverClaudeSkills({ homePath: "" }, undefined, {
+          CLAUDE_CONFIG_DIR: NodePath.join(home, ".claude"),
+        });
+        for (const name of names) {
+          assert.isTrue(discovered.some((skill) => skill.name === name));
+        }
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect("follows CLAUDE_CONFIG_DIR like Claude Code does", () =>

@@ -2,18 +2,22 @@ import type {
   EnvironmentId,
   ProjectId,
   ProjectMemory,
+  ProjectMemoryDerivedFrom,
   ProjectMemoryId,
   ProjectMemoryKind,
   ProjectMemoryOrigin,
   ProjectMemoryWriteResult,
 } from "@t3tools/contracts";
 import { PROJECT_MEMORY_MAX_LIMIT } from "@t3tools/contracts";
+import { projectMemoryAnalyserState } from "@t3tools/client-runtime/state/project-memory-proposals";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { PlusIcon, SearchIcon, Trash2Icon } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -26,6 +30,8 @@ import { useDebouncedValue } from "../../state/queries";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { isElectron } from "../../env";
+import { useT } from "../../i18n";
+import { buildThreadRouteParams } from "../../threadRoutes";
 import { usePrimarySessionState } from "../../environments/primary";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentSessionState } from "../../state/session";
@@ -251,6 +257,7 @@ function ProjectMemoryEditorInner({
   onFinished,
   onClose,
 }: ProjectMemoryEditorInnerProps) {
+  const t = useT();
   const createMemory = useAtomCommand(projectMemory.create, { reportFailure: false });
   const updateMemory = useAtomCommand(projectMemory.update, { reportFailure: false });
   const deleteMemory = useAtomCommand(projectMemory.delete, { reportFailure: false });
@@ -618,9 +625,20 @@ function ProjectMemoryEditorInner({
           />
           {expired ? <span className="text-xs text-destructive">Already expired.</span> : null}
         </label>
+        {detail.data?.memory.derivedFrom !== undefined ? (
+          <DerivedFromNote
+            environmentId={environmentId}
+            derivedFrom={detail.data.memory.derivedFrom}
+          />
+        ) : null}
         {origin.type === "message" ? (
           <p className="text-xs text-muted-foreground">
             Saved from a chat message. Deleting this memory does not delete the message.
+          </p>
+        ) : null}
+        {deleteArmed ? (
+          <p className="text-xs text-muted-foreground">
+            {t("Content already sent to a provider can't be recalled.")}
           </p>
         ) : null}
         {writeLock !== null ? <p className="text-xs text-muted-foreground">{writeLock}</p> : null}
@@ -657,6 +675,50 @@ function readVersion(cause: unknown): number | null {
   return null;
 }
 
+/**
+ * Marks a memory that came from a work-analyser suggestion, so it is never
+ * mistaken for something a person wrote. With the cited events it also links
+ * to the threads the lesson was drawn from.
+ */
+function DerivedFromNote({
+  environmentId,
+  derivedFrom,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly derivedFrom: ProjectMemoryDerivedFrom;
+}) {
+  const t = useT();
+  const navigate = useNavigate();
+  const threadIds = [...new Set(derivedFrom.map((item) => item.threadId))];
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-xs text-muted-foreground">
+        {t(
+          "Derived from recent work by the work analyser and approved by you. It may be wrong; edit or delete it if so.",
+        )}
+      </p>
+      <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+        {t("Seen in:")}
+        {threadIds.map((threadId, index) => (
+          <Button
+            key={threadId}
+            size="xs"
+            variant="link"
+            onClick={() =>
+              void navigate({
+                to: "/$environmentId/$threadId",
+                params: buildThreadRouteParams(scopeThreadRef(environmentId, threadId)),
+              })
+            }
+          >
+            {t("Thread {index}", { index: index + 1 })}
+          </Button>
+        ))}
+      </p>
+    </div>
+  );
+}
+
 /** Environment+project scoped memory management. Hidden without `manage`. */
 export function ProjectMemorySection({
   environmentId,
@@ -673,6 +735,78 @@ export function ProjectMemorySection({
       environmentId={environmentId}
       projectId={projectId}
       showProposals={memoryCapability.proposals === true}
+      analyser={projectMemoryAnalyserState(config)}
+    />
+  );
+}
+
+/**
+ * The work analyser is off until the user turns it on in General settings, and
+ * only runs when asked here. It sends structured summaries of recent work (check results, review
+ * verdicts, reverts), never chat text, to the project's text-generation model.
+ * What it finds waits in the proposal list; nothing is saved automatically.
+ */
+function ProjectMemoryAnalyserRow({
+  environmentId,
+  projectId,
+  enabled,
+  writeLock,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly projectId: ProjectId;
+  readonly enabled: boolean;
+  readonly writeLock: string | null;
+}) {
+  const t = useT();
+  const analyse = useAtomCommand(projectMemory.analyse, { reportFailure: false });
+  const [running, setRunning] = useState(false);
+
+  const run = async () => {
+    if (running || writeLock !== null) return;
+    setRunning(true);
+    try {
+      const result = await analyse({ environmentId, input: { projectId } });
+      if (result._tag === "Success") {
+        const { memoriesProposed, skillsSuggested } = result.value;
+        const found = memoriesProposed + skillsSuggested;
+        toastManager.add({
+          type: "success",
+          title:
+            found === 0
+              ? t("Nothing new to suggest")
+              : t("{count} suggestion(s) added for review", { count: found }),
+        });
+        return;
+      }
+      if (isAtomCommandInterrupted(result)) return;
+      const cause = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: cause instanceof Error ? cause.message : "The memory request failed.",
+      });
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <SettingsRow
+      title={t("Analyse recent work")}
+      description={t(
+        "Suggests lessons that recur across this project's recent threads, using only check results, review verdicts and reverts. Suggestions wait for your approval. Uses the text-generation model.",
+      )}
+      status={enabled ? undefined : t("Turn on Work analyser in General settings first.")}
+      control={
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!enabled || running || writeLock !== null}
+          title={writeLock ?? undefined}
+          onClick={() => void run()}
+        >
+          {running ? t("Analysing…") : t("Analyse recent work")}
+        </Button>
+      }
     />
   );
 }
@@ -681,12 +815,16 @@ function ProjectMemorySectionInner({
   environmentId,
   projectId,
   showProposals,
+  analyser,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   /** Older servers do not serve the proposal RPCs. */
   readonly showProposals: boolean;
+  /** Whether the work analyser is served, and if so whether the user turned it on. */
+  readonly analyser: ReturnType<typeof projectMemoryAnalyserState>;
 }) {
+  const t = useT();
   const operateAccess = useProjectMemoryOperateAccess(environmentId);
   const writeLock = resolveMemoryWriteLock(operateAccess);
   const [searchInput, setSearchInput] = useState("");
@@ -737,6 +875,14 @@ function ProjectMemorySectionInner({
           </Button>
         }
       />
+      {analyser !== "unsupported" ? (
+        <ProjectMemoryAnalyserRow
+          environmentId={environmentId}
+          projectId={projectId}
+          enabled={analyser === "on"}
+          writeLock={writeLock}
+        />
+      ) : null}
       <div className="flex flex-col gap-2 px-6">
         {writeLock !== null ? <p className="text-xs text-muted-foreground">{writeLock}</p> : null}
         {showProposals ? (
@@ -776,6 +922,11 @@ function ProjectMemorySectionInner({
                 <Badge variant="outline" size="sm">
                   {KIND_LABEL[item.kind]}
                 </Badge>
+                {item.derivedFrom !== undefined ? (
+                  <Badge variant="outline" size="sm">
+                    {t("Derived")}
+                  </Badge>
+                ) : null}
                 <span className="shrink-0 text-xs text-muted-foreground">v{item.version}</span>
                 <span className="shrink-0 text-xs text-muted-foreground">
                   ≈{item.estimatedTokens} tok

@@ -16,11 +16,14 @@ pub struct KeyInput<'a> {
 }
 
 fn mod_param(mods: ModifiersState) -> u8 {
-    1 + u8::from(mods.shift_key()) + 2 * u8::from(mods.alt_key()) + 4 * u8::from(mods.control_key())
+    1 + u8::from(mods.shift_key())
+        + 2 * u8::from(mods.alt_key())
+        + 4 * u8::from(mods.control_key())
+        + 8 * u8::from(mods.super_key())
 }
 
 fn has_mods(mods: ModifiersState) -> bool {
-    mods.shift_key() || mods.alt_key() || mods.control_key()
+    mods.shift_key() || mods.alt_key() || mods.control_key() || mods.super_key()
 }
 
 fn csi_u(code: u32, mods: ModifiersState) -> Vec<u8> {
@@ -97,12 +100,33 @@ fn first_char(key: &Key) -> Option<char> {
     }
 }
 
+/// Cmd+C / Cmd+X 를 프로그램에 그대로 알린다 (`CSI 99;9u`, `CSI 120;9u`). 프로그램이 kitty 키 보고
+/// (disambiguate)를 켠 경우에만이고, 그 외에는 `None`이라 지금까지처럼 동작한다. 프로그램(oop 의
+/// 메시지 입력창)이 자기 선택 영역을 복사/잘라내기 할 수 있게 하려는 것이며, 선택 영역이 없으면
+/// 프로그램은 무시한다. Cmd+V 는 전달하지 않는다: 터미널이 클립보드를 붙여넣기(bracketed paste)로
+/// 보내면 프로그램이 선택 영역을 대체하므로 지금 동작으로 충분하다.
+pub fn edit_chord(c: char, mode: TermMode) -> Option<Vec<u8>> {
+    let kitty = mode.contains(TermMode::DISAMBIGUATE_ESC_CODES)
+        || mode.contains(TermMode::REPORT_ALL_KEYS_AS_ESC);
+    (kitty && matches!(c, 'c' | 'x')).then(|| csi_u(c as u32, ModifiersState::SUPER))
+}
+
+/// 키 입력이 Cmd+C / Cmd+X (다른 수정자 없이)이면 그 글자.
+fn edit_chord_char(input: &KeyInput) -> Option<char> {
+    let mods = input.mods;
+    if !mods.super_key() || mods.control_key() || mods.alt_key() || mods.shift_key() {
+        return None;
+    }
+    let c = input.base.or(Some(input.logical)).and_then(first_char)?;
+    Some(c.to_ascii_lowercase())
+}
+
 /// 키 입력을 PTY로 보낼 바이트로 바꾼다. `None`이면 보낼 것이 없다.
 /// Cmd(Super)가 눌린 입력은 앱 단축키 몫이므로 None을 돌려준다.
 pub fn encode_key(input: &KeyInput, mode: TermMode) -> Option<Vec<u8>> {
     let mods = input.mods;
     if mods.super_key() {
-        return None;
+        return edit_chord_char(input).and_then(|c| edit_chord(c, mode));
     }
     let app_cursor = mode.contains(TermMode::APP_CURSOR);
     let disambiguate = mode.contains(TermMode::DISAMBIGUATE_ESC_CODES);
@@ -436,6 +460,34 @@ mod tests {
             TermMode::NONE,
         );
         assert_eq!(out, Some(vec![0x1b, 3]));
+    }
+
+    #[test]
+    fn cmd_c_and_x_reach_a_program_that_asked_for_kitty_key_reports() {
+        let kitty = TermMode::DISAMBIGUATE_ESC_CODES;
+        let cmd = ModifiersState::SUPER;
+        assert_eq!(
+            enc(ch("c"), Some(ch("c")), Some("c"), cmd, kitty),
+            Some(b"\x1b[99;9u".to_vec())
+        );
+        assert_eq!(
+            enc(ch("x"), Some(ch("x")), Some("x"), cmd, kitty),
+            Some(b"\x1b[120;9u".to_vec())
+        );
+        // an uppercase logical key (Caps Lock) still names the same key
+        assert_eq!(
+            enc(ch("C"), Some(ch("c")), Some("C"), cmd, kitty),
+            Some(b"\x1b[99;9u".to_vec())
+        );
+        // a program in the plain mode, and every other Cmd chord, get nothing as before
+        assert_eq!(enc(ch("c"), None, Some("c"), cmd, TermMode::NONE), None);
+        assert_eq!(enc(ch("v"), None, Some("v"), cmd, kitty), None);
+        assert_eq!(
+            enc(ch("c"), None, Some("c"), cmd | ModifiersState::SHIFT, kitty),
+            None
+        );
+        assert_eq!(edit_chord('c', kitty), Some(b"\x1b[99;9u".to_vec()));
+        assert_eq!(edit_chord('c', TermMode::NONE), None);
     }
 
     #[test]

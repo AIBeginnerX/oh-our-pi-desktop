@@ -1,7 +1,7 @@
 # Install OOP
 
 OOP runs coding agents on your computer and lets you control them from its
-desktop, web, or mobile app. Set up the machine where the agents will work first.
+desktop, web, or a phone browser. Set up the machine where the agents will work first.
 
 ## Requirements
 
@@ -90,19 +90,23 @@ Pass a path, such as `t3 app ../my-project`, to open another directory. It requi
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 
-## Mobile app
+## Mobile web
 
-Install OOP from the
-[App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
-[Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code).
-The phone connects to a server on another machine. Follow
+A phone opens the relay mobile web, not a native app: scan the QR code from the
+desktop's phone dialog and the phone browser opens the full web app. Follow
 [remote access](./remote-access.md) to link it through OOP Connect or a pairing URL.
 
-If the app crashes during launch, open Settings → Diagnostics on the next launch
-that succeeds. It lists startup crashes from the last 7 days with the error and
-component stack that store crash reports leave out. Copy the report and paste it
-into a GitHub issue. Error messages can quote values from the app, so read it over
-before sharing.
+The React Native app from the
+[App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
+[Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code) is
+no longer the supported phone surface and gets no new features. Push notifications
+and background updates belong to that app only.
+
+If the native app crashes during launch, open Settings → Diagnostics on the next
+launch that succeeds. It lists startup crashes from the last 7 days with the error
+and component stack that store crash reports leave out. Copy the report and paste
+it into a GitHub issue. Error messages can quote values from the app, so read it
+over before sharing.
 
 ## Providers
 

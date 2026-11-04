@@ -479,6 +479,52 @@ describe("workEntryIndicatesToolNeutralStatus", () => {
 });
 
 describe("deriveWorkLogEntries", () => {
+  it("folds a crew task's checklist progress row into the task's one row", () => {
+    const crew = {
+      taskId: "crew-task-1",
+      title: "Port the module",
+      agentKind: "agent",
+      crewRole: "worker",
+    };
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "started",
+        kind: "task.started",
+        summary: "Worker started: Port the module",
+        payload: { ...crew, status: "running" },
+        turnId: "turn-1",
+        sequence: 1,
+      }),
+      makeActivity({
+        id: "task-progress:crew:crew-task-1",
+        kind: "task.progress",
+        summary: "Worker checklist 1 of 3 verified: Port the module",
+        payload: {
+          ...crew,
+          status: "running",
+          todos: [{ id: "t1", text: "a", status: "verified" }],
+          todoTotal: 3,
+          todoVerified: 1,
+          todoClaimed: 0,
+          todoFailed: 0,
+          todoBlocked: 0,
+        },
+        turnId: "turn-1",
+        sequence: 2,
+      }),
+      makeActivity({
+        id: "completed",
+        kind: "task.completed",
+        summary: "Worker finished: Port the module",
+        payload: { ...crew, status: "completed", todoTotal: 3, todoVerified: 3 },
+        turnId: "turn-1",
+        sequence: 3,
+      }),
+    ]);
+    expect(entries.filter((entry) => entry.taskId === "crew-task-1")).toHaveLength(1);
+    expect(entries).toHaveLength(1);
+  });
+
   it("keeps release verification evidence out of the ordinary work log, even on failure", () => {
     const activities = [
       makeActivity({ id: "before", kind: "tool.completed", summary: "Read files", sequence: 1 }),

@@ -5,7 +5,7 @@
 use crate::clipboard::{self, Why};
 use crate::commands::{self, Bootstrap, Ctx, Turn};
 use crate::i18n::tr;
-use crate::input::Input;
+use crate::input::{Input, Move};
 use crate::panels_common::{fill, s};
 use crate::pet;
 use crate::selection::{self, End, Pos, Selection};
@@ -41,6 +41,21 @@ pub const CONFIG_RPC: &str = "server.getConfig";
 pub const TURN_WINDOW: u32 = 20;
 /// Lines one wheel notch moves.
 const WHEEL_LINES: usize = 3;
+/// How long the header keeps a tip before the next one.
+pub const TIP_EVERY_MS: i64 = 20_000;
+
+/// How the provider on screen is signed in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthKind {
+    ApiKey,
+    /// A subscription, with the server's name for the plan when it gives one.
+    Subscription(Option<String>),
+    SignedOut,
+    /// Signed in some other way the server names (a cloud account); shown by that name.
+    Other(String),
+    /// The server did not say, or the provider is not known.
+    Unknown,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkStatus {
@@ -78,6 +93,8 @@ pub enum Msg {
         open: Option<String>,
         /// A request the command answered; forgotten again when the command failed.
         answered: Option<String>,
+        /// The id of the message the command sent, if it was a turn start.
+        sent: Option<String>,
     },
     Older {
         id: String,
@@ -85,16 +102,30 @@ pub enum Msg {
     },
     /// A copy to the clipboard has finished.
     Copied(clipboard::Outcome),
+    /// The clipboard was read for a paste (Ctrl-V, Cmd-V in the message box).
+    Clip(Result<String, clipboard::Why>),
     /// The result of work a command started in the background (a request to the server, a lookup):
     /// it runs on the app with the screen as it is by then.
     Ext(Box<dyn FnOnce(&mut App) + Send>),
 }
 
-/// The two views of the right-hand panel.
+/// The views of the right-hand panel.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Side {
     Workflow,
     Agents,
+    Savvy,
+    Files,
+}
+
+/// How one thread's right-hand panel is set: the view picked, the flow pinned in the Workflow view
+/// and how far the wheel moved the body. `App` keeps the on-screen thread's in its own fields and
+/// the others' here, so switching threads puts each back as it was left.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct SideSetting {
+    view: Side,
+    pinned_flow: Option<String>,
+    scroll: i32,
 }
 
 /// Where the conversation sits on the screen as of the last drawing, so the mouse can say which
@@ -177,6 +208,8 @@ pub struct Pick {
     pub items: Vec<String>,
     pub cursor: usize,
     pub data: Vec<String>,
+    /// Text typed into the list, for a list whose last row asks for it (see `folder.rs`).
+    pub typed: Option<String>,
 }
 
 /// How far the user is through the questions of one request.
@@ -191,11 +224,15 @@ pub struct QuestionState {
     pub answers: serde_json::Map<String, Value>,
 }
 
-/// The lines of the conversation, kept until the thread, its revision or the width changes.
+/// The lines of the conversation, kept until the thread, its revision, the width, the theme or the
+/// symbol set changes.
 struct Cached {
     thread_id: String,
     revision: u64,
     width: usize,
+    /// The colours and marks it was drawn in: another theme is another picture.
+    theme: Theme,
+    sym: Symbols,
     lines: Rc<Transcript>,
 }
 
@@ -213,6 +250,12 @@ pub struct App {
     pub active: Active,
     pub conv: Conversation,
     pub input: Input,
+    /// What was half-typed in each thread (and each new-thread draft) the box was left in; the box
+    /// belongs to the thread on screen, so it is saved here when the thread changes and put back
+    /// when it is returned to. Only messages with something in them are kept.
+    drafts: HashMap<String, crate::input::Saved>,
+    /// The panel's setting of each thread (and draft) that is not on screen, by `draft_key`.
+    side_settings: HashMap<String, SideSetting>,
     pub settings: Settings,
     pub theme: Theme,
     pub sym: Symbols,
@@ -221,11 +264,17 @@ pub struct App {
     pub question: QuestionState,
     pub view: View,
     pub notice: Option<String>,
-    /// A command line for the TypeScript terminal that the main loop runs with the screen given
-    /// back (`/provider`); and the server and home this session was started with, which it gets.
-    pub pending_handoff: Option<Vec<String>>,
-    pub handoff_server: Option<String>,
-    pub handoff_home: Option<String>,
+    /// `/provider`: the request the main loop runs in the foreground (`cmd_provider::take_request`),
+    /// and the server and home this session was started with, which it talks to.
+    pub pending_provider: Option<crate::provider_args::ProviderRequest>,
+    /// The bell rings once after the next draw (`notify.rs`); the main loop writes it.
+    pub bell_pending: bool,
+    /// Ctrl-Z was pressed: the main loop gives the terminal back and stops the process
+    /// (`terminal::suspend_process`). Unix only.
+    pub suspend_requested: bool,
+    pub notifier: crate::notify::Notifier,
+    pub provider_server: Option<String>,
+    pub provider_home: Option<String>,
     /// `/tasks`: the task list is shown under the conversation.
     pub tasks_on: bool,
     /// The terminal's size as of the last drawing or resize: (columns, rows).
@@ -234,6 +283,8 @@ pub struct App {
     pub notes: Vec<crate::notes::Note>,
     /// A full-body screen over the conversation, when one is open (see `screen.rs`).
     pub screen: Option<Box<dyn crate::screen::Screen>>,
+    /// The Replay Theater view and its button (see `replay.rs`).
+    pub replay: crate::replay::State,
     /// What `/theme`, `/update`, `/threads` and `/projects` keep (see `cmd_misc.rs`).
     pub misc: crate::cmd_misc::State,
     pub quit: bool,
@@ -256,7 +307,11 @@ pub struct App {
     pub geo: Cell<Geo>,
     /// The list's rectangle and, for each row on screen, its y and index into `rows()`.
     pub list_hits: RefCell<(Rect, Vec<(u16, usize)>)>,
+    /// The same for the open picker: its rectangle and, for each row on screen, its y and index.
+    pub modal_hits: RefCell<(Rect, Vec<(u16, usize)>)>,
     pub clip_plan: clipboard::Plan,
+    /// The message box's command list, mouse and clipboard state (see `composer.rs`).
+    pub composer: crate::composer::State,
     /// The command line's wishes, carried out once when the projects and threads are known.
     pub launch: Option<Launch>,
     copy_job: Option<CopyJob>,
@@ -270,9 +325,13 @@ pub struct App {
     pub panel_scroll: Cell<i32>,
     /// Mocha, the header pet: what she remembers, and the picture last drawn.
     pet_memory: pet::Memory,
-    pub pet_shown: Cell<Option<(pet::PetState, usize, pet::Tone)>>,
-    /// A fixed clock for the pet, in tests.
+    pub pet_shown: Cell<Option<(pet::PetState, usize)>>,
+    /// A fixed clock for the pet and the header's tips, in tests.
     pub pet_clock: Option<i64>,
+    /// The tip last drawn; the app repaints for a tip only when the next one differs.
+    pub tip_shown: Cell<Option<usize>>,
+    /// Running inside OOP Terminal's own window, which has split keys the tips may name.
+    pub in_oop_terminal: bool,
     /// A model picked with `/model` or `/effort`, sent with the next turn.
     pub(crate) model_override: Option<Value>,
     /// A mode the user picked on an open thread, shown until the server's own value catches up
@@ -281,6 +340,8 @@ pub struct App {
     pub(crate) interaction_intent: Option<String>,
     draft_runtime_mode: String,
     draft_interaction_mode: String,
+    /// The crew picked on a conversation not started yet; it goes out with the first message.
+    pub(crate) draft_crew: Option<Value>,
     visited: HashMap<String, i64>,
     answered: HashSet<String>,
     cwd_project: Option<String>,
@@ -291,6 +352,11 @@ pub struct App {
     pub(crate) bearer: Option<String>,
     /// Tick at which a queued message was sent; the next waits for the agent to start on it.
     pub(crate) awaiting: Option<usize>,
+    /// The message just sent to the open thread (its id, the tick it left): until it comes back
+    /// the right-hand panel and the composer's bar show a fresh start, not the work before it. It
+    /// ends on the message's echo, on that send failing, or on leaving the thread, never on a
+    /// timer: a slow echo (a reconnect) must not bring the work before it back.
+    pub(crate) sent: Option<(String, usize)>,
     /// What `/undo`, `/diff` and `/history` are waiting for (see `cmd_history.rs`).
     pub(crate) threadops: crate::cmd_history::State,
     cache: RefCell<Option<Cached>>,
@@ -344,7 +410,12 @@ impl App {
             active: Active::None,
             conv: Conversation::default(),
             input: Input::default(),
+            drafts: HashMap::new(),
+            side_settings: HashMap::new(),
             settings: Settings::default(),
+            bell_pending: false,
+            suspend_requested: false,
+            notifier: Default::default(),
             theme: theme::LAVENDER,
             sym: Symbols::pick(false),
             modal: None,
@@ -352,13 +423,14 @@ impl App {
             question: QuestionState::default(),
             view: View::default(),
             notice: None,
-            pending_handoff: None,
-            handoff_server: None,
-            handoff_home: None,
+            pending_provider: None,
+            provider_server: None,
+            provider_home: None,
             tasks_on: false,
             term_size: Cell::new((0, 0)),
             notes: Vec::new(),
             screen: None,
+            replay: Default::default(),
             misc: Default::default(),
             quit: false,
             tick: 0,
@@ -373,7 +445,12 @@ impl App {
             width: Cell::new(0),
             geo: Cell::new(Geo::default()),
             list_hits: RefCell::new((Rect::default(), Vec::new())),
+            modal_hits: RefCell::new((Rect::default(), Vec::new())),
             clip_plan: clipboard::plan(|k| std::env::var(k).ok(), clipboard::Platform::current()),
+            composer: crate::composer::State::new(clipboard::read_plan(
+                |k| std::env::var(k).ok(),
+                clipboard::Platform::current(),
+            )),
             launch: None,
             copy_job: None,
             side_open: true,
@@ -383,12 +460,15 @@ impl App {
             panel_scroll: Cell::new(0),
             pet_memory: pet::Memory::new(now_ms()),
             pet_shown: Cell::new(None),
-            pet_clock: None,
+            pet_clock: cfg!(test).then_some(0), // tests must not see the wall clock turn the tips
+            tip_shown: Cell::new(None),
+            in_oop_terminal: false,
             model_override: None,
             runtime_intent: None,
             interaction_intent: None,
             draft_runtime_mode: "full-access".into(),
             draft_interaction_mode: "default".into(),
+            draft_crew: None,
             visited: HashMap::new(),
             answered: HashSet::new(),
             cwd_project: None,
@@ -398,6 +478,7 @@ impl App {
             origin: None,
             bearer: None,
             awaiting: None,
+            sent: None,
             threadops: Default::default(),
             cache: RefCell::new(None),
             tx,
@@ -492,6 +573,19 @@ impl App {
         }
     }
 
+    /// The crew the thread on screen has of its own, `None` when it runs the default crew: the one
+    /// the server holds with the thread, or (before the thread exists) the one picked in the draft.
+    pub fn own_crew(&self) -> Option<Value> {
+        match &self.active {
+            Active::Thread(id) => match self.thread_shell(id) {
+                Some(shell) => shell.crew.clone(),
+                None => self.draft_crew.clone(),
+            },
+            Active::Draft(_) => self.draft_crew.clone(),
+            Active::None => None,
+        }
+    }
+
     pub fn thread_shell(&self, id: &str) -> Option<&ThreadShell> {
         self.shell.threads.iter().find(|t| t.id == id)
     }
@@ -551,6 +645,8 @@ impl App {
             && c.thread_id == self.conv.thread_id
             && c.revision == self.conv.revision
             && c.width == width
+            && c.theme == self.theme
+            && c.sym == self.sym
         {
             return c.lines.clone();
         }
@@ -564,6 +660,8 @@ impl App {
             thread_id: self.conv.thread_id.clone(),
             revision: self.conv.revision,
             width,
+            theme: self.theme,
+            sym: self.sym,
             lines: lines.clone(),
         });
         lines
@@ -617,6 +715,7 @@ impl App {
 
     pub fn handle(&mut self, msg: Msg) {
         self.react(msg);
+        crate::composer::sync(self);
         self.refresh_pet();
     }
 
@@ -631,6 +730,7 @@ impl App {
             }
             Msg::Term(_) => {}
             Msg::Copied(outcome) => self.notice = Some(copy_notice(&outcome)),
+            Msg::Clip(result) => crate::composer::pasted(self, result),
             Msg::Ext(job) => job(self),
             Msg::Link(status) => {
                 if status != LinkStatus::Online {
@@ -672,6 +772,11 @@ impl App {
                 if self.thread_id().as_deref() == Some(id.as_str()) {
                     self.conv.apply(&item);
                     if self.conv.deleted {
+                        // Its draft goes with it: there is no thread left to return to.
+                        self.input.take(false);
+                        self.side_settings.remove(&id);
+                        self.pinned_flow = None;
+                        self.panel_scroll.set(0);
                         self.active = Active::None;
                         self.notice = Some(tr("notice.deleted").into());
                     } else {
@@ -685,7 +790,7 @@ impl App {
                 }
                 if let Some(reason) = reason {
                     if !self.conv.loaded {
-                        self.active = Active::None;
+                        self.switch_to(Active::None);
                     }
                     self.notice = Some(format!("thread: {reason}"));
                 }
@@ -694,10 +799,16 @@ impl App {
                 result,
                 open,
                 answered,
+                sent,
             } => match result {
                 Ok(()) => {
                     if let Some(id) = open.filter(|_| matches!(self.active, Active::Draft(_))) {
+                        // The draft became this thread: what was typed since the send comes along.
+                        let carried = self.input.stash_draft();
                         self.open_thread(&id);
+                        if let Some(saved) = carried {
+                            self.input.restore(saved);
+                        }
                     }
                 }
                 Err(reason) => {
@@ -705,6 +816,11 @@ impl App {
                         self.answered.remove(&request);
                     }
                     self.awaiting = None;
+                    // Only the send that failed gives up its fresh start; another command's
+                    // failure (an approval reply) leaves it.
+                    if sent.is_some() && self.sent.as_ref().map(|(id, _)| id) == sent.as_ref() {
+                        self.sent = None;
+                    }
                     self.notice = Some(reason);
                 }
             },
@@ -728,6 +844,7 @@ impl App {
     /// The thread changed: clear a panel that was answered elsewhere, send the next queued message
     /// once the agent is idle.
     fn after_thread_update(&mut self) {
+        self.ring_for_update();
         crate::cmd_history::on_thread(self);
         if self.runtime_intent.as_deref() == Some(self.conv.thread.runtime_mode.as_str()) {
             self.runtime_intent = None;
@@ -749,6 +866,35 @@ impl App {
         {
             self.awaiting = Some(self.tick);
             self.send(&text);
+        }
+    }
+
+    /// `notify`: asks the notifier whether this update of the open thread is worth a bell.
+    fn ring_for_update(&mut self) {
+        let Some(id) = self.thread_id() else {
+            return;
+        };
+        let busy = self.conv.busy();
+        let pending_key = self
+            .conv
+            .pending_approvals()
+            .first()
+            .map(|p| format!("approval:{}", p.request_id))
+            .or_else(|| {
+                self.conv
+                    .pending_inputs()
+                    .first()
+                    .map(|p| format!("input:{}", p.request_id))
+            });
+        let update = crate::notify::Update {
+            thread_id: &id,
+            busy,
+            pending_key,
+            queue_goes_on: !self.queue.is_empty() && !busy,
+            notify: self.settings.notify,
+        };
+        if self.notifier.observe(&update) {
+            self.bell_pending = true;
         }
     }
 
@@ -820,8 +966,6 @@ impl App {
     fn leave_thread(&mut self) {
         crate::cmd_history::on_leave(self);
         self.notes.clear();
-        self.pinned_flow = None;
-        self.panel_scroll.set(0);
         crate::cmd_goal::drop_draft_goal(self);
         if let Active::Thread(id) = &self.active {
             self.visited.insert(id.clone(), now_ms());
@@ -830,6 +974,7 @@ impl App {
         self.modal = None;
         self.queue.clear();
         self.awaiting = None;
+        self.sent = None;
         self.model_override = None;
         self.runtime_intent = None;
         self.interaction_intent = None;
@@ -842,7 +987,8 @@ impl App {
     pub(crate) fn start_draft(&mut self, project_id: &str) {
         self.leave_thread();
         self.draft_id = None;
-        self.active = Active::Draft(project_id.to_string());
+        self.draft_crew = None;
+        self.switch_to(Active::Draft(project_id.to_string()));
         self.draft_project = Some(project_id.to_string());
         self.conv = Conversation::default();
         self.focus = Focus::Composer;
@@ -851,10 +997,53 @@ impl App {
     pub(crate) fn open_thread(&mut self, id: &str) {
         self.leave_thread();
         self.visited.insert(id.to_string(), now_ms());
-        self.active = Active::Thread(id.to_string());
+        self.switch_to(Active::Thread(id.to_string()));
         self.conv = Conversation::new(id);
         self.focus = Focus::Composer;
         self.subscribe_thread(id);
+    }
+
+    /// Makes `next` the thread on screen, and the message box goes with it: what is half-typed is
+    /// kept for the thread being left, and the one being entered gets its own back (an empty box
+    /// if it has none). With no thread on screen the box has no owner, so what is typed there
+    /// follows into whatever opens next, unless that has a draft of its own.
+    fn switch_to(&mut self, next: Active) {
+        if let Some(key) = draft_key(&self.active) {
+            match self.input.stash_draft() {
+                Some(saved) => {
+                    self.drafts.insert(key, saved);
+                }
+                None => {
+                    self.drafts.remove(&key);
+                }
+            }
+        }
+        if let Some(saved) = draft_key(&next).and_then(|key| self.drafts.remove(&key)) {
+            self.input.restore(saved);
+        }
+        self.keep_side_setting(&next);
+        self.active = next;
+    }
+
+    /// The panel's view, pin and scroll go with the thread being left, and the one being entered
+    /// gets its own back. A thread not seen before starts unpinned and unscrolled, on the view
+    /// that is up (that choice is the user's, not the thread's data).
+    fn keep_side_setting(&mut self, next: &Active) {
+        if let Some(key) = draft_key(&self.active) {
+            let setting = SideSetting {
+                view: self.side_view,
+                pinned_flow: self.pinned_flow.take(),
+                scroll: self.panel_scroll.get(),
+            };
+            self.side_settings.insert(key, setting);
+        }
+        self.pinned_flow = None;
+        self.panel_scroll.set(0);
+        if let Some(saved) = draft_key(next).and_then(|key| self.side_settings.remove(&key)) {
+            self.side_view = saved.view;
+            self.pinned_flow = saved.pinned_flow;
+            self.panel_scroll.set(saved.scroll);
+        }
     }
 
     // --- subscriptions ----------------------------------------------------------------------
@@ -1005,12 +1194,16 @@ impl App {
             return;
         };
         let tx = self.tx.clone();
+        let sent = (command["type"] == "thread.turn.start")
+            .then(|| command["message"]["messageId"].as_str().map(str::to_string))
+            .flatten();
         tokio::spawn(async move {
             let result = rpc.call(DISPATCH_RPC, command).await.map(|_| ());
             let _ = tx.send(Msg::Dispatched {
                 result,
                 open,
                 answered,
+                sent,
             });
         });
     }
@@ -1030,10 +1223,23 @@ impl App {
     }
 
     fn flip_side(&mut self) {
-        self.side_view = match self.side_view {
-            Side::Workflow => Side::Agents,
-            Side::Agents => Side::Workflow,
-        };
+        self.side_view = self.side_view.next();
+    }
+
+    /// A click on a title of the panel's tab bar shows that view.
+    fn click_side_tab(&mut self, column: u16, row: u16) {
+        let rect = self.side_rect.get();
+        // The bar is the panel's first row, inside the border on the left and a one-cell margin.
+        if row != rect.y {
+            return;
+        }
+        let offset = usize::from(column.saturating_sub(rect.x + 2));
+        if column >= rect.x + 2
+            && let Some(view) = crate::panels_common::tab_at(offset)
+        {
+            self.side_view = Side::of(view);
+            self.panel_scroll.set(0);
+        }
     }
 
     /// `/dag-workflow` and `/dag-agents`: each shows its own view; with the panel closed it opens,
@@ -1043,6 +1249,8 @@ impl App {
         let usage = match view {
             Side::Workflow => "/dag-workflow [on|off|N|next|prev|live]",
             Side::Agents => "/agents [on|off|live]",
+            Side::Savvy => "/savvy [on|off]",
+            Side::Files => "/files [on|off]",
         };
         let Some(action) = side::parse_flow_action(argument) else {
             self.notice = Some(format!("{}{usage}", s("Usage: ", "사용법: ")));
@@ -1070,17 +1278,20 @@ impl App {
                     self.panel_scroll.set(0);
                     result.err()
                 }
-                Side::Agents => matches!(
+                Side::Agents | Side::Savvy | Side::Files => matches!(
                     action,
                     side::FlowAction::Pick(_) | side::FlowAction::Next | side::FlowAction::Prev
                 )
                 .then(|| {
                     fill(
                         s(
-                            "The Agents panel shows the current turn. Pick a flow with {command} <number>.",
-                            "Agents 창은 현재 턴을 보여 줍니다. 흐름 고르기는 {command} <번호> 로 합니다.",
+                            "The {view} panel shows the current turn. Pick a flow with {command} <number>.",
+                            "{view} 창은 현재 턴을 보여 줍니다. 흐름 고르기는 {command} <번호> 로 합니다.",
                         ),
-                        &[("command", "/dag-workflow".into())],
+                        &[
+                            ("view", view.name().into()),
+                            ("command", "/dag-workflow".into()),
+                        ],
                     )
                 }),
             };
@@ -1102,6 +1313,90 @@ impl App {
 
     fn pet_now(&self) -> i64 {
         self.pet_clock.unwrap_or_else(now_ms)
+    }
+
+    /// Which tip the header shows: the tips turn over every `TIP_EVERY_MS` on the wall clock, so a
+    /// repaint is due only when this number changes.
+    pub fn tip_index(&self) -> usize {
+        let slot = usize::try_from(self.pet_now().max(0) / TIP_EVERY_MS).unwrap_or(0);
+        slot % crate::i18n::tip_count(self.in_oop_terminal)
+    }
+
+    /// The window title: the product's line, never a thread's name, with a mark in front while a
+    /// turn runs.
+    pub fn window_title(&self) -> String {
+        let mark = if self.state_key() == "state.working" {
+            format!("{} ", if self.settings.ascii { "*" } else { "◆" })
+        } else {
+            String::new()
+        };
+        format!("{mark}OOP — {}", crate::i18n::TAGLINE)
+    }
+
+    /// The provider instance the next turn runs on, from the server's config.
+    fn current_provider(&self) -> Option<&Value> {
+        let model = self.current_model()?;
+        let instance = model["instanceId"].as_str()?;
+        self.config["providers"]
+            .as_array()?
+            .iter()
+            .find(|p| p["instanceId"].as_str() == Some(instance))
+    }
+
+    /// The provider's name for the header: its display name, else its instance id.
+    pub fn provider_name(&self) -> Option<String> {
+        let model = self.current_model()?;
+        self.current_provider()
+            .and_then(|p| p["displayName"].as_str())
+            .or_else(|| model["instanceId"].as_str())
+            .map(str::to_string)
+    }
+
+    /// How the provider is signed in, from `auth` of its entry in the server's config
+    /// (`ServerProviderAuth`): never guessed, `Unknown` when the server does not say.
+    pub fn auth_kind(&self) -> AuthKind {
+        let Some(auth) = self.current_provider().map(|p| &p["auth"]) else {
+            return AuthKind::Unknown;
+        };
+        let label = auth["label"].as_str().filter(|l| !l.is_empty());
+        if auth["status"].as_str() == Some("unauthenticated") {
+            AuthKind::SignedOut
+        } else if auth["type"].as_str() == Some("apiKey") {
+            AuthKind::ApiKey
+        } else if auth["type"].as_str() == Some("chatgpt")
+            || label.is_some_and(|l| l.to_lowercase().ends_with("subscription"))
+        {
+            AuthKind::Subscription(label.map(str::to_string))
+        } else {
+            label.map_or(AuthKind::Unknown, |l| AuthKind::Other(l.to_string()))
+        }
+    }
+
+    /// The folder the open thread works in: its worktree, else its project's folder, else where
+    /// oop was started.
+    pub fn workdir(&self) -> String {
+        let project = |id: &str| {
+            self.shell
+                .projects
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.workspace_root.as_str())
+        };
+        let candidates: Vec<Option<&str>> = match &self.active {
+            Active::Thread(id) => {
+                let loaded = self.conv.thread_id == *id;
+                let shell = self.thread_shell(id);
+                vec![
+                    self.conv.thread.worktree_path.as_deref().filter(|_| loaded),
+                    shell.and_then(|t| t.worktree_path.as_deref()),
+                    shell.and_then(|t| project(&t.project_id)),
+                    project(&self.conv.thread.project_id).filter(|_| loaded),
+                ]
+            }
+            Active::Draft(project_id) => vec![project(project_id)],
+            Active::None => Vec::new(),
+        };
+        pick_folder(candidates, &self.cwd)
     }
 
     /// What the thread is doing, as far as the pet cares.
@@ -1141,8 +1436,8 @@ impl App {
         }
     }
 
-    /// The model the next message goes to, with the colour its provider gives Mocha's coffee. A
-    /// thread's model changing is a switch; opening another thread is not.
+    /// The model the next message goes to. A thread's model changing is a switch (she jumps);
+    /// opening another thread is not.
     fn pet_model(&self) -> Option<pet::Model> {
         let scope = match &self.active {
             Active::Thread(id) => id.clone(),
@@ -1152,16 +1447,9 @@ impl App {
         let selection = self.current_model()?;
         let instance = selection["instanceId"].as_str().unwrap_or_default();
         let model = selection["model"].as_str().unwrap_or_default();
-        let driver = self.config["providers"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .find(|p| p["instanceId"].as_str() == Some(instance))
-            .and_then(|p| p["driver"].as_str());
         Some(pet::Model {
             scope,
             key: format!("{instance}/{model}"),
-            tone: pet::tone_of(driver, instance, model),
         })
     }
 
@@ -1179,9 +1467,14 @@ impl App {
         }
     }
 
-    /// The colours the pet is drawn in for `state`.
-    pub fn pet_look(&self, state: pet::PetState) -> pet::Look {
-        self.pet_memory.look(state)
+    /// How far right in her strip the pet stands: she paces it while a turn runs (animations on),
+    /// `roam` being the cells the strip she is drawn in has to spare.
+    pub fn pet_offset(&self, state: pet::PetState, roam: usize) -> usize {
+        if self.settings.animations {
+            pet::offset(state, self.pet_now(), roam)
+        } else {
+            0
+        }
     }
 
     fn refresh_pet(&mut self) {
@@ -1224,6 +1517,18 @@ impl App {
     }
 
     fn on_mouse(&mut self, m: MouseEvent) {
+        self.on_mouse_at(m, std::time::Instant::now());
+    }
+
+    /// `on_mouse` with the time of the event, which a double click is told by.
+    pub(crate) fn on_mouse_at(&mut self, m: MouseEvent, now: std::time::Instant) {
+        if crate::composer::mouse(self, m, now) {
+            return;
+        }
+        if self.modal.is_some() {
+            self.on_modal_mouse(m);
+            return;
+        }
         let at =
             |r: Rect| m.column >= r.x && m.column < r.right() && m.row >= r.y && m.row < r.bottom();
         match m.kind {
@@ -1231,6 +1536,9 @@ impl App {
                 let up = m.kind == MouseEventKind::ScrollUp;
                 if let Some(screen) = self.screen.as_mut() {
                     screen.wheel(up);
+                    return;
+                }
+                if crate::replay::on_wheel(self, up) {
                     return;
                 }
                 // Over the right-hand panel the wheel moves the panel's body.
@@ -1249,6 +1557,10 @@ impl App {
                 }
             }
             MouseEventKind::Down(MouseButton::Left) => {
+                if crate::replay::on_click(self, m.column, m.row) {
+                    self.selection.press(None);
+                    return;
+                }
                 let list = self.list_hits.borrow().clone();
                 if self.list_shown() && at(list.0) {
                     self.selection.press(None);
@@ -1257,6 +1569,11 @@ impl App {
                         self.focus = Focus::List;
                         self.activate_row();
                     }
+                    return;
+                }
+                if self.side_shown() && at(self.side_rect.get()) {
+                    self.selection.press(None);
+                    self.click_side_tab(m.column, m.row);
                     return;
                 }
                 self.selection.press(self.pos_at(m.column, m.row, false));
@@ -1280,6 +1597,16 @@ impl App {
         }
     }
 
+    /// Queues `text` for the clipboard: OSC 52 and the platform's tool, as the main loop carries out.
+    pub fn copy_text(&mut self, text: String) {
+        let osc52 = clipboard::osc52(&text, self.clip_plan.tmux, clipboard::OSC52_MAX_BASE64);
+        self.copy_job = Some(CopyJob {
+            text,
+            osc52,
+            plan: self.clip_plan.clone(),
+        });
+    }
+
     /// Takes the selected text from the conversation and queues it for the clipboard.
     fn copy_selection(&mut self) {
         let Some(range) = self.selection.range() else {
@@ -1292,12 +1619,7 @@ impl App {
             self.selection.clear();
             return;
         }
-        let osc52 = clipboard::osc52(&text, self.clip_plan.tmux, clipboard::OSC52_MAX_BASE64);
-        self.copy_job = Some(CopyJob {
-            text,
-            osc52,
-            plan: self.clip_plan.clone(),
-        });
+        self.copy_text(text);
     }
 
     /// The copy the main loop has to carry out, if any.
@@ -1325,7 +1647,12 @@ impl App {
         self.selection.clear();
         self.pet_memory.touch(self.pet_now());
         if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
-            self.quit = true;
+            crate::composer::ctrl_c(self);
+            return;
+        }
+        #[cfg(unix)]
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('z')) {
+            self.suspend_requested = true;
             return;
         }
         // The side panel's two tabs: Shift-Tab flips them, and Tab too where the list is not open
@@ -1335,6 +1662,9 @@ impl App {
             && (key.code == KeyCode::BackTab || (key.code == KeyCode::Tab && !self.list_shown()))
         {
             self.flip_side();
+            return;
+        }
+        if crate::replay::on_key(self, key) {
             return;
         }
         if let Some(mut screen) = self.screen.take() {
@@ -1347,6 +1677,9 @@ impl App {
             self.on_modal_key(key);
             return;
         }
+        if self.pane_key(key) {
+            return;
+        }
         match self.focus {
             Focus::Composer if self.approval().is_some() => self.on_approval_key(key),
             Focus::Composer if self.pending_input().is_some() => self.on_question_key(key),
@@ -1355,7 +1688,7 @@ impl App {
         }
     }
 
-    fn on_paste(&mut self, text: &str) {
+    pub(crate) fn on_paste(&mut self, text: &str) {
         match &mut self.modal {
             Some(Modal::Models { filter, cursor }) => {
                 filter.push_str(&text.replace(['\n', '\r'], " "));
@@ -1376,7 +1709,11 @@ impl App {
     }
 
     fn on_composer_key(&mut self, key: KeyEvent) {
+        if crate::composer::key(self, key) {
+            return;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let sup = key.modifiers.contains(KeyModifiers::SUPER);
         let alt = key
             .modifiers
             .intersects(KeyModifiers::ALT | KeyModifiers::SHIFT);
@@ -1395,22 +1732,29 @@ impl App {
             KeyCode::Char('u') if ctrl => self.input.kill_to_start(),
             KeyCode::Char('k') if ctrl => self.input.kill_to_end(),
             KeyCode::Char('w') if ctrl => self.input.kill_word(),
-            KeyCode::Char('a') if ctrl => self.input.home(),
             KeyCode::Char('e') if ctrl => self.input.end(),
-            KeyCode::Char(ch) if !ctrl => self.input.insert(ch),
+            KeyCode::Char(ch) if !ctrl && !sup => self.input.insert(ch),
             KeyCode::Backspace => self.input.backspace(),
             KeyCode::Delete => self.input.delete(),
-            KeyCode::Left => self.input.left(),
-            KeyCode::Right => self.input.right(),
-            KeyCode::Home => self.input.home(),
-            KeyCode::End => self.input.end(),
+            KeyCode::Left => {
+                self.input.mv(Move::Left, false);
+            }
+            KeyCode::Right => {
+                self.input.mv(Move::Right, false);
+            }
+            KeyCode::Home => {
+                self.input.mv(Move::Home, false);
+            }
+            KeyCode::End => {
+                self.input.mv(Move::End, false);
+            }
             KeyCode::Up => {
-                if !self.input.up() {
+                if !self.input.mv(Move::Up, false) {
                     self.input.history_back();
                 }
             }
             KeyCode::Down => {
-                if !self.input.down() {
+                if !self.input.mv(Move::Down, false) {
                     self.input.history_forward();
                 }
             }
@@ -1456,9 +1800,7 @@ impl App {
                     }
                     _ => None,
                 };
-                if let Some(id) = project.or_else(|| self.draft_project_id()) {
-                    self.start_draft(&id);
-                }
+                self.new_thread_in(project);
             }
             KeyCode::Enter => self.activate_row(),
             _ => {}
@@ -1481,13 +1823,14 @@ impl App {
         }
     }
 
-    /// A draft in the project of the working folder, else the last one used.
-    fn new_thread(&mut self) {
-        if let Some(id) = self.draft_project_id() {
-            self.start_draft(&id);
-        } else {
-            self.notice = Some(tr("notice.pickFirst").into());
-        }
+    /// A new thread: the folder is chosen first (see `folder.rs`), the project in use leading.
+    pub(crate) fn new_thread(&mut self) {
+        self.new_thread_in(None);
+    }
+
+    /// The same, with `project` leading the list of folders where one is asked for.
+    pub(crate) fn new_thread_in(&mut self, project: Option<String>) {
+        crate::folder::open(self, project);
     }
 
     /// The project a new thread goes in: the working folder's, else the last one used, else the
@@ -1500,16 +1843,31 @@ impl App {
     }
 
     pub(crate) fn add_folder(&mut self) {
+        let cwd = self.cwd.clone();
+        self.add_project(&cwd);
+    }
+
+    /// The project already rooted at `folder`, if there is one.
+    pub(crate) fn project_in(&self, folder: &str) -> Option<String> {
+        self.shell
+            .projects
+            .iter()
+            .find(|p| same_folder(&p.workspace_root, folder))
+            .map(|p| p.id.clone())
+    }
+
+    /// Asks the server to add `folder` as a project; a draft in it opens once the list shows it.
+    pub(crate) fn add_project(&mut self, folder: &str) {
         if self.adding.is_some() {
             return;
         }
         let project_id = new_id();
-        let title = std::path::Path::new(&self.cwd)
+        let title = std::path::Path::new(folder)
             .file_name()
-            .map_or_else(|| self.cwd.clone(), |n| n.to_string_lossy().into_owned());
+            .map_or_else(|| folder.to_string(), |n| n.to_string_lossy().into_owned());
         self.adding = Some(project_id.clone());
         self.notice = Some(tr("notice.adding").into());
-        let command = commands::project_create(&Ctx::fresh(), &project_id, &title, &self.cwd);
+        let command = commands::project_create(&Ctx::fresh(), &project_id, &title, folder);
         self.dispatch(command, None, None);
     }
 
@@ -1673,18 +2031,27 @@ impl App {
             KeyCode::Esc => self.modal = None,
             KeyCode::Up => set_cursor(self, cursor.saturating_sub(1)),
             KeyCode::Down => set_cursor(self, (cursor + 1).min(count.saturating_sub(1))),
-            KeyCode::Backspace => {
-                if let Some(Modal::Models { filter, cursor }) = &mut self.modal {
+            KeyCode::Backspace => match &mut self.modal {
+                Some(Modal::Models { filter, cursor }) => {
                     filter.pop();
                     *cursor = 0;
                 }
-            }
+                Some(Modal::Pick(pick)) => crate::folder::backspace(pick),
+                _ => {}
+            },
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                if let Some(Modal::Models { filter, cursor }) = &mut self.modal {
-                    filter.push(ch);
-                    *cursor = 0;
+                match &mut self.modal {
+                    Some(Modal::Models { filter, cursor }) => {
+                        filter.push(ch);
+                        *cursor = 0;
+                    }
+                    Some(Modal::Pick(pick)) => crate::folder::type_char(pick, ch),
+                    _ => {}
                 }
             }
+            // No path typed yet: the list waits for one instead of closing.
+            KeyCode::Enter if matches!(&modal, Modal::Pick(pick) if crate::folder::waits_for_path(pick, cursor)) =>
+                {}
             KeyCode::Enter if count > 0 => {
                 self.modal = None;
                 match modal {
@@ -1702,6 +2069,36 @@ impl App {
                     }
                     Modal::Pick(pick) => crate::cmd::picked(self, &pick, cursor),
                 }
+            }
+            _ => {}
+        }
+    }
+
+    /// The mouse over an open list: a click on a row picks it, the wheel moves the pointer; the
+    /// rest does nothing, so a list is never answered by a click that was meant for what is behind it.
+    fn on_modal_mouse(&mut self, m: MouseEvent) {
+        match m.kind {
+            MouseEventKind::ScrollUp => self.on_modal_key(KeyEvent::from(KeyCode::Up)),
+            MouseEventKind::ScrollDown => self.on_modal_key(KeyEvent::from(KeyCode::Down)),
+            MouseEventKind::Down(MouseButton::Left) => {
+                let (rect, rows) = self.modal_hits.borrow().clone();
+                let inside = m.column >= rect.x
+                    && m.column < rect.right()
+                    && m.row >= rect.y
+                    && m.row < rect.bottom();
+                let Some((_, index)) = rows.iter().find(|(y, _)| inside && *y == m.row) else {
+                    return;
+                };
+                match &mut self.modal {
+                    Some(
+                        Modal::Models { cursor, .. }
+                        | Modal::Mode { cursor }
+                        | Modal::Effort { cursor },
+                    ) => *cursor = *index,
+                    Some(Modal::Pick(pick)) => pick.cursor = *index,
+                    None => return,
+                }
+                self.on_modal_key(KeyEvent::from(KeyCode::Enter));
             }
             _ => {}
         }
@@ -1781,6 +2178,7 @@ impl App {
         };
         let turn = self.conv.session().and_then(|s| s.active_turn_id.clone());
         self.notice = Some(tr("notice.stopping").into());
+        self.notifier.stop_requested(&id);
         let command = commands::turn_interrupt(&Ctx::fresh(), &id, turn.as_deref());
         self.dispatch(command, None, None);
     }
@@ -1810,14 +2208,14 @@ impl App {
             .map(|Choice { instance_id, model }| json!({"instanceId": instance_id, "model": model}))
     }
 
-    fn submit(&mut self) {
+    pub(crate) fn submit(&mut self) {
         let text = self.input.text();
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
         let word = trimmed.split_whitespace().next().unwrap_or_default();
-        if word.starts_with('/') && !word[1..].contains('/') {
+        if word.starts_with('/') && self.input.starts_with_slash() && !word[1..].contains('/') {
             let argument = trimmed[word.len()..].trim().to_string();
             if self.run_slash(&word[1..].to_lowercase(), &argument) {
                 self.input.take(true);
@@ -1915,13 +2313,12 @@ impl App {
             }
             "help" => self.notice = Some(tr("notice.help").into()),
             "sidebar" => match flag_word(argument) {
-                Some(on) => {
-                    self.settings.sidebar = on.unwrap_or(!self.settings.sidebar);
-                    if !self.list_shown() {
-                        self.focus = Focus::Composer;
-                    }
-                }
+                Some(on) => self.set_list(on),
                 None => self.notice = Some(tr("notice.sidebarUsage").into()),
+            },
+            "panel" => match flag_word(argument) {
+                Some(on) => self.set_panel(on),
+                None => self.notice = Some(tr("notice.panelToggleUsage").into()),
             },
             "pet" => match flag_word(argument) {
                 Some(on) => {
@@ -1954,6 +2351,8 @@ impl App {
             },
             "dag-workflow" | "workflow" => return self.panel_command(Side::Workflow, argument),
             "dag-agents" | "agents" => return self.panel_command(Side::Agents, argument),
+            "savvy" => return self.panel_command(Side::Savvy, argument),
+            "files" => return self.panel_command(Side::Files, argument),
             _ => return crate::cmd::run(self, name, argument),
         }
         true
@@ -1984,6 +2383,7 @@ impl App {
                     return false;
                 };
                 let thread_id = self.draft_id.take().unwrap_or_else(new_id);
+                let crew = self.draft_crew.clone();
                 let command = commands::turn_start(
                     &ctx,
                     &Turn {
@@ -1995,6 +2395,7 @@ impl App {
                         interaction_mode: &interaction_mode,
                         bootstrap: Some(Bootstrap {
                             project_id: &project_id,
+                            crew: crew.as_ref(),
                         }),
                     },
                 );
@@ -2017,18 +2418,32 @@ impl App {
         };
         self.notice = None;
         self.scroll.set(0);
+        self.sent = Some((message_id, self.tick));
         self.dispatch(command, None, None);
         true
+    }
+
+    /// A request was sent and its message has not come back yet: no work of it exists, and the
+    /// work before it is not this one's.
+    pub fn request_pending(&self) -> bool {
+        self.sent
+            .as_ref()
+            .is_some_and(|(id, _)| !self.conv.thread.messages.iter().any(|m| &m.id == id))
     }
 
     /// Advances the spinner; true when the screen changes by it.
     pub fn on_tick(&mut self) -> bool {
         self.tick = self.tick.wrapping_add(1);
         self.refresh_pet();
+        // A tip moves the screen only when the next one is another tip.
+        let tip_changed = self
+            .tip_shown
+            .get()
+            .is_some_and(|shown| shown != self.tip_index());
         // The pet moves the screen only when its picture changes.
         let pet_changed = self.settings.pet && {
             let state = self.pet_state();
-            let shown = (state, self.pet_frame(state), self.pet_look(state).tone);
+            let shown = (state, self.pet_frame(state));
             self.pet_shown.get() != Some(shown)
         };
         if self
@@ -2037,8 +2452,11 @@ impl App {
         {
             self.awaiting = None;
         }
+        let replay_moved = crate::replay::tick(self);
         pet_changed
-            || self.settings.animations && crate::side::is_live(self)
+            || tip_changed
+            || replay_moved
+            || self.settings.animations && (self.request_pending() || crate::side::is_live(self))
             || self.settings.animations
                 && (self.conv.busy()
                     || matches!(
@@ -2059,18 +2477,22 @@ impl App {
     }
 }
 
+/// The key a thread's half-typed message is kept under: its id, or `draft:` and the project for a
+/// new thread; none where there is no thread.
+fn draft_key(active: &Active) -> Option<String> {
+    match active {
+        Active::None => None,
+        Active::Draft(project) => Some(format!("draft:{project}")),
+        Active::Thread(id) => Some(id.clone()),
+    }
+}
+
 /// The word after `/sidebar`, `/pet` or `/mouse`: nothing toggles, `on` and `off` set; else `None`.
 /// Said for `off` aimed at a view that is not the one shown, which would otherwise do nothing in
 /// silence.
 fn off_elsewhere(view: Side, shown: Side) -> String {
-    let name = |side: Side| match side {
-        Side::Workflow => "Workflow",
-        Side::Agents => "Agents",
-    };
-    let command = match shown {
-        Side::Workflow => "/dag-workflow",
-        Side::Agents => "/dag-agents",
-    };
+    let name = Side::name;
+    let command = shown.command();
     fill(
         s(
             "The {view} panel is not open. The {shown} panel is open now; close it with {command}.",
@@ -2141,606 +2563,20 @@ fn same_folder(a: &str, b: &str) -> bool {
     canonical(a) == canonical(b)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::thread::Role;
-    use ratatui::crossterm::event::{KeyEventState, MouseEvent};
-    use tokio::sync::mpsc::unbounded_channel;
-
-    pub fn key_with(code: KeyCode, modifiers: KeyModifiers) -> Msg {
-        Msg::Term(Event::Key(KeyEvent {
-            code,
-            modifiers,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        }))
-    }
-
-    pub fn key(code: KeyCode) -> Msg {
-        key_with(code, KeyModifiers::NONE)
-    }
-
-    fn type_text(app: &mut App, text: &str) {
-        for ch in text.chars() {
-            app.handle(key(KeyCode::Char(ch)));
-        }
-    }
-
-    pub fn no_last_model(app: &mut App) {
-        app.last_model_path = std::env::temp_dir().join(format!(
-            "oop-rs-none-{}/last-model.json",
-            std::process::id()
-        ));
-    }
-
-    pub fn app_with_project() -> App {
-        let (tx, _rx) = unbounded_channel();
-        let mut app = App::new("0.0.0", "/tmp/oop-rs/work/demo", "/tmp", tx);
-        no_last_model(&mut app);
-        app.handle(Msg::Shell(json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
-            "projects": [{"id": "p1", "title": "demo", "workspaceRoot": "/tmp/oop-rs/work/demo"}],
-            "threads": [{"id": "t1", "projectId": "p1", "title": "안녕 스레드", "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"}]}})));
-        app
-    }
-
-    fn config() -> Value {
-        json!({"threadSnapshotPagination": true, "providers": [{"instanceId": "codex", "displayName": "Codex", "enabled": true, "installed": true,
-            "models": [
-              {"slug": "gpt-5", "name": "GPT-5", "isDefault": true, "capabilities": {"optionDescriptors": [{"id": "reasoningEffort", "type": "select", "options": [{"id": "low", "label": "Low"}, {"id": "high", "label": "High", "isDefault": true}]}]}},
-              {"slug": "gpt-5-mini", "name": "GPT-5 mini"}]}]})
-    }
-
-    fn ids(app: &App) -> Vec<String> {
-        app.rows()
-            .into_iter()
-            .map(|r| match r {
-                Row::AddFolder => "add".into(),
-                Row::Item(Nav::New { .. }) => "new".into(),
-                Row::Item(Nav::Thread(t)) => t.id,
-                Row::Item(other) => format!("{other:?}"),
-            })
-            .collect()
-    }
-
-    fn thread_event(app: &mut App, sequence: u64, kind: &str, payload: Value) {
-        app.handle(Msg::Thread {
-            id: "t1".into(),
-            item: json!({"kind": "event", "event": {"sequence": sequence, "type": kind, "occurredAt": "2026-01-01T00:00:00.000Z", "payload": payload}}),
-        });
-    }
-
-    /// An app with thread t1 open, loaded with a finished conversation.
-    fn open_thread() -> App {
-        let mut app = app_with_project();
-        app.link = LinkStatus::Online;
-        app.config = config();
-        app.handle(key(KeyCode::Tab));
-        app.handle(key(KeyCode::Down));
-        app.handle(key(KeyCode::Enter));
-        app.handle(Msg::Thread {
-            id: "t1".into(),
-            item: json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 5, "page": {"hasMore": true, "beforeCursor": "c1"}, "thread": {
-                "id": "t1", "title": "안녕 스레드", "runtimeMode": "approval-required", "interactionMode": "default",
-                "modelSelection": {"instanceId": "codex", "model": "gpt-5"}, "messages": [
-                {"id": "u1", "role": "user", "text": "hi", "streaming": false, "createdAt": "2026-01-01T00:00:01.000Z"}]}}}),
-        });
-        app
-    }
-
-    #[tokio::test]
-    async fn the_working_folder_project_opens_a_draft_and_lists_its_threads() {
-        let app = app_with_project();
-        assert_eq!(app.active, Active::Draft("p1".into()));
-        assert_eq!(app.focus, Focus::Composer);
-        assert_eq!(ids(&app), vec!["new", "t1"]);
-    }
-
-    #[tokio::test]
-    async fn a_folder_that_is_not_a_project_offers_to_add_it() {
-        let (tx, _rx) = unbounded_channel();
-        let mut app = App::new("0.0.0", "/tmp/oop-rs/elsewhere", "/tmp", tx);
-        app.handle(Msg::Shell(json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1, "projects": [], "threads": []}})));
-        assert_eq!(ids(&app), vec!["add", "new"]);
-        assert_eq!(app.active, Active::None);
-        app.handle(key(KeyCode::Tab));
-        app.focus = Focus::List;
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.log[0]["type"], "project.create");
-    }
-
-    #[tokio::test]
-    async fn sending_without_a_provider_says_so_instead_of_dispatching() {
-        let mut app = app_with_project();
-        type_text(&mut app, "hello");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.notice.as_deref(), Some(tr("notice.noProvider")));
-        assert_eq!(
-            app.input.text(),
-            "hello",
-            "the text stays so it can be sent after fixing the cause"
-        );
-        assert!(app.log.is_empty());
-    }
-
-    #[tokio::test]
-    async fn the_first_message_starts_a_thread_on_the_default_model_and_is_remembered() {
-        let mut app = app_with_project();
-        app.config = config();
-        type_text(&mut app, "build it");
-        app.handle(key(KeyCode::Enter));
-        let command = &app.log[0];
-        assert_eq!(command["type"], "thread.turn.start");
-        assert_eq!(
-            command["modelSelection"],
-            json!({"instanceId": "codex", "model": "gpt-5"})
-        );
-        assert_eq!(command["bootstrap"]["createThread"]["projectId"], "p1");
-        assert!(app.input.is_empty());
-        app.handle(key(KeyCode::Up));
-        assert_eq!(app.input.text(), "build it", "Up recalls what was sent");
-    }
-
-    #[tokio::test]
-    async fn the_composer_edits_wide_characters_and_several_lines() {
-        let mut app = app_with_project();
-        type_text(&mut app, "안녕x");
-        app.handle(key(KeyCode::Left));
-        app.handle(key(KeyCode::Backspace));
-        assert_eq!(app.input.text(), "안x");
-        app.handle(key(KeyCode::End));
-        app.handle(key_with(KeyCode::Char('j'), KeyModifiers::CONTROL));
-        type_text(&mut app, "둘째");
-        app.handle(key_with(KeyCode::Enter, KeyModifiers::ALT));
-        assert_eq!(app.input.text(), "안x\n둘째\n");
-        app.handle(Msg::Term(Event::Paste("a\r\nb".into())));
-        assert_eq!(app.input.text(), "안x\n둘째\na\nb");
-    }
-
-    #[tokio::test]
-    async fn tab_moves_between_list_and_composer_and_enter_opens_a_thread() {
-        let mut app = app_with_project();
-        app.handle(key(KeyCode::Tab));
-        assert_eq!(app.focus, Focus::List);
-        app.handle(key(KeyCode::Down));
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.active, Active::Thread("t1".into()));
-        assert_eq!(app.focus, Focus::Composer);
-    }
-
-    #[tokio::test]
-    async fn slash_exit_quits_and_unknown_commands_keep_the_text() {
-        let mut app = app_with_project();
-        type_text(&mut app, "/foo");
-        app.handle(key(KeyCode::Enter));
-        assert!(!app.quit && app.notice.is_some());
-        assert_eq!(app.input.text(), "/foo");
-        app.input.take(false);
-        type_text(&mut app, "/exit");
-        app.handle(key(KeyCode::Enter));
-        assert!(app.quit);
-    }
-
-    #[tokio::test]
-    async fn a_path_is_a_message_not_a_command() {
-        let mut app = app_with_project();
-        app.config = config();
-        type_text(&mut app, "/Users/x/file.rs is broken");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.log[0]["type"], "thread.turn.start");
-    }
-
-    #[tokio::test]
-    async fn esc_stops_a_running_turn_and_enter_queues_until_it_ends() {
-        let mut app = open_thread();
-        thread_event(
-            &mut app,
-            6,
-            "thread.session-set",
-            json!({"session": {"status": "running", "activeTurnId": "turn-9", "updatedAt": "x"}}),
-        );
-        assert!(app.conv.busy());
-        app.handle(key(KeyCode::Esc));
-        assert_eq!(app.log.last().unwrap()["type"], "thread.turn.interrupt");
-        assert_eq!(app.log.last().unwrap()["turnId"], "turn-9");
-        assert_eq!(app.focus, Focus::Composer);
-
-        type_text(&mut app, "next one");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.queue.len(), 1);
-        assert_eq!(app.log.len(), 1, "nothing is sent while the turn runs");
-        thread_event(
-            &mut app,
-            7,
-            "thread.session-set",
-            json!({"session": {"status": "ready", "updatedAt": "y"}}),
-        );
-        assert!(app.queue.is_empty());
-        let sent = app.log.last().unwrap();
-        assert_eq!(
-            (sent["type"].as_str(), sent["message"]["text"].as_str()),
-            (Some("thread.turn.start"), Some("next one"))
-        );
-        assert_eq!(
-            sent["runtimeMode"], "approval-required",
-            "an open thread keeps its own mode"
-        );
-    }
-
-    #[tokio::test]
-    async fn an_approval_takes_the_keys_and_answers_once() {
-        let mut app = open_thread();
-        thread_event(
-            &mut app,
-            6,
-            "thread.activity-appended",
-            json!({"activity": {"id": "a", "tone": "approval", "kind": "approval.requested", "summary": "s",
-            "payload": {"requestId": "r1", "requestKind": "command", "detail": "rm -rf build"}, "createdAt": "2026-01-01T00:00:02.000Z"}}),
-        );
-        assert_eq!(app.state_key(), "state.waiting");
-        type_text(&mut app, "x");
-        assert!(
-            app.input.is_empty(),
-            "typing does not leak into the composer"
-        );
-        app.handle(key(KeyCode::Down));
-        app.handle(key(KeyCode::Enter));
-        let command = app.log.last().unwrap();
-        assert_eq!(command["type"], "thread.approval.respond");
-        assert_eq!(
-            (command["requestId"].as_str(), command["decision"].as_str()),
-            (Some("r1"), Some("acceptForSession"))
-        );
-        // No server in this test: the answer cannot go out, so the panel stays for a retry.
-        assert_eq!(app.notice.as_deref(), Some(tr("notice.offline")));
-        assert!(app.approval().is_some());
-        // Once an answer is on its way the panel is gone, so a second Enter cannot repeat it.
-        app.answered.insert("r1".into());
-        assert!(app.approval().is_none());
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.log.len(), 1, "a second Enter does not answer again");
-    }
-
-    #[tokio::test]
-    async fn a_question_collects_its_answers_and_sends_them_together() {
-        let mut app = open_thread();
-        thread_event(
-            &mut app,
-            6,
-            "thread.activity-appended",
-            json!({"activity": {"id": "q", "tone": "info", "kind": "user-input.requested", "summary": "s",
-            "payload": {"requestId": "r2", "questions": [
-                {"id": "color", "header": "C", "question": "Which?", "options": [{"label": "red", "description": ""}, {"label": "blue", "description": ""}]},
-                {"id": "tags", "header": "T", "question": "Tags?", "multiSelect": true, "options": [{"label": "a", "description": ""}, {"label": "b", "description": ""}]}]},
-            "createdAt": "2026-01-01T00:00:02.000Z"}}),
-        );
-        app.handle(key(KeyCode::Down));
-        app.handle(key(KeyCode::Enter));
-        assert!(app.log.is_empty(), "the second question is still open");
-        app.handle(key(KeyCode::Char(' ')));
-        app.handle(key(KeyCode::Down));
-        app.handle(key(KeyCode::Char(' ')));
-        app.handle(key(KeyCode::Enter));
-        let command = app.log.last().unwrap();
-        assert_eq!(command["type"], "thread.user-input.respond");
-        assert_eq!(
-            command["answers"],
-            json!({"color": "blue", "tags": ["a", "b"]})
-        );
-    }
-
-    #[tokio::test]
-    async fn model_mode_and_effort_pickers_change_the_next_turn() {
-        let mut app = open_thread();
-        let path =
-            std::env::temp_dir().join(format!("oop-rs-app-{}/last-model.json", std::process::id()));
-        app.last_model_path = path.clone();
-        type_text(&mut app, "/model mini");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(
-            app.model_display(),
-            "codex/gpt-5-mini",
-            "one match is picked outright"
-        );
-        assert_eq!(
-            settings::read_last_model(&path).unwrap()["model"],
-            "gpt-5-mini"
-        );
-        type_text(&mut app, "/model");
-        app.handle(key(KeyCode::Enter));
-        assert!(matches!(app.modal, Some(Modal::Models { .. })));
-        app.handle(key(KeyCode::Esc));
-        type_text(&mut app, "/mode full");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.log.last().unwrap()["runtimeMode"], "full-access");
-        app.handle(key(KeyCode::Char('x')));
-        app.input.take(false);
-        app.model_override = None;
-        type_text(&mut app, "/effort low");
-        app.handle(key(KeyCode::Enter));
-        type_text(&mut app, "go");
-        app.handle(key(KeyCode::Enter));
-        let sent = app.log.last().unwrap();
-        assert_eq!(
-            sent["modelSelection"]["options"],
-            json!([{"id": "reasoningEffort", "value": "low"}])
-        );
-        let _ = std::fs::remove_file(&path);
-        let _ = std::fs::remove_dir(path.parent().unwrap());
-    }
-
-    #[tokio::test]
-    async fn plan_mode_is_sent_with_the_next_turn_of_a_draft() {
-        let mut app = app_with_project();
-        app.config = config();
-        type_text(&mut app, "/plan");
-        app.handle(key(KeyCode::Enter));
-        type_text(&mut app, "design it");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.log[0]["interactionMode"], "plan");
-    }
-
-    #[tokio::test]
-    async fn scrolling_up_to_the_top_asks_for_older_turns_once() {
-        let mut app = open_thread();
-        app.scroll_max.set(5);
-        app.scroll_up(3);
-        assert_eq!(app.scroll.get(), 3);
-        assert!(!app.conv.loading_older);
-        // No server is connected in this test, so the request is only recorded as not possible.
-        app.origin = Some("http://127.0.0.1:1".into());
-        app.bearer = Some("b".into());
-        app.scroll_up(3);
-        assert!(app.conv.loading_older, "the top was reached");
-        app.scroll_up(3);
-        app.handle(Msg::Older {
-            id: "t1".into(),
-            result: Ok(json!({"snapshotSequence": 4, "page": {"hasMore": false, "beforeCursor": null}, "thread": {"messages": [
-                {"id": "u0", "role": "user", "text": "earlier", "streaming": false, "createdAt": "2026-01-01T00:00:00.000Z"}]}})),
-        });
-        assert_eq!(app.conv.thread.messages[0].id, "u0");
-        assert!(!app.conv.has_more && !app.conv.loading_older);
-        app.handle(Msg::Term(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::ScrollDown,
-            column: 0,
-            row: 0,
-            modifiers: KeyModifiers::NONE,
-        })));
-        assert_eq!(app.scroll.get(), 6, "the wheel moves three lines");
-    }
-
-    #[tokio::test]
-    async fn the_list_skips_headers_and_toggles_shelves() {
-        let mut app = app_with_project();
-        app.handle(Msg::Shell(json!({"kind": "thread-upserted", "sequence": 2, "thread": {"id": "t2", "projectId": "p1", "title": "old", "settledOverride": "settled", "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"}})));
-        app.handle(key(KeyCode::Tab));
-        app.handle(key(KeyCode::Down));
-        app.handle(key(KeyCode::Down));
-        assert!(matches!(
-            app.rows()[app.selected],
-            Row::Item(Nav::Shelf { .. })
-        ));
-        app.handle(key(KeyCode::Enter));
-        assert!(app.view.settled_open);
-        assert!(ids(&app).contains(&"t2".to_string()));
-    }
-
-    /// The whole path of a streamed reply with a fake server standing in for the provider: the
-    /// server sends a thread snapshot and then deltas, each only after the previous chunk is
-    /// acknowledged (as the real one does). The assistant text must grow chunk by chunk and the
-    /// final screen must show it, with the user's message right-aligned above it.
-    #[tokio::test]
-    async fn a_streamed_reply_grows_on_screen_chunk_by_chunk() {
-        use futures_util::{SinkExt, StreamExt};
-        use tokio_tungstenite::tungstenite::Message;
-
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        tokio::spawn(async move {
-            let (tcp, _) = listener.accept().await.unwrap();
-            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
-            let chunk = |id: &Value, item: Value| {
-                Message::text(
-                    json!({"_tag": "Chunk", "requestId": id, "values": [item]}).to_string(),
-                )
-            };
-            let message = |seq: u64, text: &str, streaming: bool| {
-                json!({"kind": "event", "event": {"sequence": seq, "type": "thread.message-sent", "payload": {
-                    "messageId": "a1", "role": "assistant", "text": text, "streaming": streaming, "createdAt": "2026-01-01T00:00:02.000Z"}}})
-            };
-            let mut queue = vec![
-                message(4, "안", true),
-                message(5, "녕", true),
-                message(6, "하세요", true),
-                message(7, "안녕하세요", false),
-            ];
-            queue.reverse();
-            let mut thread_request = Value::Null;
-            while let Some(Ok(Message::Text(text))) = ws.next().await {
-                let m: Value = serde_json::from_str(text.as_str()).unwrap();
-                match m["_tag"].as_str() {
-                    Some("Request") if m["tag"] == SHELL_RPC => {
-                        let snapshot = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
-                            "projects": [{"id": "p1", "title": "demo", "workspaceRoot": "/tmp/oop-rs/work/demo"}],
-                            "threads": [{"id": "t1", "projectId": "p1", "title": "stream", "updatedAt": "z"}]}});
-                        ws.send(chunk(&m["id"], snapshot)).await.unwrap();
-                    }
-                    Some("Request") if m["tag"] == THREAD_RPC => {
-                        thread_request = m["id"].clone();
-                        let snapshot = json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 3, "thread": {"title": "stream",
-                            "messages": [{"id": "u1", "role": "user", "text": "안녕?", "streaming": false, "createdAt": "2026-01-01T00:00:01.000Z"}]}}});
-                        ws.send(chunk(&thread_request, snapshot)).await.unwrap();
-                    }
-                    Some("Ack") if m["requestId"] == thread_request => {
-                        if let Some(next) = queue.pop() {
-                            ws.send(chunk(&thread_request, next)).await.unwrap();
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        });
-
-        let (tx, mut rx) = unbounded_channel();
-        let mut app = App::new("0.0.0", "/tmp/oop-rs/work/demo", "/tmp", tx);
-        no_last_model(&mut app);
-        let rpc = Rpc::connect(&format!("ws://127.0.0.1:{port}/ws"))
-            .await
-            .unwrap();
-        app.handle(Msg::Connected {
-            rpc,
-            config: json!({}),
-            server: "fake".into(),
-            origin: String::new(),
-            bearer: String::new(),
-        });
-        let mut next = async |app: &mut App| {
-            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-                .await
-                .expect("a message in time")
-                .unwrap();
-            app.handle(msg);
-        };
-        while !app.shell.loaded {
-            next(&mut app).await;
-        }
-        // Tab to the list, down to the thread, Enter: open it.
-        for code in [KeyCode::Tab, KeyCode::Down, KeyCode::Enter] {
-            app.handle(key(code));
-        }
-        let mut seen = Vec::new();
-        loop {
-            next(&mut app).await;
-            if let Some(m) = app.conv.thread.messages.last()
-                && m.role == Role::Assistant
-            {
-                if seen.last() != Some(&m.text) {
-                    seen.push(m.text.clone());
-                }
-                if !m.streaming && m.text == "안녕하세요" {
-                    break;
-                }
-            }
-        }
-        assert_eq!(
-            seen,
-            vec!["안", "안녕", "안녕하세요"],
-            "the reply grew a chunk at a time, then settled"
-        );
-        assert!(!app.conv.busy());
-        let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| crate::ui::draw(f, &app)).unwrap();
-        // A wide character's second cell is blank in the buffer, so compare without spaces.
-        let text: String = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|c| c.symbol())
-            .collect();
-        let text = text.replace(' ', "");
-        assert!(text.contains("안녕하세요") && text.contains("안녕?"));
-    }
-
-    #[tokio::test]
-    async fn a_picked_mode_shows_at_once_and_yields_to_the_server_value() {
-        let mut app = open_thread();
-        assert_eq!(app.runtime_mode(), "approval-required");
-        app.set_runtime_mode("auto");
-        assert_eq!(
-            app.runtime_mode(),
-            "auto",
-            "shown before the server echoes it"
-        );
-        assert_eq!(app.log.last().unwrap()["type"], "thread.runtime-mode.set");
-        thread_event(
-            &mut app,
-            9,
-            "thread.runtime-mode-set",
-            json!({"runtimeMode": "auto", "updatedAt": "2026-01-01T00:00:09.000Z"}),
-        );
-        assert!(app.runtime_intent.is_none(), "the server caught up");
-        assert_eq!(app.runtime_mode(), "auto");
-        app.set_interaction_mode("plan");
-        assert_eq!(app.interaction_mode(), "plan");
-    }
-
-    #[tokio::test]
-    async fn the_panel_commands_pick_flows_and_say_why_not() {
-        crate::i18n::init(Some("en"));
-        let mut app = open_thread();
-        app.side_open = false;
-        type_text(&mut app, "/dag-workflow x");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(
-            app.notice.as_deref(),
-            Some("Usage: /dag-workflow [on|off|N|next|prev|live]")
-        );
-        app.input.take(true);
-        type_text(&mut app, "/dag-workflow 2");
-        app.handle(key(KeyCode::Enter));
-        assert_eq!(app.notice.as_deref(), Some("There is no flow to pick."));
-        assert!(!app.side_open, "a refused pick opens nothing");
-        app.input.take(true);
-        type_text(&mut app, "/dag-workflow live");
-        app.handle(key(KeyCode::Enter));
-        assert!(app.side_open && app.side_view == Side::Workflow);
-        type_text(&mut app, "/dag-agents 1");
-        app.handle(key(KeyCode::Enter));
-        assert!(
-            app.notice
-                .as_deref()
-                .is_some_and(|n| n.starts_with("The Agents panel shows the current turn")),
-            "{:?}",
-            app.notice
-        );
-        app.input.take(true);
-        type_text(&mut app, "/dag-agents");
-        app.handle(key(KeyCode::Enter));
-        assert!(
-            app.side_open && app.side_view == Side::Agents,
-            "switches without closing"
-        );
-        app.input.take(true);
-        type_text(&mut app, "/dag-workflow off");
-        app.handle(key(KeyCode::Enter));
-        assert!(
-            app.side_open,
-            "off for the view that is not shown closes nothing"
-        );
-        assert!(
-            app.notice
-                .as_deref()
-                .is_some_and(|n| n.contains("close it with /dag-agents"))
-        );
-    }
-
-    #[tokio::test]
-    async fn the_wheel_over_the_panel_moves_the_panel_and_elsewhere_the_conversation() {
-        let mut app = open_thread();
-        app.side_open = true;
-        app.side_rect.set(Rect::new(100, 5, 40, 20));
-        let wheel = |column: u16, kind: MouseEventKind| {
-            Msg::Term(Event::Mouse(MouseEvent {
-                kind,
-                column,
-                row: 10,
-                modifiers: KeyModifiers::NONE,
-            }))
-        };
-        app.handle(wheel(110, MouseEventKind::ScrollDown));
-        assert_eq!(app.panel_scroll.get(), WHEEL_LINES as i32);
-        app.handle(wheel(110, MouseEventKind::ScrollUp));
-        app.handle(wheel(110, MouseEventKind::ScrollUp));
-        assert_eq!(app.panel_scroll.get(), -(WHEEL_LINES as i32));
-        assert_eq!(app.scroll.get(), 0, "the conversation did not move");
-        app.handle(wheel(20, MouseEventKind::ScrollUp));
-        assert_eq!(
-            app.scroll.get(),
-            WHEEL_LINES,
-            "left of the panel it is the conversation's"
-        );
-        assert_eq!(app.panel_scroll.get(), -(WHEEL_LINES as i32));
-    }
+/// The first candidate that names a folder (blank ones are skipped, so an empty worktree does not
+/// hide the project's folder), else `cwd`.
+pub(crate) fn pick_folder<'a>(
+    candidates: impl IntoIterator<Item = Option<&'a str>>,
+    cwd: &str,
+) -> String {
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|p| !p.trim().is_empty())
+        .unwrap_or(cwd)
+        .to_string()
 }
+
+#[cfg(test)]
+#[path = "app_tests.rs"]
+mod tests;

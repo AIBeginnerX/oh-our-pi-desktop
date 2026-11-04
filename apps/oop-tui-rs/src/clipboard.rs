@@ -1,9 +1,14 @@
-//! Putting text on the clipboard, as the TypeScript terminal does (apps/oop-tui/src/clipboard):
+//! Putting text on the clipboard, as the former TypeScript terminal did:
 //! OSC 52 always, which the terminal turns into a copy on the machine it runs on, and for a session
 //! on this computer also the platform's tool: pbcopy on macOS; wl-copy, xclip and xsel on Linux, the
 //! one for the running display server first; clip.exe on Windows and in WSL. Over SSH only OSC 52, as
 //! a tool would fill the remote machine's clipboard. A tool is run with no shell: its command and
 //! arguments are fixed and the text only ever travels on its standard input.
+//!
+//! Reading goes the other way and only ever happens for an explicit paste (Ctrl-V, Cmd-V): pbpaste
+//! on macOS; wl-paste, xclip and xsel on Linux; PowerShell's Get-Clipboard on Windows and in WSL.
+//! Over SSH there is no tool, since it would read the remote machine's clipboard; the terminal's own
+//! paste (bracketed paste) is what works there.
 
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -89,6 +94,48 @@ pub fn plan(env: impl Fn(&str) -> Option<String>, platform: Platform) -> Plan {
         }
     };
     Plan { tmux, tools }
+}
+
+/// The tools that print the system clipboard on their standard output, tried in order; none over SSH.
+pub fn read_plan(env: impl Fn(&str) -> Option<String>, platform: Platform) -> Vec<Tool> {
+    let set = |name: &str| env(name).is_some_and(|v| !v.is_empty());
+    if ["SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"]
+        .iter()
+        .any(|n| set(n))
+    {
+        return vec![];
+    }
+    let powershell = || {
+        tool(
+            "powershell.exe",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-Clipboard -Raw",
+            ],
+            false,
+        )
+    };
+    match platform {
+        Platform::Mac => vec![tool("pbpaste", &[], false)],
+        Platform::Windows => vec![powershell()],
+        Platform::Other => {
+            let xclip = tool("xclip", &["-selection", "clipboard", "-o"], false);
+            let xsel = tool("xsel", &["--clipboard", "--output"], false);
+            let wl = tool("wl-paste", &["--no-newline"], false);
+            let x11_first = !set("WAYLAND_DISPLAY") && set("DISPLAY");
+            let mut linux = if x11_first {
+                vec![xclip, xsel, wl]
+            } else {
+                vec![wl, xclip, xsel]
+            };
+            if set("WSL_DISTRO_NAME") {
+                linux.push(powershell());
+            }
+            linux
+        }
+    }
 }
 
 fn base64(bytes: &[u8]) -> String {
@@ -183,6 +230,52 @@ pub async fn run_tool(tool: &Tool, text: &str, timeout: Duration) -> Result<(), 
     }
 }
 
+/// Most bytes taken from a clipboard tool: a paste is text, and the composer folds a long one.
+const READ_MAX: usize = 8 * 1024 * 1024;
+
+/// Runs a tool and returns what it printed. It never panics and never waits past the timeout.
+pub async fn read_tool(tool: &Tool, timeout: Duration) -> Result<String, Why> {
+    let child = Command::new(&tool.command)
+        .args(&tool.args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Why::Missing
+            } else {
+                Why::Failed
+            }
+        })?;
+    match tokio::time::timeout(timeout, child.wait_with_output()).await {
+        Ok(Ok(out)) if out.status.success() => {
+            let bytes = &out.stdout[..out.stdout.len().min(READ_MAX)];
+            Ok(String::from_utf8_lossy(bytes).into_owned())
+        }
+        Ok(_) => Err(Why::Failed),
+        Err(_) => Err(Why::Timeout),
+    }
+}
+
+/// Reads with the first tool that works; the last real failure is what gets reported, and a
+/// machine with no tool at all reports `Missing`.
+pub async fn read_tools(tools: &[Tool], timeout: Duration) -> Result<String, Why> {
+    let mut last = Why::Missing;
+    for candidate in tools {
+        match read_tool(candidate, timeout).await {
+            Ok(text) => return Ok(text),
+            Err(why) => {
+                if why != Why::Missing || last == Why::Missing {
+                    last = why;
+                }
+            }
+        }
+    }
+    Err(last)
+}
+
 /// How a copy went.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Outcome {
@@ -266,6 +359,83 @@ mod tests {
         let wsl = plan(env(&[("WSL_DISTRO_NAME", "u")]), Platform::Other);
         assert_eq!(wsl.tools.last().unwrap().command, "clip.exe");
         assert!(plan(env(&[]), Platform::Windows).tools[0].utf16);
+    }
+
+    #[test]
+    fn reading_has_a_tool_per_platform_and_none_over_ssh() {
+        assert_eq!(
+            read_plan(env(&[]), Platform::Mac),
+            vec![tool("pbpaste", &[], false)]
+        );
+        assert!(read_plan(env(&[("SSH_TTY", "/dev/pts/1")]), Platform::Mac).is_empty());
+        let wl = read_plan(
+            env(&[("WAYLAND_DISPLAY", "w"), ("DISPLAY", ":0")]),
+            Platform::Other,
+        );
+        assert_eq!(wl[0].command, "wl-paste");
+        let x11 = read_plan(env(&[("DISPLAY", ":0")]), Platform::Other);
+        assert_eq!(x11[0].command, "xclip");
+        assert!(x11[0].args.contains(&"-o".to_string()));
+        let wsl = read_plan(env(&[("WSL_DISTRO_NAME", "u")]), Platform::Other);
+        assert_eq!(wsl.last().unwrap().command, "powershell.exe");
+        assert_eq!(
+            read_plan(env(&[]), Platform::Windows)[0].command,
+            "powershell.exe"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_read_tool_prints_text_and_a_missing_or_failing_one_is_told_apart() {
+        let dir = std::env::temp_dir().join(format!("oop-rs-clip-read-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-paste.sh");
+        std::fs::write(&script, "#!/bin/sh\nprintf '안녕 $(x)\\n둘째'\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let fake = Tool {
+            command: script.to_string_lossy().into_owned(),
+            args: vec![],
+            utf16: false,
+        };
+        let missing = Tool {
+            command: "/nonexistent/oop-paste".into(),
+            args: vec![],
+            utf16: false,
+        };
+        assert_eq!(
+            read_tool(&fake, TOOL_TIMEOUT).await.unwrap(),
+            "안녕 $(x)\n둘째"
+        );
+        assert_eq!(
+            read_tools(&[missing.clone(), fake], TOOL_TIMEOUT)
+                .await
+                .unwrap(),
+            "안녕 $(x)\n둘째"
+        );
+        assert_eq!(
+            read_tools(&[missing], TOOL_TIMEOUT).await,
+            Err(Why::Missing)
+        );
+        assert_eq!(read_tools(&[], TOOL_TIMEOUT).await, Err(Why::Missing));
+        let failing = Tool {
+            command: "false".into(),
+            args: vec![],
+            utf16: false,
+        };
+        assert_eq!(read_tool(&failing, TOOL_TIMEOUT).await, Err(Why::Failed));
+        let sleeper = Tool {
+            command: "sleep".into(),
+            args: vec!["5".into()],
+            utf16: false,
+        };
+        assert_eq!(
+            read_tool(&sleeper, Duration::from_millis(100)).await,
+            Err(Why::Timeout)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

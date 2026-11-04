@@ -17,6 +17,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { Tool } from "effect/unstable/ai";
 
 import {
+  ProjectMemorySendGate,
   ProjectMemorySendPolicy,
   layer as sendGateLayer,
 } from "../../../memory/ProjectMemorySendGate.ts";
@@ -138,6 +139,14 @@ const makeHarness = Effect.fn("makeMemoryToolkitHarness")(function* (
     )
     VALUES (${PROJECT_ID}, 'Project', '/tmp/project', '[]', ${NOW}, ${NOW}, NULL)
   `;
+  yield* sql`
+    INSERT INTO projection_threads (
+      thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
+      created_at, updated_at, deleted_at
+    )
+    VALUES (${THREAD_ID}, ${PROJECT_ID}, 'Thread', '{}', 'full-access', 'default', ${NOW}, ${NOW}, NULL)
+  `;
+  const sendGate = yield* ProjectMemorySendGate.pipe(Effect.provide(context));
   // TestClock starts at the epoch; recall judges expiry against the clock.
   yield* TestClock.setTime(Date.parse(NOW));
 
@@ -167,7 +176,7 @@ const makeHarness = Effect.fn("makeMemoryToolkitHarness")(function* (
       body,
       ...(validUntil === undefined ? {} : { validUntil }),
     });
-  return { call, memories, save };
+  return { call, memories, save, gate: sendGate, sql };
 });
 
 describe("memory toolkit handlers", () => {
@@ -281,6 +290,139 @@ describe("memory toolkit handlers", () => {
       expect(error).toMatchObject({ _tag: "ProjectMemoryRejectedError", reason: "sensitive" });
       expect(error.message).not.toContain("sk_");
       expect((yield* harness.memories.listProposals({ projectId: PROJECT_ID })).items).toEqual([]);
+    }),
+  );
+
+  it.effect("ledgers recalled memories against the thread, id and version, and taints it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const saved = yield* harness.save("Deploy runbook", "deploy with the blue script");
+      yield* harness.save("Other", "unrelated body");
+
+      const recalled = yield* harness.call("memory_recall", { query: "deploy" });
+      expect(recalled.memories.map((memory) => memory.title)).toEqual(["Deploy runbook"]);
+
+      const attempts = yield* harness.sql<{
+        readonly memoryId: string;
+        readonly version: number;
+        readonly threadId: string;
+        readonly state: string;
+      }>`
+        SELECT i.memory_id AS "memoryId", i.memory_version AS "version",
+          a.thread_id AS "threadId", a.state
+        FROM project_memory_send_items i
+        JOIN project_memory_send_attempts a ON a.attempt_seq = i.attempt_seq
+      `;
+      expect(attempts).toEqual([
+        {
+          memoryId: saved.memory.memoryId,
+          version: saved.memory.version,
+          threadId: THREAD_ID,
+          state: "external_send_unknown",
+        },
+      ]);
+
+      // A recall that finds nothing records nothing.
+      yield* harness.call("memory_recall", { query: "nonexistentterm" });
+      const count = yield* harness.sql<{ readonly n: number }>`
+        SELECT COUNT(*) AS n FROM project_memory_send_attempts
+      `;
+      expect(count[0]?.n).toBe(1);
+    }),
+  );
+
+  it.effect("holds a thread that recalled a memory once that memory is edited or deleted", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const edited = yield* harness.save("Deploy runbook", "deploy with the blue script");
+      const removed = yield* harness.save("Deploy rollback", "deploy rollback uses the old tag");
+
+      expect(Option.isNone(yield* harness.gate.threadHold(THREAD_ID))).toBe(true);
+      yield* harness.call("memory_recall", { query: "deploy" });
+      expect(Option.isNone(yield* harness.gate.threadHold(THREAD_ID))).toBe(true);
+
+      yield* harness.memories.update({
+        projectId: PROJECT_ID,
+        memoryId: edited.memory.memoryId,
+        expectedVersion: edited.memory.version,
+        body: "deploy with the green script",
+      });
+      expect(yield* harness.gate.threadHold(THREAD_ID)).toEqual(Option.some("affected"));
+
+      yield* harness.memories.delete({
+        projectId: PROJECT_ID,
+        memoryId: removed.memory.memoryId,
+        expectedVersion: removed.memory.version,
+      });
+      const state = yield* harness.sql<{ readonly reason: string }>`
+        SELECT reason FROM project_memory_affected ORDER BY change_seq
+      `;
+      expect(state.map((row) => row.reason)).toEqual(["updated", "deleted"]);
+    }),
+  );
+
+  it.effect("refuses to return memory to a held thread", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      const edited = yield* harness.save("Deploy runbook", "deploy with the blue script");
+      yield* harness.save("Deploy rollback", "deploy rollback uses the old tag");
+      yield* harness.call("memory_recall", { query: "deploy" });
+      yield* harness.memories.update({
+        projectId: PROJECT_ID,
+        memoryId: edited.memory.memoryId,
+        expectedVersion: edited.memory.version,
+        body: "deploy with the green script",
+      });
+
+      const before = yield* harness.sql<{ readonly n: number }>`
+        SELECT COUNT(*) AS n FROM project_memory_send_attempts
+      `;
+      const error = yield* harness.call("memory_recall", { query: "deploy" }).pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "ProjectMemoryStoreError" });
+      expect(error.message).toContain("paused for this thread");
+      const after = yield* harness.sql<{ readonly n: number }>`
+        SELECT COUNT(*) AS n FROM project_memory_send_attempts
+      `;
+      expect(after[0]?.n).toBe(before[0]?.n);
+    }),
+  );
+
+  it.effect("fails closed with a storage message when the hold check cannot be read", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      yield* harness.save("Deploy runbook", "deploy with the blue script");
+      yield* harness.sql`DROP TABLE project_memory_affected`;
+      const error = yield* harness.call("memory_recall", { query: "deploy" }).pipe(Effect.flip);
+      expect(error).toMatchObject({ _tag: "ProjectMemoryStoreError" });
+      expect(error.message).toContain("could not be checked");
+      expect(error.message).not.toContain("paused");
+    }),
+  );
+
+  it.effect("returns nothing for queries that only match words most memories contain", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness();
+      yield* harness.save("Deploy runbook", "Run the blue script to deploy the app");
+      yield* harness.save("Branch naming", "Name the branch after the ticket");
+      yield* harness.save("Lint", "Run the linter before the commit");
+      for (const query of ["a", "the fix", "이"]) {
+        const result = yield* harness.call("memory_recall", { query });
+        expect(result).toMatchObject({ memories: [] });
+      }
+      const hit = yield* harness.call("memory_recall", { query: "the deploy" });
+      expect(hit).toMatchObject({ memories: [{ title: "Deploy runbook" }] });
+    }),
+  );
+
+  it.effect("records nothing when the provider driver is not allowed", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ driverKind: CODEX });
+      yield* harness.save("Deploy runbook", "deploy with the blue script");
+      yield* harness.call("memory_recall", { query: "deploy" }).pipe(Effect.flip);
+      const count = yield* harness.sql<{ readonly n: number }>`
+        SELECT COUNT(*) AS n FROM project_memory_send_attempts
+      `;
+      expect(count[0]?.n).toBe(0);
     }),
   );
 });

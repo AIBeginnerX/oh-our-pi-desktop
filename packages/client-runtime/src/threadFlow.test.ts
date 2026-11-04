@@ -427,6 +427,61 @@ describe("crew board evidence and usage", () => {
     expect(crew.brain?.info).toMatchObject({ tokens: 1834, costUsd: 0.42, unpriced: true });
   });
 
+  it("keeps the latest TODO counts, lets the final report win, and totals the crew by items", () => {
+    const counts = (total: number, verified: number, claimed = 0) => ({
+      todoTotal: total,
+      todoVerified: verified,
+      todoClaimed: claimed,
+      todoFailed: 0,
+      todoBlocked: 0,
+    });
+    const crew = crewOf([
+      task("task.started", "2026-10-14T01:00:00.000Z", "a"),
+      task("task.started", "2026-10-14T01:00:00.100Z", "b"),
+      task("task.started", "2026-10-14T01:00:00.200Z", "c"),
+      task("task.progress", "2026-10-14T01:00:01.000Z", "a", counts(4, 1)),
+      task("task.progress", "2026-10-14T01:00:02.000Z", "a", counts(5, 2, 1)),
+      task("task.progress", "2026-10-14T01:00:02.100Z", "b", counts(2, 0)),
+      task("task.completed", "2026-10-14T01:00:03.000Z", "b", {
+        ...counts(2, 1),
+        status: "partial",
+      }),
+      // A progress row that arrives after the report must not replace its counts.
+      task("task.progress", "2026-10-14T01:00:04.000Z", "b", counts(2, 2)),
+    ]);
+
+    expect(crew.node("a")?.info.todos).toEqual({
+      total: 5,
+      verified: 2,
+      claimed: 1,
+      failed: 0,
+      blocked: 0,
+    });
+    expect(crew.node("b")?.info.todos?.verified).toBe(1);
+    expect(crew.node("c")?.info.todos).toBeUndefined();
+    // Proven items only: a: 2 of 5, b: 1 of 2, c has no list and has not completed: 3 of 8.
+    expect(crew.brain?.info.overall).toEqual({ done: 3, total: 8, percent: 37 });
+  });
+
+  it("reads the server's proof verdict and treats a missing or unknown one as unproven", () => {
+    const crew = crewOf([
+      task("task.started", "2026-10-14T01:00:00.000Z", "a"),
+      task("task.started", "2026-10-14T01:00:00.100Z", "b"),
+      task("task.started", "2026-10-14T01:00:00.200Z", "c"),
+      task("task.completed", "2026-10-14T01:00:01.000Z", "a", { proof: "verified" }),
+      task("task.completed", "2026-10-14T01:00:02.000Z", "b", { proof: "inconclusive" }),
+      task("task.completed", "2026-10-14T01:00:03.000Z", "c", { proof: "maybe" }),
+    ]);
+    expect(crew.node("a")?.info.proof).toBe("verified");
+    expect(crew.node("b")?.info.proof).toBe("inconclusive");
+    expect(crew.node("c")?.info.proof).toBeUndefined();
+  });
+
+  it("has no overall share when no task has a TODO list", () => {
+    const crew = crewOf([task("task.started", "2026-10-14T01:00:00.000Z", "a")]);
+    expect(crew.brain?.info.overall).toBeUndefined();
+  });
+
   it("labels an unaudited result tested or reported, and leaves a running task unlabeled", () => {
     const crew = crewOf([
       task("task.started", "2026-10-14T01:00:00.000Z", "a", { threadId: "thread-a" }),
@@ -595,6 +650,31 @@ describe("agent flows", () => {
       "edit",
       "search",
     ]);
+  });
+
+  it("shows a crew task as stopped as soon as the server asks it to stop", () => {
+    const crewTask = (kind: string, second: number, extra = {}) =>
+      activity(kind, at(second), {
+        taskId: "a",
+        title: "task a",
+        crewRole: "worker",
+        status: "running",
+        ...extra,
+      });
+    const stopping = [
+      ...toolWork,
+      crewTask("task.started", 6),
+      crewTask("task.progress", 7, { status: "stopped", summary: "Stopped with the lead turn." }),
+    ];
+    const worker = (extra: ReadonlyArray<ReturnType<typeof crewTask>> = []) =>
+      actorFlows({ activities: [...stopping, ...extra], agents, activeTurnId: "turn-1" })[0]
+        ?.nodes[1];
+    expect(worker()?.state).toBe("cancelled");
+    expect(worker()?.info.progress).toBe("Stopped with the lead turn.");
+    // Its final report still decides the outcome.
+    expect(worker([crewTask("task.completed", 8, { status: "stopped" })])?.info.crew?.outcome).toBe(
+      "stopped",
+    );
   });
 
   it("draws a launched subagent as an agent of its own and stops it with its turn", () => {

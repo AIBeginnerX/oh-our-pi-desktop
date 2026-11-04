@@ -52,6 +52,7 @@ import {
 } from "./persistence/ProjectMemorySendLedger.ts";
 import * as ProviderSafetyObservations from "./persistence/ProviderSafetyObservations.ts";
 import { layer as restartContinuationsLayer } from "./restartContinuations.ts";
+import { OrchestrationEventStore } from "./persistence/Services/OrchestrationEventStore.ts";
 import * as ProviderService from "./provider/Services/ProviderService.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
 import * as ReleaseVerification from "./releaseVerification/ReleaseVerification.ts";
@@ -890,6 +891,7 @@ const buildStartupOrderingStartupLayer = (input: StartupOrderingFixtureInput) =>
     ),
     AnalyticsService.layerTest,
     Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+    Layer.mock(OrchestrationEventStore)({}),
     Layer.succeed(ProviderService.ProviderService, {
       previewSubmissionRoute: () => Effect.die("unused"),
       startSession: () => Effect.die("unused"),

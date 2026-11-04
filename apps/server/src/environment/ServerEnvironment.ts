@@ -268,9 +268,12 @@ export const make = Effect.gen(function* () {
         manage: true,
         send: memorySendDriverKinds.length > 0,
         threadRecovery: true,
+        sentToThread: true,
         proposals: true,
+        analyser: true,
         ...(memorySendDriverKinds.length > 0 ? { sendDriverKinds: memorySendDriverKinds } : {}),
       },
+      crew: { stopTasks: true },
       // Judgment and retire are always advertised when lifecycle ships; `use`
       // derives from the same ProjectSkillUsePolicy future admission reads.
       // The default allowlist is empty, so `use` stays false until a build

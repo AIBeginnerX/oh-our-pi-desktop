@@ -19,6 +19,7 @@
   "thread.pull-request-unlinked",
   "thread.pull-request-synced",
   "thread.runtime-mode-set",
+  "thread.crew-set",
   "thread.interaction-mode-set",
   "thread.message-sent",
   "thread.turn-start-requested",

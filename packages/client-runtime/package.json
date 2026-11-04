@@ -7,6 +7,10 @@
       "types": "./src/localDecision.ts",
       "default": "./src/localDecision.ts"
     },
+    "./project-memory-auto-select": {
+      "types": "./src/projectMemoryAutoSelect.ts",
+      "default": "./src/projectMemoryAutoSelect.ts"
+    },
     "./thread-plan": {
       "types": "./src/threadPlan.ts",
       "default": "./src/threadPlan.ts"
@@ -203,6 +207,10 @@
       "types": "./src/crewBoard.ts",
       "default": "./src/crewBoard.ts"
     },
+    "./crew-decision-log": {
+      "types": "./src/crewDecisionLog.ts",
+      "default": "./src/crewDecisionLog.ts"
+    },
     "./state/device": {
       "types": "./src/state/device.ts",
       "default": "./src/state/device.ts"
@@ -218,6 +226,10 @@
     "./state/project-memory": {
       "types": "./src/state/projectMemory.ts",
       "default": "./src/state/projectMemory.ts"
+    },
+    "./state/project-memory-proposals": {
+      "types": "./src/state/projectMemoryProposals.ts",
+      "default": "./src/state/projectMemoryProposals.ts"
     },
     "./state/project-skills": {
       "types": "./src/state/projectSkills.ts",

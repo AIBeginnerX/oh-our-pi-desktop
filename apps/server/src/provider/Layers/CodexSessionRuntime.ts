@@ -199,6 +199,13 @@ export interface CodexSessionRuntimeSendTurnInput {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
   readonly interactionMode?: ProviderInteractionMode;
+  /**
+   * Caller-supplied publish gate. Called synchronously with the provider
+   * thread id this runtime holds, after the last await and immediately before
+   * `turn/start` is written; `false` (or a throw) sends nothing and fails the
+   * turn with `CodexSessionRuntimeAdmissionRefusedError`.
+   */
+  readonly admit?: ((providerThreadId: string | undefined) => boolean) | undefined;
 }
 
 export interface CodexThreadTurnSnapshot {
@@ -243,7 +250,19 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
-  | CodexSessionRuntimeThreadIdMissingError;
+  | CodexSessionRuntimeThreadIdMissingError
+  | CodexSessionRuntimeAdmissionRefusedError;
+
+export class CodexSessionRuntimeAdmissionRefusedError extends Schema.TaggedError<CodexSessionRuntimeAdmissionRefusedError>()(
+  "CodexSessionRuntimeAdmissionRefusedError",
+  {
+    threadId: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Codex turn for ${this.threadId} was not admitted at publish`;
+  }
+}
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedError<CodexSessionRuntimePendingApprovalNotFoundError>()(
   "CodexSessionRuntimePendingApprovalNotFoundError",
@@ -2585,6 +2604,23 @@ export const makeCodexSessionRuntime = (
               options.mcpCapabilities,
             ),
           });
+          // The caller's last-word gate: read the thread id and judge it with
+          // no await in between, before any state is written, so a refusal
+          // leaves the turn unsent and the session untouched.
+          if (input.admit !== undefined) {
+            const publishedThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+            let admitted = false;
+            try {
+              admitted = input.admit(publishedThreadId);
+            } catch {
+              admitted = false;
+            }
+            if (!admitted) {
+              return yield* new CodexSessionRuntimeAdmissionRefusedError({
+                threadId: options.threadId,
+              });
+            }
+          }
           yield* Ref.set(lastAdditionalContextRef, params.additionalContext);
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

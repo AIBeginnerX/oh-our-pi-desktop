@@ -84,7 +84,6 @@ import {
   stageResourceMonitor,
   stageTerminalApp,
   resolveRustClientSources,
-  TerminalAppBundleIncompleteError,
   stageLinuxCaptureHelper,
   stageWslRuntimeArchive,
   bundlesWslRuntime,
@@ -1114,63 +1113,41 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     ),
   );
 
-  it("bundles the terminal app only into OOP macOS and Windows builds", () => {
+  it("bundles the Rust terminal client into every OOP build and no other", () => {
     assert.isTrue(bundlesTerminalApp({ platform: "mac", oopBrand: true }));
     assert.isTrue(bundlesTerminalApp({ platform: "win", oopBrand: true }));
-    assert.isFalse(bundlesTerminalApp({ platform: "linux", oopBrand: true }));
+    assert.isTrue(bundlesTerminalApp({ platform: "linux", oopBrand: true }));
     assert.isFalse(bundlesTerminalApp({ platform: "mac", oopBrand: false }));
     assert.deepStrictEqual(TERMINAL_APP_EXTRA_RESOURCES, [
       { from: "apps/desktop/prod-resources/oop", to: "oop" },
     ]);
   });
 
-  it.effect("stages the terminal app bundle as resources/oop/oop.mjs", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-stage-test-" });
-        const stageResourcesDir = path.join(repoRoot, "stage");
-        yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
-        yield* fs.writeFileString(path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"), "bundle");
-        yield* fs.makeDirectory(path.join(stageResourcesDir, "oop"), { recursive: true });
-        yield* fs.writeFileString(path.join(stageResourcesDir, "oop/stale.txt"), "stale");
-
-        yield* stageTerminalApp({ repoRoot, stageResourcesDir });
-
-        assert.deepStrictEqual(yield* fs.readDirectory(path.join(stageResourcesDir, "oop")), [
-          "oop.mjs",
-        ]);
-        assert.equal(
-          yield* fs.readFileString(path.join(stageResourcesDir, "oop/oop.mjs")),
-          "bundle",
-        );
-      }),
-    ),
-  );
-
-  it.effect("copies the Rust client next to oop.mjs, as oop-rs.exe on Windows", () =>
+  it.effect("stages only the Rust client in resources/oop, as oop-rs.exe on Windows", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
         const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-rust-test-" });
         const stageResourcesDir = path.join(repoRoot, "stage");
-        yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
-        yield* fs.writeFileString(path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"), "bundle");
         const oopRs = path.join(repoRoot, "built-oop-rs");
         yield* fs.writeFileString(oopRs, "rust client");
+        yield* fs.makeDirectory(path.join(stageResourcesDir, "oop"), { recursive: true });
+        yield* fs.writeFileString(path.join(stageResourcesDir, "oop/stale.txt"), "stale");
 
         yield* stageTerminalApp({
-          repoRoot,
           stageResourcesDir,
           platform: "win",
           rust: { oopRs, terminalApp: undefined },
         });
 
         assert.deepStrictEqual(
-          [...(yield* fs.readDirectory(path.join(stageResourcesDir, "oop")))].toSorted(),
+          (yield* fs.readDirectory(path.join(stageResourcesDir, "oop"))).toSorted(),
           ["oop-rs.exe", "oop.mjs"],
+        );
+        assert.include(
+          yield* fs.readFileString(path.join(stageResourcesDir, "oop/oop.mjs")),
+          "OOP.app is too old or incomplete",
         );
         assert.equal(
           yield* fs.readFileString(path.join(stageResourcesDir, "oop/oop-rs.exe")),
@@ -1191,17 +1168,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           const path = yield* Path.Path;
           const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-app-test-" });
           const stageResourcesDir = path.join(repoRoot, "stage");
-          yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
-          yield* fs.writeFileString(path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"), "bundle");
+          const oopRs = path.join(repoRoot, "built-oop-rs");
+          yield* fs.writeFileString(oopRs, "rust client");
           const app = path.join(repoRoot, "OOP Terminal.app");
           yield* fs.makeDirectory(path.join(app, "Contents/MacOS"), { recursive: true });
           yield* fs.writeFileString(path.join(app, "Contents/MacOS/oop-terminal"), "gui");
           yield* fs.symlink("oop-terminal", path.join(app, "Contents/MacOS/alias"));
 
           yield* stageTerminalApp({
-            repoRoot,
             stageResourcesDir,
-            rust: { oopRs: undefined, terminalApp: app },
+            rust: { oopRs, terminalApp: app },
           });
 
           const staged = path.join(stageResourcesDir, "oop/OOP Terminal.app/Contents/MacOS");
@@ -1211,7 +1187,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ),
   );
 
-  it("finds the Rust client sources: an explicit path must exist, the default is optional", () => {
+  it("finds the Rust client: it must exist, named or default, on every platform", () => {
     const present = new Set(["/repo/apps/oop-tui-rs/target/release/oop-rs", "/x/app", "/x/rs"]);
     const resolve = (platform: "mac" | "win" | "linux", env: Record<string, string | undefined>) =>
       resolveRustClientSources({
@@ -1230,42 +1206,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       oopRs: "/x/rs",
       terminalApp: "/x/app",
     });
-    // Only macOS carries the GUI app, and Windows has no default build to find.
-    assert.deepStrictEqual(resolve("win", { OOP_TERMINAL_APP: "/x/app" }), {
-      oopRs: undefined,
+    // Only macOS carries the GUI app.
+    assert.deepStrictEqual(resolve("linux", { OOP_RS_BIN: "/x/rs", OOP_TERMINAL_APP: "/x/app" }), {
+      oopRs: "/x/rs",
       terminalApp: undefined,
     });
     assert.throws(() => resolve("mac", { OOP_RS_BIN: "/nowhere/oop-rs" }), /does not exist/);
     assert.throws(() => resolve("mac", { OOP_TERMINAL_APP: "/nowhere/app" }), /does not exist/);
+    // No fallback to a terminal without it: a missing client fails the build, naming OOP_RS_BIN.
+    assert.throws(() => resolve("win", {}), /oop-rs\.exe.*OOP_RS_BIN/s);
   });
-
-  it.effect("refuses a terminal app bundle that left a dependency out", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const repoRoot = yield* fs.makeTempDirectoryScoped({ prefix: "oop-terminal-stage-test-" });
-        const stageResourcesDir = path.join(repoRoot, "stage");
-        yield* fs.makeDirectory(path.join(repoRoot, "apps/oop-tui/dist"), { recursive: true });
-        yield* fs.writeFileString(
-          path.join(repoRoot, "apps/oop-tui/dist/oop.mjs"),
-          [
-            'import fs from "node:fs";',
-            'import { ThreadId } from "@t3tools/contracts";',
-            'import "ws";',
-          ].join("\n"),
-        );
-
-        const failure = yield* Effect.flip(stageTerminalApp({ repoRoot, stageResourcesDir }));
-
-        assert.instanceOf(failure, TerminalAppBundleIncompleteError);
-        assert.includeMembers(
-          [...(failure as TerminalAppBundleIncompleteError).imports],
-          ["@t3tools/contracts", "ws"],
-        );
-      }),
-    ),
-  );
 
   it.effect("reports every missing Linux desktop build prerequisite with an install command", () =>
     Effect.scoped(

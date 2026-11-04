@@ -9,6 +9,7 @@ import {
   type CrewPreset,
   type CrewRole,
   type CrewSettings,
+  type CrewThreadOverride,
   type ModelSelection,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -50,6 +51,17 @@ export function crewModelTier(slug: string, name: string): CrewModelTier {
   return 2;
 }
 
+/**
+ * Provider drivers whose threads can lead a crew: the ones OOP gives its crew tools and the
+ * brief to. The server enforces this and tells clients through `ServerProvider.canLeadCrew`.
+ */
+const CREW_LEAD_DRIVERS: ReadonlySet<string> = new Set(["claudeAgent", "codex"]);
+
+/** Whether a thread running on this provider driver can lead a crew (Claude and Codex only). */
+export function canLeadCrew(driver: string): boolean {
+  return CREW_LEAD_DRIVERS.has(driver);
+}
+
 /** Models a crew role can use: ready, signed-in providers only, legacy models left out. */
 export function crewModelOptions(providers: ReadonlyArray<ServerProvider>): CrewModelOption[] {
   return providers.flatMap((provider) => {
@@ -71,6 +83,21 @@ export function crewModelOptions(providers: ReadonlyArray<ServerProvider>): Crew
         isDefault: model.isDefault === true,
       }));
   });
+}
+
+/**
+ * The family a model belongs to, for telling whether two models can disagree independently. The
+ * slug decides first, since a provider such as Cursor hosts models of other families; the
+ * driver names the family only when the slug says nothing.
+ */
+export function modelFamily(slug: string, driver: string): string {
+  const name = slug.toLowerCase();
+  if (/claude|opus|sonnet|haiku|fable/.test(name)) return "claude";
+  if (/gpt|codex|\bo[34]\b/.test(name)) return "openai";
+  if (name.includes("gemini")) return "google";
+  if (/grok|composer/.test(name)) return "xai";
+  const own = /glm|kimi|qwen|deepseek|minimax/.exec(name)?.[0];
+  return own ?? driver;
 }
 
 const sameModel = (a: ModelSelection | null | undefined, b: ModelSelection | null | undefined) =>
@@ -161,26 +188,29 @@ export function recommendCrew(
   }
 }
 
+/** Where the crew a thread runs with comes from: its own crew, else the default. */
+export type CrewSource = "thread" | "default";
+
 export interface ResolvedCrew {
   readonly enabled: boolean;
   readonly preset: CrewPreset;
   readonly roles: Record<CrewRole, CrewModelOption | null>;
   readonly pinned: ReadonlySet<CrewRole>;
+  readonly source: CrewSource;
 }
 
-/** The crew a thread runs with: its override over the defaults, then pins over the preset. */
+/**
+ * The crew a thread runs with: its own crew (`thread.crew`) over the defaults in the settings,
+ * then pins over the preset. A thread without a crew of its own runs the defaults as they are
+ * now, so changing the defaults moves every such thread and never one that has its own.
+ */
 export function resolveCrew(input: {
   readonly settings: CrewSettings;
-  readonly threadId: string | null;
+  readonly override: CrewThreadOverride | null | undefined;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly brain: ModelSelection | null;
 }): ResolvedCrew {
-  const override =
-    input.threadId === null
-      ? undefined
-      : Object.entries(input.settings.threads).find(
-          ([threadId]) => threadId === input.threadId,
-        )?.[1];
+  const override = input.override ?? undefined;
   const enabled = override?.enabled ?? input.settings.enabled;
   const preset = override?.preset ?? input.settings.preset;
   const pins = { ...input.settings.pinned, ...override?.pinned };
@@ -195,7 +225,45 @@ export function resolveCrew(input: {
     if (pinnedOption !== undefined) pinned.add(role);
     roles[role] = pinnedOption ?? recommended[role];
   }
-  return { enabled, preset, roles, pinned };
+  return { enabled, preset, roles, pinned, source: override === undefined ? "default" : "thread" };
+}
+
+export interface CrewChange {
+  readonly enabled?: boolean;
+  readonly preset?: CrewPreset;
+  /** A model pins the role; null puts it back on Auto. */
+  readonly pins?: Partial<Record<CrewRole, ModelSelection | null>>;
+}
+
+/**
+ * A thread's next crew after `change`, which is stored as the thread's complete crew. A null pin
+ * is kept: it means Auto even when the defaults pin the role. Everything the change does not name
+ * stays as it was, so editing one role never moves the others.
+ */
+export function applyCrewChange(
+  current: CrewThreadOverride | null | undefined,
+  change: CrewChange,
+): CrewThreadOverride {
+  return {
+    ...current,
+    ...(change.enabled === undefined ? {} : { enabled: change.enabled }),
+    ...(change.preset === undefined ? {} : { preset: change.preset }),
+    pinned: { ...current?.pinned, ...change.pins },
+  };
+}
+
+/**
+ * "Use this crew for new chats": what the thread runs with (on or off, preset, and the roles
+ * pinned by hand) becomes the default. It is the only way a client edits the default crew, and no
+ * thread's own crew changes with it.
+ */
+export function crewAsDefault(settings: CrewSettings, crew: ResolvedCrew): CrewSettings {
+  let pinned: CrewSettings["pinned"] = {};
+  for (const role of CREW_ROLES) {
+    const option = crew.roles[role];
+    if (crew.pinned.has(role) && option !== null) pinned = { ...pinned, [role]: option.selection };
+  }
+  return { ...settings, enabled: crew.enabled, preset: crew.preset, pinned };
 }
 
 const ROLE_TIERS: Record<CrewRole, ReadonlyArray<CrewModelTier>> = {
@@ -218,6 +286,10 @@ export function crewFallbackChain(input: {
   readonly brain: ModelSelection | null;
   readonly unavailableInstances?: ReadonlySet<string>;
   readonly limit?: number;
+  /** Families to keep away from: models outside them come first. */
+  readonly avoidFamilies?: ReadonlySet<string>;
+  /** Models to keep away from when no model outside `avoidFamilies` is left: another one of the same family comes before these. */
+  readonly avoidSelections?: ReadonlyArray<ModelSelection>;
 }): CrewModelOption[] {
   const usable = input.options.filter(
     (option) =>
@@ -246,5 +318,14 @@ export function crewFallbackChain(input: {
       Number(!a.isDefault) - Number(!b.isDefault),
   );
   for (const option of rest) add(option);
-  return chain.slice(0, input.limit ?? 3);
+  const avoided = input.avoidFamilies;
+  if (avoided === undefined || avoided.size === 0) return chain.slice(0, input.limit ?? 3);
+  // Another family first, then another model of an avoided family, then the very same model.
+  const distance = (option: CrewModelOption) =>
+    !avoided.has(modelFamily(option.selection.model, option.driver))
+      ? 0
+      : (input.avoidSelections ?? []).some((selection) => sameModel(selection, option.selection))
+        ? 2
+        : 1;
+  return [...chain].sort((a, b) => distance(a) - distance(b)).slice(0, input.limit ?? 3);
 }

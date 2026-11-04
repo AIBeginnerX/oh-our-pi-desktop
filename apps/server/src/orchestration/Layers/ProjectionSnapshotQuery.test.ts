@@ -488,6 +488,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           activeOrderKey: "hq",
           autoSettleDisabledAt: null,
           parentThreadId: null,
+          crew: null,
           titleRegeneration: null,
           titleState: null,
           deletedAt: null,
@@ -616,6 +617,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           activeOrderKey: "hq",
           autoSettleDisabledAt: null,
           parentThreadId: null,
+          crew: null,
           titleRegeneration: null,
           titleState: null,
           session: {
@@ -664,6 +666,27 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.deepEqual(unlinkedShell.value.pullRequests, []);
         assert.equal("linkedPullRequest" in unlinkedShell.value, false);
       }
+
+      // A thread's own crew is read back on the shell, the detail and the command read model.
+      yield* sql`
+        UPDATE projection_threads
+        SET crew_json = '{"enabled":true,"preset":"speed"}'
+        WHERE thread_id = 'thread-1'
+      `;
+      const crewShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-1"));
+      const crewDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
+      assert.deepEqual(crewShell._tag === "Some" ? crewShell.value.crew : undefined, {
+        enabled: true,
+        preset: "speed",
+      });
+      assert.deepEqual(crewDetail._tag === "Some" ? crewDetail.value.crew : undefined, {
+        enabled: true,
+        preset: "speed",
+      });
+      assert.deepEqual((yield* snapshotQuery.getCommandReadModel()).threads[0]?.crew, {
+        enabled: true,
+        preset: "speed",
+      });
 
       yield* sql`
         INSERT INTO projection_thread_activities (

@@ -1,5 +1,5 @@
 //! Reads and changes the server's settings (`server.getSettings`, `server.updateSettings`), the
-//! way apps/oop-tui/src/app/settingsPatch.ts does. A patch that replaces a whole record
+//! way the former TypeScript terminal's settings patch did. A patch that replaces a whole record
 //! (`threadGoals`, `crew`) must be built from the newest value, or it undoes a change made a moment
 //! ago elsewhere: each patch reads the settings first and is built from what was read, and patches
 //! run one at a time, so two quick ones from this app cannot overwrite each other either.

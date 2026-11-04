@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { RotateCcwIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { useT } from "../i18n";
-import { useSettingsRestore } from "../components/settings/SettingsPanels";
+import { useSettingsRestore } from "../components/settings/SettingsPanels.restore";
 
 import { SettingsBreadcrumb } from "../components/settings/SettingsBreadcrumb";
 import { SidebarInset } from "../components/ui/sidebar";

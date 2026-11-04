@@ -13,11 +13,13 @@ import {
   ProjectMemoryCreateInput,
   ProjectMemoryDeleteInput,
   ProjectMemoryGetInput,
+  ProjectMemory,
   ProjectMemoryId,
   ProjectMemoryNotFoundError,
   ProjectMemoryRejectedError,
   ProjectMemorySearchInput,
   ProjectMemoryStoreError,
+  ProjectMemorySentToThread,
   ProjectMemoryThreadState,
   ProjectMemoryThreadStateInput,
   ProjectMemoryUpdateInput,
@@ -30,6 +32,7 @@ const decodeGetInput = Schema.decodeUnknownSync(ProjectMemoryGetInput);
 const decodeSearchInput = Schema.decodeUnknownSync(ProjectMemorySearchInput);
 const decodeThreadStateInput = Schema.decodeUnknownSync(ProjectMemoryThreadStateInput);
 const decodeThreadState = Schema.decodeUnknownSync(ProjectMemoryThreadState);
+const decodeSentToThread = Schema.decodeUnknownSync(ProjectMemorySentToThread);
 const decodeAckInput = Schema.decodeUnknownSync(ProjectMemoryAcknowledgeThreadInput);
 
 const baseCreate = {
@@ -270,5 +273,114 @@ describe("projectMemory capability", () => {
       },
     });
     expect(decoded.capabilities.projectMemory).toEqual({ manage: true, send: false });
+  });
+});
+
+describe("derived memories on the wire", () => {
+  // The memory schema as an older client had it: origin was manual or message only.
+  const OldOrigin = Schema.Union([
+    Schema.Struct({ type: Schema.Literal("manual") }),
+    Schema.Struct({
+      type: Schema.Literal("message"),
+      threadId: Schema.String,
+      messageId: Schema.String,
+    }),
+  ]);
+  const OldMemory = Schema.Struct({ ...ProjectMemory.fields, origin: OldOrigin });
+  const derived = {
+    memoryId: "memory-1",
+    projectId: "project-1",
+    kind: "fact",
+    title: "Lint first",
+    body: "Run lint before committing.",
+    version: 1,
+    origin: { type: "manual" },
+    validUntil: null,
+    estimatedTokens: 7,
+    createdAt: "2026-10-09T00:00:00.000Z",
+    updatedAt: "2026-10-09T00:00:00.000Z",
+    derivedFrom: [{ threadId: "thread-a", eventSeq: 4 }],
+  };
+
+  it("keeps a derived memory decodable by a client that predates them", () => {
+    const decoded = Schema.decodeUnknownSync(OldMemory)(derived);
+    expect(decoded.origin).toEqual({ type: "manual" });
+  });
+
+  it("carries the cited events beside the origin", () => {
+    expect(Schema.decodeUnknownSync(ProjectMemory)(derived).derivedFrom).toEqual(
+      derived.derivedFrom,
+    );
+  });
+
+  it("never accepts a client-claimed derived origin or derivedFrom on a write", () => {
+    const claim = { derivedFrom: [{ threadId: "thread-a", eventSeq: 4 }] };
+    expect(() =>
+      decodeCreateInput({
+        ...baseCreate,
+        origin: { type: "derived", evidence: claim.derivedFrom },
+      }),
+    ).toThrow();
+    expect(decodeCreateInput({ ...baseCreate, ...claim })).not.toHaveProperty("derivedFrom");
+    expect(
+      decodeUpdateInput({
+        projectId: "project-1",
+        memoryId: "memory-1",
+        expectedVersion: 1,
+        ...claim,
+      }),
+    ).not.toHaveProperty("derivedFrom");
+  });
+});
+
+describe("ProjectMemorySentToThread", () => {
+  const sentAt = "2026-10-11T09:00:00.000Z";
+
+  it("decodes sends with and without a current title", () => {
+    const decoded = decodeSentToThread({
+      items: [
+        {
+          memoryId: "memory-1",
+          version: 2,
+          sentAt,
+          via: "recall",
+          state: "external_send_unknown",
+          changedSinceSent: true,
+          deleted: true,
+        },
+        {
+          memoryId: "memory-2",
+          version: 1,
+          sentAt,
+          via: "message",
+          state: "provider_accepted",
+          title: "Deploy runbook",
+          changedSinceSent: false,
+          deleted: false,
+        },
+      ],
+      truncated: false,
+      held: false,
+    });
+    expect(decoded.items[0]).not.toHaveProperty("title");
+    expect(decoded.items[1]?.title).toBe("Deploy runbook");
+  });
+
+  it("rejects an unknown send channel or state", () => {
+    const item = {
+      memoryId: "memory-1",
+      version: 1,
+      sentAt,
+      via: "message",
+      state: "provider_accepted",
+      changedSinceSent: false,
+      deleted: false,
+    };
+    expect(() =>
+      decodeSentToThread({ items: [{ ...item, via: "other" }], truncated: false, held: false }),
+    ).toThrow();
+    expect(() =>
+      decodeSentToThread({ items: [{ ...item, state: "sent" }], truncated: false, held: false }),
+    ).toThrow();
   });
 });

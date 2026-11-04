@@ -205,12 +205,22 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
           `projectMemory.acknowledgeThread` recovery RPCs. Absent on older
           servers means unsupported — not that no thread is held. */
       threadRecovery: Schema.optionalKey(Schema.Boolean),
+      /** Server serves `projectMemory.sentToThread`. Absent on older servers
+          means unsupported. */
+      sentToThread: Schema.optionalKey(Schema.Boolean),
       /** Server serves the `projectMemory.listProposals`, `approveProposal`
           and `rejectProposal` RPCs for memories agents propose. Absent on
           older servers means unsupported. */
       proposals: Schema.optionalKey(Schema.Boolean),
+      /** Server serves `projectMemory.analyse`. The `projectMemoryAnalyser` setting
+          still decides whether it runs. Absent on older servers means
+          unsupported. */
+      analyser: Schema.optionalKey(Schema.Boolean),
     }),
   ),
+  /** Server serves `crew.stopTasks`. Absent on older servers means unsupported: clients
+      stop a task by interrupting its member thread and hide "Stop all". */
+  crew: Schema.optionalKey(Schema.Struct({ stopTasks: Schema.optionalKey(Schema.Boolean) })),
   /** Server persists inactive `projectSkill.*` candidates and serves their
       management RPCs. Lifecycle and use flags stay absent until the server
       advertises them. Same version-skew contract as projectMemory: absent on

@@ -16,9 +16,20 @@ export const PROJECT_MEMORY_MAX_LIMIT = 100;
 export const PROJECT_MEMORY_REASON_MAX_LENGTH = 500;
 /** Agent proposals waiting for review, per project. Bounds a looping agent. */
 export const PROJECT_MEMORY_PENDING_PROPOSALS_MAX = 20;
+/** Work-analyser suggestions waiting for review, per project. Counted apart from
+    agent proposals so the analyser can neither fill nor be starved by that cap. */
+export const PROJECT_MEMORY_ANALYSER_PENDING_MAX = 5;
+/** Most suggestions one analyser run may add. */
+export const PROJECT_MEMORY_ANALYSER_RUN_MAX = 3;
+/** Distinct threads a derived lesson must be seen in. */
+export const PROJECT_MEMORY_EVIDENCE_MIN_THREADS = 2;
+/** Derived memories expire unless the user keeps them alive. */
+export const PROJECT_MEMORY_DERIVED_VALID_DAYS = 90;
 /** Page bound for thread-recovery change listings. Held equal to the send
     ledger's PROJECT_MEMORY_AFFECTED_PAGE_MAX; a server test pins the two. */
 export const PROJECT_MEMORY_THREAD_CHANGES_MAX = 50;
+/** Most sends `projectMemory.sentToThread` returns, newest first. */
+export const PROJECT_MEMORY_SENT_MAX = 100;
 
 export const ProjectMemoryId = TrimmedNonEmptyString.pipe(Schema.brand("ProjectMemoryId"));
 export type ProjectMemoryId = typeof ProjectMemoryId.Type;
@@ -30,6 +41,13 @@ export type ProjectMemoryProposalId = typeof ProjectMemoryProposalId.Type;
 
 export const ProjectMemoryKind = Schema.Literals(["fact", "procedure", "work-log"]);
 export type ProjectMemoryKind = typeof ProjectMemoryKind.Type;
+
+/** An orchestration event a derived lesson rests on. */
+export const ProjectMemoryEvidence = Schema.Struct({
+  threadId: ThreadId,
+  eventSeq: NonNegativeInt,
+});
+export type ProjectMemoryEvidence = typeof ProjectMemoryEvidence.Type;
 
 /**
  * Where a memory came from. `manual` is written directly by the user;
@@ -47,6 +65,17 @@ export const ProjectMemoryOrigin = Schema.Union([
   }),
 ]);
 export type ProjectMemoryOrigin = typeof ProjectMemoryOrigin.Type;
+
+/**
+ * The events a memory proposed by the work analyser rests on. Carried beside
+ * `origin`, which stays `manual` for such a memory: a client that predates
+ * derived memories decodes `origin` strictly and would fail on a new variant,
+ * but ignores an extra field.
+ */
+export const ProjectMemoryDerivedFrom = Schema.Array(ProjectMemoryEvidence).check(
+  Schema.isMinLength(1),
+);
+export type ProjectMemoryDerivedFrom = typeof ProjectMemoryDerivedFrom.Type;
 
 export const ProjectMemoryTitle = TrimmedNonEmptyString.check(
   Schema.isMaxLength(PROJECT_MEMORY_TITLE_MAX_LENGTH),
@@ -90,10 +119,13 @@ export const ProjectMemory = Schema.Struct({
   estimatedTokens: NonNegativeInt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  /** Present only on a memory the user approved from a work-analyser suggestion. */
+  derivedFrom: Schema.optionalKey(ProjectMemoryDerivedFrom),
 });
 export type ProjectMemory = typeof ProjectMemory.Type;
 
-/** List/search rows omit `body`; `projectMemory.get` loads it for editing. */
+/** List/search rows omit `body` unless a list asks for it with `includeBody`;
+    `projectMemory.get` loads it for editing. */
 export const ProjectMemorySummary = Schema.Struct({
   memoryId: ProjectMemoryId,
   projectId: ProjectId,
@@ -105,6 +137,8 @@ export const ProjectMemorySummary = Schema.Struct({
   estimatedTokens: NonNegativeInt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
+  body: Schema.optionalKey(ProjectMemoryBody),
+  derivedFrom: Schema.optionalKey(ProjectMemoryDerivedFrom),
 });
 export type ProjectMemorySummary = typeof ProjectMemorySummary.Type;
 
@@ -115,6 +149,8 @@ const limitField = Schema.optional(
 export const ProjectMemoryListInput = Schema.Struct({
   projectId: ProjectId,
   limit: limitField,
+  /** Ranking the composer's related-memory suggestions needs the body text. */
+  includeBody: Schema.optionalKey(Schema.Boolean),
 });
 export type ProjectMemoryListInput = typeof ProjectMemoryListInput.Type;
 
@@ -190,6 +226,27 @@ export const ProjectMemoryWriteResult = Schema.Struct({
 export type ProjectMemoryWriteResult = typeof ProjectMemoryWriteResult.Type;
 
 /**
+ * What the work analyser adds to a proposal. `target: "skill"` marks a
+ * procedure: approving it is done in the thread's existing skill-draft flow,
+ * so the server has nothing to save. `related` holds existing memories that
+ * look close to the text, shown beside it so the user decides; nothing merges
+ * automatically. An approved suggestion becomes a memory that expires
+ * `PROJECT_MEMORY_DERIVED_VALID_DAYS` after approval.
+ */
+export const ProjectMemoryProposalAnalysis = Schema.Struct({
+  target: Schema.Literals(["memory", "skill"]),
+  evidence: Schema.Array(ProjectMemoryEvidence).check(Schema.isMinLength(1)),
+  related: Schema.Array(
+    Schema.Struct({
+      memoryId: ProjectMemoryId,
+      title: ProjectMemoryTitle,
+      body: ProjectMemoryBody,
+    }),
+  ),
+});
+export type ProjectMemoryProposalAnalysis = typeof ProjectMemoryProposalAnalysis.Type;
+
+/**
  * A durable fact an agent proposed through the `memory_propose` tool. It lives
  * outside the memory store until the user approves it, so it is never
  * searched, listed as a memory, or sent to a provider while pending.
@@ -204,6 +261,8 @@ export const ProjectMemoryProposal = Schema.Struct({
   /** Why the agent thinks this should be remembered. */
   reason: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_MEMORY_REASON_MAX_LENGTH)),
   createdAt: IsoDateTime,
+  /** Work-analyser suggestions only; absent on agent proposals and older servers. */
+  analysis: Schema.optionalKey(ProjectMemoryProposalAnalysis),
 });
 export type ProjectMemoryProposal = typeof ProjectMemoryProposal.Type;
 
@@ -221,6 +280,18 @@ export const ProjectMemoryProposalDecisionInput = Schema.Struct({
   proposalId: ProjectMemoryProposalId,
 });
 export type ProjectMemoryProposalDecisionInput = typeof ProjectMemoryProposalDecisionInput.Type;
+
+export const ProjectMemoryAnalyseInput = Schema.Struct({ projectId: ProjectId });
+export type ProjectMemoryAnalyseInput = typeof ProjectMemoryAnalyseInput.Type;
+
+export const ProjectMemoryAnalyseResult = Schema.Struct({
+  threadsAnalysed: NonNegativeInt,
+  /** Memory suggestions added by this run. */
+  memoriesProposed: NonNegativeInt,
+  /** Procedures nominated as skill-draft sources by this run. */
+  skillsSuggested: NonNegativeInt,
+});
+export type ProjectMemoryAnalyseResult = typeof ProjectMemoryAnalyseResult.Type;
 
 export const ProjectMemoryThreadStateInput = Schema.Struct({
   projectId: ProjectId,
@@ -253,6 +324,40 @@ export const ProjectMemoryThreadState = Schema.Struct({
 });
 export type ProjectMemoryThreadState = typeof ProjectMemoryThreadState.Type;
 
+export const ProjectMemorySentToThreadInput = Schema.Struct({
+  projectId: ProjectId,
+  threadId: ThreadId,
+});
+export type ProjectMemorySentToThreadInput = typeof ProjectMemorySentToThreadInput.Type;
+
+/** One memory handed to this thread's provider. Carries no memory body. */
+export const ProjectMemorySentItem = Schema.Struct({
+  memoryId: ProjectMemoryId,
+  /** The version that was sent. */
+  version: PositiveInt,
+  sentAt: IsoDateTime,
+  /** `message`: a composer reference. `recall`: the agent's `memory_recall` tool. */
+  via: Schema.Literals(["message", "recall"]),
+  /** `external_send_unknown` means the content may have reached the provider. */
+  state: Schema.Literals(["dispatch_committed", "provider_accepted", "external_send_unknown"]),
+  /** Current title; absent once the memory is deleted. */
+  title: Schema.optionalKey(Schema.String),
+  /** The memory was edited or deleted after this send. */
+  changedSinceSent: Schema.Boolean,
+  deleted: Schema.Boolean,
+});
+export type ProjectMemorySentItem = typeof ProjectMemorySentItem.Type;
+
+export const ProjectMemorySentToThread = Schema.Struct({
+  /** Newest first, at most PROJECT_MEMORY_SENT_MAX. */
+  items: Schema.Array(ProjectMemorySentItem),
+  /** Older sends exist beyond `items`. */
+  truncated: Schema.Boolean,
+  /** The thread's turns are on hold until its memory changes are resolved. */
+  held: Schema.Boolean,
+});
+export type ProjectMemorySentToThread = typeof ProjectMemorySentToThread.Type;
+
 /** Accepts ALL retained-context changes through the watermark, including ones not shown. Never erases provider context. */
 export const ProjectMemoryAcknowledgeThreadInput = Schema.Struct({
   projectId: ProjectId,
@@ -277,6 +382,9 @@ export const ProjectMemoryRejectedReason = Schema.Literals([
   "acknowledgement-invalid",
   "proposal-missing",
   "proposal-limit",
+  "analyser-disabled",
+  "analyser-failed",
+  "proposal-not-memory",
 ]);
 export type ProjectMemoryRejectedReason = typeof ProjectMemoryRejectedReason.Type;
 
@@ -291,6 +399,9 @@ const REJECTED_REASON_MESSAGES: Record<ProjectMemoryRejectedReason, string> = {
   "proposal-missing": "Proposal is missing or was already handled.",
   "proposal-limit":
     "Too many proposals are waiting for the user's review. Do not propose more until they decide.",
+  "analyser-disabled": "The work analyser is turned off.",
+  "analyser-failed": "The work analyser could not produce suggestions.",
+  "proposal-not-memory": "This suggestion is saved from its thread's skill draft, not as a memory.",
 };
 
 type ProjectMemoryErrorContext = {

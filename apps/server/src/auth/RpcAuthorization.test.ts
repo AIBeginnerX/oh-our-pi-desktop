@@ -89,6 +89,9 @@ describe("RPC authorization scopes", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryThreadState)).toBe(
       AuthOrchestrationReadScope,
     );
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectMemorySentToThread)).toBe(
+      AuthOrchestrationReadScope,
+    );
     expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryAcknowledgeThread)).toBe(
       AuthOrchestrationOperateScope,
     );
@@ -100,6 +103,9 @@ describe("RPC authorization scopes", () => {
       AuthOrchestrationOperateScope,
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryRejectProposal)).toBe(
+      AuthOrchestrationOperateScope,
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.projectMemoryAnalyse)).toBe(
       AuthOrchestrationOperateScope,
     );
   });

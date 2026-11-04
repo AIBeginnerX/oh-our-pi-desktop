@@ -68,6 +68,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetUsageSummary]: AuthOrchestrationReadScope,
   [WS_METHODS.usageGetThreadResults]: AuthOrchestrationReadScope,
   [WS_METHODS.crewRetryTask]: AuthOrchestrationOperateScope,
+  [WS_METHODS.crewStopTasks]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRefreshUsageRates]: AuthOrchestrationReadScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
@@ -125,12 +126,16 @@ export const RPC_REQUIRED_SCOPES = {
   // Held-state inspection is a read; the acknowledge watermark is a
   // user-fact write like the other memory mutations.
   [WS_METHODS.projectMemoryThreadState]: AuthOrchestrationReadScope,
+  [WS_METHODS.projectMemorySentToThread]: AuthOrchestrationReadScope,
   [WS_METHODS.projectMemoryAcknowledgeThread]: AuthOrchestrationOperateScope,
   // Approving turns an agent's proposal into active memory, so it needs the
   // same operate scope as creating one; rejecting just discards it.
   [WS_METHODS.projectMemoryListProposals]: AuthOrchestrationReadScope,
   [WS_METHODS.projectMemoryApproveProposal]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectMemoryRejectProposal]: AuthOrchestrationOperateScope,
+  // Analysing recent work spends the text-generation model and adds pending
+  // suggestions, so it needs operate like the other memory writes.
+  [WS_METHODS.projectMemoryAnalyse]: AuthOrchestrationOperateScope,
   // Skill candidate reads follow the project's other read scopes; creating,
   // revising, judging, and deleting inactive candidates are user-fact writes
   // and require operate. No activate/use method exists. Deriving a review

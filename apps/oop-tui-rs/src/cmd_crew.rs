@@ -1,15 +1,15 @@
 //! `/crew`: turn the crew on or off for a thread, choose its preset and the model of each role, make
-//! a thread's settings the default, and follow the crew's tasks. A port of `runCrewCommand`,
-//! `saveCrew`, `openCrewThread`, `backToLead` of the TypeScript controller, of
-//! apps/oop-tui/src/app/crew.ts (the settings arithmetic and the model list) and of
-//! apps/oop-tui/src/app/crewScreen.ts (the screen: main, preset, model and task views).
+//! a thread's settings the default, and follow the crew's tasks: the settings arithmetic, the model
+//! list, and the screen (main, preset, model and task views).
 //!
-//! The crew settings live in the server's settings (`crew`): the defaults, and an override per
-//! thread. A change is written over the settings read just now (see `server_settings`). In a
-//! thread it lands in that thread's override; on a conversation not started yet it changes the
-//! defaults.
+//! The default crew lives in the server's settings (`crew`); a thread's own crew lives with the
+//! thread on the server (`thread.crew.set`). A change in a thread gives that thread its own crew and
+//! touches nothing else; on a conversation not started yet it is kept in the draft and goes out
+//! with the first message. Only "make default" writes the settings, over the settings read just
+//! now (see `server_settings`). "Use the default crew" takes the thread's own crew away.
 
 use crate::app::{Active, App, Msg};
+use crate::commands::{self, Ctx};
 use crate::crew::{self, Brain, ModelOption, ROLES, Resolved};
 use crate::crew_text::{text, text_with};
 use crate::flow::{
@@ -19,11 +19,12 @@ use crate::flow::{
 use crate::i18n::{Lang, lang, tr};
 use crate::notes::Tone;
 use crate::panels_common::{
-    evidence_word, flat, format_cost, format_elapsed, phase_word, tokens_word,
+    evidence_word, flat, format_cost, format_elapsed, phase_word, proof_word, tokens_word,
 };
 use crate::screen::Screen;
 use crate::server_settings::{self, Patched};
 use crate::text::{sanitize, truncate, width, wrap};
+use crate::thread::Activity;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
@@ -34,6 +35,7 @@ use serde_json::{Map, Value, json};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const RETRY_RPC: &str = "crew.retryTask";
+pub const STOP_RPC: &str = "crew.stopTasks";
 
 // ---- the words ----------------------------------------------------------------------------------
 
@@ -173,8 +175,8 @@ struct Context {
     preset: String,
     roles: [Option<ModelOption>; 3],
     pinned: [bool; 3],
-    /// A change lands in the thread's own override, not in the defaults.
-    thread_scope: bool,
+    /// The thread has a crew of its own, rather than running the default.
+    own: bool,
     /// Why the thread's model cannot lead a crew.
     problem: Option<String>,
     board: Option<CrewBoard>,
@@ -228,7 +230,8 @@ fn context(app: &App, now: i64) -> Context {
         preset,
         roles,
         pinned,
-    } = crew::resolve(&app.config, thread, brain);
+        own,
+    } = crew::resolve(&app.config, app.own_crew().as_ref(), brain);
     let loaded = thread.is_some_and(|id| app.conv.loaded && app.conv.thread_id == id);
     let board = loaded
         .then(|| crew_board(&app.conv.thread, app.conv.busy()))
@@ -253,7 +256,7 @@ fn context(app: &App, now: i64) -> Context {
         autos: crew::auto_picks(&app.config, brain, &preset),
         options: crew::model_options(&app.config),
         problem: brain_problem(&app.config, brain),
-        thread_scope: thread.is_some(),
+        own,
         enabled,
         preset,
         roles,
@@ -295,7 +298,7 @@ pub fn crew_settings(settings: &Value) -> Value {
     if settings["crew"].is_object() {
         settings["crew"].clone()
     } else {
-        json!({"enabled": false, "preset": "recommended", "pinned": {}, "threads": {}})
+        json!({"enabled": false, "preset": "recommended", "pinned": {}})
     }
 }
 
@@ -308,42 +311,20 @@ pub struct Change {
     pub pins: Vec<(&'static str, Option<Value>)>,
 }
 
-/// The next crew settings after `change`, the way the desktop app writes them (`applyCrewChange`).
-/// In a thread the change lands in that thread's override, where a null pin means Auto even if the
-/// defaults pin the role; without a thread it changes the defaults themselves. Everything else is
-/// kept.
-pub fn apply_change(settings: &Value, thread_id: Option<&str>, change: &Change) -> Value {
-    let mut next = settings.clone();
-    let mut scoped = Map::new();
-    if let Some(enabled) = change.enabled {
-        scoped.insert("enabled".into(), json!(enabled));
-    }
-    if let Some(preset) = &change.preset {
-        scoped.insert("preset".into(), json!(preset));
-    }
-    let Some(thread_id) = thread_id else {
-        let mut pinned = settings["pinned"].as_object().cloned().unwrap_or_default();
-        for (role, selection) in &change.pins {
-            match selection {
-                None => {
-                    pinned.remove(*role);
-                }
-                Some(selection) => {
-                    pinned.insert((*role).into(), selection.clone());
-                }
-            }
-        }
-        for (key, value) in scoped {
-            next[key] = value;
-        }
-        next["pinned"] = Value::Object(pinned);
-        return next;
-    };
-    let mut entry = settings["threads"][thread_id]
-        .as_object()
+/// A thread's next crew after `change`, stored as the thread's complete crew (`applyCrewChange`).
+/// A null pin is kept: it means Auto even when the default pins the role. Everything the change
+/// does not name stays as it was, so editing one role never moves the others.
+pub fn apply_change(current: Option<&Value>, change: &Change) -> Value {
+    let mut entry = current
+        .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    entry.extend(scoped);
+    if let Some(enabled) = change.enabled {
+        entry.insert("enabled".into(), json!(enabled));
+    }
+    if let Some(preset) = &change.preset {
+        entry.insert("preset".into(), json!(preset));
+    }
     let mut pinned = entry
         .get("pinned")
         .and_then(Value::as_object)
@@ -353,15 +334,12 @@ pub fn apply_change(settings: &Value, thread_id: Option<&str>, change: &Change) 
         pinned.insert((*role).into(), selection.clone().unwrap_or(Value::Null));
     }
     entry.insert("pinned".into(), Value::Object(pinned));
-    let mut threads = settings["threads"].as_object().cloned().unwrap_or_default();
-    threads.insert(thread_id.to_string(), Value::Object(entry));
-    next["threads"] = Value::Object(threads);
-    next
+    Value::Object(entry)
 }
 
 /// "Use this crew for new chats": what the thread runs with (on or off, preset, and the roles
-/// pinned by hand) becomes the default. Threads' own overrides stay as they are
-/// (`crewAsDefault`).
+/// pinned by hand) becomes the default. It is the only way the default is edited, and no thread's
+/// own crew changes with it (`crewAsDefault`).
 pub fn as_default(settings: &Value, crew: &Resolved) -> Value {
     let mut pinned = Map::new();
     for (slot, role) in ROLES.iter().enumerate() {
@@ -383,14 +361,43 @@ enum Save {
     Change(Change),
     /// Make what the thread runs with the default for new threads.
     Default,
+    /// Take the thread's own crew away, so it runs the default crew again.
+    Reset,
 }
 
-/// Writes a crew change over the settings read just now, then says what was done.
+/// Gives the thread on screen its own crew (`None`: takes it away), then says what was done. On a
+/// draft the crew is kept until the first message creates the thread.
+fn set_own(app: &mut App, next: Option<Value>, label: String, value: String) {
+    match app.active.clone() {
+        Active::Thread(id) => {
+            let command = commands::crew_set(&Ctx::fresh(), &id, next.as_ref());
+            app.dispatch(command, None, None);
+            if app.rpc.is_none() {
+                return;
+            }
+        }
+        Active::Draft(_) => app.draft_crew = next,
+        Active::None => return,
+    }
+    app.note(Tone::Done, &label, vec![value]);
+}
+
+/// Carries out a crew change: in the thread's own crew, or (`Save::Default`) in the settings.
 fn save(app: &mut App, change: Save, label: String, value: String) {
-    let scope = match &app.active {
-        Active::Thread(id) => Some(id.clone()),
-        _ => None,
-    };
+    match change {
+        Save::Change(change) => {
+            let next = apply_change(app.own_crew().as_ref(), &change);
+            set_own(app, Some(next), label, value);
+        }
+        Save::Reset => set_own(app, None, label, value),
+        Save::Default => save_default(app, label, value),
+    }
+}
+
+/// Makes what the thread runs with the default for new threads: the one write to the settings,
+/// made over the settings read just now.
+fn save_default(app: &mut App, label: String, value: String) {
+    let own = app.own_crew();
     let providers = app.config["providers"].clone();
     let brain: Option<(String, String)> = app.current_model().and_then(|m| {
         Some((
@@ -403,14 +410,9 @@ fn save(app: &mut App, change: Save, label: String, value: String) {
         app,
         move |current| {
             let crew = crew_settings(current);
-            let next = match &change {
-                Save::Change(change) => apply_change(&crew, scope.as_deref(), change),
-                Save::Default => {
-                    let config = json!({"settings": {"crew": crew}, "providers": providers});
-                    let brain = brain.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
-                    as_default(&crew, &crew::resolve(&config, scope.as_deref(), brain))
-                }
-            };
+            let config = json!({"settings": {"crew": crew}, "providers": providers});
+            let brain = brain.as_ref().map(|(a, b)| (a.as_str(), b.as_str()));
+            let next = as_default(&crew, &crew::resolve(&config, own.as_ref(), brain));
             Some(json!({"crew": next}))
         },
         move |app, result| {
@@ -662,6 +664,7 @@ fn task_usage(task: &CrewTask) -> Option<String> {
 /// The dim part of a board row: model, time, usage.
 fn task_note(task: &CrewTask, now: i64) -> String {
     [
+        task.proof.map(|proof| proof_word(proof).to_string()),
         task.model.clone(),
         task_elapsed(task, now),
         task_usage(task),
@@ -708,6 +711,12 @@ fn task_detail(task: &CrewTask, now: i64, waiting: Option<Waiting>) -> Vec<(Stri
         rows.push((
             text("render.crew.field.evidence").to_string(),
             evidence_word(evidence).to_string(),
+        ));
+    }
+    if let Some(proof) = task.proof {
+        rows.push((
+            text("render.crew.field.proof").to_string(),
+            proof_word(proof).to_string(),
         ));
     }
     if let Some(summary) = &task.summary {
@@ -764,6 +773,7 @@ enum Row {
     Role(usize),
     AutoAll,
     Default,
+    Reset,
     /// An index into the board's tasks.
     Task(usize),
     /// A crew thread that waits for the user but is on no board; an index into `waiting`.
@@ -789,8 +799,8 @@ fn main_rows(ctx: &Context) -> Vec<Row> {
     if ctx.pinned.iter().any(|p| *p) {
         rows.push(Row::AutoAll);
     }
-    if ctx.thread_scope {
-        rows.push(Row::Default);
+    if ctx.own {
+        rows.extend([Row::Default, Row::Reset]);
     }
     rows.extend((0..tasks.len()).map(Row::Task));
     rows
@@ -808,6 +818,7 @@ fn row_id(ctx: &Context, row: Row) -> String {
         Row::Preset => "preset".into(),
         Row::AutoAll => "autoAll".into(),
         Row::Default => "default".into(),
+        Row::Reset => "reset".into(),
     }
 }
 
@@ -958,6 +969,7 @@ enum Effect {
     Pin { role: usize, pick: PickItem },
     AutoAll,
     Default,
+    Reset,
     Open(String),
     Stop(TaskRef),
     Retry(TaskRef),
@@ -1222,6 +1234,7 @@ fn activate(view: &View, ctx: &Context) -> KeyResult {
                 Row::Toggle => with_effect(Some(view.clone()), Effect::Toggle),
                 Row::AutoAll => with_effect(Some(view.clone()), Effect::AutoAll),
                 Row::Default => with_effect(Some(view.clone()), Effect::Default),
+                Row::Reset => with_effect(Some(view.clone()), Effect::Reset),
                 Row::Preset => stay(Some(View::Preset {
                     selected: PRESETS
                         .iter()
@@ -1305,6 +1318,12 @@ fn run_effect(app: &mut App, effect: Effect, ctx: &Context) {
             text("session.c.crewDefault").into(),
             text("session.c.crewDefaultNote").into(),
         ),
+        Effect::Reset => save(
+            app,
+            Save::Reset,
+            text("session.c.crewReset").into(),
+            text("session.c.crewResetNote").into(),
+        ),
         Effect::Open(id) => open_thread(app, &id),
         Effect::Stop(task) => stop_task(app, &task),
         Effect::Retry(task) => retry_task(app, &task),
@@ -1354,6 +1373,62 @@ fn stop_task(app: &mut App, task: &TaskRef) {
             &[("role", role_name(&task.role))],
         )],
     );
+}
+
+static STOPPING: AtomicBool = AtomicBool::new(false);
+
+/// How many tasks the server says `crew.stopTasks` stopped.
+fn stopped_count(result: &Value) -> usize {
+    result["stopped"].as_array().map_or(0, Vec::len)
+}
+
+/// How many tasks were interrupted but had not ended when the server stopped waiting for them.
+fn stopping_count(result: &Value) -> usize {
+    result["stopping"].as_array().map_or(0, Vec::len)
+}
+
+/// `/crew stop [id|all]`: the server stops the lead's running crew tasks, one by id or all of them.
+fn stop_tasks(app: &mut App, task_id: Option<String>) {
+    let (Some(rpc), Active::Thread(lead)) = (app.rpc.clone(), app.active.clone()) else {
+        return offline(app);
+    };
+    // An older server has no crew.stopTasks; the /crew screen still interrupts a task's thread.
+    if app.config["environment"]["capabilities"]["crew"]["stopTasks"] != true {
+        return app.say(Tone::Error, text("session.c.crewStopUnsupported"));
+    }
+    if STOPPING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let tx = app.sender();
+    tokio::spawn(async move {
+        let mut payload = json!({"leadThreadId": lead});
+        if let Some(task_id) = task_id {
+            payload["taskId"] = json!(task_id);
+        }
+        let outcome = rpc.call(STOP_RPC, payload).await;
+        STOPPING.store(false, Ordering::SeqCst);
+        let _ = tx.send(Msg::Ext(Box::new(move |app| match outcome {
+            Ok(result) => {
+                let (stopped, stopping) = (stopped_count(&result), stopping_count(&result));
+                let line = if stopping > 0 {
+                    text_with("session.c.crewStopping", &[("count", stopping.to_string())])
+                } else if stopped == 0 {
+                    text("session.c.crewStopNone").to_string()
+                } else {
+                    text_with("session.c.crewStopped", &[("count", stopped.to_string())])
+                };
+                app.note(Tone::Done, "Crew", vec![line]);
+            }
+            Err(detail) => {
+                let line = format!(
+                    "{}: {}",
+                    text("session.c.crewStopFailed"),
+                    sanitize(&detail).lines().next().unwrap_or_default()
+                );
+                app.say(Tone::Error, &line);
+            }
+        })));
+    });
 }
 
 static RETRYING: AtomicBool = AtomicBool::new(false);
@@ -1481,8 +1556,20 @@ pub fn run(app: &mut App, argument: &str) {
             );
         }
         "model" => run_model(app, &ctx, &args),
+        "reset" => {
+            if !ctx.own {
+                app.notice = Some(text("session.c.crewDefaultAlready").into());
+                return;
+            }
+            save(
+                app,
+                Save::Reset,
+                text("session.c.crewReset").into(),
+                text("session.c.crewResetNote").into(),
+            );
+        }
         "default" => {
-            if !ctx.thread_scope {
+            if !ctx.own {
                 app.notice = Some(text("session.c.crewDefaultAlready").into());
                 return;
             }
@@ -1493,6 +1580,13 @@ pub fn run(app: &mut App, argument: &str) {
                 text("session.c.crewDefaultNote").into(),
             );
         }
+        "stop" => stop_tasks(
+            app,
+            args.get(1)
+                .filter(|target| !target.eq_ignore_ascii_case("all"))
+                .map(|target| target.to_string()),
+        ),
+        "log" => show_log(app),
         "back" => back_to_lead(app),
         _ => {
             app.notice = Some(text_with(
@@ -1501,6 +1595,303 @@ pub fn run(app: &mut App, argument: &str) {
             ))
         }
     }
+}
+
+// ---- /crew log -----------------------------------------------------------------------------------
+
+/// Rows of the decision log `/crew log` writes into the conversation; the clipboard gets them all.
+const LOG_ROWS: usize = 10;
+
+/// The cell limit of the TSV, in characters.
+const CELL_LIMIT: usize = 500;
+
+/// One decision of the crew: who the lead handed what to, why, on what evidence, how it came out.
+/// The same table as the TypeScript terminal and the desktop app derive from the lead's activities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LogRow {
+    ts: String,
+    phase: String,
+    decision: String,
+    why: String,
+    evidence: String,
+    result: String,
+}
+
+fn payload_str(payload: &Value, key: &str) -> String {
+    payload[key].as_str().unwrap_or("").trim().to_string()
+}
+
+fn join_words(parts: &[String]) -> String {
+    parts
+        .iter()
+        .filter(|part| !part.is_empty())
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn log_row(activity: &Activity) -> Option<LogRow> {
+    let payload = &activity.payload;
+    let task_id = payload_str(payload, "taskId");
+    // Provider-native tasks (the plan's own steps, Agent subagents) emit the same task kinds
+    // without a role; they are not the crew's decisions.
+    let crew_role = Some(payload_str(payload, "crewRole")).filter(|role| !role.is_empty());
+    if activity.kind.starts_with("task.") && crew_role.is_none() {
+        return None;
+    }
+    let role = crew_role.unwrap_or_else(|| "worker".to_string());
+    let title = payload_str(payload, "title");
+    let row = |phase: String, decision: String, why: String, evidence: String, result: &str| {
+        Some(LogRow {
+            ts: activity.created_at.clone(),
+            phase,
+            decision,
+            why,
+            evidence,
+            result: result.to_string(),
+        })
+    };
+    match activity.kind.as_str() {
+        "task.started" => {
+            let model = Some(payload_str(payload, "model"))
+                .filter(|model| !model.is_empty())
+                .unwrap_or_else(|| role.clone());
+            let thread = payload_str(payload, "threadId");
+            row(
+                format!("delegate:{role}"),
+                if title.is_empty() {
+                    format!("handed to {model}")
+                } else {
+                    format!("handed to {model}: {title}")
+                },
+                payload_str(payload, "why"),
+                join_words(&[
+                    format!("task:{task_id}"),
+                    if thread.is_empty() {
+                        String::new()
+                    } else {
+                        format!("thread:{thread}")
+                    },
+                ]),
+                "running",
+            )
+        }
+        // Only a model switch is a decision; the checklist's progress row is not.
+        "task.progress" if activity.summary.contains(" switched to ") => {
+            let model = payload_str(payload, "model");
+            row(
+                "fallback".into(),
+                format!(
+                    "switched to {}",
+                    if model.is_empty() {
+                        "another model"
+                    } else {
+                        &model
+                    }
+                ),
+                payload_str(payload, "summary"),
+                format!("task:{task_id}"),
+                "retrying",
+            )
+        }
+        "task.completed" if role == "auditor" => {
+            let verdict = Some(payload_str(payload, "verdict"))
+                .filter(|verdict| !verdict.is_empty())
+                .or_else(|| Some(payload_str(payload, "status")).filter(|s| !s.is_empty()))
+                .unwrap_or_else(|| "unknown".to_string());
+            row(
+                "audit".into(),
+                format!("auditor {verdict}"),
+                String::new(),
+                format!("task:{task_id}"),
+                &verdict,
+            )
+        }
+        "task.completed" => {
+            let status = payload_str(payload, "status");
+            let outcome = match status.as_str() {
+                "completed" => "finished",
+                "partial" => "finished part",
+                "blocked" => "blocked",
+                "failed" => "failed",
+                "stopped" | "interrupted" => "stopped",
+                "" => "ended",
+                other => other,
+            };
+            let total = payload["todoTotal"].as_u64().unwrap_or(0);
+            let verified = payload["todoVerified"].as_u64().unwrap_or(0);
+            // A missing verdict is an older server, which never proved anything.
+            let result = match payload["proof"].as_str() {
+                Some("verified") => "VERIFIED",
+                Some("not-verified") => "NOT VERIFIED",
+                Some("inconclusive") => "INCONCLUSIVE",
+                _ => "UNKNOWN",
+            };
+            row(
+                format!("result:{role}"),
+                format!("{role} {outcome}"),
+                String::new(),
+                join_words(&[
+                    format!("task:{task_id}"),
+                    if total == 0 {
+                        String::new()
+                    } else {
+                        format!("todos {verified}/{total}")
+                    },
+                ]),
+                result,
+            )
+        }
+        "crew.follow-up" => row(
+            "follow-up".into(),
+            "lead got a follow-up turn".into(),
+            payload_str(payload, "reason"),
+            String::new(),
+            "queued",
+        ),
+        "crew.stopped" | "crew.stopping" => {
+            let ids: Vec<&str> = payload["taskIds"]
+                .as_array()
+                .map(|ids| ids.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let stopping = activity.kind == "crew.stopping";
+            // A stop the user asked for carries only the server's `reason`.
+            let why = Some(payload_str(payload, "why"))
+                .filter(|why| !why.is_empty())
+                .unwrap_or_else(|| payload_str(payload, "reason"));
+            row(
+                "stop".into(),
+                format!(
+                    "{} {} {}",
+                    if stopping { "stopping" } else { "stopped" },
+                    ids.len(),
+                    if ids.len() == 1 { "task" } else { "tasks" }
+                ),
+                why,
+                if ids.is_empty() {
+                    String::new()
+                } else {
+                    format!("tasks:{}", ids.join(","))
+                },
+                if stopping { "stopping" } else { "stopped" },
+            )
+        }
+        _ => None,
+    }
+}
+
+/// The decision rows of the lead's crew activities, oldest first. Task activities without a crew
+/// role are left out, as are the provider's own plan steps and Agent subagents; `crew.stopped` and
+/// `crew.stopping` stay, because a stop is the lead's.
+fn decision_log(activities: &[Activity]) -> Vec<LogRow> {
+    let mut ordered: Vec<(usize, &Activity)> = activities.iter().enumerate().collect();
+    ordered.sort_by(|(ia, a), (ib, b)| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then(a.sequence.unwrap_or(0).cmp(&b.sequence.unwrap_or(0)))
+            .then(ia.cmp(ib))
+    });
+    ordered
+        .into_iter()
+        .filter_map(|(_, activity)| log_row(activity))
+        .collect()
+}
+
+/// One TSV cell on one line: control characters and line breaks become spaces, and a cell a
+/// spreadsheet would read as a formula (`=`, `+`, `-`, `@`) gets a leading `'`.
+fn tsv_cell(value: &str) -> String {
+    let spaced: String = value
+        .chars()
+        .map(|c| {
+            if c.is_control() || c == '\u{2028}' || c == '\u{2029}' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let flat: String = spaced
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(CELL_LIMIT)
+        .collect();
+    if flat.starts_with(['=', '+', '-', '@']) {
+        format!("'{flat}")
+    } else {
+        flat
+    }
+}
+
+/// The log as TSV: a header line, then a line per row.
+fn decision_log_tsv(rows: &[LogRow]) -> String {
+    let mut lines = vec!["ts\tphase\tdecision\twhy\tevidence\tresult".to_string()];
+    for row in rows {
+        lines.push(
+            [
+                &row.ts,
+                &row.phase,
+                &row.decision,
+                &row.why,
+                &row.evidence,
+                &row.result,
+            ]
+            .map(|cell| tsv_cell(cell))
+            .join("\t"),
+        );
+    }
+    lines.join("\n")
+}
+
+/// The newest `limit` rows as lines for the conversation: the UTC time, the phase, the decision and
+/// its result, then the lead's reason. Server strings are cleaned for the terminal.
+fn decision_log_lines(rows: &[LogRow], limit: usize) -> Vec<String> {
+    let start = rows.len().saturating_sub(limit);
+    rows[start..]
+        .iter()
+        .map(|row| {
+            let why = flat(&row.why);
+            format!(
+                "{}Z {} · {} · {}{}",
+                row.ts.get(11..19).unwrap_or(&row.ts),
+                flat(&row.phase),
+                flat(&row.decision),
+                flat(&row.result),
+                if why.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {why}")
+                }
+            )
+        })
+        .collect()
+}
+
+/// `/crew log`: the newest decision rows go into the conversation and the whole log, as TSV, to the
+/// clipboard. It is read from the lead's activities now, so it is a snapshot.
+fn show_log(app: &mut App) {
+    let loaded =
+        matches!(&app.active, Active::Thread(id) if app.conv.loaded && app.conv.thread_id == *id);
+    let rows = if loaded {
+        decision_log(&app.conv.thread.activities)
+    } else {
+        Vec::new()
+    };
+    if rows.is_empty() {
+        app.notice = Some(text("session.c.crewLogEmpty").into());
+        return;
+    }
+    let lines = decision_log_lines(&rows, LOG_ROWS);
+    let title = text_with(
+        "session.c.crewLogTitle",
+        &[
+            ("shown", lines.len().to_string()),
+            ("total", rows.len().to_string()),
+        ],
+    );
+    app.note(Tone::Info, &title, lines);
+    app.copy_text(decision_log_tsv(&rows));
 }
 
 /// `/crew model <role> [model|auto]`.
@@ -1622,7 +2013,7 @@ fn dim(line: impl Into<String>) -> (String, Shade) {
 
 fn frame_of(shown: &View, ctx: &Context, room: usize) -> Content {
     let view = settle(shown, ctx);
-    let scope = text(if ctx.thread_scope {
+    let scope = text(if ctx.own {
         "providers.crewScreen.scopeThread"
     } else {
         "providers.crewScreen.scopeDefault"
@@ -1832,6 +2223,10 @@ fn frame_of(shown: &View, ctx: &Context, room: usize) -> Content {
                         label: text("providers.crewScreen.makeDefault").into(),
                         note: text("providers.crewScreen.makeDefaultNote").into(),
                     },
+                    Row::Reset => Item {
+                        label: text("providers.crewScreen.resetToDefault").into(),
+                        note: text("providers.crewScreen.resetToDefaultNote").into(),
+                    },
                     Row::Thread(i) => Item {
                         label: format!(
                             "{}  {}",
@@ -1979,1050 +2374,5 @@ impl Screen for CrewScreen {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::notes::Note;
-    use crate::panels_common::scenes;
-    use crate::server_settings::{UPDATE_SETTINGS, fake};
-    use crate::state::{Conversation, ThreadShell};
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-
-    fn english() {
-        crate::i18n::init(Some("en"));
-    }
-
-    fn model(slug: &str, name: &str, default: bool) -> Value {
-        json!({"slug": slug, "name": name, "isDefault": default})
-    }
-
-    fn providers() -> Value {
-        json!([
-            {"instanceId": "claude", "driver": "claudeAgent", "displayName": "Claude", "enabled": true,
-             "installed": true, "status": "ready", "auth": {"status": "authenticated"},
-             "models": [model("claude-haiku-5-5", "Haiku 5.5", false), model("claude-sonnet-5-5", "Sonnet 5.5", true),
-                        model("claude-opus-5-5", "Opus 5.5", false)]},
-            {"instanceId": "codex", "driver": "codex", "displayName": "Codex", "enabled": true,
-             "installed": true, "status": "ready", "auth": {"status": "authenticated"},
-             "models": [model("gpt-5", "GPT-5", true), model("gpt-5-mini", "GPT-5 mini", false)]},
-            {"instanceId": "grok", "driver": "grok", "displayName": "Grok", "enabled": true,
-             "installed": true, "status": "ready", "auth": {"status": "authenticated"},
-             "models": [model("grok-4", "Grok 4", true)]}
-        ])
-    }
-
-    fn app_with(crew: Value) -> App {
-        english();
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new("0.0.0", "/tmp/oop-rs/work/demo", "/tmp", tx);
-        app.config = json!({"settings": {"crew": crew}, "providers": providers()});
-        app
-    }
-
-    /// The thread `lead`, on Claude, loaded, with the given activities.
-    fn on_lead(app: &mut App, activities: Vec<Value>, running: bool) {
-        let mut thread = scenes::thread(activities, running);
-        thread.model_selection = json!({"instanceId": "claude", "model": "claude-sonnet-5-5"});
-        app.active = Active::Thread("lead".into());
-        app.conv = Conversation::new("lead");
-        app.conv.loaded = true;
-        app.conv.thread = thread;
-        app.shell.threads = vec![
-            serde_json::from_value(json!({"id": "lead", "projectId": "p1", "title": "Lead"}))
-                .unwrap(),
-        ];
-    }
-
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
-    }
-
-    fn letter(ch: char) -> KeyEvent {
-        key(KeyCode::Char(ch))
-    }
-
-    #[test]
-    fn presets_and_roles_are_named_by_value_alias_or_label() {
-        english();
-        assert_eq!(parse_preset("speed"), Some("speed"));
-        assert_eq!(parse_preset(" FAST "), Some("speed"));
-        assert_eq!(parse_preset("cheap"), Some("budget"));
-        assert_eq!(parse_preset("pick"), Some("recommended"));
-        assert_eq!(parse_preset("OOP pick"), Some("recommended"));
-        assert_eq!(parse_preset(""), None);
-        assert_eq!(parse_preset("nope"), None);
-        assert_eq!(parse_role("Expert"), Some(1));
-        assert_eq!(parse_role("boss"), None);
-        assert_eq!(preset_words(), "recommended|speed|quality|budget");
-    }
-
-    #[test]
-    fn a_change_in_a_thread_lands_in_its_override_and_keeps_the_rest() {
-        let settings = json!({"enabled": false, "preset": "recommended",
-            "pinned": {"worker": {"instanceId": "codex", "model": "gpt-5"}},
-            "threads": {"other": {"enabled": true, "pinned": {}},
-                        "t1": {"preset": "speed", "pinned": {"expert": {"instanceId": "claude", "model": "claude-opus-5-5"}}}}});
-        let next = apply_change(
-            &settings,
-            Some("t1"),
-            &Change {
-                enabled: Some(true),
-                pins: vec![
-                    ("worker", None),
-                    (
-                        "auditor",
-                        Some(json!({"instanceId": "codex", "model": "gpt-5"})),
-                    ),
-                ],
-                ..Default::default()
-            },
-        );
-        assert_eq!(next["enabled"], false, "the defaults are not touched");
-        assert_eq!(next["pinned"], settings["pinned"]);
-        assert_eq!(next["threads"]["other"], settings["threads"]["other"]);
-        let entry = &next["threads"]["t1"];
-        assert_eq!(entry["enabled"], true);
-        assert_eq!(
-            entry["preset"], "speed",
-            "the override keeps its own preset"
-        );
-        assert_eq!(
-            entry["pinned"]["worker"],
-            Value::Null,
-            "a null pin means Auto over the defaults' pin"
-        );
-        assert_eq!(entry["pinned"]["expert"]["model"], "claude-opus-5-5");
-        assert_eq!(entry["pinned"]["auditor"]["model"], "gpt-5");
-    }
-
-    #[test]
-    fn a_change_without_a_thread_changes_the_defaults() {
-        let settings = json!({"enabled": false, "preset": "recommended",
-            "pinned": {"worker": {"instanceId": "codex", "model": "gpt-5"}}, "threads": {"t1": {"enabled": true}}});
-        let next = apply_change(
-            &settings,
-            None,
-            &Change {
-                preset: Some("quality".into()),
-                pins: vec![
-                    ("worker", None),
-                    (
-                        "expert",
-                        Some(json!({"instanceId": "claude", "model": "m"})),
-                    ),
-                ],
-                ..Default::default()
-            },
-        );
-        assert_eq!(next["preset"], "quality");
-        assert_eq!(next["enabled"], false);
-        assert!(
-            next["pinned"].get("worker").is_none(),
-            "Auto removes the pin"
-        );
-        assert_eq!(next["pinned"]["expert"]["model"], "m");
-        assert_eq!(next["threads"], settings["threads"]);
-    }
-
-    #[test]
-    fn make_default_copies_what_the_thread_runs_with_and_only_hand_picked_models() {
-        let config = json!({"settings": {"crew": {"enabled": false, "preset": "recommended", "pinned": {},
-            "threads": {"t1": {"enabled": true, "preset": "quality",
-                "pinned": {"worker": {"instanceId": "codex", "model": "gpt-5-mini"}}}}}}, "providers": providers()});
-        let resolved = crew::resolve(&config, Some("t1"), Some(("claude", "claude-sonnet-5-5")));
-        let next = as_default(&config["settings"]["crew"], &resolved);
-        assert_eq!(next["enabled"], true);
-        assert_eq!(next["preset"], "quality");
-        assert_eq!(
-            next["pinned"],
-            json!({"worker": {"instanceId": "codex", "model": "gpt-5-mini"}})
-        );
-        assert_eq!(
-            next["threads"], config["settings"]["crew"]["threads"],
-            "overrides stay"
-        );
-    }
-
-    #[test]
-    fn the_model_list_puts_auto_first_and_ranks_the_models_that_match() {
-        let app = app_with(json!({"enabled": true}));
-        let ctx = context(&app, 0);
-        let all = pick_items(&ctx, 0, "");
-        assert!(matches!(all[0], PickItem::Auto { .. }));
-        assert_eq!(all.len(), 1 + 6);
-        assert!(
-            all[0].note().starts_with("Recommended: "),
-            "{}",
-            all[0].note()
-        );
-        let hits = pick_items(&ctx, 0, "mini");
-        assert_eq!(
-            hits.len(),
-            1,
-            "Auto is ruled out by the words, one model fits: {hits:?}"
-        );
-        assert_eq!(hits[0].label(), "Codex / GPT-5 mini");
-        let by_provider = pick_items(&ctx, 0, "claude opus");
-        assert_eq!(
-            by_provider[0].label(),
-            "Claude / Opus 5.5",
-            "every word must match, in any field"
-        );
-        assert!(pick_items(&ctx, 0, "zzzz").is_empty());
-        assert!(matches!(
-            pick_items(&ctx, 0, "auto")[0],
-            PickItem::Auto { .. }
-        ));
-        assert!(all.iter().any(|i| i.note().contains("default")));
-    }
-
-    #[test]
-    fn the_status_of_the_thread_model_explains_why_the_crew_cannot_start() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, vec![], false);
-        assert!(context(&app, 0).problem.is_none());
-        app.conv.thread.model_selection = json!({"instanceId": "grok", "model": "grok-4"});
-        let problem = context(&app, 0).problem.expect("grok cannot lead");
-        assert!(problem.contains("Grok"), "{problem}");
-        app.conv.thread.model_selection = json!({"instanceId": "gone", "model": "x"});
-        assert_eq!(
-            context(&app, 0).problem.as_deref(),
-            Some(text("providers.crew.unknownModel"))
-        );
-    }
-
-    fn pressed(shown: &View, ctx: &Context, code: KeyEvent) -> KeyResult {
-        crew_key(shown, ctx, code)
-    }
-
-    #[test]
-    fn the_main_screen_lists_settings_then_tasks_and_keys_move_the_pointer() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(
-            &mut app,
-            vec![
-                scenes::crew(
-                    "task.started",
-                    6,
-                    "w1",
-                    "worker",
-                    json!({"title": "fix it"}),
-                ),
-                scenes::crew(
-                    "task.completed",
-                    20,
-                    "w1",
-                    "worker",
-                    json!({"status": "completed"}),
-                ),
-            ],
-            false,
-        );
-        let ctx = context(&app, scenes::ms(100));
-        let rows = main_rows(&ctx);
-        assert_eq!(
-            rows,
-            [
-                Row::Toggle,
-                Row::Preset,
-                Row::Role(0),
-                Row::Role(1),
-                Row::Role(2),
-                Row::Default,
-                Row::Task(0)
-            ],
-            "no Auto-all row while nothing is pinned; a thread has the make-default row"
-        );
-        let view = open_view(&ctx);
-        assert_eq!(view.selected(), 0);
-        let down = pressed(&view, &ctx, key(KeyCode::Down));
-        assert_eq!(down.view.unwrap().selected(), 1);
-        let digit = pressed(&view, &ctx, letter('7'));
-        assert_eq!(digit.view.unwrap().selected(), 6);
-        let beyond = pressed(&view, &ctx, letter('9'));
-        assert_eq!(
-            beyond.view.unwrap().selected(),
-            0,
-            "a digit past the last row does nothing"
-        );
-        assert!(
-            pressed(&view, &ctx, key(KeyCode::Esc)).view.is_none(),
-            "Esc closes the main screen"
-        );
-        assert!(pressed(&view, &ctx, letter('q')).view.is_none());
-        let up = pressed(&view, &ctx, key(KeyCode::Up));
-        assert_eq!(
-            up.view.unwrap().selected(),
-            0,
-            "the pointer stays inside the list"
-        );
-    }
-
-    #[test]
-    fn enter_on_a_setting_asks_for_its_change_and_on_a_list_opens_it() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, vec![], false);
-        let ctx = context(&app, 0);
-        let at = |row: Row| {
-            let selected = main_rows(&ctx).iter().position(|r| *r == row).unwrap();
-            main_view_at(&ctx, selected)
-        };
-        assert_eq!(
-            pressed(&at(Row::Toggle), &ctx, key(KeyCode::Enter)).effect,
-            Effect::Toggle
-        );
-        assert_eq!(
-            pressed(&at(Row::Default), &ctx, key(KeyCode::Enter)).effect,
-            Effect::Default
-        );
-        let preset = pressed(&at(Row::Preset), &ctx, key(KeyCode::Enter))
-            .view
-            .unwrap();
-        assert_eq!(preset, View::Preset { selected: 0 });
-        let chosen = pressed(&View::Preset { selected: 2 }, &ctx, key(KeyCode::Enter));
-        assert_eq!(chosen.effect, Effect::Preset("quality"));
-        assert!(
-            matches!(chosen.view, Some(View::Main { .. })),
-            "back to the main screen"
-        );
-        let model = pressed(&at(Row::Role(1)), &ctx, key(KeyCode::Enter))
-            .view
-            .unwrap();
-        assert_eq!(
-            model,
-            View::Model {
-                role: 1,
-                selected: 0,
-                query: String::new()
-            },
-            "Auto is the current choice"
-        );
-    }
-
-    #[test]
-    fn the_model_list_filters_as_letters_are_typed_and_esc_clears_before_it_goes_back() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, vec![], false);
-        let ctx = context(&app, 0);
-        let mut view = View::Model {
-            role: 0,
-            selected: 0,
-            query: String::new(),
-        };
-        for ch in "mini".chars() {
-            view = pressed(&view, &ctx, letter(ch)).view.unwrap();
-        }
-        assert_eq!(
-            view,
-            View::Model {
-                role: 0,
-                selected: 0,
-                query: "mini".into()
-            },
-            "'q' and digits are letters here too"
-        );
-        let pick = pressed(&view, &ctx, key(KeyCode::Enter));
-        match pick.effect {
-            Effect::Pin {
-                role: 0,
-                pick: PickItem::Model { option, .. },
-            } => assert_eq!(option.model, "gpt-5-mini"),
-            other => panic!("{other:?}"),
-        }
-        let backspace = pressed(&view, &ctx, key(KeyCode::Backspace)).view.unwrap();
-        assert!(matches!(&backspace, View::Model { query, .. } if query == "min"));
-        let cleared = pressed(&view, &ctx, key(KeyCode::Esc)).view.unwrap();
-        assert!(matches!(&cleared, View::Model { query, .. } if query.is_empty()));
-        assert!(matches!(
-            pressed(&cleared, &ctx, key(KeyCode::Esc)).view,
-            Some(View::Main { .. })
-        ));
-        // no match: Enter says so and stays
-        let none = View::Model {
-            role: 0,
-            selected: 0,
-            query: "zzzz".into(),
-        };
-        let result = pressed(&none, &ctx, key(KeyCode::Enter));
-        assert_eq!(result.effect, Effect::None);
-        assert_eq!(
-            result.notice.as_deref(),
-            Some(text("providers.crewScreen.noMatch"))
-        );
-        let ctrl_u = KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL);
-        assert!(
-            matches!(&pressed(&view, &ctx, ctrl_u).view, Some(View::Model { query, .. }) if query.is_empty())
-        );
-        assert_eq!(
-            append_to_search("a ", "  b"),
-            "a b",
-            "doubled spaces and leading space go"
-        );
-        assert_eq!(append_to_search("", " "), "");
-    }
-
-    fn running_board() -> Vec<Value> {
-        vec![
-            scenes::crew(
-                "task.started",
-                6,
-                "w1",
-                "worker",
-                json!({"title": "fix the parser"}),
-            ),
-            scenes::crew(
-                "task.started",
-                7,
-                "e1",
-                "expert",
-                json!({"title": "hard part"}),
-            ),
-            scenes::crew(
-                "task.completed",
-                30,
-                "e1",
-                "expert",
-                json!({"status": "failed"}),
-            ),
-        ]
-    }
-
-    #[test]
-    fn a_task_offers_open_stop_and_retry_as_it_stands() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, running_board(), true);
-        let ctx = context(&app, scenes::ms(40));
-        let board = ctx.board.as_ref().expect("a board");
-        let (running, failed) = (&board.tasks[0], &board.tasks[1]);
-        assert_eq!(
-            task_items(running, false),
-            [TaskItem::Open, TaskItem::Stop, TaskItem::Back]
-        );
-        assert_eq!(
-            task_items(failed, false),
-            [TaskItem::Open, TaskItem::Retry, TaskItem::Back]
-        );
-        assert_eq!(
-            task_items(failed, true),
-            [TaskItem::Confirm, TaskItem::Cancel]
-        );
-        // an auditor is not retried, a task with no thread cannot be opened or stopped
-        let mut auditor = failed.clone();
-        auditor.role = "auditor".into();
-        auditor.actions.retry = false;
-        assert_eq!(
-            task_items(&auditor, false),
-            [TaskItem::Open, TaskItem::Back]
-        );
-        assert!(running.actions.stop && running.actions.open && !running.actions.retry);
-        assert!(failed.actions.retry && !failed.actions.stop);
-    }
-
-    #[test]
-    fn stopping_a_task_asks_first_and_then_names_the_task() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, running_board(), true);
-        let ctx = context(&app, scenes::ms(40));
-        let task_row = main_rows(&ctx)
-            .iter()
-            .position(|r| *r == Row::Task(0))
-            .unwrap();
-        let task = pressed(&main_view_at(&ctx, task_row), &ctx, key(KeyCode::Enter))
-            .view
-            .unwrap();
-        assert_eq!(
-            task,
-            View::Task {
-                task_id: "w1".into(),
-                selected: 0,
-                confirm_stop: false
-            }
-        );
-        let ask = pressed(
-            &View::Task {
-                task_id: "w1".into(),
-                selected: 1,
-                confirm_stop: false,
-            },
-            &ctx,
-            key(KeyCode::Enter),
-        );
-        assert_eq!(
-            ask.effect,
-            Effect::None,
-            "nothing is stopped before it is confirmed"
-        );
-        let asked = ask.view.unwrap();
-        assert_eq!(
-            asked,
-            View::Task {
-                task_id: "w1".into(),
-                selected: 1,
-                confirm_stop: true
-            },
-            "the pointer starts on Cancel"
-        );
-        let cancel = pressed(&asked, &ctx, key(KeyCode::Enter));
-        assert_eq!(cancel.effect, Effect::None);
-        let confirm = pressed(
-            &View::Task {
-                task_id: "w1".into(),
-                selected: 0,
-                confirm_stop: true,
-            },
-            &ctx,
-            key(KeyCode::Enter),
-        );
-        assert_eq!(
-            confirm.effect,
-            Effect::Stop(TaskRef {
-                task_id: "w1".into(),
-                role: "worker".into(),
-                thread_id: Some("th-w1".into())
-            })
-        );
-        let esc = pressed(&asked, &ctx, key(KeyCode::Esc)).view.unwrap();
-        assert!(
-            matches!(
-                esc,
-                View::Task {
-                    confirm_stop: false,
-                    ..
-                }
-            ),
-            "Esc only leaves the question"
-        );
-        let retry = pressed(
-            &View::Task {
-                task_id: "e1".into(),
-                selected: 1,
-                confirm_stop: false,
-            },
-            &ctx,
-            key(KeyCode::Enter),
-        );
-        assert!(
-            matches!(retry.effect, Effect::Retry(TaskRef { ref task_id, .. }) if task_id == "e1")
-        );
-        let open = pressed(
-            &View::Task {
-                task_id: "e1".into(),
-                selected: 0,
-                confirm_stop: false,
-            },
-            &ctx,
-            key(KeyCode::Enter),
-        );
-        assert_eq!(open.effect, Effect::Open("th-e1".into()));
-        assert!(open.view.is_none(), "opening a thread closes the screen");
-    }
-
-    #[test]
-    fn a_pointer_follows_its_row_when_rows_come_and_go() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, running_board(), true);
-        let ctx = context(&app, scenes::ms(40));
-        let on_task = main_view_at(
-            &ctx,
-            main_rows(&ctx)
-                .iter()
-                .position(|r| *r == Row::Role(1))
-                .unwrap(),
-        );
-        // A model gets pinned: an "Auto for all" row appears above the roles' end; the pointer stays on the expert.
-        app.config["settings"]["crew"]["pinned"] =
-            json!({"worker": {"instanceId": "codex", "model": "gpt-5"}});
-        let after = context(&app, scenes::ms(40));
-        assert!(main_rows(&after).contains(&Row::AutoAll));
-        let settled = settle(&on_task, &after);
-        assert_eq!(
-            row_id(&after, main_rows(&after)[settled.selected()]),
-            "role:expert"
-        );
-    }
-
-    #[test]
-    fn a_crew_thread_that_waits_for_the_user_starts_the_pointer_and_is_listed_first() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, running_board(), true);
-        app.shell
-            .threads
-            .push(scenes::shell("th-w1", "Crew Worker · fix the parser", true));
-        app.shell.threads.push(scenes::shell(
-            "th-old",
-            "Crew Expert · an earlier thing",
-            false,
-        ));
-        let ctx = context(&app, scenes::ms(40));
-        assert_eq!(ctx.waiting.len(), 1);
-        let rows = main_rows(&ctx);
-        assert!(
-            !rows.iter().any(|r| matches!(r, Row::Thread(_))),
-            "it is on the board already: shown as a task row"
-        );
-        let view = open_view(&ctx);
-        let task = ctx
-            .board
-            .as_ref()
-            .unwrap()
-            .tasks
-            .iter()
-            .position(|t| t.task_id == "w1")
-            .unwrap();
-        assert_eq!(
-            rows[view.selected()],
-            Row::Task(task),
-            "the pointer starts on the request that waits"
-        );
-        // A waiting thread that is on no board is a row of its own, at the top.
-        app.shell
-            .threads
-            .push(scenes::shell("th-x", "Crew Auditor · a review", true));
-        let ctx = context(&app, scenes::ms(40));
-        let rows = main_rows(&ctx);
-        assert!(matches!(rows[0], Row::Thread(_)));
-        let open = pressed(&open_view(&ctx), &ctx, key(KeyCode::Enter));
-        assert_eq!(open.effect, Effect::Open("th-x".into()));
-        assert_eq!(
-            waiting_text(&ctx.waiting.iter().map(|w| w.kind).collect::<Vec<_>>()).as_deref(),
-            Some("2 crew tasks are waiting for approval — /crew")
-        );
-    }
-
-    fn rows_of(app: &App, w: u16, h: u16) -> Vec<String> {
-        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal
-            .draw(|f| app.screen.as_ref().unwrap().draw(f, f.area(), app))
-            .unwrap();
-        let buffer = terminal.backend().buffer().clone();
-        (0..h)
-            .map(|y| {
-                (0..w)
-                    .map(|x| buffer[(x, y)].symbol().to_string())
-                    .collect::<String>()
-                    .trim_end()
-                    .to_string()
-            })
-            .collect()
-    }
-
-    #[test]
-    fn the_screen_draws_the_settings_and_the_board() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, running_board(), true);
-        run(&mut app, "");
-        let rows = rows_of(&app, 100, 24).join("\n");
-        for wanted in [
-            "Crew  on",
-            "this thread",
-            "Preset  OOP pick",
-            "Worker  Auto · Haiku 5.5",
-            "Expert  Auto · Opus 5.5",
-            "Auditor  Auto · Opus 5.5",
-            "Use as new chat default",
-            "Worker  In progress · fix the parser",
-            "Expert  Failed · hard part",
-        ] {
-            assert!(rows.contains(wanted), "{wanted:?} in\n{rows}");
-        }
-        assert!(
-            rows.contains("1  Crew") && rows.contains("This turn"),
-            "{rows}"
-        );
-        assert_eq!(
-            app.screen.as_ref().unwrap().hint(),
-            text("providers.crewScreen.hintMain")
-        );
-    }
-
-    #[test]
-    fn the_task_screen_shows_the_detail_and_a_long_summary_is_cut() {
-        let mut app = app_with(json!({"enabled": true}));
-        let long = "word ".repeat(200);
-        on_lead(
-            &mut app,
-            vec![
-                scenes::crew(
-                    "task.started",
-                    6,
-                    "w1",
-                    "worker",
-                    json!({"title": "fix the parser"}),
-                ),
-                scenes::crew(
-                    "task.completed",
-                    26,
-                    "w1",
-                    "worker",
-                    json!({"status": "completed", "summary": long}),
-                ),
-            ],
-            false,
-        );
-        app.screen = Some(Box::new(CrewScreen {
-            view: View::Task {
-                task_id: "w1".into(),
-                selected: 0,
-                confirm_stop: false,
-            },
-        }));
-        let rows = rows_of(&app, 44, 30);
-        let shown = rows.join("\n");
-        for wanted in [
-            "Worker task",
-            "Task      fix the parser",
-            "Status    Done",
-            "Elapsed   20s",
-            "Open sub-thread",
-            "Back to board",
-        ] {
-            assert!(shown.contains(wanted), "{wanted:?} in\n{shown}");
-        }
-        assert!(shown.contains('…'), "the summary is cut: {shown}");
-        assert!(!shown.contains("Retry"), "a finished task is not retried");
-    }
-
-    #[test]
-    fn a_task_that_has_left_the_board_says_so() {
-        let mut app = app_with(json!({"enabled": true}));
-        on_lead(&mut app, vec![], false);
-        app.screen = Some(Box::new(CrewScreen {
-            view: View::Task {
-                task_id: "gone".into(),
-                selected: 0,
-                confirm_stop: false,
-            },
-        }));
-        assert!(
-            rows_of(&app, 80, 12)
-                .join("\n")
-                .contains(text("providers.crewScreen.taskGone"))
-        );
-    }
-
-    fn notes(app: &App) -> String {
-        app.notes
-            .iter()
-            .map(|n| match n {
-                Note::Text { title, body, .. } => format!("{title} {}", body.join(" ")),
-                Note::Rows { .. } => String::new(),
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    async fn connected_on_lead() -> (fake::Fake, App, tokio::sync::mpsc::UnboundedReceiver<Msg>) {
-        english();
-        let fake = fake::start_with(json!({"crew": {"enabled": false, "preset": "recommended", "pinned": {}, "threads": {"other": {"enabled": true}}}}), providers()).await;
-        let (mut app, rx) = fake::connected(&fake).await;
-        on_lead(&mut app, vec![], false);
-        (fake, app, rx)
-    }
-
-    fn stored(fake: &fake::Fake) -> Value {
-        fake.settings.lock().unwrap()["crew"].clone()
-    }
-
-    #[tokio::test]
-    async fn crew_on_writes_the_threads_override_and_says_so() {
-        let (fake, mut app, mut rx) = connected_on_lead().await;
-        run(&mut app, "on");
-        fake::pump(&mut app, &mut rx, |a| !a.notes.is_empty()).await;
-        let crew = stored(&fake);
-        assert_eq!(crew["threads"]["lead"]["enabled"], true);
-        assert_eq!(crew["enabled"], false, "the defaults stay off");
-        assert_eq!(
-            crew["threads"]["other"],
-            json!({"enabled": true}),
-            "another thread's override stays"
-        );
-        assert!(notes(&app).contains("Crew on"), "{}", notes(&app));
-        let calls = fake.called(UPDATE_SETTINGS).len();
-        run(&mut app, "on");
-        assert!(
-            app.notice.as_deref().is_some_and(|n| n.contains("already")),
-            "{:?}",
-            app.notice
-        );
-        assert_eq!(
-            fake.called(UPDATE_SETTINGS).len(),
-            calls,
-            "nothing is sent for what already is"
-        );
-    }
-
-    #[tokio::test]
-    async fn crew_off_preset_and_default_go_to_the_server() {
-        let (fake, mut app, mut rx) = connected_on_lead().await;
-        run(&mut app, "preset fast");
-        fake::pump(&mut app, &mut rx, |a| !a.notes.is_empty()).await;
-        assert_eq!(stored(&fake)["threads"]["lead"]["preset"], "speed");
-        assert!(notes(&app).contains("Crew preset Speed"), "{}", notes(&app));
-        run(&mut app, "preset nope");
-        assert!(
-            app.notice
-                .as_deref()
-                .unwrap()
-                .contains("recommended|speed|quality|budget")
-        );
-        // The crew on this thread, then "default": new threads get what this thread runs with.
-        run(&mut app, "on");
-        fake::pump(&mut app, &mut rx, |a| {
-            a.config["settings"]["crew"]["threads"]["lead"]["enabled"] == true
-        })
-        .await;
-        run(&mut app, "default");
-        fake::pump(&mut app, &mut rx, |a| {
-            a.config["settings"]["crew"]["enabled"] == true
-        })
-        .await;
-        let crew = stored(&fake);
-        assert_eq!(
-            (crew["enabled"].clone(), crew["preset"].clone()),
-            (json!(true), json!("speed"))
-        );
-        assert_eq!(
-            crew["threads"]["lead"]["enabled"], true,
-            "the override stays"
-        );
-        run(&mut app, "off");
-        fake::pump(&mut app, &mut rx, |a| {
-            a.config["settings"]["crew"]["threads"]["lead"]["enabled"] == false
-        })
-        .await;
-        assert_eq!(stored(&fake)["threads"]["lead"]["enabled"], false);
-    }
-
-    #[tokio::test]
-    async fn crew_model_pins_a_model_or_puts_the_role_back_on_auto() {
-        let (fake, mut app, mut rx) = connected_on_lead().await;
-        run(&mut app, "model worker gpt-5 mini");
-        fake::pump(&mut app, &mut rx, |a| !a.notes.is_empty()).await;
-        assert_eq!(
-            stored(&fake)["threads"]["lead"]["pinned"]["worker"],
-            json!({"instanceId": "codex", "model": "gpt-5-mini"})
-        );
-        assert!(
-            notes(&app).contains("Worker model Codex / GPT-5 mini"),
-            "{}",
-            notes(&app)
-        );
-        run(&mut app, "model worker auto");
-        fake::pump(&mut app, &mut rx, |a| {
-            a.config["settings"]["crew"]["threads"]["lead"]["pinned"]["worker"].is_null()
-        })
-        .await;
-        assert_eq!(
-            stored(&fake)["threads"]["lead"]["pinned"]["worker"],
-            Value::Null
-        );
-        // usage and unknown words
-        run(&mut app, "model");
-        assert_eq!(
-            app.notice.as_deref(),
-            Some(text("session.c.crewModelUsage"))
-        );
-        run(&mut app, "model boss");
-        assert!(app.notice.as_deref().unwrap().contains("boss"));
-        run(&mut app, "model worker zzzz");
-        assert!(app.notice.as_deref().unwrap().contains("zzzz"));
-        // several matches open the narrowed list
-        assert!(app.screen.is_none());
-        run(&mut app, "model expert claude");
-        let screen = rows_of(&app, 100, 20).join("\n");
-        assert!(
-            screen.contains("Claude / Opus 5.5") && screen.contains("Claude / Haiku 5.5"),
-            "{screen}"
-        );
-        assert!(!screen.contains("Codex /"), "{screen}");
-        assert!(screen.contains("Search: claude"), "{screen}");
-    }
-
-    #[tokio::test]
-    async fn on_a_conversation_not_started_the_crew_settings_are_the_defaults() {
-        english();
-        let fake = fake::start_with(json!({"crew": {"enabled": false, "preset": "recommended", "pinned": {}, "threads": {}}}), providers()).await;
-        let (mut app, mut rx) = fake::connected(&fake).await;
-        app.active = Active::Draft("p1".into());
-        run(&mut app, "default");
-        assert_eq!(
-            app.notice.as_deref(),
-            Some(text("session.c.crewDefaultAlready"))
-        );
-        run(&mut app, "preset budget");
-        fake::pump(&mut app, &mut rx, |a| !a.notes.is_empty()).await;
-        assert_eq!(stored(&fake)["preset"], "budget");
-        assert_eq!(stored(&fake)["threads"], json!({}));
-    }
-
-    #[tokio::test]
-    async fn a_failed_save_is_reported_and_nothing_is_recorded_as_done() {
-        english();
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut app = App::new("0.0.0", "/tmp", "/tmp", tx);
-        app.config = json!({"settings": {"crew": {"enabled": false}}, "providers": providers()});
-        on_lead(&mut app, vec![], false);
-        run(&mut app, "on");
-        assert!(
-            notes(&app).contains(crate::i18n::tr("notice.offline")),
-            "{}",
-            notes(&app)
-        );
-        assert!(!notes(&app).contains("Crew on"));
-    }
-
-    #[tokio::test]
-    async fn a_settings_update_from_the_stream_refreshes_what_the_crew_line_reads() {
-        english();
-        let fake = fake::start_with(json!({"crew": {"enabled": false, "preset": "recommended", "pinned": {}, "threads": {}}}), providers()).await;
-        let (mut app, mut rx) = fake::connected(&fake).await;
-        on_lead(&mut app, vec![], false);
-        let line = |app: &App| {
-            let model = app.current_model();
-            crew::roles_of(&app.config, Some("lead"), brain_of(&model), true)
-        };
-        // The stream's snapshot arrives first; the crew is off.
-        fake::pump(&mut app, &mut rx, |a| {
-            fake.calls
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|(t, _)| t == "subscribeServerConfig")
-                && a.config["providers"].is_array()
-        })
-        .await;
-        assert!(line(&app).is_none());
-        // Another client turns the crew on and pins the worker: the server announces it.
-        let now = json!({"crew": {"enabled": true, "preset": "recommended", "threads": {},
-            "pinned": {"worker": {"instanceId": "codex", "model": "gpt-5-mini"}}}});
-        *fake.settings.lock().unwrap() = now.clone();
-        fake.events
-            .send(json!({"type": "settingsUpdated", "payload": {"settings": now}}))
-            .unwrap();
-        fake::pump(&mut app, &mut rx, |a| line(a).is_some()).await;
-        let roles = line(&app).expect("the crew line has input now");
-        assert_eq!(roles[0].model.as_deref(), Some("GPT-5 mini"));
-        assert_eq!(roles[1].model.as_deref(), Some("Opus 5.5"));
-    }
-
-    #[tokio::test]
-    async fn my_own_change_shows_at_once_without_waiting_for_the_stream() {
-        let (_fake, mut app, mut rx) = connected_on_lead().await;
-        run(&mut app, "on");
-        // Only the answer to the patch is handled; the stream's own announcement may come later.
-        fake::pump(&mut app, &mut rx, |a| {
-            a.config["settings"]["crew"]["threads"]["lead"]["enabled"] == true
-        })
-        .await;
-        let model = app.current_model();
-        assert!(crew::roles_of(&app.config, Some("lead"), brain_of(&model), true).is_some());
-    }
-
-    #[tokio::test]
-    async fn in_a_crew_task_thread_only_back_works_and_it_returns_to_the_lead() {
-        let (fake, mut app, mut rx) = connected_on_lead().await;
-        app.shell
-            .threads
-            .push(scenes::shell("th-w1", "Crew Worker · fix", false));
-        app.active = Active::Thread("th-w1".into());
-        assert!(crew_sub(&app).is_some());
-        run(&mut app, "on");
-        assert_eq!(app.notice.as_deref(), Some(text("session.c.crewBackOnly")));
-        assert!(fake.called(UPDATE_SETTINGS).is_empty());
-        run(&mut app, "back");
-        assert_eq!(
-            app.active,
-            Active::Thread("lead".into()),
-            "the lead is open again"
-        );
-        // The note that belongs to a task thread is not shown on the lead.
-        assert!(!notes(&app).contains(text("session.c.crewTaskThread")));
-        // /crew back on a lead says what it is for.
-        run(&mut app, "back");
-        assert_eq!(
-            app.notice.as_deref(),
-            Some(text("session.c.crewBackOnlyInTask"))
-        );
-        // A task thread whose lead is not known cannot go back.
-        app.shell.threads.push(
-            serde_json::from_value::<ThreadShell>(
-                json!({"id": "orphan", "projectId": "p1", "title": "Crew Expert · x"}),
-            )
-            .unwrap(),
-        );
-        app.active = Active::Thread("orphan".into());
-        run(&mut app, "");
-        assert_eq!(app.notice.as_deref(), Some(text("session.c.leadUnknown")));
-        let _ = &mut rx;
-    }
-
-    #[tokio::test]
-    async fn opening_a_crew_thread_says_what_it_is_and_an_unknown_thread_is_refused() {
-        let (_fake, mut app, _rx) = connected_on_lead().await;
-        app.shell
-            .threads
-            .push(scenes::shell("th-w1", "Crew Worker · fix", false));
-        open_thread(&mut app, "th-w1");
-        assert_eq!(app.active, Active::Thread("th-w1".into()));
-        assert!(
-            notes(&app).contains(text("session.c.crewTaskThread")),
-            "{}",
-            notes(&app)
-        );
-        open_thread(&mut app, "nowhere");
-        assert_eq!(
-            app.notice.as_deref(),
-            Some(text("session.c.threadNotFound"))
-        );
-        assert_eq!(app.active, Active::Thread("th-w1".into()));
-    }
-
-    #[tokio::test]
-    async fn retry_asks_the_server_to_run_the_task_again_and_stop_interrupts_its_thread() {
-        let (fake, mut app, mut rx) = connected_on_lead().await;
-        on_lead(&mut app, running_board(), true);
-        let task = |id: &str, role: &str| TaskRef {
-            task_id: id.into(),
-            role: role.into(),
-            thread_id: Some(format!("th-{id}")),
-        };
-        retry_task(&mut app, &task("e1", "expert"));
-        fake::pump(&mut app, &mut rx, |a| {
-            notes(a).contains("Restarted the Expert task")
-        })
-        .await;
-        assert_eq!(
-            fake.called(RETRY_RPC),
-            [json!({"leadThreadId": "lead", "taskId": "e1"})]
-        );
-        stop_task(&mut app, &task("w1", "worker"));
-        assert!(
-            notes(&app).contains("Requested to stop the Worker task"),
-            "{}",
-            notes(&app)
-        );
-        assert_eq!(
-            app.log
-                .last()
-                .map(|c| (c["type"].clone(), c["threadId"].clone())),
-            Some((json!("thread.turn.interrupt"), json!("th-w1")))
-        );
-    }
-
-    #[tokio::test]
-    async fn a_screen_key_carries_out_what_it_asks_and_closes_when_it_leaves() {
-        let (fake, mut app, mut rx) = connected_on_lead().await;
-        run(&mut app, "");
-        let mut screen = app.screen.take().unwrap();
-        assert!(
-            !screen.key(key(KeyCode::Enter), &mut app),
-            "the toggle keeps the screen open"
-        );
-        fake::pump(&mut app, &mut rx, |a| !a.notes.is_empty()).await;
-        assert_eq!(stored(&fake)["threads"]["lead"]["enabled"], true);
-        assert!(
-            screen.key(key(KeyCode::Esc), &mut app),
-            "Esc on the main screen closes it"
-        );
-    }
-}
+#[path = "cmd_crew_tests.rs"]
+mod tests;

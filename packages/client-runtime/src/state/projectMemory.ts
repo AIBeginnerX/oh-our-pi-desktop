@@ -127,6 +127,18 @@ export function createProjectMemoryAtoms<R, E>(
     refreshTrigger: refreshOnWrite,
   });
 
+  // Which memories reached one thread's provider. Edits and deletes change the
+  // changedSinceSent/deleted flags, so the project's change signal refreshes it;
+  // new sends arrive with turns, not writes, so the short staleTime refetches on
+  // the next mount.
+  const sentToThreadFamily = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:project-memory:sent-to-thread",
+    tag: WS_METHODS.projectMemorySentToThread,
+    staleTimeMs: 5_000,
+    idleTtlMs: 60_000,
+    refreshTrigger: refreshOnWrite,
+  });
+
   // Memories agents proposed, waiting for review. The server adds them from a
   // tool call, not an RPC, so they appear on the next mount or refresh; the
   // staleTime is short because a proposal is worth showing soon.
@@ -162,6 +174,7 @@ export function createProjectMemoryAtoms<R, E>(
     search: cachedRead("environment-data:project-memory:search", searchFamily),
     get: cachedRead("environment-data:project-memory:get", getFamily),
     threadState: cachedRead("environment-data:project-memory:thread-state", threadStateFamily),
+    sentToThread: cachedRead("environment-data:project-memory:sent-to-thread", sentToThreadFamily),
     proposals: cachedRead("environment-data:project-memory:proposals", proposalsFamily),
     create: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:project-memory:create",
@@ -200,6 +213,16 @@ export function createProjectMemoryAtoms<R, E>(
     rejectProposal: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:project-memory:reject-proposal",
       tag: WS_METHODS.projectMemoryRejectProposal,
+      scheduler: writeScheduler,
+      concurrency: writeConcurrency,
+      onSuccess: ({ environmentId, input: { projectId } }, registry) =>
+        Effect.sync(() => bumpChangeSignal({ environmentId, input: { projectId } }, registry)),
+    }),
+    // Adds work-analyser suggestions as pending proposals; the proposal list
+    // refetches on the bump. The server refuses while the setting is off.
+    analyse: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:project-memory:analyse",
+      tag: WS_METHODS.projectMemoryAnalyse,
       scheduler: writeScheduler,
       concurrency: writeConcurrency,
       onSuccess: ({ environmentId, input: { projectId } }, registry) =>

@@ -1,6 +1,188 @@
 {
   "versions": [
     {
+      "version": "0.0.143",
+      "date": "2026-11-04",
+      "highlights": [
+        {
+          "en": "Only Claude and Codex can lead a crew. Other providers can still be crew members, and every client says so instead of starting a lead that cannot delegate.",
+          "ko": "Crew 리드는 Claude와 Codex만 맡을 수 있습니다. 다른 provider는 크루 멤버로는 계속 쓸 수 있고, 모든 클라이언트가 위임할 수 없는 리드를 시작하는 대신 그렇게 알려 줍니다."
+        },
+        {
+          "en": "/provider works in the terminal again: listing, adding with the guided screens, and removing providers all run inside the terminal itself.",
+          "ko": "터미널에서 /provider 가 다시 동작합니다. 목록 보기, 안내 화면으로 추가하기, 삭제하기가 모두 터미널 안에서 실행됩니다."
+        },
+        {
+          "en": "The Rust terminal is now the only terminal. Commands that used to need the TypeScript terminal (config, doctor, stop, update, provider, pairing) run in it, and an existing oop command keeps working after the update.",
+          "ko": "이제 터미널은 Rust 터미널 하나입니다. 예전에 TypeScript 터미널이 필요했던 명령(config, doctor, stop, update, provider, 페어링)이 모두 여기서 실행되고, 기존 oop 명령도 업데이트 후 그대로 동작합니다."
+        },
+        {
+          "en": "OOP Terminal has its own app icon, with a small T next to the P.",
+          "ko": "OOP Terminal 앱에 전용 아이콘이 생겼습니다. P 오른쪽 위에 작은 T가 있습니다."
+        },
+        {
+          "en": "In the terminal, Savvy shows bars only for crew members that are actually working, and the Folder in the header shows the selected thread's folder.",
+          "ko": "터미널의 Savvy는 실제로 작업 중인 크루의 막대만 보여 주고, 상단 Folder에는 선택한 쓰레드의 폴더가 표시됩니다."
+        },
+        {
+          "en": "Phones connect through the relay and open the full web app; that is the supported way to use OOP on a phone.",
+          "ko": "휴대폰은 중계로 연결해 전체 웹 앱을 엽니다. 이것이 휴대폰에서 OOP를 쓰는 공식 방법입니다."
+        },
+        {
+          "en": "Reliability: a restarted server settles turns that were starting when it stopped, deleting a thread also removes its checkpoints, and the server accepts browser connections only from its own pages.",
+          "ko": "안정성: 서버가 다시 시작되면 멈출 때 시작 중이던 턴을 정리하고, 쓰레드를 지우면 체크포인트도 함께 지워지며, 서버는 자기 페이지에서 온 브라우저 연결만 받습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.142",
+      "date": "2026-11-03",
+      "highlights": [
+        {
+          "en": "Crew tasks now say whether OOP could verify them: VERIFIED, NOT VERIFIED or INCONCLUSIVE. Progress counts only proven work, and a finished bar shows unproven work in a lighter tone.",
+          "ko": "Crew 작업이 OOP가 직접 확인했는지를 VERIFIED, NOT VERIFIED, INCONCLUSIVE로 알려 줍니다. 진행률은 증명된 작업만 세고, 끝난 진행 바에서 미증명 부분은 옅은 색으로 보입니다."
+        },
+        {
+          "en": "Audit findings block only when they are proven by a traced path, a run or the app; unproven ones come back as leads.",
+          "ko": "감사 지적은 코드 경로 추적, 실행, 앱 확인으로 증명된 것만 작업을 막고, 증명되지 않은 것은 단서로 전달됩니다."
+        },
+        {
+          "en": "Arena: the lead can try the same task on models from different families as candidates that are never merged on their own.",
+          "ko": "Arena: 두뇌 모델이 같은 작업을 다른 계열 모델들에게 후보로 맡길 수 있고, 후보는 자동으로 병합되지 않습니다."
+        },
+        {
+          "en": "The crew has a decision log showing who was handed what and why, and how it came out, on the web and in both terminals.",
+          "ko": "누구에게 무엇을 왜 맡겼고 결과가 어땠는지 보여 주는 Crew 결정 로그가 웹과 두 터미널에 생겼습니다."
+        },
+        {
+          "en": "The terminal works on its own without the desktop app, and waits instead of failing while the app updates.",
+          "ko": "터미널이 데스크톱 앱 없이 단독으로 동작하고, 앱이 업데이트되는 동안에는 실패하지 않고 기다립니다."
+        },
+        {
+          "en": "In the Rust terminal, Savvy's bar resets for each new request, glows while work runs, and fills to the last cell when it finishes.",
+          "ko": "Rust 터미널에서 Savvy 진행 바가 새 요청마다 새로 시작하고, 작업 중에는 빛이 흐르며, 끝나면 마지막 칸까지 채워집니다."
+        },
+        {
+          "en": "New bundled skills help you create and maintain a verification skill for your project, and the eval gate no longer claims an improvement from too few runs.",
+          "ko": "프로젝트용 검증 스킬을 만들고 유지하는 번들 스킬이 추가됐고, eval 게이트는 반복 횟수가 적으면 개선을 주장하지 않습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.141",
+      "date": "2026-11-03",
+      "highlights": [
+        {
+          "en": "Each chat now keeps its own crew: changing the crew in one chat no longer changes other chats, and the default applies only to new chats.",
+          "ko": "Crew가 대화마다 따로 유지됩니다. 한 대화에서 바꿔도 다른 대화는 바뀌지 않고, 기본값은 새 대화에만 적용됩니다."
+        },
+        {
+          "en": "Stopping a turn now stops the crew work it started, and the crew board has Stop all.",
+          "ko": "작업을 중지하면 그 작업이 맡긴 Crew 작업도 함께 멈추고, Crew 보드에 전체 중지가 생겼습니다."
+        },
+        {
+          "en": "Project memory now also reaches Codex chats and crew members whose provider supports it, and you can see which memories were sent to a chat.",
+          "ko": "프로젝트 메모리가 Codex 대화와, 메모리를 지원하는 Crew 구성원에게도 전달되고, 대화에 보낸 메모리를 확인할 수 있습니다."
+        },
+        {
+          "en": "Optional: the composer can pre-select related memories as removable chips, and a work analyser can suggest lessons for you to approve. Both are off by default.",
+          "ko": "선택 기능: 입력창이 관련 메모리를 지울 수 있는 칩으로 미리 고르고, 작업 분석기가 승인할 교훈을 제안합니다. 둘 다 기본으로 꺼져 있습니다."
+        },
+        {
+          "en": "In the Rust terminal, the right-hand panes follow each thread and show only its latest work.",
+          "ko": "Rust 터미널의 오른쪽 창이 스레드마다 따로 동작하고 최근 작업만 보여 줍니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.140",
+      "date": "2026-11-02",
+      "highlights": [
+        {
+          "en": "The lead now gives each crew member a concrete todo list, and the server checks finished items itself where it can.",
+          "ko": "두뇌 모델이 Crew마다 구체적인 todo 목록을 주고, 완료 항목은 가능한 경우 서버가 직접 확인합니다."
+        },
+        {
+          "en": "Savvy shows each crew member's progress as a percentage with verified and reported items apart, plus an overall percentage counted from all items.",
+          "ko": "Savvy가 Crew별 진행률을 확인된 항목과 신고된 항목으로 나누어 %로 보여 주고, 전체 %는 모든 항목을 합산해 계산합니다."
+        },
+        {
+          "en": "The web crew board and the TypeScript terminal show the same percentages.",
+          "ko": "웹 Crew 보드와 TypeScript 터미널에도 같은 진행률이 표시됩니다."
+        },
+        {
+          "en": "A task with unfinished items now ends as partial instead of done.",
+          "ko": "남은 항목이 있는 작업은 완료가 아니라 일부 완료로 끝납니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.139",
+      "date": "2026-11-02",
+      "highlights": [
+        {
+          "en": "The Rust terminal now uses left, centre and right columns with the logo in the centre, and either side can be closed with Ctrl-B/F2 or Ctrl-G/F3.",
+          "ko": "Rust 터미널이 왼쪽, 가운데, 오른쪽 3열로 바뀌고 로고는 가운데에만 나오며, 양쪽 창은 Ctrl-B/F2와 Ctrl-G/F3으로 닫을 수 있습니다."
+        },
+        {
+          "en": "Each thread keeps its own unsent message, and a new thread starts by choosing its project folder.",
+          "ko": "보내지 않은 메시지가 스레드별로 유지되고, 새 스레드는 프로젝트 폴더 선택부터 시작합니다."
+        },
+        {
+          "en": "Savvy shows a progress bar, and Files colours each file by what is happening to it.",
+          "ko": "Savvy에 진행 상태 바가 표시되고, Files가 파일별 작업 상태를 색으로 보여 줍니다."
+        },
+        {
+          "en": "Mocha paces more widely while working, and the hints now point to Shift-Enter for a new line.",
+          "ko": "모카가 작업 중 더 넓게 움직이고, 줄바꿈 안내가 Shift-Enter로 바뀌었습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.138",
+      "date": "2026-11-02",
+      "highlights": [
+        {
+          "en": "Type / in the terminal to preview commands, and long pastes collapse into a line count.",
+          "ko": "터미널에서 /를 입력하면 명령어 목록을 미리 볼 수 있고, 긴 붙여넣기는 줄 수 표시로 접힙니다."
+        },
+        {
+          "en": "The message box supports mouse selection, cut, copy and paste.",
+          "ko": "메시지 입력창에서 마우스 선택과 잘라내기, 복사, 붙여넣기를 쓸 수 있습니다."
+        },
+        {
+          "en": "The Rust terminal adds Savvy live progress, a Files tree that lights up what is being read and changed, and Replay to step through a finished turn.",
+          "ko": "Rust 터미널에 실시간 진행 Savvy, 읽고 고치는 파일을 표시하는 Files 트리, 끝난 작업을 단계별로 보는 Replay가 추가되었습니다."
+        },
+        {
+          "en": "Your messages now use a tint of each theme's own colour instead of a fixed yellow or pink.",
+          "ko": "내 메시지가 고정된 노란색이나 분홍색 대신 각 테마 색 계열로 표시됩니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.137",
+      "date": "2026-11-02",
+      "highlights": [
+        {
+          "en": "The terminal header now has an info box next to the logo with version, provider, model, auth type, folder and crew models, plus rotating usage tips and rules that split the screen into three tiers.",
+          "ko": "터미널 헤더의 로고 옆에 버전, 프로바이더, 모델, 인증 방식, 폴더, 크루 모델을 보여주는 상자가 추가되었고, 사용 팁이 돌아가며 표시되며 구분선으로 화면이 세 단으로 나뉩니다."
+        },
+        {
+          "en": "The Rust terminal draws charts, flow graphs and boxed tables in results, with a short colourful reveal.",
+          "ko": "Rust 터미널이 결과의 차트, 플로우 그래프, 박스 표를 짧은 컬러 애니메이션과 함께 그립니다."
+        },
+        {
+          "en": "Mocha and your own messages now take their colours from the terminal theme, and the terminal shows its interface in English unless you set language to ko.",
+          "ko": "모카와 내 메시지의 색이 터미널 테마를 따르고, 터미널 화면은 language를 ko로 설정하지 않으면 영어로 표시됩니다."
+        },
+        {
+          "en": "The desktop app now installs OOP Terminal and the oop command on launch, so every macOS install path reaches the Rust terminal.",
+          "ko": "데스크톱 앱이 시작할 때 OOP Terminal과 oop 명령을 설치해, macOS의 모든 설치 경로에서 Rust 터미널을 쓸 수 있습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.136",
       "date": "2026-11-02",
       "highlights": [

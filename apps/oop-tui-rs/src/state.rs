@@ -33,6 +33,9 @@ pub struct ThreadShell {
     pub background_liveness: Option<String>,
     pub has_pending_approvals: bool,
     pub has_pending_user_input: bool,
+    pub worktree_path: Option<String>,
+    /// The crew the thread has of its own; `None` when it runs the default crew.
+    pub crew: Option<Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -157,10 +160,6 @@ impl Conversation {
             thread_id: thread_id.to_string(),
             ..Default::default()
         }
-    }
-
-    pub fn title(&self) -> &str {
-        &self.thread.title
     }
 
     pub fn session(&self) -> Option<&Session> {
@@ -561,6 +560,18 @@ mod tests {
         assert_eq!((s.projects.len(), s.threads.len(), s.sequence), (1, 1, 4));
         s.apply(&json!({"kind": "thread-removed", "sequence": 5, "threadId": "t"}));
         assert!(s.threads.is_empty());
+    }
+
+    #[test]
+    fn a_threads_own_crew_comes_with_the_shell_and_null_means_the_default() {
+        let mut s = Shell::default();
+        let thread = |id: &str, crew: Value| json!({"kind": "thread-upserted", "thread": {"id": id, "projectId": "p", "title": id, "crew": crew}});
+        s.apply(&thread("a", json!({"enabled": true, "pinned": {}})));
+        s.apply(&thread("b", Value::Null));
+        s.apply(&json!({"kind": "thread-upserted", "thread": {"id": "c", "projectId": "p", "title": "c"}}));
+        let crew = |id: &str| s.threads.iter().find(|t| t.id == id).unwrap().crew.clone();
+        assert_eq!(crew("a"), Some(json!({"enabled": true, "pinned": {}})));
+        assert_eq!((crew("b"), crew("c")), (None, None));
     }
 
     #[test]

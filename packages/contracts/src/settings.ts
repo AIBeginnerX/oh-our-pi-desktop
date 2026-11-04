@@ -1255,6 +1255,21 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
   ),
   enableProviderUpdateChecks: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * Whether the composer pre-selects up to three related project memories as
+   * ordinary removable chips while a draft is typed. Off by default and the
+   * kill switch for the feature: it adds nothing the user does not see, and a
+   * send still goes through the normal memory-reference path and the
+   * build-time provider allowlist.
+   */
+  autoSelectProjectMemories: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Whether the "Analyse recent work" action may send structured digests of
+   * finished work (check results, verdicts, reverts; no chat text) to the
+   * text-generation model. Off by default and the kill switch the server
+   * checks on every run. Environment-wide: the action itself is per project.
+   */
+  projectMemoryAnalyser: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Retain the update-era key; recovery now needs an environment-owned opt-in.
   continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
@@ -1455,7 +1470,7 @@ export const ServerSettings = Schema.Struct({
   usagePriceOverrides: Schema.Record(TrimmedNonEmptyString, UsageModelPriceOverride).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
-  /** OOP Crew role assignments; see `crew.ts`. */
+  /** The default OOP Crew, which threads without a crew of their own run; see `crew.ts`. */
   crew: CrewSettings.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_CREW_SETTINGS))),
   threadGoals: ThreadGoals.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   /**
@@ -1664,6 +1679,8 @@ export const ServerSettingsPatch = Schema.Struct({
   // Server settings
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
+  autoSelectProjectMemories: Schema.optionalKey(Schema.Boolean),
+  projectMemoryAnalyser: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   projectAgentBrowserAccessOverrides: Schema.optionalKey(
@@ -1765,7 +1782,7 @@ export const ServerSettingsPatch = Schema.Struct({
   usagePriceOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),
   ),
-  /** Replaces the whole crew object; clients send the complete next value. */
+  /** Replaces the whole default crew; clients send the complete next value. */
   crew: Schema.optionalKey(CrewSettings),
   threadGoals: Schema.optionalKey(ThreadGoals),
   continueUnfinishedPlans: Schema.optionalKey(Schema.Boolean),

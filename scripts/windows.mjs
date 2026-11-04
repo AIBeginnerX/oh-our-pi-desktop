@@ -26,7 +26,6 @@ import {
   RUST_CLIENT_DIR,
   cargoReleaseArgs,
   releaseVersion,
-  skipsRust,
   sourceKey,
   upstreamVersion,
 } from "./macos.mjs";
@@ -324,16 +323,9 @@ async function writeAtomically(destination, content) {
 }
 
 /**
- * Builds the installer from `sourceRoot` and publishes it to every folder in
- * `releaseDirectories`. The app it builds looks in Google Drive first and, when the build runs
- * against the NAS, falls back to the share's release\\windows.
- */
-/**
- * Best-effort `cargo build --release` of the Rust terminal client (apps/oop-tui-rs). The Windows
- * release must never depend on it: a missing toolchain, a crate that does not build for Windows
- * (today it uses Unix-only APIs), or a binary that prints another version leaves the installer
- * with the TypeScript terminal alone. OOP_SKIP_RUST=1 skips the attempt. Returns the environment
- * the artifact builder reads (OOP_RS_BIN), or nothing.
+ * `cargo build --release` of the Rust terminal client (apps/oop-tui-rs). oop-rs.exe is the only
+ * terminal, so every failure (no source, no cargo, a failed build, a binary printing another
+ * version) stops the release. Returns the environment the artifact builder reads (OOP_RS_BIN).
  */
 export function buildRustClient(checkout, env, version, io = {}) {
   const {
@@ -342,26 +334,29 @@ export function buildRustClient(checkout, env, version, io = {}) {
     exists = NodeFS.existsSync,
   } = io;
   const dir = NodePath.join(checkout, RUST_CLIENT_DIR);
-  if (skipsRust(env)) return { reason: "OOP_SKIP_RUST is set", env: {} };
   if (!exists(NodePath.join(dir, "Cargo.toml")))
-    return { reason: `no ${RUST_CLIENT_DIR}`, env: {} };
-  if (!probe("cargo", ["--version"])) return { reason: "cargo is not installed", env: {} };
+    throw new Error(`${RUST_CLIENT_DIR} is missing from this source: oop-rs is the only terminal.`);
+  if (!probe("cargo", ["--version"]))
+    throw new Error("cargo is not installed: https://rustup.rs (the Rust terminal is required)");
   try {
     runCargo(cargoReleaseArgs({ locked: exists(NodePath.join(dir, "Cargo.lock")) }), {
       cwd: dir,
       env: { ...env, OOP_VERSION: version },
     });
   } catch (error) {
-    return { reason: `cargo build failed (${error.message})`, env: {} };
+    throw new Error(`cargo build failed (${error.message})`);
   }
   const binary = NodePath.join(dir, "target", "release", "oop-rs.exe");
   const printed = exists(binary) ? probe(binary, ["--version"]) : "";
-  if (printed !== version) {
-    return { reason: `oop-rs.exe prints "${printed}", not ${version}`, env: {} };
-  }
-  return { reason: undefined, env: { OOP_RS_BIN: binary } };
+  if (printed !== version) throw new Error(`oop-rs.exe prints "${printed}", not ${version}`);
+  return { OOP_RS_BIN: binary };
 }
 
+/**
+ * Builds the installer from `sourceRoot` and publishes it to every folder in
+ * `releaseDirectories`. The app it builds looks in Google Drive first and, when the build runs
+ * against the NAS, falls back to the share's release\\windows.
+ */
 async function packageInstaller(
   sourceRoot,
   arch,
@@ -475,8 +470,6 @@ async function packageInstaller(
       "@t3tools/scripts...",
       "--filter",
       "t3...",
-      "--filter",
-      "oop-tui...",
     ],
     { cwd: checkout, env },
   );
@@ -491,8 +484,6 @@ async function packageInstaller(
     env,
   });
   const rust = buildRustClient(checkout, env, version);
-  if (rust.reason !== undefined)
-    console.log(`The Windows terminal stays TypeScript only: ${rust.reason}.`);
   const out = NodePath.join(artifactsRoot, `${Date.now()}`);
   await NodeFSP.mkdir(out, { recursive: true });
   run(
@@ -511,7 +502,7 @@ async function packageInstaller(
       "--output-dir",
       out,
     ],
-    { cwd: checkout, env: { ...env, ...rust.env } },
+    { cwd: checkout, env: { ...env, ...rust } },
   );
 
   const fileName = windowsFeedInstallerName(version, arch);

@@ -13,12 +13,17 @@
  *
  * @module CheckpointStore
  */
-import { VcsUnsupportedOperationError, type CheckpointRef } from "@t3tools/contracts";
+import {
+  VcsUnsupportedOperationError,
+  type CheckpointRef,
+  type ThreadId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import type { CheckpointStoreError } from "./Errors.ts";
+import { checkpointRefPrefixForThread } from "./Utils.ts";
 import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
@@ -45,6 +50,11 @@ export interface DiffCheckpointsInput {
 export interface DeleteCheckpointRefsInput {
   readonly cwd: string;
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
+}
+
+export interface DeleteThreadCheckpointRefsInput {
+  readonly cwd: string;
+  readonly threadId: ThreadId;
 }
 
 /** Service tag for checkpoint persistence and restore operations. */
@@ -94,6 +104,14 @@ export class CheckpointStore extends Context.Service<
      */
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
+    ) => Effect.Effect<void, CheckpointStoreError>;
+
+    /**
+     * Delete every checkpoint ref of one thread, found by its exact ref
+     * namespace so other threads' refs are never touched.
+     */
+    readonly deleteThreadCheckpointRefs: (
+      input: DeleteThreadCheckpointRefsInput,
     ) => Effect.Effect<void, CheckpointStoreError>;
   }
 >()("t3/checkpointing/CheckpointStore") {}
@@ -160,6 +178,18 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.deleteCheckpointRefs(input);
   });
 
+  const deleteThreadCheckpointRefs: CheckpointStore["Service"]["deleteThreadCheckpointRefs"] =
+    Effect.fn("deleteThreadCheckpointRefs")(function* (input) {
+      const checkpoints = yield* resolveCheckpoints(
+        "CheckpointStore.deleteThreadCheckpointRefs",
+        input.cwd,
+      );
+      return yield* checkpoints.deleteCheckpointRefsUnderPrefix({
+        cwd: input.cwd,
+        prefix: checkpointRefPrefixForThread(input.threadId),
+      });
+    });
+
   return CheckpointStore.of({
     isGitRepository,
     captureCheckpoint,
@@ -167,6 +197,7 @@ export const make = Effect.gen(function* () {
     restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,
+    deleteThreadCheckpointRefs,
   });
 });
 

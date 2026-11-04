@@ -28,7 +28,7 @@ export const MemoryToolError = Schema.Union([
 const MemoryRecallInput = Schema.Struct({
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_MEMORY_QUERY_MAX_LENGTH)).annotate({
     description:
-      "Words to look for, such as a topic, file, or tool name. Every word must match, so a few specific words work best.",
+      "Words to look for, such as a topic, file, or tool name. Memories that match more of the words rank first, so a few specific words work best.",
   }),
 });
 

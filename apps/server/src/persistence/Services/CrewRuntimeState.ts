@@ -29,10 +29,16 @@ export class CrewRuntimeState extends Context.Service<
     readonly prepareFollowUp: (
       checkpoint: Omit<CrewFollowUpCheckpoint, "delivered_at" | "rejected_at">,
     ) => Effect.Effect<void, PersistenceSqlError>;
-    readonly readFollowUps: Effect.Effect<
+    /** The one undelivered, unrejected delivery of a lead, if any. */
+    readonly readPendingFollowUps: (
+      leadThreadId: string,
+    ) => Effect.Effect<ReadonlyArray<CrewFollowUpCheckpoint>, PersistenceSqlError>;
+    /** Deliveries already delivered or rejected that a restart still has to finish and delete. */
+    readonly readSettledFollowUps: Effect.Effect<
       ReadonlyArray<CrewFollowUpCheckpoint>,
       PersistenceSqlError
     >;
+    readonly deleteFollowUp: (deliveryId: string) => Effect.Effect<void, PersistenceSqlError>;
     readonly acknowledgeFollowUp: (
       deliveryId: string,
       deliveredAt: string,

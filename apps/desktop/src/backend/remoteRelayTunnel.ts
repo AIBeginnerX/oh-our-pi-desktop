@@ -137,9 +137,19 @@ export function startRemoteRelayTunnel(input: {
   };
 
   const openBackendSocket = (id: number, open: OopRelaySocketOpen) => {
+    // The backend sees Host 127.0.0.1, so it cannot tell that the phone's Origin is the relay it
+    // is served from. Declare the relay host in X-Forwarded-Host (which a browser cannot set on a
+    // handshake) and drop whatever forwarding headers the phone sent, so a foreign page's Origin
+    // still does not match.
+    const headers: Record<string, string> = {};
+    for (const [name, value] of open.headers) {
+      const lower = name.toLowerCase();
+      if (lower !== "x-forwarded-host" && lower !== "forwarded") headers[name] = value;
+    }
+    headers["x-forwarded-host"] = new URL(input.relayUrl).host;
     const socket = new BackendWebSocket(`ws://127.0.0.1:${input.backendPort()}${open.path}`, {
       protocols: [...open.protocols],
-      headers: Object.fromEntries(open.headers),
+      headers,
     });
     socket.binaryType = "arraybuffer";
     const entry: BackendSocket = { socket, queued: [] };

@@ -9,8 +9,7 @@ which models and account access are available through this agent.
 On web or desktop, open **Settings > Providers**, choose the environment that runs
 your project, and enable Antigravity. Install its runtime there, then choose
 **Sign in with Google** and complete the browser sign-in. Wait for OOP to confirm
-account access and load models before starting a thread. Provider setup is not
-available in the mobile app.
+account access and load models before starting a thread.
 
 Installation continues if you leave settings or reconnect. Setup requires
 permission to operate the environment; update an older server if it does not offer

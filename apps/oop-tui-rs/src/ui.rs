@@ -1,9 +1,13 @@
-//! Drawing. Reads `App`, writes a ratatui frame. Layout, top to bottom: the pinned header (the OOP
-//! wordmark, status, thread and folder, a rule), then the thread list on the left with the
-//! conversation and the composer (or the approval or question the agent waits on) on the right,
-//! then one status line. Pickers (`/model`, `/mode`, `/effort`) open over the conversation.
+//! Drawing. Reads `App`, writes a ratatui frame. Layout: three full-height columns over one status
+//! line. On the left the thread list, on the right the panel (Workflow, Agents, Savvy, Files), and
+//! in the middle, top to bottom in three tiers, the pinned header (the OOP wordmark with its info
+//! box, the state, Mocha, a tip) over a rule; the conversation; and, under a second rule, the
+//! composer (or the approval or question the agent waits on). Either side column can be closed
+//! (`panes.rs`) and the middle takes its width. The status line runs under all three. Pickers
+//! (`/model`, `/mode`, `/effort`) open over the conversation, and a full-body screen (`/stats`,
+//! `/crew`) takes the whole width under the header while it is up.
 
-use crate::app::{Active, App, Focus, LinkStatus, Modal, Row};
+use crate::app::{Active, App, AuthKind, Focus, LinkStatus, Modal, Row};
 use crate::i18n::tr;
 use crate::pet;
 use crate::sidebar::{Nav, Section, Status};
@@ -14,8 +18,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
-/// The wordmark of apps/oop-tui/src/render/banner.ts, byte for byte. A test reads that file and
-/// fails if this copy drifts.
+/// The OOP wordmark (four rows).
 pub const WORDMARK: [&str; 4] = [
     " ▄██▄   ▄██▄   ████▄ ",
     "██  ██ ██  ██  ██  ██",
@@ -23,7 +26,20 @@ pub const WORDMARK: [&str; 4] = [
     " ▀██▀   ▀██▀   ██    ",
 ];
 const LOGO_WIDTH: u16 = 21;
-const HEADER_FULL_ROWS: u16 = 7;
+/// Rows of the full header: the wordmark with the info box beside it (seven rows), a tip and a
+/// rule; with no room for the box, the wordmark's four rows, the folder line, a tip and a rule.
+const HEADER_BOX_ROWS: u16 = 9;
+const HEADER_PLAIN_ROWS: u16 = 7;
+/// Columns left of the info box: the wordmark and the gap after it.
+const BOX_X: usize = LOGO_WIDTH as usize + 2;
+/// The box shows its labels from this width, and values alone from `BOX_COMPACT_MIN`; narrower, it
+/// is not drawn and the facts go back beside the wordmark.
+const BOX_FULL_MIN: usize = 34;
+const BOX_COMPACT_MIN: usize = 18;
+/// Wider than this the box would only be empty space, and Mocha stands next to it.
+const BOX_MAX: usize = 76;
+/// The least room the plain header's notes keep beside the wordmark before Mocha gives way.
+const PLAIN_NOTES_MIN: usize = 14;
 const HEADER_FULL_MIN_COLUMNS: u16 = 40;
 const HEADER_FULL_MIN_ROWS: u16 = 30;
 /// The list gives way below this width, as the TypeScript terminal's does.
@@ -31,9 +47,13 @@ pub const SIDEBAR_MIN_COLUMNS: u16 = 60;
 /// From this width the list and the panel are both on screen; below it they share one slot.
 const WIDE_COLUMNS: u16 = 120;
 /// The panel needs this many columns in all to be worth opening.
-const PANEL_MIN_COLUMNS: u16 = 90;
+pub const PANEL_MIN_COLUMNS: u16 = 90;
 const COMPOSER_MAX_ROWS: usize = 6;
+/// The rule above the input is drawn when the main column has this many rows.
+const RULE_MIN_ROWS: u16 = 8;
 const PANEL_MAX_ROWS: u16 = 14;
+/// The status line names a closed side pane only when it has this many columns to spare.
+const CLOSED_HINT_MIN_COLUMNS: usize = 50;
 
 enum Header {
     Full,
@@ -51,29 +71,37 @@ fn header_kind(app: &App, area: Rect) -> Header {
     }
 }
 
+/// The header's form for a column `width` cells wide in a terminal `rows` tall, and its height.
+fn header_for(app: &App, width: u16, rows: u16) -> (Header, u16) {
+    let kind = header_kind(app, Rect::new(0, 0, width, rows));
+    let height = match kind {
+        Header::Full if full_header(app, width).form == BoxForm::Hidden => HEADER_PLAIN_ROWS,
+        Header::Full => HEADER_BOX_ROWS,
+        _ => 1,
+    };
+    (kind, height)
+}
+
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.width.set(area.width);
     app.term_size.set((area.width, area.height));
-    let header_kind = header_kind(app, area);
-    let header_rows = if matches!(header_kind, Header::Full) {
-        HEADER_FULL_ROWS
-    } else {
-        1
-    };
-    let [header, body, status] = Layout::vertical([
-        Constraint::Length(header_rows),
-        Constraint::Min(3),
-        Constraint::Length(1),
-    ])
-    .areas(area);
-    draw_header(frame, header, app, &header_kind);
+    let [columns, status] =
+        Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
     if let Some(screen) = &app.screen {
+        // A screen takes the whole width: the side columns are not drawn, and a click must not
+        // land on where they were.
+        let (kind, rows) = header_for(app, columns.width, area.height);
+        let [header, body] =
+            Layout::vertical([Constraint::Length(rows), Constraint::Min(3)]).areas(columns);
+        app.side_rect.set(Rect::default());
+        *app.list_hits.borrow_mut() = (Rect::default(), Vec::new());
+        draw_header(frame, header, app, &kind);
         screen.draw(frame, body, app);
         draw_status(frame, status, app);
         return;
     }
-    let (list, side, main) = split_body(app, body);
+    let (list, side, centre) = split_columns(app, columns);
     app.side_rect.set(side.unwrap_or_default());
     *app.list_hits.borrow_mut() = (list.unwrap_or_default(), Vec::new());
     if let Some(list) = list {
@@ -82,15 +110,35 @@ pub fn draw(frame: &mut Frame, app: &App) {
     if let Some(side) = side {
         crate::side::draw(frame, side, app);
     }
-    let bottom = bottom_height(app, main);
-    let tasks = crate::tasks_pane::rows_for(app, area, main);
-    let [conversation, tasks_area, bottom_area] = Layout::vertical([
+    // The header and its rule belong to the middle column alone.
+    let (header_kind, header_rows) = header_for(app, centre.width, area.height);
+    let [header, main] =
+        Layout::vertical([Constraint::Length(header_rows), Constraint::Min(3)]).areas(centre);
+    draw_header(frame, header, app, &header_kind);
+    // The third tier, the input and what is under it, starts under a rule across the main column.
+    let rule = u16::from(main.height >= RULE_MIN_ROWS);
+    let below = Rect::new(main.x, main.y, main.width, main.height - rule);
+    let bottom = bottom_height(app, below);
+    let tasks = crate::tasks_pane::rows_for(app, area, below);
+    let [conversation, tasks_area, rule_area, bottom_area] = Layout::vertical([
         Constraint::Min(2),
         Constraint::Length(tasks),
+        Constraint::Length(rule),
         Constraint::Length(bottom),
     ])
     .areas(main);
-    draw_conversation(frame, conversation, app);
+    if crate::replay::is_open(app) {
+        crate::replay::draw(frame, conversation, app);
+    } else {
+        draw_conversation(frame, conversation, app);
+    }
+    if rule > 0 {
+        let line = app.sym.rule.repeat(usize::from(rule_area.width));
+        frame.render_widget(
+            Paragraph::new(Span::styled(line, app.theme.dim_style())),
+            rule_area,
+        );
+    }
     if tasks > 0 {
         crate::tasks_pane::draw(frame, tasks_area, app);
     }
@@ -100,6 +148,8 @@ pub fn draw(frame: &mut Frame, app: &App) {
         draw_question(frame, bottom_area, app);
     } else {
         draw_composer(frame, bottom_area, app);
+        crate::savvy_panel::draw_input_bar(frame, bottom_area, app);
+        crate::composer::draw_list(frame, conversation, bottom_area, app);
     }
     if let Some(modal) = &app.modal {
         draw_modal(frame, conversation, app, modal);
@@ -107,11 +157,12 @@ pub fn draw(frame: &mut Frame, app: &App) {
     draw_status(frame, status, app);
 }
 
-/// The body's columns: the thread list on the left, the conversation, the panel on the right.
-/// From `WIDE_COLUMNS` up both side columns fit; below it they share one slot, the list while it
-/// has the keys and the panel otherwise.
-fn split_body(app: &App, body: Rect) -> (Option<Rect>, Option<Rect>, Rect) {
-    let w = body.width;
+/// The three columns of `columns`: the thread list on the left, the middle (header, conversation,
+/// composer), the panel on the right. A side column that is closed, has nothing to show or has no
+/// room is `None` and the middle takes its width. From `WIDE_COLUMNS` up both side columns fit;
+/// below it they share one slot, the list while it has the keys and the panel otherwise.
+fn split_columns(app: &App, columns: Rect) -> (Option<Rect>, Option<Rect>, Rect) {
+    let w = columns.width;
     let list_on = app.list_shown();
     let panel_on = app.side_open && app.active != Active::None && w >= PANEL_MIN_COLUMNS;
     let (list_on, panel_on) = if w >= WIDE_COLUMNS {
@@ -131,13 +182,13 @@ fn split_body(app: &App, body: Rect) -> (Option<Rect>, Option<Rect>, Rect) {
     } else {
         0
     };
-    let [list, main, side] = Layout::horizontal([
+    let [list, middle, side] = Layout::horizontal([
         Constraint::Length(list_w),
         Constraint::Min(10),
         Constraint::Length(side_w),
     ])
-    .areas(body);
-    (list_on.then_some(list), panel_on.then_some(side), main)
+    .areas(columns);
+    (list_on.then_some(list), panel_on.then_some(side), middle)
 }
 
 fn state_style(app: &App, key: &str) -> Style {
@@ -221,22 +272,33 @@ fn pad_spans(mut spans: Vec<Span<'static>>, to: usize) -> Vec<Span<'static>> {
 /// The crew as `Crew worker Haiku 5.5 · expert Opus 5.5 · …`, or a letter for each role where the
 /// room is short; empty with the crew off.
 fn crew_spans(app: &App, words: bool) -> Vec<Span<'static>> {
+    let roles = crew_roles(app, words);
+    if roles.is_empty() {
+        return roles;
+    }
+    let mut out = vec![Span::styled(
+        format!("{} ", tr("header.crew")),
+        app.theme.dim_style(),
+    )];
+    out.extend(roles);
+    out
+}
+
+/// The crew's roles with the model each runs, without the `Crew` label; empty with the crew off.
+fn crew_roles(app: &App, words: bool) -> Vec<Span<'static>> {
     let t = &app.theme;
-    let thread = app.thread_id();
+    let own = app.own_crew();
     let current = app.current_model();
     let brain = current
         .as_ref()
         .and_then(|m| Some((m["instanceId"].as_str()?, m["model"].as_str()?)));
-    let Some(roles) = crate::crew::roles_of(
-        &app.config,
-        thread.as_deref(),
-        brain,
-        app.active != Active::None,
-    ) else {
+    let Some(roles) =
+        crate::crew::roles_of(&app.config, own.as_ref(), brain, app.active != Active::None)
+    else {
         return Vec::new();
     };
     let dot = if app.settings.ascii { "|" } else { "·" };
-    let mut out = vec![Span::styled(tr("header.crew"), t.dim_style())];
+    let mut out = Vec::new();
     for (i, role) in roles.iter().enumerate() {
         if i > 0 {
             out.push(Span::styled(format!(" {dot} "), t.dim_style()));
@@ -282,17 +344,21 @@ fn crew_beside(app: &App, folder: Vec<Span<'static>>, wide: usize) -> Vec<Span<'
 }
 
 /// Mocha's strip beside the header: how wide it is (0 when she is off or there is no room), and
-/// whether it holds her one-line form. The compact header always shows her so; the full header
-/// falls back to it on the first row where the strip beside the notes is too narrow for all five.
+/// whether she is in her one-line form. The compact header always shows her so, in a strip at its
+/// end. The full header gives her the five-row strip beside the box while the box keeps its labels
+/// and she fits; otherwise `mini` is set with a width of 0 and she walks the rule at its foot,
+/// which takes none of the box's room.
 struct PetStrip {
     width: usize,
     mini: bool,
+    /// Cells of `width` beyond her own strip, which she paces while a turn runs.
+    roam: usize,
 }
 
-fn pet_strip(app: &App, columns: u16, full: bool) -> PetStrip {
+fn pet_strip(app: &App, columns: u16, full: bool, notes_min: usize) -> PetStrip {
     let columns = usize::from(columns);
     let avail = if full {
-        columns.saturating_sub(23 + 14)
+        columns.saturating_sub(BOX_X + notes_min)
     } else {
         columns.saturating_sub(24)
     };
@@ -300,12 +366,23 @@ fn pet_strip(app: &App, columns: u16, full: bool) -> PetStrip {
         return PetStrip {
             width: 0,
             mini: !full,
+            roam: 0,
         };
     }
-    if full && avail >= pet::PET_TRACK_WIDTH {
+    if full {
+        // Beside the box she is taken only while it keeps its labels and she has her whole walk;
+        // with less she would pace less than on the rule.
+        if notes_min >= BOX_FULL_MIN && avail >= pet::PET_TRACK_WIDTH + pet::ROAM_MAX {
+            return PetStrip {
+                width: pet::PET_TRACK_WIDTH + pet::ROAM_MAX,
+                mini: false,
+                roam: pet::ROAM_MAX,
+            };
+        }
         return PetStrip {
-            width: pet::PET_TRACK_WIDTH,
-            mini: false,
+            width: 0,
+            mini: true,
+            roam: 0,
         };
     }
     PetStrip {
@@ -315,20 +392,285 @@ fn pet_strip(app: &App, columns: u16, full: bool) -> PetStrip {
             0
         },
         mini: true,
+        roam: 0,
     }
 }
 
 /// The state and picture Mocha is drawn in; remembers them so the app repaints only on a change.
-fn pet_view(app: &App) -> (pet::PetState, usize, pet::Look, pet::Draw) {
+fn pet_view(app: &App) -> (pet::PetState, usize, pet::Draw) {
     let state = app.pet_state();
     let frame = app.pet_frame(state);
-    let look = app.pet_look(state);
-    app.pet_shown.set(Some((state, frame, look.tone)));
+    app.pet_shown.set(Some((state, frame)));
     let draw = pet::Draw {
         level: app.misc.level,
         ascii: app.settings.ascii,
     };
-    (state, frame, look, draw)
+    (state, frame, draw)
+}
+
+/// Which form the info box beside the wordmark takes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BoxForm {
+    /// Labels and values.
+    Full,
+    /// Values alone.
+    Compact,
+    /// No box; the facts go back beside the wordmark.
+    Hidden,
+}
+
+struct FullHeader {
+    pet: PetStrip,
+    form: BoxForm,
+    /// Cells of the rows beside the pet's strip: the wordmark's column and the box.
+    lead: usize,
+    box_width: usize,
+}
+
+/// How the full header is laid out at this width. The box has the room before Mocha does: she
+/// shrinks to her one-line form, then goes, before the box loses its labels; she keeps what is
+/// left once the box is down to its values alone; and only when even that box would not fit does
+/// it go and the pet get the room the plain header gave her.
+fn full_header(app: &App, columns: u16) -> FullHeader {
+    let width = usize::from(columns);
+    let lead_of = |pet: &PetStrip| {
+        if pet.width == 0 {
+            width.saturating_sub(1)
+        } else {
+            width.saturating_sub(pet.width)
+        }
+    };
+    for notes_min in [BOX_FULL_MIN, BOX_COMPACT_MIN] {
+        let pet = pet_strip(app, columns, true, notes_min);
+        let box_width = lead_of(&pet).saturating_sub(BOX_X);
+        if box_width >= notes_min {
+            let box_width = box_width.min(BOX_MAX);
+            return FullHeader {
+                lead: BOX_X + box_width,
+                pet,
+                form: if box_width >= BOX_FULL_MIN {
+                    BoxForm::Full
+                } else {
+                    BoxForm::Compact
+                },
+                box_width,
+            };
+        }
+    }
+    let pet = pet_strip(app, columns, true, PLAIN_NOTES_MIN);
+    FullHeader {
+        lead: lead_of(&pet),
+        pet,
+        form: BoxForm::Hidden,
+        box_width: 0,
+    }
+}
+
+/// `text` cut from the left to `max` cells, with an ellipsis in front of what is left.
+fn truncate_left(text: &str, max: usize) -> String {
+    if width(text) <= max {
+        return text.to_string();
+    }
+    if max == 0 {
+        return String::new();
+    }
+    let mut kept = Vec::new();
+    let mut used = 1;
+    for ch in text.chars().rev() {
+        let w = char_width(ch);
+        if used + w > max {
+            break;
+        }
+        used += w;
+        kept.push(ch);
+    }
+    kept.push('…');
+    kept.iter().rev().collect()
+}
+
+/// The auth row's value: how the provider is signed in, or that this is not known.
+fn auth_spans(app: &App) -> Vec<Span<'static>> {
+    let dim = app.theme.dim_style();
+    match app.auth_kind() {
+        AuthKind::ApiKey => vec![Span::raw(tr("auth.apiKey"))],
+        AuthKind::Subscription(plan) => {
+            let mut out = vec![Span::raw(tr("auth.subscription"))];
+            if let Some(plan) = plan {
+                out.push(Span::styled(
+                    format!(" {} {}", dot_of(app), sanitize(&plan).replace('\n', " ")),
+                    dim,
+                ));
+            }
+            out
+        }
+        AuthKind::SignedOut => vec![Span::styled(
+            tr("auth.signedOut"),
+            Style::new().fg(app.theme.warning),
+        )],
+        AuthKind::Other(label) => vec![Span::raw(sanitize(&label).replace('\n', " "))],
+        AuthKind::Unknown => vec![Span::styled(tr("auth.unknown"), dim)],
+    }
+}
+
+fn dot_of(app: &App) -> &'static str {
+    if app.settings.ascii { "|" } else { "·" }
+}
+
+/// The box beside the wordmark, `BOX_ROWS` rows of `box_width` cells: the product and version on
+/// the top edge, then the provider, model, sign-in, work folder and crew, a muted label and a
+/// plain value each.
+fn info_box(app: &App, box_width: usize, form: BoxForm) -> Vec<Vec<Span<'static>>> {
+    let t = &app.theme;
+    let edge = Style::new().fg(t.border);
+    let [top_left, top_right, bottom_left, bottom_right] = app.sym.corners;
+    let inner = box_width.saturating_sub(4);
+    let labeled = form == BoxForm::Full;
+    let name = if labeled {
+        format!("{} v{}", tr("header.title"), app.version)
+    } else {
+        format!("OOP v{}", app.version)
+    };
+    let mut title = vec![Span::styled(
+        name,
+        Style::new().fg(t.brand).add_modifier(Modifier::BOLD),
+    )];
+    if labeled {
+        title.push(Span::styled(format!(" {} ", dot_of(app)), t.dim_style()));
+        title.push(Span::styled(crate::i18n::TAGLINE, t.muted_style()));
+    }
+    let title = clip_spans(title, box_width.saturating_sub(6));
+    let fill = box_width.saturating_sub(spans_width(&title) + 5);
+    let mut top = vec![Span::styled(format!("{top_left}{} ", app.sym.rule), edge)];
+    top.extend(title);
+    top.push(Span::styled(
+        format!(" {}{top_right}", app.sym.rule.repeat(fill)),
+        edge,
+    ));
+
+    let provider = app.provider_name().map_or_else(
+        || vec![Span::styled(tr("header.noProvider"), t.dim_style())],
+        |name| vec![Span::raw(sanitize(&name).replace('\n', " "))],
+    );
+    let model = if app.model_display().is_empty() {
+        vec![Span::styled(tr("header.noModel"), t.dim_style())]
+    } else {
+        vec![Span::raw(model_label(app))]
+    };
+    let rows = [
+        ("header.provider", provider),
+        ("header.model", model),
+        ("header.auth", auth_spans(app)),
+        ("header.folder", Vec::new()),
+        ("header.crew", Vec::new()),
+    ];
+    let label_width = rows
+        .iter()
+        .map(|(key, _)| width(tr(key)))
+        .max()
+        .unwrap_or(0);
+    let room = if labeled {
+        inner.saturating_sub(label_width + 2)
+    } else {
+        inner
+    };
+    let folder = vec![Span::raw(truncate_left(
+        &home_relative(&sanitize(&app.workdir()).replace('\n', " "), &app.home),
+        room,
+    ))];
+    let crew = {
+        let words = crew_roles(app, true);
+        if !labeled {
+            // No label column to say what the row is: the crew names itself.
+            if words.is_empty() {
+                vec![Span::styled(
+                    format!("{} {}", tr("header.crew"), tr("header.crewOff")),
+                    t.dim_style(),
+                )]
+            } else {
+                crew_spans(app, false)
+            }
+        } else if words.is_empty() {
+            vec![Span::styled(tr("header.crewOff"), t.dim_style())]
+        } else if spans_width(&words) <= room {
+            words
+        } else {
+            crew_roles(app, false)
+        }
+    };
+    let mut out = vec![top];
+    for (key, value) in rows {
+        let value = match key {
+            "header.folder" => folder.clone(),
+            "header.crew" => crew.clone(),
+            _ => value,
+        };
+        let mut row = vec![Span::styled(format!("{} ", app.sym.bar), edge)];
+        let mut cell = Vec::new();
+        if labeled {
+            cell.push(Span::styled(
+                format!("{}{}  ", tr(key), " ".repeat(label_width - width(tr(key)))),
+                t.muted_style(),
+            ));
+        }
+        cell.extend(value);
+        row.extend(pad_spans(clip_spans(cell, inner), inner));
+        row.push(Span::styled(format!(" {}", app.sym.bar), edge));
+        out.push(row);
+    }
+    out.push(vec![Span::styled(
+        format!(
+            "{bottom_left}{}{bottom_right}",
+            app.sym.rule.repeat(box_width.saturating_sub(2))
+        ),
+        edge,
+    )]);
+    out
+}
+
+/// The tip line: the label and the tip the clock has come to. Remembers which, so the app repaints
+/// for a tip only when the next one is another.
+fn tip_line(app: &App, wide: usize) -> Vec<Span<'static>> {
+    let index = app.tip_index();
+    app.tip_shown.set(Some(index));
+    let label = format!("{} ", tr("header.tip"));
+    let room = wide.saturating_sub(width(&label));
+    vec![
+        Span::styled(label, app.theme.dim_style()),
+        Span::styled(
+            truncate(crate::i18n::tip(index, app.in_oop_terminal), room),
+            app.theme.muted_style(),
+        ),
+    ]
+}
+
+/// The rule at the header's foot, `wide` cells, with Mocha's one-line form on it. She walks up to
+/// `ROAM_MAX` cells along it while a turn runs, which is room the box beside the wordmark does not
+/// lose; the strip she walks in is as wide idle as working.
+fn rule_with_pet(
+    app: &App,
+    wide: usize,
+    state: pet::PetState,
+    frame_no: usize,
+    draw: pet::Draw,
+) -> Line<'static> {
+    let dim = app.theme.dim_style();
+    let roam = (wide - pet::PET_MINI_TRACK_WIDTH).min(pet::ROAM_MAX);
+    let track = pet::PET_MINI_TRACK_WIDTH + roam;
+    let at = app.pet_offset(state, roam);
+    let mut spans: Vec<Span<'static>> = pet::mini(state, frame_no, &app.theme, track, at, draw)
+        .spans
+        .into_iter()
+        .map(|span| {
+            // The strip's blank cells are rule again, so she stands on the line, not in a gap.
+            if span.content.chars().all(|c| c == ' ') {
+                Span::styled(app.sym.rule.repeat(span.content.chars().count()), dim)
+            } else {
+                span
+            }
+        })
+        .collect();
+    spans.push(Span::styled(app.sym.rule.repeat(wide - track), dim));
+    Line::from(spans)
 }
 
 fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
@@ -339,16 +681,15 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
         format!("{} {}", app.sym.bullet, tr(state_key)),
         state_style(app, state_key),
     );
-    let thread = match (&app.active, app.conv.title()) {
-        (Active::Thread(_), title) if !title.is_empty() => sanitize(title).replace('\n', " "),
-        _ => tr("header.noThread").to_string(),
-    };
     let title = Span::styled(
         format!("OOP v{}", app.version),
         Style::new().fg(t.brand).add_modifier(Modifier::BOLD),
     );
     let model = Span::styled(model_label(app), t.muted_style());
     let columns = usize::from(area.width);
+    if !matches!(kind, Header::Full) {
+        app.tip_shown.set(None);
+    }
     match kind {
         Header::Minimal => {
             let line = Line::from(vec![title, Span::styled(" · ", dim), state]);
@@ -356,26 +697,24 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
             return;
         }
         Header::Compact => {
-            let track = pet_strip(app, area.width, false).width;
+            let track = pet_strip(app, area.width, false, 0).width;
             let room = columns.saturating_sub(track + 1);
             let sep = Span::styled(if app.settings.ascii { " | " } else { " · " }, dim);
             let mut facts = vec![title, sep.clone(), state, sep.clone(), model];
-            // The crew comes before the thread's title, which is the first to be cut; with less
-            // than a few cells it is left out whole rather than shown as a stub.
+            // The crew is cut last; with less than a few cells it is left out whole rather than
+            // shown as a stub.
             let crew = crew_spans(app, false);
             let crew_room = room
                 .saturating_sub(spans_width(&facts))
                 .saturating_sub(width(&sep.content));
             if !crew.is_empty() && crew_room >= 14 {
-                facts.push(sep.clone());
+                facts.push(sep);
                 facts.extend(clip_spans(crew, crew_room));
             }
-            facts.push(sep);
-            facts.push(Span::styled(thread, dim));
             let mut spans = pad_spans(clip_spans(facts, room), room);
             if track > 0 {
-                let (pet_state, frame_no, look, draw) = pet_view(app);
-                spans.extend(pet::mini(pet_state, frame_no, look, track, draw).spans);
+                let (pet_state, frame_no, draw) = pet_view(app);
+                spans.extend(pet::mini(pet_state, frame_no, &app.theme, track, 0, draw).spans);
             }
             frame.render_widget(Paragraph::new(Line::from(spans)), area);
             return;
@@ -383,72 +722,89 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App, kind: &Header) {
         Header::Full => {}
     }
     let wide = columns.saturating_sub(1);
-    let strip = pet_strip(app, area.width, true);
+    let FullHeader {
+        pet: strip,
+        form,
+        lead: lead_width,
+        box_width,
+    } = full_header(app, area.width);
     let track = strip.width;
-    let lead_width = if track == 0 {
-        columns.saturating_sub(1)
-    } else {
-        columns - track
-    };
-    let notes = [
-        Some(title),
-        Some(state),
-        Some(model),
-        Some(Span::styled(mode_label(app), dim)),
-    ];
     debug_assert_eq!(WORDMARK[0].chars().count(), usize::from(LOGO_WIDTH));
     let pet_rows = if track == 0 {
         Vec::new()
     } else {
-        let (pet_state, frame_no, look, draw) = pet_view(app);
-        if strip.mini {
-            vec![pet::mini(pet_state, frame_no, look, track, draw)]
-        } else {
-            pet::lines(pet_state, frame_no, look, track, draw)
+        let (pet_state, frame_no, draw) = pet_view(app);
+        let at = app.pet_offset(pet_state, strip.roam);
+        pet::lines(pet_state, frame_no, &app.theme, track, at, draw)
+    };
+    let rule = if strip.mini && wide >= pet::PET_MINI_TRACK_WIDTH {
+        let (pet_state, frame_no, draw) = pet_view(app);
+        rule_with_pet(app, wide, pet_state, frame_no, draw)
+    } else {
+        Line::from(Span::styled(app.sym.rule.repeat(wide), dim))
+    };
+    // A row of the header with the pet's row beside it, when she has one there.
+    let with_pet = |row: usize, spans: Vec<Span<'static>>| {
+        let mut spans = pad_spans(clip_spans(spans, lead_width), lead_width);
+        if let Some(pet_row) = pet_rows.get(row) {
+            spans.extend(pet_row.spans.clone());
         }
+        Line::from(spans)
     };
-    let mut lines: Vec<Line> = WORDMARK
-        .iter()
-        .zip(t.gradient)
-        .zip(notes)
-        .enumerate()
-        .map(|(i, ((row, color), note))| {
-            let art = if app.settings.ascii {
-                row.replace(['▄', '▀', '█'], "#")
-            } else {
-                row.to_string()
-            };
-            let mut spans = vec![Span::styled(art, Style::new().fg(color)), Span::raw("  ")];
+    let art_of = |i: usize| {
+        let art = if app.settings.ascii {
+            WORDMARK[i].replace(['▄', '▀', '█'], "#")
+        } else {
+            WORDMARK[i].to_string()
+        };
+        Span::styled(art, Style::new().fg(t.gradient[i]))
+    };
+    let mut lines: Vec<Line> = Vec::new();
+    if form == BoxForm::Hidden {
+        let notes = [
+            Some(title),
+            Some(state),
+            Some(model),
+            Some(Span::styled(mode_label(app), dim)),
+        ];
+        for (i, note) in notes.into_iter().enumerate() {
+            let mut spans = vec![art_of(i), Span::raw("  ")];
             spans.extend(note);
-            let mut spans = pad_spans(clip_spans(spans, lead_width), lead_width);
-            if let Some(pet_row) = pet_rows.get(i) {
-                spans.extend(pet_row.spans.clone());
-            }
-            Line::from(spans)
-        })
-        .collect();
-    let folder = home_relative(&sanitize(&app.cwd), &app.home);
-    let folder_spans = vec![Span::styled(tr("header.folder"), dim), Span::raw(folder)];
-    // The thread row shares the strip with the pet's fifth row; its text stops before it.
-    let thread_row = vec![
-        Span::styled(tr("header.thread"), dim),
-        Span::styled(thread, dim),
-    ];
-    let mut thread_line = if let Some(pet_row) = pet_rows.get(WORDMARK.len()) {
-        let mut spans = pad_spans(clip_spans(thread_row, lead_width), lead_width);
-        spans.extend(pet_row.spans.clone());
-        spans
+            lines.push(with_pet(i, spans));
+        }
+        let folder = home_relative(&sanitize(&app.workdir()), &app.home);
+        let folder_spans = vec![
+            Span::styled(format!("{} ", tr("header.folder")), dim),
+            Span::raw(folder),
+        ];
+        // The folder row shares the strip with the pet's fifth row; its text stops before it.
+        let room = if pet_rows.len() > WORDMARK.len() {
+            lead_width
+        } else {
+            wide
+        };
+        let folder_row = if crew_spans(app, false).is_empty() {
+            clip_spans(folder_spans, room)
+        } else {
+            crew_beside(app, folder_spans, room)
+        };
+        lines.push(with_pet(WORDMARK.len(), folder_row));
     } else {
-        clip_spans(thread_row, wide)
-    };
-    lines.push(Line::from(std::mem::take(&mut thread_line)));
-    let crew_on = !crew_spans(app, false).is_empty();
-    lines.push(Line::from(if crew_on {
-        crew_beside(app, folder_spans, wide)
-    } else {
-        clip_spans(folder_spans, wide)
-    }));
-    lines.push(Line::from(Span::styled(app.sym.rule.repeat(wide), dim)));
+        let boxed = info_box(app, box_width, form);
+        for (i, box_row) in boxed.into_iter().enumerate() {
+            let mut left = match i {
+                0..=3 => vec![art_of(i), Span::raw("  ")],
+                4 => vec![state.clone()],
+                5 => vec![Span::styled(mode_label(app), dim)],
+                _ => Vec::new(),
+            };
+            left = pad_spans(clip_spans(left, BOX_X), BOX_X);
+            left.extend(box_row);
+            lines.push(with_pet(i, left));
+        }
+    }
+    lines.push(Line::from(tip_line(app, wide)));
+    lines.push(rule);
     frame.render_widget(Paragraph::new(lines), area);
 }
 
@@ -702,6 +1058,14 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
             lines
         }
     };
+    // After a finished turn the last line is the `[Replay]` button; it is not part of the transcript.
+    let replay_button = crate::replay::button_visible(app);
+    if replay_button {
+        if !tail.is_empty() {
+            tail.push(Line::default());
+        }
+        tail.push(crate::replay::button_line(app));
+    }
     if !base.is_empty() && !tail.is_empty() {
         tail.insert(0, Line::default());
     }
@@ -732,6 +1096,7 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
     let mut shown: Vec<Line> = vec![Line::default(); pad];
     shown.extend((start..end).map(at));
     frame.render_widget(Paragraph::new(shown), area);
+    crate::replay::place_button(app, area, pad, (total.saturating_sub(1), start, end));
     app.geo.set(crate::app::Geo {
         area,
         pad,
@@ -843,35 +1208,7 @@ fn draw_composer(frame: &mut Frame, area: Rect, app: &App) {
         .title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let room = usize::from(inner.width).saturating_sub(3);
-    let (rows, (col, row)) = app.input.layout(room.max(2));
-    let visible = usize::from(inner.height).max(1);
-    // Show the rows that end at the cursor's, so the cursor is always on screen.
-    let first = (row + 1).saturating_sub(visible);
-    let lines: Vec<Line> = rows
-        .iter()
-        .enumerate()
-        .skip(first)
-        .take(visible)
-        .map(|(i, text)| {
-            let lead = if i == 0 {
-                format!("{} ", app.sym.prompt)
-            } else {
-                "  ".into()
-            };
-            Line::from(vec![
-                Span::styled(lead, Style::new().fg(t.brand)),
-                Span::raw(sanitize(text)),
-            ])
-        })
-        .collect();
-    frame.render_widget(Paragraph::new(lines), inner);
-    if focused && app.modal.is_none() {
-        frame.set_cursor_position(Position::new(
-            inner.x + 2 + col as u16,
-            inner.y + (row - first) as u16,
-        ));
-    }
+    crate::composer::draw_input(frame, inner, app);
 }
 
 fn panel_block<'a>(app: &App, title: &'a str) -> Block<'a> {
@@ -1066,13 +1403,16 @@ fn draw_modal(frame: &mut Frame, area: Rect, app: &App, modal: &Modal) {
     }
     let room = usize::from(inner.height).saturating_sub(lines.len());
     let first = (cursor + 1).saturating_sub(room.max(1));
+    let mut hits = Vec::new();
     for (i, item) in items.iter().enumerate().skip(first).take(room) {
+        hits.push((inner.y + lines.len() as u16, i));
         lines.push(option_line(
             app,
             i == cursor,
             truncate(item, usize::from(inner.width).saturating_sub(2)),
         ));
     }
+    *app.modal_hits.borrow_mut() = (rect, hits);
     frame.render_widget(Paragraph::new(lines), inner);
     if let Modal::Models { filter, .. } = modal {
         let x = inner.x + 2 + width(filter) as u16 + u16::from(!filter.is_empty());
@@ -1088,11 +1428,13 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
     let screen_hint = app.screen.as_ref().map(|screen| screen.hint());
     let hint = if let Some(hint) = &screen_hint {
         hint.as_str()
+    } else if crate::replay::is_open(app) {
+        crate::replay::hint()
     } else if app.modal.is_some() {
-        tr(if matches!(app.modal, Some(Modal::Models { .. })) {
-            "hint.modelPicker"
-        } else {
-            "hint.picker"
+        tr(match &app.modal {
+            Some(Modal::Models { .. }) => "hint.modelPicker",
+            Some(Modal::Pick(pick)) if pick.typed.is_some() => "hint.folderPicker",
+            _ => "hint.picker",
         })
     } else if app.focus == Focus::Composer && app.approval().is_some() {
         tr("hint.approval")
@@ -1119,29 +1461,40 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         (None, Some((text, color))) => (text, Style::new().fg(color)),
         (None, None) => (hint.to_string(), t.dim_style()),
     };
-    // The thread's goal, right-aligned, kept whole while the left text gives way.
+    // On the right, kept whole while the left text gives way: the thread's goal, and before it the
+    // way back to a side pane that is closed.
     let goal = crate::cmd_goal::goal_bar(app).map(|bar| format!(" {} ", sanitize(&bar)));
     let goal_room = goal.as_ref().map_or(0, |bar| width(bar) + 1);
+    let closed = app
+        .closed_panes_hint()
+        .map(|hint| format!(" {hint} "))
+        .filter(|hint| usize::from(area.width) >= CLOSED_HINT_MIN_COLUMNS + width(hint));
+    let closed_room = closed.as_ref().map_or(0, |hint| width(hint) + 1);
     let line = Line::from(Span::styled(
         format!(
             " {}",
             truncate(
                 &sanitize(&text).replace('\n', " "),
-                usize::from(area.width).saturating_sub(2 + goal_room)
+                usize::from(area.width).saturating_sub(2 + goal_room + closed_room)
             )
         ),
         style,
     ));
     frame.render_widget(Paragraph::new(line), area);
-    if let Some(bar) = goal {
-        let room = u16::try_from(width(&bar))
+    let mut right = area.right();
+    let mut put = |text: String, style: Style| {
+        let room = u16::try_from(width(&text))
             .unwrap_or(u16::MAX)
-            .min(area.width);
-        let rect = Rect::new(area.right() - room, area.y, room, area.height.min(1));
-        frame.render_widget(
-            Paragraph::new(Span::styled(bar, Style::new().fg(t.brand))),
-            rect,
-        );
+            .min(right - area.x);
+        right -= room;
+        let rect = Rect::new(right, area.y, room, area.height.min(1));
+        frame.render_widget(Paragraph::new(Span::styled(text, style)), rect);
+    };
+    if let Some(bar) = goal {
+        put(bar, Style::new().fg(t.brand));
+    }
+    if let Some(hint) = closed {
+        put(hint, t.dim_style());
     }
 }
 
@@ -1151,683 +1504,5 @@ fn cells(text: &str) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::Msg;
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
-    use ratatui::crossterm::event::{
-        Event, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
-    };
-    use serde_json::{Value, json};
-    use tokio::sync::mpsc::unbounded_channel;
-
-    fn screen(app: &App, w: u16, h: u16) -> Vec<String> {
-        let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|f| draw(f, app)).unwrap();
-        let buffer = terminal.backend().buffer().clone();
-        // A wide character fills two cells; the second holds no symbol of its own, so skip it.
-        (0..h)
-            .map(|y| {
-                let mut row = String::new();
-                let mut x = 0;
-                while x < w {
-                    let symbol = buffer[(x, y)].symbol();
-                    row.push_str(symbol);
-                    x += u16::try_from(width(symbol).max(1)).unwrap_or(1);
-                }
-                row
-            })
-            .collect()
-    }
-
-    fn press(app: &mut App, code: KeyCode) {
-        app.handle(Msg::Term(Event::Key(KeyEvent {
-            code,
-            modifiers: KeyModifiers::NONE,
-            kind: KeyEventKind::Press,
-            state: KeyEventState::NONE,
-        })));
-    }
-
-    fn open_conversation() -> App {
-        let (tx, _rx) = unbounded_channel();
-        let mut app = App::new("9.9.9", "/Users/x/demo", "/Users/x", tx);
-        app.last_model_path = std::env::temp_dir().join("oop-rs-ui-none/last-model.json");
-        app.handle(Msg::Shell(json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 1,
-            "projects": [{"id": "p", "title": "demo", "workspaceRoot": "/Users/x/demo"}],
-            "threads": [{"id": "t", "projectId": "p", "title": "안녕 스레드", "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"}]}})));
-        app.handle(Msg::Link(LinkStatus::Online));
-        app.active = Active::Thread("t".into());
-        app.conv = crate::state::Conversation::new("t");
-        load(
-            &mut app,
-            json!([
-            {"id": "u", "role": "user", "text": "안녕하세요 반갑습니다", "streaming": false, "createdAt": "2026-01-01T00:00:01.000Z"},
-            {"id": "a", "role": "assistant", "text": "Hello there, 세계!", "streaming": false, "createdAt": "2026-01-01T00:00:02.000Z"}]),
-        );
-        app
-    }
-
-    fn load(app: &mut App, messages: Value) {
-        app.conv.apply(&json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 2, "thread": {"title": "안녕 스레드",
-            "modelSelection": {"instanceId": "codex", "model": "gpt"}, "messages": messages}}}));
-    }
-
-    #[test]
-    fn the_wordmark_is_the_one_in_banner_ts() {
-        let source = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../oop-tui/src/render/banner.ts"
-        ))
-        .expect("banner.ts");
-        for row in WORDMARK {
-            assert!(
-                source.contains(&format!("\"{row}\"")),
-                "wordmark row drifted from banner.ts: {row}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_header_pins_the_wordmark_and_the_list_is_on_the_left() {
-        let app = open_conversation();
-        let rows = screen(&app, 140, 40);
-        assert!(rows[0].starts_with(WORDMARK[0]), "{}", rows[0]);
-        assert!(rows[3].starts_with(WORDMARK[3]));
-        assert!(rows[0].contains("OOP v9.9.9"));
-        assert!(rows[2].contains("codex/gpt"), "{}", rows[2]);
-        assert!(rows[6].starts_with('─'));
-        assert!(rows[8].contains(tr("list.new")), "{:?}", &rows[7..11]);
-        assert!(
-            rows.iter()
-                .any(|r| r.starts_with("▸") && r.contains("안녕 스레드")),
-            "{rows:#?}"
-        );
-    }
-
-    #[test]
-    fn the_header_uses_the_lavender_gradient_and_no_magenta() {
-        let app = open_conversation();
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(1, 0)].fg, app.theme.gradient[0]);
-        assert_eq!(buffer[(1, 1)].fg, app.theme.gradient[1]);
-        let magenta = buffer.content().iter().any(|c| {
-            matches!(
-                c.fg,
-                ratatui::style::Color::Magenta | ratatui::style::Color::LightMagenta
-            )
-        });
-        assert!(!magenta);
-    }
-
-    #[test]
-    fn user_text_is_right_aligned_and_assistant_text_is_left() {
-        let mut app = open_conversation();
-        app.side_open = false;
-        let rows = screen(&app, 140, 40);
-        let user = rows
-            .iter()
-            .find(|r| r.contains("안녕하세요 반갑습니다"))
-            .expect("user line");
-        let assistant = rows
-            .iter()
-            .find(|r| r.contains("Hello there"))
-            .expect("assistant line");
-        let user_end = width(user.trim_end());
-        assert!(
-            user_end >= 138 && user.trim_end().ends_with('│'),
-            "user plate ends at the right edge: {user_end} cells"
-        );
-        let left = width(&user[..user.find("안녕하세요").unwrap()]);
-        assert!(
-            left > 70,
-            "user text starts in the right half: column {left}"
-        );
-        let col = width(&assistant[..assistant.find("●").unwrap()]);
-        assert!(
-            (35..40).contains(&col),
-            "assistant text starts at the pane's left edge: column {col}"
-        );
-    }
-
-    #[test]
-    fn user_text_has_its_own_colour() {
-        let app = open_conversation();
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let cell = (0..40u16)
-            .flat_map(|y| (0..140u16).map(move |x| (x, y)))
-            .find(|(x, y)| buffer[(*x, *y)].symbol() == "반")
-            .expect("cell");
-        assert_eq!(buffer[cell].fg, app.theme.user_fg);
-        assert_eq!(buffer[cell].bg, app.theme.user_bg);
-    }
-
-    #[test]
-    fn replies_render_markdown_with_code_plates() {
-        let mut app = open_conversation();
-        load(
-            &mut app,
-            json!([{"id": "a", "role": "assistant", "streaming": false, "createdAt": "2026-01-01T00:00:02.000Z",
-            "text": "## Plan\n- **one** thing\n```rust\nfn main() {}\n```"}]),
-        );
-        let rows = screen(&app, 140, 40);
-        assert!(
-            rows.iter().any(|r| r.contains("Plan"))
-                && rows.iter().any(|r| r.contains("• one thing"))
-        );
-        let code_row = rows
-            .iter()
-            .position(|r| r.contains("fn main() {}"))
-            .expect("code row");
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        let row = &rows[code_row];
-        let x = width(&row[..row.find("fn").unwrap()]) as u16;
-        assert_eq!(buffer[(x, code_row as u16)].bg, app.theme.code_bg);
-        assert_eq!(buffer[(x, code_row as u16)].fg, app.theme.keyword);
-    }
-
-    #[test]
-    fn a_small_terminal_folds_the_header_to_one_line_and_hides_the_list() {
-        let app = open_conversation();
-        let rows = screen(&app, 50, 20);
-        assert!(rows[0].contains("OOP v9.9.9") && !rows[0].contains("██  ██"));
-        assert!(!rows.iter().any(|r| r.contains(tr("list.new"))));
-    }
-
-    #[test]
-    fn settings_choose_the_header_and_the_symbols() {
-        let mut app = open_conversation();
-        app.configure(
-            Settings {
-                banner: false,
-                sidebar: false,
-                ascii: true,
-                ..Settings::default()
-            },
-            vec![],
-        );
-        let rows = screen(&app, 140, 40);
-        assert!(rows[0].contains("OOP v9.9.9") && !rows.iter().any(|r| r.contains('█')));
-        assert!(
-            !rows.iter().any(|r| r.contains(tr("list.new"))),
-            "the list is off"
-        );
-        assert!(
-            rows.iter().any(|r| r.contains("* Hello there")),
-            "ascii bullet"
-        );
-        app.configure(
-            Settings {
-                status_line: "minimal".into(),
-                ..Settings::default()
-            },
-            vec![],
-        );
-        assert!(
-            !screen(&app, 140, 40)[0].contains("codex"),
-            "minimal drops the model"
-        );
-    }
-
-    #[test]
-    fn wide_characters_never_overflow_a_narrow_pane() {
-        let app = open_conversation();
-        for line in app.transcript(12).lines.iter() {
-            let cells: usize = line.spans.iter().map(|s| width(&s.content)).sum();
-            assert!(cells <= 12, "{cells} cells: {line:?}");
-        }
-    }
-
-    #[test]
-    fn a_note_shows_even_when_no_thread_is_open() {
-        let (tx, _rx) = unbounded_channel();
-        let mut app = App::new("9.9.9", "/Users/x/demo", "/Users/x", tx);
-        app.say(
-            crate::notes::Tone::Warning,
-            "the update feed did not answer",
-        );
-        let rows = screen(&app, 120, 30);
-        assert!(
-            rows.iter()
-                .any(|r| r.contains("the update feed did not answer"))
-        );
-        assert!(rows.iter().any(|r| r.contains(tr("conv.pick"))));
-    }
-
-    #[test]
-    fn a_failed_session_shows_its_error_in_the_conversation() {
-        let mut app = open_conversation();
-        app.conv.apply(&json!({"kind": "event", "event": {"sequence": 3, "type": "thread.session-set",
-            "payload": {"session": {"status": "error", "lastError": "Provider is not signed in"}}}}));
-        let rows = screen(&app, 140, 40);
-        assert!(
-            rows.iter()
-                .any(|r| r.contains("✗  Provider is not signed in"))
-        );
-        assert!(rows[1].contains(tr("state.error")));
-    }
-
-    #[test]
-    fn the_error_is_said_once_when_the_activity_already_says_it() {
-        let mut app = open_conversation();
-        let long = "Claude could not authenticate. For subscription login, run `claude auth login` on this environment's machine.";
-        app.conv.apply(
-            &json!({"kind": "event", "event": {"sequence": 3, "type": "thread.session-set",
-            "payload": {"session": {"status": "error", "lastError": long}}}}),
-        );
-        app.conv.apply(&json!({"kind": "event", "event": {"sequence": 4, "type": "thread.activity-appended", "payload": {"activity": {
-            "id": "e", "tone": "error", "kind": "runtime.error", "summary": "Runtime error", "createdAt": "2026-01-01T00:00:03.000Z",
-            "payload": {"message": "Claude could not authenticate. For subscription login, run `claude auth login` on this env..."}}}}}));
-        let rows = screen(&app, 140, 40);
-        let says = rows
-            .iter()
-            .filter(|r| r.contains("Claude could not"))
-            .count();
-        assert_eq!(says, 1, "{rows:#?}");
-    }
-
-    #[test]
-    fn user_text_sits_in_a_rounded_box_and_the_header_names_no_server() {
-        let mut app = open_conversation();
-        app.server = Some("127.0.0.1:4873".into());
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains('╭') && r.contains('╮')));
-        assert!(rows.iter().any(|r| r.contains("│ 안녕하세요 반갑습니다")));
-        assert!(rows.iter().any(|r| r.contains('╰') && r.contains('╯')));
-        assert!(
-            !rows
-                .iter()
-                .any(|r| r.contains("127.0.0.1") || r.contains("4873")),
-            "no address on the screen"
-        );
-        app.settings.ascii = true;
-        app.sym = crate::theme::Symbols::pick(true);
-        // another pane width, so the conversation is built again with the new symbols
-        let rows = screen(&app, 150, 40);
-        assert!(rows.iter().any(|r| r.contains("+--")), "{rows:#?}");
-        assert!(rows.iter().any(|r| r.contains("| 안녕하세요")));
-    }
-
-    #[test]
-    fn the_box_stays_with_no_colour() {
-        let mut app = open_conversation();
-        app.theme = app.theme.for_level(0);
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains('╭')) && rows.iter().any(|r| r.contains('╰')));
-    }
-
-    #[test]
-    fn mocha_stands_in_the_header_and_the_mini_one_in_the_short_header() {
-        let mut app = open_conversation();
-        app.pet_clock = Some(1_000_000);
-        let blocks = |row: &str| row.contains(['▀', '▄', '█']);
-        // Five rows: the wordmark's four and the thread row, whose text stops before her.
-        let rows = screen(&app, 140, 40);
-        assert!(
-            blocks(&rows[4]) && rows[4].contains("Thread"),
-            "{:#?}",
-            &rows[..6]
-        );
-        assert!(!blocks(&rows[5]) && !blocks(&rows[6]), "{:#?}", &rows[..7]);
-        for row in &rows[..5] {
-            assert!(row.trim_end().ends_with(['▀', '▄', '█']) || blocks(&row[row.len() - 24..]));
-        }
-        let rows = screen(&app, 90, 20);
-        assert!(
-            rows[0].contains("OOP v9.9.9") && blocks(&rows[0]),
-            "{}",
-            rows[0]
-        );
-        // no room for her five rows beside the notes: her one-line form stands on the first row
-        let rows = screen(&app, 50, 40);
-        assert!(blocks(&rows[0]) && !blocks(&rows[4]), "{:#?}", &rows[..5]);
-        app.settings.pet = false;
-        let rows = screen(&app, 140, 40);
-        assert!(!blocks(&rows[4]), "{:#?}", &rows[..5]);
-    }
-
-    #[test]
-    fn the_crew_line_follows_the_roles_and_is_absent_with_the_crew_off() {
-        let mut app = open_conversation();
-        let provider = json!({"instanceId": "codex", "driver": "codex", "displayName": "Codex", "enabled": true,
-            "installed": true, "status": "ready", "auth": {"status": "authenticated"},
-            "models": [{"slug": "gpt", "name": "GPT", "isDefault": true}]});
-        app.config = json!({"settings": {"crew": {"enabled": true}}, "providers": [provider]});
-        let rows = screen(&app, 140, 40);
-        let crew = rows
-            .iter()
-            .find(|r| r.contains(tr("header.crew").trim()))
-            .expect("crew line");
-        assert!(crew.contains("worker") && crew.contains("expert") && crew.contains("auditor"));
-        assert!(
-            crew.contains(tr("header.folder").trim()),
-            "the folder stays beside it"
-        );
-        // narrower: letters instead of words
-        let rows = screen(&app, 60, 40);
-        assert!(
-            rows.iter()
-                .any(|r| r.contains(tr("header.crew").trim()) && r.contains("w GPT")),
-            "{rows:#?}"
-        );
-        app.config = json!({"settings": {"crew": {"enabled": false}}, "providers": []});
-        let rows = screen(&app, 140, 40);
-        assert!(!rows.iter().any(|r| r.contains(tr("header.crew").trim())));
-    }
-
-    #[test]
-    fn the_panel_opens_on_the_right_and_gives_way_to_the_list_on_a_medium_screen() {
-        let mut app = open_conversation();
-        let rows = screen(&app, 140, 40);
-        assert!(
-            rows.iter()
-                .any(|r| r.contains("Workflow") && r.contains("Agents"))
-        );
-        assert!(
-            rows.iter().any(|r| r.contains(tr("list.projects"))),
-            "the list stays"
-        );
-        // 100 columns: one side slot
-        let rows = screen(&app, 100, 40);
-        assert!(rows.iter().any(|r| r.contains("Workflow")));
-        assert!(!rows.iter().any(|r| r.contains(tr("list.projects"))));
-        press(&mut app, KeyCode::Tab);
-        let rows = screen(&app, 100, 40);
-        assert!(rows.iter().any(|r| r.contains(tr("list.projects"))));
-        assert!(!rows.iter().any(|r| r.contains("Workflow")));
-    }
-
-    fn mouse(app: &mut App, kind: ratatui::crossterm::event::MouseEventKind, x: u16, y: u16) {
-        app.handle(Msg::Term(Event::Mouse(
-            ratatui::crossterm::event::MouseEvent {
-                kind,
-                column: x,
-                row: y,
-                modifiers: KeyModifiers::NONE,
-            },
-        )));
-    }
-
-    /// The screen cell of the first glyph of `needle` in the drawn rows.
-    fn cell_of(rows: &[String], needle: &str) -> (u16, u16) {
-        let y = rows.iter().position(|r| r.contains(needle)).expect("row");
-        let x = width(&rows[y][..rows[y].find(needle).unwrap()]);
-        (x as u16, y as u16)
-    }
-
-    #[test]
-    fn dragging_over_boxed_text_copies_the_text_without_the_border() {
-        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
-        let mut app = open_conversation();
-        app.side_open = false;
-        let rows = screen(&app, 140, 40);
-        let (x, y) = cell_of(&rows, "안녕하세요");
-        let (end_x, _) = cell_of(&rows, "반갑습니다");
-        // from the box's left border to its right border: the border is not text
-        let left = x - 2;
-        let right = end_x + 12 + 2;
-        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), left, y);
-        mouse(&mut app, MouseEventKind::Drag(MouseButton::Left), right, y);
-        assert!(
-            app.take_copy().is_none(),
-            "nothing is copied while the button is down"
-        );
-        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), right, y);
-        let job = app.take_copy().expect("a copy on release");
-        assert_eq!(job.text, "안녕하세요 반갑습니다");
-        assert!(
-            job.osc52
-                .as_deref()
-                .is_some_and(|s| s.starts_with("\u{1b}]52;c;") || s.starts_with("\u{1b}Ptmux;"))
-        );
-        // the selected cells are drawn reversed, the border is not
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
-        let buffer = terminal.backend().buffer();
-        assert!(buffer[(x, y)].modifier.contains(Modifier::REVERSED));
-        assert!(!buffer[(left, y)].modifier.contains(Modifier::REVERSED));
-        // a key press puts the highlight away
-        press(&mut app, KeyCode::Char('x'));
-        let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
-        assert!(
-            !terminal.backend().buffer()[(x, y)]
-                .modifier
-                .contains(Modifier::REVERSED)
-        );
-    }
-
-    #[test]
-    fn a_click_copies_nothing_and_a_click_on_a_list_row_opens_it() {
-        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
-        let mut app = open_conversation();
-        let rows = screen(&app, 140, 40);
-        let (x, y) = cell_of(&rows, "안녕하세요");
-        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
-        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), x, y);
-        assert!(app.take_copy().is_none());
-        // the list row of the thread (not the conversation)
-        let (lx, ly) = cell_of(&rows[8..], "안녕 스레드");
-        let ly = ly + 8;
-        app.active = Active::None;
-        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), lx, ly);
-        mouse(&mut app, MouseEventKind::Up(MouseButton::Left), lx, ly);
-        assert_eq!(app.active, Active::Thread("t".into()));
-    }
-
-    #[test]
-    fn wrapped_text_is_copied_as_the_line_that_was_typed() {
-        use ratatui::crossterm::event::{MouseButton, MouseEventKind};
-        let mut app = open_conversation();
-        app.side_open = false;
-        load(
-            &mut app,
-            json!([{"id": "u", "role": "user", "text": "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma", "streaming": false,
-            "createdAt": "2026-01-01T00:00:01.000Z"}]),
-        );
-        let rows = screen(&app, 70, 30);
-        let (x, y) = cell_of(&rows, "alpha");
-        let last = rows.iter().rposition(|r| r.contains("sigma")).unwrap() as u16;
-        let (ex, _) = cell_of(&rows[..], "sigma");
-        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), x, y);
-        mouse(
-            &mut app,
-            MouseEventKind::Drag(MouseButton::Left),
-            ex + 4,
-            last,
-        );
-        mouse(
-            &mut app,
-            MouseEventKind::Up(MouseButton::Left),
-            ex + 4,
-            last,
-        );
-        let job = app.take_copy().expect("copy");
-        assert_eq!(
-            job.text,
-            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma"
-        );
-    }
-
-    #[test]
-    fn slash_commands_drive_the_panel_the_pet_the_list_and_the_mouse() {
-        let mut app = open_conversation();
-        let run = |app: &mut App, text: &str| {
-            for ch in text.chars() {
-                press(app, KeyCode::Char(ch));
-            }
-            press(app, KeyCode::Enter);
-        };
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains("Workflow")));
-        run(&mut app, "/dag-workflow");
-        let rows = screen(&app, 140, 40);
-        assert!(
-            !rows.iter().any(|r| r.contains("Workflow  ")) || !app.side_open,
-            "closed"
-        );
-        assert!(!app.side_open);
-        run(&mut app, "/dag-agents");
-        assert!(app.side_open && app.side_view == crate::app::Side::Agents);
-        run(&mut app, "/dag-workflow");
-        assert!(app.side_open && app.side_view == crate::app::Side::Workflow);
-        run(&mut app, "/dag-workflow off");
-        assert!(!app.side_open);
-        run(&mut app, "/pet off");
-        assert!(!app.settings.pet);
-        run(&mut app, "/pet");
-        assert!(app.settings.pet);
-        run(&mut app, "/mouse off");
-        assert!(!app.mouse);
-        run(&mut app, "/mouse");
-        assert!(app.mouse);
-        run(&mut app, "/sidebar off");
-        assert!(!app.settings.sidebar);
-        run(&mut app, "/sidebar on");
-        run(&mut app, "/new");
-        assert!(matches!(app.active, Active::Draft(_)));
-        run(&mut app, "/bogus");
-        assert_eq!(app.notice.as_deref(), Some(tr("notice.unknownCommand")));
-    }
-
-    #[test]
-    fn shift_tab_flips_the_panel_and_tab_still_takes_the_list() {
-        let mut app = open_conversation();
-        screen(&app, 140, 40);
-        assert_eq!(app.side_view, crate::app::Side::Workflow);
-        press(&mut app, KeyCode::BackTab);
-        assert_eq!(app.side_view, crate::app::Side::Agents);
-        press(&mut app, KeyCode::BackTab);
-        assert_eq!(app.side_view, crate::app::Side::Workflow);
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.focus, Focus::List);
-        // with the list off, Tab flips the panel as well
-        app.focus = Focus::Composer;
-        app.settings.sidebar = false;
-        screen(&app, 140, 40);
-        press(&mut app, KeyCode::Tab);
-        assert_eq!(app.side_view, crate::app::Side::Agents);
-    }
-
-    #[test]
-    fn an_approval_replaces_the_composer_with_its_choices() {
-        let mut app = open_conversation();
-        app.conv.apply(&json!({"kind": "event", "event": {"sequence": 3, "type": "thread.activity-appended", "payload": {"activity": {
-            "id": "a", "tone": "approval", "kind": "approval.requested", "summary": "s", "createdAt": "2026-01-01T00:00:03.000Z",
-            "payload": {"requestId": "r", "requestKind": "command", "detail": "rm -rf build"}}}}}));
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains(tr("panel.approval"))));
-        assert!(rows.iter().any(|r| r.contains("rm -rf build")));
-        assert!(
-            rows.iter()
-                .any(|r| r.contains("1. ") && r.contains(tr("approval.accept")))
-        );
-        assert!(rows.last().unwrap().contains("1-4"));
-        press(&mut app, KeyCode::Down);
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains("❯ 2.")));
-    }
-
-    #[test]
-    fn scrolling_back_shows_older_lines_and_says_how_to_return() {
-        let mut app = open_conversation();
-        let messages: Vec<Value> = (0..60)
-            .map(|i| json!({"id": format!("m{i}"), "role": if i % 2 == 0 { "user" } else { "assistant" }, "text": format!("line number {i}"), "streaming": false, "createdAt": format!("2026-01-01T00:{:02}:00.000Z", i % 60)}))
-            .collect();
-        load(&mut app, Value::Array(messages));
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains("line number 59")));
-        assert!(
-            !rows
-                .iter()
-                .any(|r| r.contains("line number 0 ") || r.ends_with("line number 0"))
-        );
-        app.scroll_up(40);
-        let rows = screen(&app, 140, 40);
-        assert!(
-            !rows.iter().any(|r| r.contains("line number 59")),
-            "scrolled away from the end"
-        );
-        assert!(rows.iter().any(|r| r.contains(tr("conv.jump"))));
-        app.scroll_down(1000);
-        assert!(
-            screen(&app, 140, 40)
-                .iter()
-                .any(|r| r.contains("line number 59")),
-            "back at the end it follows again"
-        );
-    }
-
-    #[test]
-    fn new_lines_do_not_move_what_the_reader_scrolled_to() {
-        let mut app = open_conversation();
-        let many = |n: usize| -> Value {
-            Value::Array((0..n).map(|i| json!({"id": format!("m{i}"), "role": "assistant", "text": format!("row {i}"), "streaming": false, "createdAt": format!("2026-01-01T00:00:{:02}.000Z", i % 60)})).collect())
-        };
-        load(&mut app, many(50));
-        screen(&app, 140, 40);
-        app.scroll_up(10);
-        let before = screen(&app, 140, 40);
-        let target = before.iter().find(|r| r.contains("row ")).cloned().unwrap();
-        app.conv.apply(&json!({"kind": "event", "event": {"sequence": 9, "type": "thread.message-sent", "payload": {
-            "messageId": "new", "role": "assistant", "text": "fresh", "streaming": false, "createdAt": "2026-01-01T00:59:00.000Z"}}}));
-        let after = screen(&app, 140, 40);
-        assert!(
-            after.contains(&target),
-            "the same rows stay on screen while the reader is scrolled up"
-        );
-    }
-
-    #[test]
-    fn the_list_groups_by_the_desktop_sections() {
-        let mut app = open_conversation();
-        app.handle(Msg::Shell(json!({"kind": "thread-upserted", "sequence": 2, "thread": {"id": "p1", "projectId": "p", "title": "pinned one", "pinnedAt": "2026-01-01T00:00:00.000Z", "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"}})));
-        app.handle(Msg::Shell(json!({"kind": "thread-upserted", "sequence": 3, "thread": {"id": "s1", "projectId": "p", "title": "settled one", "settledOverride": "settled", "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z"}})));
-        let rows = screen(&app, 140, 40);
-        // The header and the list share words ("Threads", the title), so look inside the list column.
-        let list: Vec<&str> = rows
-            .iter()
-            .map(|r| r.split('│').next().unwrap_or(""))
-            .collect();
-        let at = |needle: &str| {
-            list.iter()
-                .rposition(|r| r.contains(needle))
-                .unwrap_or_else(|| panic!("{needle} in {list:#?}"))
-        };
-        assert!(
-            at(tr("list.pinned")) < at("pinned one")
-                && at("pinned one") < at(tr("list.active"))
-                && at(tr("list.active")) < at("안녕 스레드")
-        );
-        assert!(at("안녕 스레드") < at(tr("list.settled")));
-        assert!(
-            !rows.iter().any(|r| r.contains("settled one")),
-            "shelves start closed"
-        );
-    }
-
-    #[test]
-    fn the_model_picker_opens_over_the_conversation() {
-        let mut app = open_conversation();
-        app.config = json!({"providers": [{"instanceId": "codex", "displayName": "Codex", "enabled": true, "installed": true, "models": [{"slug": "gpt-5", "name": "GPT-5"}, {"slug": "mini", "name": "Mini"}]}]});
-        app.modal = Some(Modal::Models {
-            filter: String::new(),
-            cursor: 1,
-        });
-        let rows = screen(&app, 140, 40);
-        assert!(rows.iter().any(|r| r.contains(tr("picker.model"))));
-        assert!(
-            rows.iter().any(|r| r.contains("❯ Codex  Mini")),
-            "{rows:#?}"
-        );
-    }
-
-    use crate::settings::Settings;
-}
+#[path = "ui_tests.rs"]
+mod tests;

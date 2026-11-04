@@ -8,6 +8,7 @@
  */
 import {
   CommandId,
+  CrewThreadOverride,
   IsoDateTime,
   ModelSelection,
   NonNegativeInt,
@@ -52,6 +53,7 @@ export const ProjectionThread = Schema.Struct({
   activeOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  crew: Schema.optional(Schema.NullOr(CrewThreadOverride)),
   titleRegenerationRequestId: Schema.optional(Schema.NullOr(CommandId)),
   titleRegenerationStartedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),

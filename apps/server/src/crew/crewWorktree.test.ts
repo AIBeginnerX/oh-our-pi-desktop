@@ -10,6 +10,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import {
   applyConflictFiles,
+  candidateNote,
   makeCrewWorktrees,
   mergeConflictNote,
   type CrewWorktree,
@@ -161,6 +162,56 @@ describe("crew worktrees", () => {
 
       assert.deepStrictEqual(yield* crew.mergeBack(worktree), { merged: true });
       assert.isFalse(yield* fs.exists(worktree.path));
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
+  it.effect("keeps a candidate's worktree and patch and leaves the lead's workspace alone", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const crew = yield* makeCrewWorktrees;
+      const lead = yield* makeLeadRepo;
+      const statusBefore = (yield* lead.run(["status", "--porcelain"])).stdout;
+      const worktree = yield* crew.create({ taskId: "cand-1", cwd: lead.root });
+      yield* edit(worktree, "a.txt", "candidate's a\n");
+      yield* edit(worktree, "new.txt", "created by the candidate\n");
+
+      const kept = yield* crew.keep(worktree);
+      if (!kept.kept) return assert.fail("expected the candidate to be kept");
+      const patchPath = kept.patchPath;
+      if (patchPath === null) return assert.fail("expected a patch file");
+      assert.strictEqual(patchPath, `${worktree.path}.patch`);
+      assert.isTrue(yield* fs.exists(worktree.path));
+      const patch = yield* fs.readFileString(patchPath);
+      assert.include(patch, "new.txt");
+      assert.include(patch, "candidate's a");
+      // Nothing reached the lead's workspace, and its index is as it was.
+      assert.strictEqual((yield* lead.run(["status", "--porcelain"])).stdout, statusBefore);
+      assert.strictEqual(yield* lead.read("a.txt"), "one\ntwo\nthree\nfour\nfive\nsix\n");
+      assert.isFalse(yield* fs.exists(path.join(lead.root, "new.txt")));
+      assert.include((yield* lead.run(["worktree", "list"])).stdout, worktree.path);
+      // The patch is meant to apply to the lead's workspace later; `--check` writes nothing.
+      yield* lead.run(["apply", "--check", "--binary", patchPath]);
+
+      const note = candidateNote(worktree, kept);
+      assert.include(note, "CANDIDATE: changes were NOT applied");
+      assert.include(note, patchPath);
+      assert.include(note, worktree.path);
+      assert.include(note, `git -C ${worktree.repoRoot} worktree remove --force ${worktree.path}`);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
+  it.effect("discards a candidate that changed nothing", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const crew = yield* makeCrewWorktrees;
+      const lead = yield* makeLeadRepo;
+      const worktree = yield* crew.create({ taskId: "cand-2", cwd: lead.root });
+
+      assert.deepStrictEqual(yield* crew.keep(worktree), { kept: false });
+      assert.isFalse(yield* fs.exists(worktree.path));
+      assert.isFalse(yield* fs.exists(`${worktree.path}.patch`));
+      assert.notInclude((yield* lead.run(["worktree", "list"])).stdout, worktree.path);
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );
 

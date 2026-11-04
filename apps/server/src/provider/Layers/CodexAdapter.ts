@@ -117,6 +117,8 @@ interface CodexAdapterSessionContext {
   readonly turnTokenUsage: CodexTurnTokenUsageState;
   readonly startInput: Parameters<CodexAdapterShape["startSession"]>[0];
   readonly runtimeRevision?: string;
+  /** Identity of this exact context; a restarted or replaced session gets a new one. */
+  readonly generation: number;
   stopped: boolean;
 }
 
@@ -2261,6 +2263,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
   const sessions = new Map<ThreadId, CodexAdapterSessionContext>();
+  let nextSessionGeneration = 0;
 
   const startSession: CodexAdapterShape["startSession"] = (input) =>
     Effect.scoped(
@@ -2545,6 +2548,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           turnTokenUsage,
           startInput: input,
           ...(resolved ? { runtimeRevision: resolved.revision } : {}),
+          generation: ++nextSessionGeneration,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -2574,65 +2578,86 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     };
   });
 
-  const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    // Codex ingests images only. Anything else would be inlined as an image
-    // and rejected or misread; generic files reach the agent through the path
-    // line ProviderService puts in the prompt. Images are passed by path
-    // instead of base64 so the turn/start request does not scale with file
-    // size; the CLI reads the file itself.
-    const codexAttachments = yield* Effect.forEach(
-      (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
-      (attachment) => resolveAttachment(input, attachment),
-      { concurrency: 1 },
-    );
-
-    let session = yield* requireSession(input.threadId);
-    if (options?.resolveRuntime) {
-      const next = yield* options.resolveRuntime.pipe(
-        Effect.scoped,
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterValidationError({
-              provider: PROVIDER,
-              operation: "sendTurn",
-              issue: cause.detail,
-            }),
-        ),
+  const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(
+    function* (input, admission) {
+      // Codex ingests images only. Anything else would be inlined as an image
+      // and rejected or misread; generic files reach the agent through the path
+      // line ProviderService puts in the prompt. Images are passed by path
+      // instead of base64 so the turn/start request does not scale with file
+      // size; the CLI reads the file itself.
+      const codexAttachments = yield* Effect.forEach(
+        (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
+        (attachment) => resolveAttachment(input, attachment),
+        { concurrency: 1 },
       );
-      if (next.revision !== session.runtimeRevision) {
-        const previous = yield* session.runtime.getSession;
-        yield* startSession({
-          ...session.startInput,
-          ...(previous.resumeCursor ? { resumeCursor: previous.resumeCursor } : {}),
-        });
-        session = yield* requireSession(input.threadId);
+
+      let session = yield* requireSession(input.threadId);
+      if (options?.resolveRuntime) {
+        const next = yield* options.resolveRuntime.pipe(
+          Effect.scoped,
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "sendTurn",
+                issue: cause.detail,
+              }),
+          ),
+        );
+        if (next.revision !== session.runtimeRevision) {
+          const previous = yield* session.runtime.getSession;
+          yield* startSession({
+            ...session.startInput,
+            ...(previous.resumeCursor ? { resumeCursor: previous.resumeCursor } : {}),
+          });
+          session = yield* requireSession(input.threadId);
+        }
       }
-    }
-    const reasoningEffort =
-      input.modelSelection?.instanceId === boundInstanceId
-        ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
-        : undefined;
-    const serviceTier =
-      !options?.resolveRuntime && input.modelSelection?.instanceId === boundInstanceId
-        ? getCodexServiceTierOptionValue(input.modelSelection)
-        : undefined;
-    return yield* session.runtime
-      .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
-        ...(input.modelSelection?.instanceId === boundInstanceId
-          ? { model: input.modelSelection.model }
-          : {}),
-        ...(reasoningEffort
-          ? {
-              effort: reasoningEffort as EffectCodexSchema.V2TurnStartParams__ReasoningEffort,
-            }
-          : {}),
-        ...(serviceTier ? { serviceTier } : {}),
-        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
-        ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
-      })
-      .pipe(Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)));
-  });
+      const reasoningEffort =
+        input.modelSelection?.instanceId === boundInstanceId
+          ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
+          : undefined;
+      const serviceTier =
+        !options?.resolveRuntime && input.modelSelection?.instanceId === boundInstanceId
+          ? getCodexServiceTierOptionValue(input.modelSelection)
+          : undefined;
+      return yield* session.runtime
+        .sendTurn({
+          ...(input.input !== undefined ? { input: input.input } : {}),
+          ...(input.modelSelection?.instanceId === boundInstanceId
+            ? { model: input.modelSelection.model }
+            : {}),
+          ...(reasoningEffort
+            ? {
+                effort: reasoningEffort as EffectCodexSchema.V2TurnStartParams__ReasoningEffort,
+              }
+            : {}),
+          ...(serviceTier ? { serviceTier } : {}),
+          ...(input.interactionMode !== undefined
+            ? { interactionMode: input.interactionMode }
+            : {}),
+          ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
+          ...(admission !== undefined
+            ? {
+                // Reports the context this send publishes on: a context that was
+                // stopped or replaced since the session was resolved reads as a
+                // generation no caller could have captured.
+                admit: (providerThreadId: string | undefined) =>
+                  admission.admit({
+                    sessionGeneration:
+                      session.stopped || sessions.get(input.threadId) !== session
+                        ? -1
+                        : session.generation,
+                    nativeSessionId: providerThreadId,
+                  }),
+              }
+            : {}),
+        })
+        .pipe(
+          Effect.mapError((cause) => mapCodexRuntimeError(input.threadId, "turn/start", cause)),
+        );
+    },
+  );
 
   const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
     const session = sessions.get(threadId);
@@ -2807,6 +2832,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
+    memoryAdmission: {
+      sessionGeneration: (threadId) => {
+        const context = sessions.get(threadId);
+        return context !== undefined && !context.stopped ? context.generation : undefined;
+      },
+      nativeSessionId: (resumeCursor) =>
+        isCodexResumeCursorSchema(resumeCursor) ? resumeCursor.threadId : undefined,
+    },
     compaction: { type: "native", start: compactThread },
     interruptTurn,
     readThread,

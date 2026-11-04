@@ -127,6 +127,8 @@ pub struct Thread {
     pub model_selection: Value,
     pub runtime_mode: String,
     pub interaction_mode: String,
+    /// The crew the thread has of its own; `None` when it runs the default crew.
+    pub crew: Option<Value>,
     pub branch: Option<String>,
     pub worktree_path: Option<String>,
     pub latest_turn: Option<LatestTurn>,
@@ -229,6 +231,7 @@ impl Thread {
                         .unwrap_or_else(|| "full-access".into()),
                     interaction_mode: text(&payload["interactionMode"])
                         .unwrap_or_else(|| "default".into()),
+                    crew: Some(payload["crew"].clone()).filter(|crew| !crew.is_null()),
                     branch: text(&payload["branch"]),
                     worktree_path: text(&payload["worktreePath"]),
                     created_at: text(&payload["createdAt"]).unwrap_or_default(),
@@ -355,6 +358,11 @@ impl Thread {
                 if let Some(mode) = text(&payload["runtimeMode"]) {
                     self.runtime_mode = mode;
                 }
+                updated(self, &payload["updatedAt"]);
+                Outcome::Updated
+            }
+            "thread.crew-set" => {
+                self.crew = Some(payload["crew"].clone()).filter(|crew| !crew.is_null());
                 updated(self, &payload["updatedAt"]);
                 Outcome::Updated
             }
@@ -772,6 +780,41 @@ mod tests {
             "thread.message-sent",
             json!({"messageId": id, "role": "assistant", "text": text, "streaming": streaming, "turnId": turn, "createdAt": "c", "updatedAt": "u"}),
         )
+    }
+
+    #[test]
+    fn a_threads_own_crew_is_taken_from_created_and_set_and_null_means_the_default() {
+        let mut t = Thread::default();
+        let created = |crew: Value| {
+            event(
+                1,
+                "thread.created",
+                json!({"threadId": "t", "projectId": "p", "title": "x", "crew": crew,
+                       "createdAt": "c", "updatedAt": "c"}),
+            )
+        };
+        t.apply_event(&created(json!({"enabled": true})));
+        assert_eq!(t.crew, Some(json!({"enabled": true})));
+        let set = |crew: Value| {
+            event(
+                2,
+                "thread.crew-set",
+                json!({"threadId": "t", "crew": crew, "updatedAt": "u2"}),
+            )
+        };
+        let outcome = t.apply_event(&set(json!({"preset": "lean"})));
+        assert_eq!(outcome, Outcome::Updated);
+        assert_eq!(
+            (t.crew.clone(), t.updated_at.as_str()),
+            (Some(json!({"preset": "lean"})), "u2")
+        );
+        t.apply_event(&set(Value::Null));
+        assert_eq!(
+            t.crew, None,
+            "null puts the thread back on the default crew"
+        );
+        t.apply_event(&created(Value::Null));
+        assert_eq!(t.crew, None);
     }
 
     #[test]

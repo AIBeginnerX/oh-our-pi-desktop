@@ -18,6 +18,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkLessonsPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -62,7 +63,8 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkLessons";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -284,10 +286,23 @@ export const makeGrokTextGeneration = Effect.fn("makeGrokTextGeneration")(functi
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
+    Effect.fn("GrokTextGeneration.generateWorkLessons")(function* (input) {
+      const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
+      return yield* runGrokJson({
+        operation: "generateWorkLessons",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkLessons,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -26,7 +26,7 @@ $stage = Join-Path $root "stage"
 $content = Join-Path $stage "oop-terminal"
 New-Item -ItemType Directory -Path (Join-Path $content "apps\server\dist") -Force | Out-Null
 [IO.File]::WriteAllText((Join-Path $content "node.exe"), "fixture runtime")
-[IO.File]::WriteAllText((Join-Path $content "oop.mjs"), "// fixture terminal app")
+[IO.File]::WriteAllText((Join-Path $content "oop-rs.exe"), "fixture rust client")
 [IO.File]::WriteAllText((Join-Path $content "apps\server\dist\bin.mjs"), "// fixture server")
 [IO.File]::WriteAllText((Join-Path $content "new-in-this-version.txt"), "new")
 $fixture = Join-Path $root "fixture.zip"
@@ -54,10 +54,10 @@ function Invoke-RestMethod {
     param($Uri, $Headers, $TimeoutSec)
     return [PSCustomObject]@{ tag_name = "v1.2.3" }
 }
-# The runtime is a boundary: node.exe here is a text file, so "running" it prints what a scenario says.
+# The Rust client is a boundary: oop-rs.exe here is a text file, so "running" it prints what a scenario says.
 function Start-Process {
     param($FilePath, $ArgumentList, $RedirectStandardOutput, [switch]$Wait, [switch]$PassThru, [switch]$NoNewWindow)
-    if (-not $FilePath.EndsWith("node.exe")) { throw "Unexpected program $FilePath." }
+    if (-not $FilePath.EndsWith("oop-rs.exe")) { throw "Unexpected program $FilePath." }
     [IO.File]::WriteAllText($RedirectStandardOutput, "$($script:printedVersion)`r`n")
     return [PSCustomObject]@{ ExitCode = $script:nodeExit }
 }
@@ -76,7 +76,7 @@ try {
     $command = Join-Path $env:OOP_BIN_DIR "oop.cmd"
     & $script
     if ($script:downloads.Count -ne 2 -or -not $script:downloads[0].EndsWith("/v1.2.3/OOP-terminal-1.2.3-windows-x64.zip")) { throw "Wrong release asset." }
-    foreach ($file in @("node.exe", "oop.mjs", "apps\server\dist\bin.mjs", ".oop-terminal-install")) {
+    foreach ($file in @("node.exe", "oop-rs.exe", "apps\server\dist\bin.mjs", ".oop-terminal-install")) {
         if (-not (Test-Path -LiteralPath (Join-Path $env:OOP_INSTALL_DIR $file))) { throw "$file was not installed." }
     }
     Write-Host "PASS download, checksum, unpack and install of the terminal app"
@@ -87,20 +87,19 @@ try {
         "rem oop-terminal-launcher",
         "setlocal",
         "if not defined OOP_DAEMON_ENTRY set `"OOP_DAEMON_ENTRY=$rootText\apps\server\dist\bin.mjs`"",
-        "`"$rootText\node.exe`" `"$rootText\oop.mjs`" %*",
-        "set `"OOP_TS_ENTRY=$rootText\oop.mjs`"",
-        "set `"OOP_TS_NODE=$rootText\node.exe`"",
-        "set `"OOP_TS_NODE_ELECTRON=`"",
-        "if /i `"%OOP_TUI%`"==`"ts`" goto typescript",
-        "if not exist `"$rootText\oop-rs.exe`" goto typescript",
+        "set `"OOP_TERMINAL_INSTALL=1`"",
+        "set `"PATH=$rootText;%PATH%`"",
         "`"$rootText\oop-rs.exe`" %*",
         "exit /b %ERRORLEVEL%"
     )) {
         if (-not $launcher.Contains($expected)) { throw "The terminal command lacks: $expected" }
     }
+    foreach ($gone in @("OOP_TS_", "OOP_TUI", "oop.mjs", "typescript")) {
+        if ($launcher.Contains($gone)) { throw "The terminal command still mentions $gone." }
+    }
     if ($launcher.IndexOf("setlocal") -gt $launcher.IndexOf("set `"OOP_DAEMON_ENTRY=")) { throw "OOP_DAEMON_ENTRY is set outside setlocal." }
     if (@([IO.File]::ReadAllBytes($command) | Where-Object { $_ -gt 127 }).Count -ne 0) { throw "The terminal command holds a non-ASCII byte." }
-    Write-Host "PASS oop.cmd runs the bundled runtime with the bundled server as OOP_DAEMON_ENTRY, scoped to that process"
+    Write-Host "PASS oop.cmd runs the Rust client with the bundled server as OOP_DAEMON_ENTRY, scoped to that process"
 
     [IO.File]::WriteAllText((Join-Path $env:OOP_INSTALL_DIR "stale-from-old-version.txt"), "old")
     & $script

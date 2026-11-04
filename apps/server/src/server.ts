@@ -51,6 +51,7 @@ import * as ProjectSkillTrials from "./persistence/ProjectSkillTrials.ts";
 import { layer as ProjectMemorySendLedgerLayer } from "./persistence/ProjectMemorySendLedger.ts";
 import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads.ts";
+import * as ProjectMemoryAnalyser from "./memory/ProjectMemoryAnalyser.ts";
 import * as ProjectMemoryService from "./memory/ProjectMemoryService.ts";
 import * as SelectedChecks from "./selectedChecks/SelectedChecks.ts";
 import * as TaskResult from "./selectedChecks/TaskResult.ts";
@@ -63,6 +64,7 @@ import {
   projectSkillUsePolicyFrom,
 } from "./skills/ProjectSkillUsePolicy.ts";
 import * as ProjectMemorySendGate from "./memory/ProjectMemorySendGate.ts";
+import { PROJECT_MEMORY_SEND_DRIVER_KINDS } from "./memory/ProjectMemorySendProviders.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory.ts";
@@ -497,7 +499,7 @@ const ProjectFaviconResolverLayerLive = ProjectFaviconResolver.layer.pipe(
 // One boot-time send allowlist for this server composition. The Reference
 // default remains empty for layer graphs that do not opt in.
 const ProjectMemorySendPolicyLive = Layer.succeed(ProjectMemorySendGate.ProjectMemorySendPolicy, {
-  driverKinds: new Set([ProviderDriverKind.make("claudeAgent")]),
+  driverKinds: PROJECT_MEMORY_SEND_DRIVER_KINDS,
 });
 
 export const ServerEnvironmentLayerLive = ServerEnvironment.layer.pipe(
@@ -745,6 +747,8 @@ export const makeRoutesLayer = Layer.mergeAll(
   Layer.provide(PullRequestServiceLive),
   // The MCP crew tools and the crew RPC share one service, which owns the running tasks.
   Layer.provide(CrewService.layer),
+  // The work analyser reads the project memory repository directly for its cursor.
+  Layer.provide(ProjectMemoryAnalyser.layer.pipe(Layer.provide(ProjectMemories.layer))),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

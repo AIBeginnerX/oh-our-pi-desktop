@@ -22,7 +22,39 @@ const make = Effect.gen(function* () {
             verify: input.verify,
             doneWhen: input.doneWhen,
             isolation: input.isolation,
+            differentFrom: input.differentFrom,
+            todos: input.todos,
+            why: input.why,
           }),
+        ),
+      ),
+    crew_todo_check: (input) =>
+      scope.pipe(
+        Effect.flatMap((invocation) =>
+          crew.checkTodo({
+            threadId: invocation.threadId,
+            todoId: input.todoId,
+            status: input.status,
+            note: input.note,
+          }),
+        ),
+      ),
+    crew_add_todos: (input) =>
+      scope.pipe(
+        Effect.flatMap((invocation) =>
+          crew.addTodos({
+            threadId: invocation.threadId,
+            taskId: input.taskId,
+            todos: input.todos,
+          }),
+        ),
+      ),
+    crew_stop: (input) =>
+      scope.pipe(
+        Effect.flatMap((invocation) =>
+          input.taskId === undefined && input.all !== true
+            ? Effect.fail(new CrewService.CrewError({ reason: "Give a taskId, or all: true." }))
+            : crew.stop({ threadId: invocation.threadId, taskId: input.taskId, why: input.why }),
         ),
       ),
     crew_wait: (input) =>

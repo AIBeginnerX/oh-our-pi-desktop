@@ -1,9 +1,9 @@
 //! What the Workflow and Agents panels share: the glyph tables (with their ASCII twins), the
 //! panel's words in English and Korean, the tab bar, and the small layout helpers (clip, pad,
-//! pack, scroll window). Ports apps/oop-tui/src/app/workflowPanel.ts (`panelHead`, `windowOf`,
-//! `packFacts`, the word tables) and render/crewBoard.ts / render/spinner.ts (formatting).
+//! pack, scroll window). Ported from the former TypeScript terminal's workflow panel (`panelHead`, `windowOf`,
+//! `packFacts`, the word tables) and its crew board and spinner formatting.
 
-use crate::flow::{Cat, CrewPhase, CrewTask, Doing, Evidence, NodeState, Role, ToolCount};
+use crate::flow::{Cat, CrewPhase, CrewTask, Doing, Evidence, NodeState, Proof, Role, ToolCount};
 use crate::i18n::{Lang, lang};
 use crate::text::{char_width, sanitize, truncate, width, wrap};
 use crate::theme::{Symbols, Theme};
@@ -47,6 +47,11 @@ pub struct Glyphs {
     pub rail: [&'static str; 3],
     pub full: &'static str,
     pub rule: &'static str,
+    /// The filled and the empty cell of a status bar, and its two ends.
+    pub block: [&'static str; 2],
+    /// The cell of a bar for an item that is claimed but not yet verified.
+    pub claimed: &'static str,
+    pub ends: [&'static str; 2],
     pub check: &'static str,
     pub brand: &'static str,
     pub separator: &'static str,
@@ -63,6 +68,9 @@ const UNICODE: Glyphs = Glyphs {
     rail: ["┌", "│", "└"],
     full: "━",
     rule: "─",
+    block: ["█", "░"],
+    claimed: "▒",
+    ends: ["▕", "▏"],
     check: "✓",
     brand: "◆",
     separator: "│",
@@ -79,6 +87,9 @@ const ASCII: Glyphs = Glyphs {
     rail: ["+", "|", "+"],
     full: "=",
     rule: "-",
+    block: ["#", "-"],
+    claimed: "=",
+    ends: ["[", "]"],
     check: "+",
     brand: "*",
     separator: "|",
@@ -372,38 +383,69 @@ pub fn finish(ctx: &Ctx, rows: Vec<Row>, max_width: usize, height: usize) -> Vec
 
 // ---- the tab bar and the notes ------------------------------------------------------------------
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum View {
     Workflow,
     Agents,
+    Savvy,
+    Files,
+}
+
+impl View {
+    /// The tabs in the order the bar shows them.
+    pub const ALL: [View; 4] = [View::Workflow, View::Agents, View::Savvy, View::Files];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            View::Workflow => "Workflow",
+            View::Agents => "Agents",
+            View::Savvy => "Savvy",
+            View::Files => "Files",
+        }
+    }
+}
+
+const TAB_GAP: usize = 3;
+
+/// Which tab a click `offset` cells into the tab bar (after the margin) lands on; the gaps between
+/// the titles are no tab.
+pub fn tab_at(offset: usize) -> Option<View> {
+    let mut start = 0;
+    for view in View::ALL {
+        let end = start + width(view.title());
+        if offset >= start && offset < end {
+            return Some(view);
+        }
+        start = end + TAB_GAP;
+    }
+    None
 }
 
 /// What every view of the panel starts with: the tab bar (the view shown lit and underlined) and
 /// a rule under it, inside a one-cell margin. `room` is the width left for text.
 pub fn head(ctx: &Ctx, view: View, room: usize) -> Vec<Row> {
-    let titles = ["Workflow", "Agents"];
     let gap = format!(" {} ", ctx.g.separator);
-    let shown = usize::from(view == View::Agents);
     let mut bar: Row = Vec::new();
-    for (i, title) in titles.iter().enumerate() {
+    let (mut before, mut lit) = (0, 0);
+    for (i, tab) in View::ALL.iter().enumerate() {
+        let title = tab.title();
         if i > 0 {
             bar.push(sp(gap.clone(), ctx.dim()));
         }
+        if *tab == view {
+            lit = width(title);
+        } else if lit == 0 {
+            before += width(title) + width(&gap);
+        }
         bar.push(sp(
-            *title,
-            if i == shown {
+            title,
+            if *tab == view {
                 ctx.accent().add_modifier(Modifier::BOLD)
             } else {
                 ctx.dim()
             },
         ));
     }
-    let before = if shown == 0 {
-        0
-    } else {
-        width(titles[0]) + width(&gap)
-    };
-    let lit = width(titles[shown]);
     let rule = vec![
         sp(ctx.g.rule.repeat(before), ctx.dim()),
         sp(ctx.g.full.repeat(lit), ctx.accent()),
@@ -506,6 +548,15 @@ pub fn evidence_word(evidence: Evidence) -> &'static str {
         Evidence::Reported => s("Reported only", "보고만 있음"),
         Evidence::Tested => s("Tests passed", "테스트 통과"),
         Evidence::Audited => s("Audit approved", "감사 승인"),
+    }
+}
+
+/// Whether the server could verify a finished task, in one word.
+pub fn proof_word(proof: Proof) -> &'static str {
+    match proof {
+        Proof::Verified => s("verified", "검증됨"),
+        Proof::NotVerified => s("not verified", "미검증"),
+        Proof::Inconclusive => s("unproven", "미증명"),
     }
 }
 
@@ -701,7 +752,9 @@ pub mod scenes {
             lead_model: Some("claude-opus-5".to_string()),
             crew: None,
             lead_waiting: None::<Waiting>,
+            lead_cost: crate::savvy_panel::lead_cost(thread),
             loading: false,
+            pending: false,
             now_ms: ms(now_sec),
             tick: 0,
             animations: false,
@@ -815,6 +868,12 @@ pub mod scenes {
     /// A workflow of two phases and four agents; `done` has them all ended, otherwise the second
     /// phase is still running.
     pub fn workflow(done: bool) -> Thread {
+        workflow_in(done, !done)
+    }
+
+    /// The workflow of `workflow`, whose agents are all in when `done`, while the lead's turn is
+    /// `running` or over (the lead still writes its answer after the last agent reports).
+    pub fn workflow_in(done: bool, running: bool) -> Thread {
         let wf = |kind: &str, sec: i64, id: &str, extra: Value| {
             let mut payload = json!({"taskId": id, "agentKind": "agent", "title": id});
             for (key, value) in extra.as_object().into_iter().flatten() {
@@ -856,6 +915,52 @@ pub mod scenes {
                 json!({"status": "completed"}),
             ));
         }
-        thread(all, !done)
+        thread(all, running)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::{LAVENDER, UNICODE};
+
+    #[test]
+    fn every_tab_lights_its_own_title_and_the_bar_fits_the_narrowest_panel() {
+        let ctx = Ctx::new(&LAVENDER, &UNICODE, 0, false);
+        for view in View::ALL {
+            let rows = head(&ctx, view, 33);
+            let bar: String = rows[0].iter().map(|s| s.content.as_ref()).collect();
+            let rule: String = rows[1].iter().map(|s| s.content.as_ref()).collect();
+            assert_eq!(bar, " Workflow │ Agents │ Savvy │ Files");
+            assert_eq!(
+                width(&rule),
+                34,
+                "the rule is as wide as the room and its margin"
+            );
+            let lit: Vec<_> = rows[1].iter().filter(|s| s.style == ctx.accent()).collect();
+            assert_eq!(lit.len(), 1);
+            assert_eq!(width(&lit[0].content), width(view.title()), "{view:?}");
+        }
+    }
+
+    #[test]
+    fn a_click_lands_on_the_title_under_it_and_the_gaps_are_no_tab() {
+        let title_starts = [
+            (0, View::Workflow),
+            (11, View::Agents),
+            (20, View::Savvy),
+            (28, View::Files),
+        ];
+        for (start, view) in title_starts {
+            assert_eq!(tab_at(start), Some(view));
+            assert_eq!(tab_at(start + width(view.title()) - 1), Some(view));
+            assert_eq!(
+                tab_at(start + width(view.title())),
+                None,
+                "the gap after {view:?}"
+            );
+        }
+        assert_eq!(tab_at(33), None);
+        assert_eq!(tab_at(500), None);
     }
 }

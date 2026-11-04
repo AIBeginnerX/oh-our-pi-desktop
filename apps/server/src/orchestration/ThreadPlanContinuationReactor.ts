@@ -255,12 +255,11 @@ const make = Effect.gen(function* () {
     // Off by default: nothing below this line runs for anyone who has not switched it on.
     if (!settings.continueUnfinishedPlans) return;
     if (settings.threadGoals[threadId]?.active) return;
-    // Crew audits and follow-ups continue a lead thread themselves, so Crew threads are left alone.
-    const crewOverride = Object.entries(settings.crew.threads).find(([id]) => id === threadId)?.[1];
-    if (crewOverride?.enabled ?? settings.crew.enabled) return;
 
     const now = DateTime.toEpochMillis(yield* DateTime.now);
     const shell = yield* snapshots.getThreadShellById(threadId);
+    // Crew audits and follow-ups continue a lead thread themselves, so Crew threads are left alone.
+    if (Option.isSome(shell) && (shell.value.crew?.enabled ?? settings.crew.enabled)) return;
     if (Option.isNone(shell) || !shellAllowsPlanContinuation(shell.value, now, serverStartedAt)) {
       return;
     }

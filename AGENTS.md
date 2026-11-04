@@ -28,7 +28,7 @@ OOP has 3 key app surfaces: **web**, **desktop**, and **mobile**.
 
 **Desktop** is the main surface most users install first. It's a full Electron app that bundles the server runner as well. The desktop app can also be used as the host server, allowing remote connections from app.t3.codes or the mobile app.
 
-**Mobile** is a React Native app for both iOS and Android, available on the App Store and Google Play. The mobile app allows for connecting to any OOP server to control work remotely.
+**Mobile** here means the mobile web served through the relay: a phone scans the QR code, reaches the relay, and opens the full web app. That is the official phone surface, so a phone gets every web feature. The React Native app (`apps/mobile`) is not maintained for new features, so "hit every surface" means web (including narrow mobile widths), desktop, and the Rust terminal.
 
 ## A note from Theo
 

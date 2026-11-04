@@ -327,6 +327,7 @@ export const makeOrchestrationIntegrationHarness = (
         stopAll: () =>
           adapter.stopAll().pipe(Effect.tap(() => Effect.sync(() => identities.clear()))),
         memoryAdmission: {
+          skillTrials: true,
           sessionGeneration: (threadId) => identities.get(threadId)?.sessionGeneration,
           nativeSessionId: nativeSessionIdOf,
         },

@@ -195,6 +195,38 @@ describe("startRemoteRelayTunnel", () => {
     expect(headers.origin).toBe("https://oop-relay.example.workers.dev");
   });
 
+  it("tells the backend which host the relay serves, ignoring forwarding headers from the phone", async () => {
+    const backend = NodeHttp.createServer();
+    const upgrade = new Promise<Record<string, string | string[] | undefined>>((resolve) => {
+      backend.on("upgrade", (request, socket) => {
+        resolve(request.headers);
+        socket.destroy();
+      });
+    });
+    await new Promise<void>((resolve) => backend.listen(0, "127.0.0.1", resolve));
+    cleanups.push(() => backend.close());
+    const address = backend.address();
+    if (address === null || typeof address === "string") throw new Error("backend not listening");
+
+    const { relay } = startTunnel(address.port);
+    relay.deliver(
+      encodeOopRelayJsonFrame(OopRelayFrameKind.socketOpen, 10, {
+        path: "/ws",
+        protocols: [],
+        headers: [
+          ["Cookie", "t3_session=abc"],
+          ["Origin", "https://evil.example"],
+          ["X-Forwarded-Host", "evil.example"],
+          ["Forwarded", "host=evil.example"],
+        ],
+      }),
+    );
+
+    const headers = await upgrade;
+    expect(headers["x-forwarded-host"]).toBe("oop-relay.example.workers.dev");
+    expect(headers.forwarded).toBeUndefined();
+  });
+
   it("reports a backend that cannot be reached instead of leaving the phone waiting", async () => {
     const { relay } = startTunnel(1);
     const error = relay.nextFrame(OopRelayFrameKind.responseError, 7);

@@ -110,9 +110,16 @@ a plan or todo list is left alone.
 
 ## Project memories
 
+Project memories are sent to Claude and Codex chats. Other providers do not receive them yet, and
+the memory button says so.
+
 When the selected provider can receive project memories, the memory button next to **Attach
 files** lists the project's saved memories. As you type, OOP suggests the memory whose title best
 matches your message next to the button; select it to add it to the message.
+
+To see which memories this chat has already sent to the provider, open the memory button and select
+**Sent to this thread**. It also lists memories the agent recalled, and marks any you edited or
+deleted since. Content a provider already received cannot be taken back.
 
 In those chats the agent can also search the project's memories and propose new ones while it
 works. A proposal is not saved: it appears under **Proposed by agents** in the project's memory settings

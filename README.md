@@ -45,7 +45,7 @@ Coding agents are good, but each one lives in its own terminal or app, with its 
 - **Let several models share a task.** OOP Crew lets one "brain" model hand routine work to cheaper workers, hard work to an expert, and have an auditor review the result.
 - **Stay in control.** Four permission modes, a diff panel with checkpoints you can restore, and a usage page so costs do not surprise you.
 - **Work away from the keyboard.** Pair your phone to the computer that runs the agents and keep an eye on (or steer) long tasks.
-- **Use it from a terminal too.** `oop` opens the same threads in a full-screen terminal app. It works with the desktop app closed and shares one data folder with it. On macOS it runs a native Rust client, falls back to the TypeScript terminal, and the desktop app also installs **OOP Terminal**, a window with split panes for `oop` and shells.
+- **Use it from a terminal too.** `oop` opens the same threads in a full-screen terminal app. It works with the desktop app closed and shares one data folder with it. It is a native Rust client, and on macOS the desktop app also installs **OOP Terminal**, a window with split panes for `oop` and shells.
 - **Keep it local.** Projects, provider logins and agent work stay on your machine. There is no OOP account and no OOP server.
 
 Who it is for: developers who already pay for one or more coding-agent subscriptions or API plans,
@@ -354,7 +354,7 @@ curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/
 irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex
 ```
 
-- The archive carries the native `oop-rs` client (macOS and Linux) and the TypeScript terminal as fallback; `OOP_TUI=ts oop` forces the latter. Windows is TypeScript only for now.
+- The archive carries the native `oop-rs` client (macOS, Linux and Windows), the only terminal app.
 - The installer checks the download's SHA-256 before it installs anything. It installs into your user folder (`~/.local/share/oop-terminal` and `~/.local/bin/oop`, or `%LOCALAPPDATA%\oop-terminal` on Windows), never overwrites an `oop` that OOP did not create, and never edits your `PATH`: if `oop` is not found it prints the exact line to add.
 - Next: sign in to a provider CLI (for example Claude Code or Codex), then run `oop` in a project folder. `oop provider` shows which providers are ready.
 - Update: run the same command again, then `oop stop` so the new background server starts. `oop update` only checks for a new release and installs nothing. Uninstall: `oop stop`, then delete the two locations above; your data in `~/.oop-desktop` stays. See [INSTALL.md](INSTALL.md).

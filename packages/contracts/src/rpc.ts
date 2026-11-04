@@ -224,6 +224,8 @@ import {
   ProjectMemoryListInput,
   ProjectMemoryListResult,
   ProjectMemoryNotFoundError,
+  ProjectMemoryAnalyseInput,
+  ProjectMemoryAnalyseResult,
   ProjectMemoryProposalDecisionInput,
   ProjectMemoryProposalListInput,
   ProjectMemoryProposalListResult,
@@ -231,6 +233,8 @@ import {
   ProjectMemorySearchInput,
   ProjectMemorySearchResult,
   ProjectMemoryStoreError,
+  ProjectMemorySentToThread,
+  ProjectMemorySentToThreadInput,
   ProjectMemoryThreadState,
   ProjectMemoryThreadStateInput,
   ProjectMemoryUpdateInput,
@@ -351,7 +355,14 @@ import {
   OwnedResultUsageOutcome,
   OwnedResultUsageReadError,
 } from "./ownedUsage.ts";
-import { CrewRetryTaskError, CrewRetryTaskInput, CrewRetryTaskResult } from "./crew.ts";
+import {
+  CrewRetryTaskError,
+  CrewRetryTaskInput,
+  CrewRetryTaskResult,
+  CrewStopTasksError,
+  CrewStopTasksInput,
+  CrewStopTasksResult,
+} from "./crew.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
@@ -495,6 +506,7 @@ export const WS_METHODS = {
 
   // Crew methods
   crewRetryTask: "crew.retryTask",
+  crewStopTasks: "crew.stopTasks",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -547,10 +559,12 @@ export const WS_METHODS = {
   projectMemoryUpdate: "projectMemory.update",
   projectMemoryDelete: "projectMemory.delete",
   projectMemoryThreadState: "projectMemory.threadState",
+  projectMemorySentToThread: "projectMemory.sentToThread",
   projectMemoryAcknowledgeThread: "projectMemory.acknowledgeThread",
   projectMemoryListProposals: "projectMemory.listProposals",
   projectMemoryApproveProposal: "projectMemory.approveProposal",
   projectMemoryRejectProposal: "projectMemory.rejectProposal",
+  projectMemoryAnalyse: "projectMemory.analyse",
 
   // Project skill methods
   projectSkillList: "projectSkill.list",
@@ -836,6 +850,12 @@ const WsCrewRetryTaskRpc = Rpc.make(WS_METHODS.crewRetryTask, {
   payload: CrewRetryTaskInput,
   success: CrewRetryTaskResult,
   error: Schema.Union([CrewRetryTaskError, EnvironmentAuthorizationError]),
+});
+
+const WsCrewStopTasksRpc = Rpc.make(WS_METHODS.crewStopTasks, {
+  payload: CrewStopTasksInput,
+  success: CrewStopTasksResult,
+  error: Schema.Union([CrewStopTasksError, EnvironmentAuthorizationError]),
 });
 
 /**
@@ -1229,9 +1249,29 @@ const WsProjectMemoryRejectProposalRpc = Rpc.make(WS_METHODS.projectMemoryReject
   ]),
 });
 
+const WsProjectMemoryAnalyseRpc = Rpc.make(WS_METHODS.projectMemoryAnalyse, {
+  payload: ProjectMemoryAnalyseInput,
+  success: ProjectMemoryAnalyseResult,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
 const WsProjectMemoryThreadStateRpc = Rpc.make(WS_METHODS.projectMemoryThreadState, {
   payload: ProjectMemoryThreadStateInput,
   success: ProjectMemoryThreadState,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsProjectMemorySentToThreadRpc = Rpc.make(WS_METHODS.projectMemorySentToThread, {
+  payload: ProjectMemorySentToThreadInput,
+  success: ProjectMemorySentToThread,
   error: Schema.Union([
     ProjectMemoryRejectedError,
     ProjectMemoryStoreError,
@@ -1907,6 +1947,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsUsageGetThreadResultsRpc,
   WsCrewRetryTaskRpc,
+  WsCrewStopTasksRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
@@ -1961,10 +2002,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectMemoryUpdateRpc,
   WsProjectMemoryDeleteRpc,
   WsProjectMemoryThreadStateRpc,
+  WsProjectMemorySentToThreadRpc,
   WsProjectMemoryAcknowledgeThreadRpc,
   WsProjectMemoryListProposalsRpc,
   WsProjectMemoryApproveProposalRpc,
   WsProjectMemoryRejectProposalRpc,
+  WsProjectMemoryAnalyseRpc,
   WsProjectSkillListRpc,
   WsProjectSkillGetRpc,
   WsProjectSkillCreateCandidateRpc,

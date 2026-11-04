@@ -16,6 +16,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkLessonsPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -54,7 +55,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generateWorkLessons";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -261,10 +263,23 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
+    Effect.fn("CursorTextGeneration.generateWorkLessons")(function* (input) {
+      const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
+      return yield* runCursorJson({
+        operation: "generateWorkLessons",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateWorkLessons,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

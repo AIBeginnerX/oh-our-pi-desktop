@@ -26,7 +26,17 @@ implement a general-purpose OAuth authorization server.
 
 Bearer and DPoP clients obtain short-lived WebSocket tickets through authenticated
 HTTP so long-lived tokens stay out of socket URLs. Browser sessions can
-authenticate the upgrade with their cookie. A successful handshake grants no
+authenticate the upgrade with their cookie. Cookies are not port-scoped, so a
+cookie-authenticated upgrade that carries an `Origin` header must come from a
+host the server is reached at: the request's `Host`, the host a reverse proxy
+reports in `X-Forwarded-Host` (first entry) or `Forwarded: host=`, the dev URL,
+a configured dev origin, or the desktop renderer. A browser cannot set the
+forwarding headers on a WebSocket handshake, so a foreign page still fails.
+The desktop relay tunnel re-opens the phone's socket on loopback, so it
+replaces any forwarding headers from the phone with `X-Forwarded-Host` set to
+the relay's own host; the Vite dev proxy keeps the browser's `Host` on `/ws`
+for the same reason. Requests without `Origin` are not browsers and are
+unaffected, as are ticket, bearer, and DPoP upgrades. A successful handshake grants no
 extra authority: [every RPC declares a required
 scope](../../apps/server/src/auth/RpcAuthorization.ts).
 

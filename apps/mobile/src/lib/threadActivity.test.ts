@@ -2896,6 +2896,51 @@ describe("buildThreadFeed", () => {
     expect(rows.some((entry) => entry.type === "work-toggle" && entry.shimmer)).toBe(shimmer);
   });
 
+  it("folds a crew task's checklist progress row into the task's one row", () => {
+    const turnId = TurnId.make("turn-crew");
+    const crew = {
+      taskId: "crew-task-1",
+      title: "Port the module",
+      agentKind: "agent",
+      crewRole: "worker",
+    };
+    const thread = makeThread({
+      id: ThreadId.make("thread-crew"),
+      projectId: ProjectId.make("project-1"),
+      title: "Crew",
+      activities: [
+        makeActivity({
+          id: EventId.make("crew-started"),
+          kind: "task.started",
+          summary: "Worker started: Port the module",
+          createdAt: "2026-04-01T00:00:01.000Z",
+          turnId,
+          payload: { ...crew, status: "running" },
+        }),
+        makeActivity({
+          id: EventId.make("task-progress:crew:crew-task-1"),
+          kind: "task.progress",
+          summary: "Worker checklist 1 of 3 verified: Port the module",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          turnId,
+          payload: { ...crew, status: "running", todoTotal: 3, todoVerified: 1 },
+        }),
+        makeActivity({
+          id: EventId.make("crew-completed"),
+          kind: "task.completed",
+          summary: "Worker finished: Port the module",
+          createdAt: "2026-04-01T00:00:03.000Z",
+          turnId,
+          payload: { ...crew, status: "completed", todoTotal: 3, todoVerified: 3 },
+        }),
+      ],
+    });
+    const rows = buildThreadFeed(thread).flatMap((entry) =>
+      entry.type === "activity-group" ? entry.activities : [],
+    );
+    expect(rows).toHaveLength(1);
+  });
+
   it("does not revive cached in-progress tools after work stops", () => {
     const turnId = TurnId.make("turn-stale-tool");
     const feed: ThreadFeedEntry[] = [

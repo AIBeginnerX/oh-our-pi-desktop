@@ -39,6 +39,12 @@ export interface VcsDeleteCheckpointRefsInput {
   readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
 }
 
+export interface VcsDeleteCheckpointRefsUnderPrefixInput {
+  readonly cwd: string;
+  /** Ref namespace without a trailing slash; only refs strictly below it are deleted. */
+  readonly prefix: string;
+}
+
 /**
  * One observation of a workspace's Git tree, taken without touching the
  * user's index or refs. `complete` carries the written tree plus the resolved
@@ -68,6 +74,9 @@ export interface VcsCheckpointOps {
   readonly diffCheckpoints: (input: VcsDiffCheckpointsInput) => Effect.Effect<string, VcsError>;
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,
+  ) => Effect.Effect<void, VcsError>;
+  readonly deleteCheckpointRefsUnderPrefix: (
+    input: VcsDeleteCheckpointRefsUnderPrefixInput,
   ) => Effect.Effect<void, VcsError>;
   /**
    * Writes the current worktree tree through a private index and reports its

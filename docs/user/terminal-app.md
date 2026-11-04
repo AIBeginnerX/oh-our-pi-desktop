@@ -6,8 +6,8 @@ and settings are the same ones the desktop app shows.
 
 ## Get started
 
-On macOS and Windows the OOP installer adds the `oop` command along with the app. Open a new
-terminal window and run:
+On macOS the app adds the `oop` command the first time it runs, and the one-line install adds it
+too; on Windows the OOP installer adds it along with the app. Open a new terminal window and run:
 
 ```sh
 oop
@@ -17,21 +17,21 @@ If the shell says `command not found`, the folder holding `oop` is not on your `
 `~/.local/bin` on macOS or `%LOCALAPPDATA%\oop-terminal` on Windows. The installer does not edit
 `PATH`, and it leaves alone an `oop` it did not create.
 
-On macOS, `oop` runs the faster native client when it is installed and the TypeScript terminal
-otherwise. Both read the same threads and settings. To use the TypeScript terminal for one run,
-start it as `OOP_TUI=ts oop`.
-
 `oop --help` lists everything. The ones you will use most:
 
-| Task                                    | Command                   |
-| --------------------------------------- | ------------------------- |
-| Resume the latest thread of this folder | `oop --continue`          |
-| Start a thread with a first message     | `oop "fix the login bug"` |
-| Manage providers                        | `oop provider`            |
-| Connect to OOP on another computer      | `oop pair <link>`         |
-| Check your setup                        | `oop doctor`              |
-| See what is new in the latest release   | `oop update`              |
-| Stop the server the terminal started    | `oop stop`                |
+| Task                                    | Command                      |
+| --------------------------------------- | ---------------------------- |
+| Resume the latest thread of this folder | `oop --continue`             |
+| Start a thread with a first message     | `oop "fix the login bug"`    |
+| Manage providers                        | `oop provider`               |
+| Connect to OOP on another computer      | `oop pair <link>`            |
+| Check your setup                        | `oop doctor`                 |
+| See what is new in the latest release   | `oop update`                 |
+| Stop the server the terminal started    | `oop stop`                   |
+| Change a setting, such as the language  | `oop config set language ko` |
+
+If you used an earlier terminal app, nothing changes for you: the commands, `settings.json`,
+saved logins and threads are the same, and `OOP_TUI=ts` is no longer read.
 
 ## OOP Terminal and splits
 

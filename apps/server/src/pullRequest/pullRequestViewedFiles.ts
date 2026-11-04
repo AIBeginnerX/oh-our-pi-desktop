@@ -17,7 +17,7 @@ import {
 
 import type * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import type { ProviderFileRevisions, PullRequestProviderError } from "./PullRequestProvider.ts";
-import type { PullRequestError, SupportedProject } from "./PullRequestService.ts";
+import type { PullRequestError, SupportedProject } from "./pullRequestServiceSupport.ts";
 
 /**
  * How long the head's version of a file is believed, and how long a held answer stands while the

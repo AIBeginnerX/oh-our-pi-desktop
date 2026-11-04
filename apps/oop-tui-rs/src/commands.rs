@@ -32,6 +32,8 @@ pub fn project_create(ctx: &Ctx, project_id: &str, title: &str, workspace_root: 
 /// Where a first message creates its thread.
 pub struct Bootstrap<'a> {
     pub project_id: &'a str,
+    /// The crew picked before the first message; `None` leaves the thread on the default crew.
+    pub crew: Option<&'a Value>,
 }
 
 pub struct Turn<'a> {
@@ -64,13 +66,16 @@ pub fn turn_start(ctx: &Ctx, turn: &Turn) -> Value {
     }
     command["runtimeMode"] = json!(turn.runtime_mode);
     command["interactionMode"] = json!(turn.interaction_mode);
-    if let Some(Bootstrap { project_id }) = &turn.bootstrap {
+    if let Some(Bootstrap { project_id, crew }) = &turn.bootstrap {
         command["bootstrap"] = json!({"createThread": {
             "projectId": project_id, "title": title_seed(turn.text),
             "modelSelection": turn.model, "runtimeMode": turn.runtime_mode,
             "interactionMode": turn.interaction_mode, "branch": null, "worktreePath": null,
             "createdAt": ctx.created_at,
         }});
+        if let Some(crew) = crew {
+            command["bootstrap"]["createThread"]["crew"] = (*crew).clone();
+        }
     }
     command["createdAt"] = json!(ctx.created_at);
     command
@@ -123,6 +128,14 @@ pub fn runtime_mode_set(ctx: &Ctx, thread_id: &str, runtime_mode: &str) -> Value
     json!({
         "type": "thread.runtime-mode.set", "commandId": ctx.command_id, "threadId": thread_id,
         "runtimeMode": runtime_mode, "createdAt": ctx.created_at,
+    })
+}
+
+/// Gives a thread that exists its own crew, or (`None`) takes it back to the default crew.
+pub fn crew_set(ctx: &Ctx, thread_id: &str, crew: Option<&Value>) -> Value {
+    json!({
+        "type": "thread.crew.set", "commandId": ctx.command_id, "threadId": thread_id,
+        "crew": crew, "createdAt": ctx.created_at,
     })
 }
 
@@ -226,6 +239,7 @@ mod tests {
                     interaction_mode: str_of(&a["interactionMode"]),
                     bootstrap: new_thread.then_some(Bootstrap {
                         project_id: "project-1",
+                        crew: None,
                     }),
                 },
             );
@@ -264,6 +278,45 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn a_crew_goes_with_the_thread_creation_and_a_crew_set_names_the_thread() {
+        let crew = json!({"enabled": true, "pinned": {}});
+        let start = |crew: Option<&Value>| {
+            turn_start(
+                &ctx(),
+                &Turn {
+                    thread_id: THREAD,
+                    message_id: "msg-1",
+                    text: "hi",
+                    model: None,
+                    runtime_mode: "full-access",
+                    interaction_mode: "default",
+                    bootstrap: Some(Bootstrap {
+                        project_id: "project-1",
+                        crew,
+                    }),
+                },
+            )
+        };
+        assert_eq!(
+            start(Some(&crew))["bootstrap"]["createThread"]["crew"],
+            crew
+        );
+        assert!(
+            start(None)["bootstrap"]["createThread"]
+                .get("crew")
+                .is_none(),
+            "a thread without a crew of its own is created without one"
+        );
+        let set = crew_set(&ctx(), THREAD, Some(&crew));
+        assert_eq!(set["type"], "thread.crew.set");
+        assert_eq!(
+            (set["threadId"].as_str(), &set["crew"]),
+            (Some(THREAD), &crew)
+        );
+        assert!(crew_set(&ctx(), THREAD, None)["crew"].is_null());
     }
 
     #[test]

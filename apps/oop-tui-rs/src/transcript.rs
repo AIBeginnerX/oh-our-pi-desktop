@@ -1,5 +1,5 @@
 //! The conversation as lines: messages, finished tool calls, notices and plans in the order they
-//! happened. A port of the shape of apps/oop-tui/src/state/transcript.ts, as a pure function of the
+//! happened. A port of the shape of the former TypeScript terminal's transcript, as a pure function of the
 //! thread, so a cache keyed on the thread's revision and the width is enough to keep scrolling cheap.
 //! Not here: the spinner and the live error line (they change with the clock, not the thread) and
 //! the approval and question panels (they wait for the user; `ui.rs` draws them).
@@ -137,24 +137,31 @@ fn message_lines(
         (lines, meta)
     };
     match m.role {
-        Role::User => user_lines(&m.text, w, th, sym),
+        // A long message (a big paste) shows its first line and a count; the text is whole.
+        Role::User => user_lines(
+            crate::paste::fold(&m.text).as_deref().unwrap_or(&m.text),
+            w,
+            th,
+            sym,
+        ),
         Role::Assistant => {
             if m.text.trim().is_empty() {
                 return (Vec::new(), Vec::new());
             }
-            let lines = markdown::render(&m.text, w.saturating_sub(2), th, sym)
-                .into_iter()
-                .enumerate()
-                .map(|(i, mut line)| {
-                    let lead = if i == 0 {
-                        Span::styled(format!("{} ", sym.bullet), Style::new().fg(th.brand))
-                    } else {
-                        Span::raw("  ")
-                    };
-                    line.spans.insert(0, lead);
-                    line
-                })
-                .collect();
+            let lines =
+                markdown::render_streaming(&m.text, w.saturating_sub(2), th, sym, m.streaming)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, mut line)| {
+                        let lead = if i == 0 {
+                            Span::styled(format!("{} ", sym.bullet), Style::new().fg(th.brand))
+                        } else {
+                            Span::raw("  ")
+                        };
+                        line.spans.insert(0, lead);
+                        line
+                    })
+                    .collect();
             plain(lines, 2)
         }
         Role::Reasoning => plain(
@@ -185,7 +192,7 @@ const MIN_INNER: usize = 8;
 /// The user's own message: a block against the right edge of the `w`-column conversation, in the
 /// theme's `user_fg` inside a rounded box, so it is told apart from the agent's text on the left. The
 /// box is as wide as its longest row plus a border and a space on each side, and never wider than
-/// four fifths of the room (width rules of apps/oop-tui/src/render/userBubble.ts), so a long message
+/// four fifths of the room (the former TypeScript terminal's width rules), so a long message
 /// wraps inside it. Every width is a display width: a Korean syllable takes two cells and every row
 /// ends in the same column. Where the terminal can fill behind text the box also carries the
 /// `user_bg` tint; with no colour at all the box itself is what sets the message apart. Only the text
@@ -674,5 +681,44 @@ mod tests {
             let cells: usize = line.spans.iter().map(|s| width(&s.content)).sum();
             assert!(cells <= 20, "{line:?}");
         }
+    }
+
+    #[test]
+    fn a_chart_in_a_reply_keeps_its_height_rows_and_placeholder_while_streaming() {
+        let chart = "```chart\n{\"type\":\"bar\",\"labels\":[\"a\",\"b\"],\"series\":[{\"name\":\"x\",\"data\":[3,5]}]}\n```";
+        let reply = |text: &str, streaming: bool| {
+            thread(
+                json!([{"id": "a", "role": "assistant", "text": text, "streaming": streaming, "createdAt": "2026-01-01T00:00:00.000Z"}]),
+                json!([]),
+            )
+        };
+        let done = reply(&format!("look\n{chart}\nok"), false);
+        let first = build(&done, 70, &LAVENDER, &UNICODE);
+        assert_eq!(first.meta.len(), first.lines.len());
+        // Every later frame of the reveal (and the settled one) has the same number of rows.
+        for _ in 0..3 {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            let again = build(&done, 70, &LAVENDER, &UNICODE);
+            assert_eq!(again.lines.len(), first.lines.len());
+            assert_eq!(again.meta.len(), again.lines.len());
+        }
+        let rows = plain(&first.lines).join("\n");
+        assert!(rows.contains("look") && rows.contains("ok") && !rows.contains("\"type\""));
+        // A narrower terminal re-renders at its own width.
+        let narrow = build(&done, 40, &LAVENDER, &UNICODE);
+        assert!(
+            narrow
+                .lines
+                .iter()
+                .all(|l| crate::text::width(&plain(std::slice::from_ref(l))[0]) <= 40)
+        );
+        // Still streaming with the fence open: one placeholder row, not a half-drawn chart.
+        let open = reply("look\n```chart\n{\"type\":\"ba", true);
+        let rows = plain(&build(&open, 70, &LAVENDER, &UNICODE).lines);
+        assert_eq!(
+            rows.iter().filter(|r| r.contains("chart")).count(),
+            1,
+            "{rows:?}"
+        );
     }
 }

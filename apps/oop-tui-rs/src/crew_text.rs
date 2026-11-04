@@ -1,5 +1,6 @@
-//! Generated from apps/oop-tui/src/i18n/{session,providers,render}.ts by tools/gen_text.py: the
-//! words of /goal and /crew, English and Korean, as the TypeScript terminal says them.
+//! The words of /goal and /crew, English and Korean. Originally generated from the removed
+//! TypeScript terminal's tables; the generator is gone, so this file is now the source and is
+//! edited directly.
 
 use crate::panels_common::{fill, s};
 
@@ -108,6 +109,11 @@ pub fn text(key: &str) -> &'static str {
             "Apply these settings to new threads too",
             "지금 설정을 새 스레드에도",
         ),
+        "providers.crewScreen.resetToDefault" => s("Use the default crew", "기본 Crew 사용"),
+        "providers.crewScreen.resetToDefaultNote" => s(
+            "Drop this thread's own crew",
+            "이 스레드 전용 Crew를 지웁니다",
+        ),
         "providers.crewScreen.noMatch" => s(
             "No matching model. Press Esc to clear the search.",
             "일치하는 모델이 없습니다. Esc로 검색어를 지우세요.",
@@ -135,8 +141,11 @@ pub fn text(key: &str) -> &'static str {
         }
         "providers.crewScreen.roleModel" => s("{role} model", "{role} 모델"),
         "providers.crewScreen.roleTask" => s("{role} task", "{role} 작업"),
-        "providers.crewScreen.scopeDefault" => s("new chat defaults", "새 채팅 기본값"),
-        "providers.crewScreen.scopeThread" => s("this thread", "이 스레드"),
+        "providers.crewScreen.scopeDefault" => s(
+            "this thread only (still on the default crew)",
+            "이 스레드에만 (아직 기본 Crew)",
+        ),
+        "providers.crewScreen.scopeThread" => s("this thread (own crew)", "이 스레드 (전용 Crew)"),
         "providers.crewScreen.search" => s("Search:", "검색:"),
         "providers.crewScreen.stop" => s("Stop", "중단"),
         "providers.crewScreen.stopNote" => {
@@ -171,6 +180,7 @@ pub fn text(key: &str) -> &'static str {
         "render.crew.field.elapsed" => s("Elapsed", "경과"),
         "render.crew.field.evidence" => s("Evidence", "근거"),
         "render.crew.field.model" => s("Model", "모델"),
+        "render.crew.field.proof" => s("Proof", "증명"),
         "render.crew.field.role" => s("Role", "역할"),
         "render.crew.field.status" => s("Status", "상태"),
         "render.crew.field.summary" => s("Summary", "요약"),
@@ -219,12 +229,17 @@ pub fn text(key: &str) -> &'static str {
         ),
         "session.c.crewDefault" => s("Crew defaults", "Crew 기본값"),
         "session.c.crewDefaultAlready" => s(
-            "Settings for a conversation that has not started are already the new-chat defaults.",
-            "아직 시작하지 않은 대화의 설정은 이미 새 채팅 기본값입니다.",
+            "This thread already runs the default crew.",
+            "이 스레드는 이미 기본 Crew를 씁니다.",
         ),
         "session.c.crewDefaultNote" => s(
             "This thread's settings are also used for new chats",
             "이 스레드의 설정을 새 채팅에도 씁니다",
+        ),
+        "session.c.crewReset" => s("Crew", "Crew"),
+        "session.c.crewResetNote" => s(
+            "This thread uses the default crew",
+            "이 스레드는 기본 Crew를 씁니다",
         ),
         "session.c.crewModelUsage" => s(
             "Usage: /crew model <worker|expert|auditor> [model|auto]",
@@ -258,6 +273,19 @@ pub fn text(key: &str) -> &'static str {
             "Requested to stop the {role} task",
             "{role} 작업 중단을 요청했습니다",
         ),
+        "session.c.crewStopNone" => s("No crew task was running", "실행 중인 crew 작업이 없습니다"),
+        "session.c.crewStopUnsupported" => s(
+            "This server cannot stop crew tasks yet. Stop one from the /crew screen, or update the server.",
+            "이 서버는 아직 crew 작업 중단을 지원하지 않습니다. /crew 화면에서 하나씩 중단하거나 서버를 업데이트하세요.",
+        ),
+        "session.c.crewStopping" => s(
+            "{count} crew task(s) are still stopping",
+            "crew 작업 {count}개가 아직 중단 중입니다",
+        ),
+        "session.c.crewStopped" => s(
+            "Stopped {count} crew task(s)",
+            "crew 작업 {count}개를 중단했습니다",
+        ),
         "session.c.crewSubPlaceholder" => s(
             "Crew task thread · /crew back returns to the lead",
             "crew 작업 스레드 · /crew back 으로 lead 에게 돌아가기",
@@ -268,11 +296,19 @@ pub fn text(key: &str) -> &'static str {
             "After answering approvals and questions, return to the lead with /crew back. Messages are not sent from here.",
             "승인·질문에 답한 뒤 /crew back 으로 lead 에게 돌아가세요. 여기서는 메시지를 보내지 않습니다.",
         ),
+        "session.c.crewLogEmpty" => s(
+            "The crew has not made any decisions in this thread yet.",
+            "이 스레드에서 crew 가 내린 결정이 아직 없습니다.",
+        ),
+        "session.c.crewLogTitle" => s(
+            "Crew decision log · the last {shown} of {total} rows (all rows go to the clipboard as TSV)",
+            "Crew 결정 로그 · 전체 {total}행 중 최근 {shown}행 (전체는 TSV 로 클립보드에 복사)",
+        ),
         "session.c.crewTasks" => s("{count} crew task(s)", "crew 작업 {count}"),
         "session.c.crewUnsupported" => s("crew unsupported", "crew 미지원"),
         "session.c.crewUsage" => s(
-            "Usage: /crew [on|off|preset <{words}>|model <role> [model|auto]|default|back]",
-            "사용법: /crew [on|off|preset <{words}>|model <역할> [모델|auto]|default|back]",
+            "Usage: /crew [on|off|preset <{words}>|model <role> [model|auto]|default|reset|stop [id|all]|log|back]",
+            "사용법: /crew [on|off|preset <{words}>|model <역할> [모델|auto]|default|reset|stop [id|all]|log|back]",
         ),
         "session.c.enterGoalText" => s("Enter the goal text.", "목표 내용을 입력하세요."),
         "session.c.goal" => s("Goal", "목표"),
@@ -283,8 +319,8 @@ pub fn text(key: &str) -> &'static str {
             "/goal clear 해제 • /goal max <횟수> 연속 횟수 • /goal <내용> 바꾸기",
         ),
         "session.c.goalHint" => s(
-            "Enter save • Ctrl-J / Alt-Enter new line • Esc cancel",
-            "Enter 저장 • Ctrl-J / Alt-Enter 줄바꿈 • Esc 취소",
+            "Enter save • Shift-Enter / Ctrl-J new line • Esc cancel",
+            "Enter 저장 • Shift-Enter / Ctrl-J 줄바꿈 • Esc 취소",
         ),
         "session.c.goalHoldsMode" => s(
             "The goal is continuing on its own, so you cannot change {what} right now. Clear it with /goal clear, then change it.",
@@ -369,8 +405,8 @@ pub fn text(key: &str) -> &'static str {
             "Crew 켜고 끄기·역할 모델·작업 보드",
         ),
         "session.slash.crew.usage" => s(
-            "[on|off|preset|model|default|back]",
-            "[on|off|preset|model|default|back]",
+            "[on|off|preset|model|default|reset|stop|log|back]",
+            "[on|off|preset|model|default|reset|stop|log|back]",
         ),
         "session.slash.goal.note" => s("Set or view the thread goal", "스레드 목표 설정·확인"),
         "session.slash.goal.usage" => s("[text|clear|max count]", "[내용|clear|max 횟수]"),

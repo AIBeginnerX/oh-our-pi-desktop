@@ -2,6 +2,7 @@
  * Plain-language text for the work flow panels. The client-runtime flows stay language-neutral
  * (roles, tool categories, counts); this is where they become words a person reads.
  */
+import { crewPercent, crewTodosProven } from "@t3tools/client-runtime/crew-board";
 import { formatSubagentModelLabel } from "@t3tools/client-runtime/state/subagentRuntime";
 import type {
   ToolCategory,
@@ -11,6 +12,7 @@ import type {
   WorkflowDoing,
   WorkflowGraph,
   WorkflowNode,
+  WorkflowNodeInfo,
 } from "@t3tools/client-runtime/workflow-graph";
 
 import type { TranslationValues } from "~/i18n";
@@ -178,4 +180,44 @@ export function nodeName(node: WorkflowNode, t: Translate): string {
   return actor === undefined
     ? node.label
     : [roleText(actor.role, t), actor.task].filter(Boolean).join(" · ");
+}
+
+/**
+ * A crew task's checklist as "40% · 2 of 5 verified", with " · 3 unproven" when members only
+ * claimed items, or the crew's overall share on its brain node; undefined for a node without
+ * items. The percent counts only what the server proved.
+ */
+export function todoText(
+  info: Pick<WorkflowNodeInfo, "todos" | "overall">,
+  t: Translate,
+): string | undefined {
+  if (info.todos !== undefined) {
+    const { verified, claimed, total } = info.todos;
+    const label = t("{percent}% · {verified} of {total} verified", {
+      percent: crewPercent(crewTodosProven(info.todos), total),
+      verified,
+      total,
+    });
+    return claimed > 0 ? `${label} · ${t("{claimed} unproven", { claimed })}` : label;
+  }
+  return info.overall === undefined
+    ? undefined
+    : t("{percent}% of the crew's items verified", { percent: info.overall.percent });
+}
+
+/**
+ * Whether OOP could verify a finished task, as one word; undefined while it runs and from an
+ * older server, which never says.
+ */
+export function proofText(info: Pick<WorkflowNodeInfo, "proof">, t: Translate): string | undefined {
+  switch (info.proof) {
+    case "verified":
+      return t("verified");
+    case "not-verified":
+      return t("not verified");
+    case "inconclusive":
+      return t("unproven");
+    default:
+      return undefined;
+  }
 }

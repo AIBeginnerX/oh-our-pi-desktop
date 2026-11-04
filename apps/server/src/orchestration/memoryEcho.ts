@@ -74,6 +74,39 @@ const isClaudeErrorAssistantSnapshot = (event: ProviderRuntimeEvent): boolean =>
 };
 
 /**
+ * Per-provider echo coverage. A driver may receive project memory only with an
+ * entry here (the send-provider tests enforce it), so adding a driver to the
+ * allow list forces a decision on which of its persisted text surfaces need a
+ * provider-specific shape beyond the generic cases in `carriesMemoryEchoField`.
+ *
+ * - claudeAgent: the SDK stamps an error onto an assistant snapshot that is
+ *   persisted as ordinary assistant text, so it needs `errorAssistantSnapshot`.
+ * - codex: errors never ride on assistant text. They arrive as the `error`
+ *   notification (`runtime.error`, or `runtime.warning` when it will retry),
+ *   fatal `process/stderr` (`runtime.error`) or non-fatal stderr
+ *   (`runtime.warning`), `turn/completed.error` (`turn.completed.errorMessage`),
+ *   a systemError thread status (`session.state.changed`) and failed
+ *   collab-agent tasks (`task.*`). Every one is a generic case, so Codex needs
+ *   no provider-specific shape. `config.warning`, `deprecation.notice`,
+ *   `thread.realtime.error`, `mcp.oauth.completed` and `turn.aborted.reason`
+ *   are not persisted by ingestion (it ignores those types).
+ *
+ * Output a driver produces on purpose (assistant text, tool commands and tool
+ * output) is not masked for any driver; masking it would hide the agent's work.
+ */
+interface MemoryEchoProviderCoverage {
+  readonly errorAssistantSnapshot?: (event: ProviderRuntimeEvent) => boolean;
+}
+
+export const MEMORY_ECHO_PROVIDER_COVERAGE: Readonly<Record<string, MemoryEchoProviderCoverage>> = {
+  claudeAgent: { errorAssistantSnapshot: isClaudeErrorAssistantSnapshot },
+  codex: {},
+};
+
+const isErrorAssistantSnapshot = (event: ProviderRuntimeEvent): boolean =>
+  MEMORY_ECHO_PROVIDER_COVERAGE[event.provider]?.errorAssistantSnapshot?.(event) ?? false;
+
+/**
  * Whether the event carries a free-text field this slice withholds. False
  * means the guard can return the event untouched without touching SQL —
  * non-target traffic never pays for a lookup (including ordinary deltas,
@@ -103,11 +136,9 @@ export function carriesMemoryEchoField(event: ProviderRuntimeEvent): boolean {
     case "task.completed":
       return event.payload.status === "failed" && event.payload.summary !== undefined;
     case "content.delta":
-      return event.payload.streamKind === "assistant_text" && isClaudeErrorAssistantSnapshot(event);
+      return event.payload.streamKind === "assistant_text" && isErrorAssistantSnapshot(event);
     case "item.completed":
-      return (
-        event.payload.itemType === "assistant_message" && isClaudeErrorAssistantSnapshot(event)
-      );
+      return event.payload.itemType === "assistant_message" && isErrorAssistantSnapshot(event);
     default:
       return false;
   }

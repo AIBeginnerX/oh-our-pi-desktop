@@ -85,8 +85,7 @@ what was recorded and offers a recheck or an explicit acknowledgement;
 acknowledging never stops programs and never reruns checks. Stop asks the
 server to stop the displayed attempt's process group.
 
-Selected checks require a server version that supports them, and are not
-yet available in the mobile app.
+Selected checks require a server version that supports them.
 
 ## Project skill candidates
 
@@ -100,8 +99,7 @@ candidate's detail you can revise it (creating a new, immutable version),
 record rights and review judgments against an exact version, withdraw a
 judgment, or delete the whole candidate. A judgment is a record made by an
 authenticated connection — not a human or legal verification — and recording
-one does not make a candidate ready for anything. Not available in the mobile
-app.
+one does not make a candidate ready for anything.
 
 ## Storage cleanup
 

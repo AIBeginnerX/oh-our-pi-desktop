@@ -7,8 +7,7 @@
 # current user cannot change is replaced only after the macOS administrator approval dialog.
 # On macOS the app also carries the terminal app: OOP Terminal.app is installed beside OOP.app, and
 # this script adds an "oop" command in OOP_BIN_DIR (default ~/.local/bin), unless an "oop" that is
-# not ours is already there. The command runs the Rust terminal client (oop-rs) when the app has
-# one and the TypeScript terminal otherwise; OOP_TUI=ts forces the latter.
+# not ours is already there. The command runs the Rust terminal client (oop-rs) of the app.
 set -eu
 
 fail() { printf 'OOP install: %s\n' "$1" >&2; exit 1; }
@@ -71,17 +70,14 @@ if [ "$platform" = mac ]; then
   fi
 fi
 
-# The command line "oop" for the terminal app inside OOP.app. The launcher runs the Rust client
-# from the app when there is one, else the app's own runtime as plain Node (ELECTRON_RUN_AS_NODE
-# applies to that one process only) on oop.mjs, which OOP_TS_ENTRY also names for the subcommands
-# the Rust client lacks; OOP_TS_NODE (the app's runtime) with OOP_TS_NODE_ELECTRON=1 tells the Rust
-# client how to run it, since no "node" need be on PATH. It looks for the app again at every start, so moving or updating OOP.app
-# does not break it.
+# The command line "oop" for the terminal app inside OOP.app: it runs the app's Rust client
+# (oop-rs) and tells it, with OOP_IN_DESKTOP_APP=1, that it is the app's own. It looks for the app
+# again at every start, so moving or updating OOP.app does not break it.
 launcher_mark='oop-desktop-terminal-launcher'
 sh_quote() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # True when the file is a launcher this script wrote or install-terminal.sh wrote, or the "oop" the
-# repository's own terminal installer builds (a node bundle that starts with an env-node shebang and
-# names oop-tui).
+# repository's own source installer built before the Rust client (a node bundle that starts with an
+# env-node shebang and names oop-tui), which is replaced.
 is_our_oop() {
   [ -f "$1" ] && [ ! -L "$1" ] || return 1
   grep -q "^# $launcher_mark" "$1" 2>/dev/null && return 0
@@ -92,11 +88,11 @@ install_terminal_command() {
   app="$1/OOP.app"
   bin_dir="${OOP_BIN_DIR:-$HOME/.local/bin}"
   target="$bin_dir/oop"
-  # Apps older than the terminal app have nothing to run.
-  [ -f "$app/Contents/Resources/oop/oop.mjs" ] && [ -x "$app/Contents/MacOS/OOP" ] || return 0
+  # Apps older than the Rust terminal client have nothing to run.
+  [ -x "$app/Contents/Resources/oop/oop-rs" ] && [ -x "$app/Contents/MacOS/OOP" ] || return 0
   if [ -e "$target" ] || [ -L "$target" ]; then
     if ! is_our_oop "$target"; then
-      printf 'Note: %s already exists and was not made by OOP, so it was left alone. The terminal app is at %s/Contents/Resources/oop/oop.mjs.\n' "$target" "$app"
+      printf 'Note: %s already exists and was not made by OOP, so it was left alone. The terminal client is at %s/Contents/Resources/oop/oop-rs.\n' "$target" "$app"
       return 0
     fi
   fi
@@ -107,15 +103,10 @@ install_terminal_command() {
     printf 'for app in %s "$HOME/Applications/OOP.app" /Applications/OOP.app; do\n' "$(sh_quote "$app")"
     cat <<'BODY'
   res="$app/Contents/Resources/oop"
-  if [ -x "$app/Contents/MacOS/OOP" ] && [ -f "$res/oop.mjs" ]; then
-    # The node rule of oop-rs: OOP_TS_NODE runs OOP_TS_ENTRY, and OOP_TS_NODE_ELECTRON=1 says that
-    # node is the Electron binary, which then gets ELECTRON_RUN_AS_NODE=1 for that child only.
-    OOP_TS_ENTRY="$res/oop.mjs"
-    OOP_TS_NODE="$app/Contents/MacOS/OOP"
-    OOP_TS_NODE_ELECTRON=1
-    export OOP_TS_ENTRY OOP_TS_NODE OOP_TS_NODE_ELECTRON
-    if [ "${OOP_TUI:-}" != ts ] && [ -x "$res/oop-rs" ]; then exec "$res/oop-rs" "$@"; fi
-    exec env ELECTRON_RUN_AS_NODE=1 "$app/Contents/MacOS/OOP" "$res/oop.mjs" "$@"
+  if [ -x "$app/Contents/MacOS/OOP" ] && [ -x "$res/oop-rs" ]; then
+    OOP_IN_DESKTOP_APP=1
+    export OOP_IN_DESKTOP_APP
+    exec "$res/oop-rs" "$@"
   fi
 done
 echo "oop: OOP.app was not found, or it is too old to include the terminal app. Install or update OOP Desktop." >&2

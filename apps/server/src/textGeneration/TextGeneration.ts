@@ -75,6 +75,24 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface WorkLessonsGenerationInput {
+  /** Scratch directory the model runs in; the prompt carries all the context. */
+  cwd: string;
+  /** JSON of the structured work digests; never raw transcript text. */
+  digest: string;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface WorkLessonsGenerationResult {
+  lessons: ReadonlyArray<{
+    category: "fact" | "prohibition" | "preference" | "procedure";
+    text: string;
+    /** Digest thread labels (T1, T2, …) the lesson draws on. */
+    threads: ReadonlyArray<string>;
+  }>;
+}
+
 /**
  * TextGeneration - Service tag for commit and change request text generation.
  */
@@ -106,6 +124,11 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /** Propose reusable lessons from structured digests of recent work. */
+    readonly generateWorkLessons: (
+      input: WorkLessonsGenerationInput,
+    ) => Effect.Effect<WorkLessonsGenerationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -113,7 +136,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "generateWorkLessons";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -165,6 +189,10 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
+      ),
+    generateWorkLessons: (input) =>
+      resolveInstance(registry, "generateWorkLessons", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateWorkLessons(input)),
       ),
   });
 });

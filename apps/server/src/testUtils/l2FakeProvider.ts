@@ -67,6 +67,7 @@ export const makeL2FakeAdapter = (input?: { readonly turnId?: TurnId }): L2FakeA
       : undefined;
 
   const memoryAdmission: ProviderMemoryAdmissionSupport = {
+    skillTrials: true,
     sessionGeneration: (threadId) => sessionIdentity.get(threadId)?.generation,
     nativeSessionId: (cursor) => nativeSessionIdOf(cursor),
   };
@@ -167,6 +168,7 @@ const unusedTextGeneration: TextGeneration["Service"] = {
   generatePrContent: () => Effect.die("unused generatePrContent"),
   generateBranchName: () => Effect.die("unused generateBranchName"),
   generateThreadTitle: () => Effect.die("unused generateThreadTitle"),
+  generateWorkLessons: () => Effect.die("unused generateWorkLessons"),
 };
 
 const makeL2FakeInstance = (

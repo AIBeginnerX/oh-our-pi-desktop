@@ -73,6 +73,21 @@ export type ProjectMemorySendCommitResult =
     }
   | { readonly status: "held"; readonly reason: ProjectMemorySendHoldReason };
 
+export interface RecordProjectMemoryRecallInput {
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly memoryIds: ReadonlyArray<ProjectMemoryId>;
+  readonly now: DateTime.Utc;
+}
+
+export type ProjectMemoryRecallRecordResult =
+  | {
+      readonly status: "recorded";
+      readonly memories: ReadonlyArray<ProjectMemorySendCommittedMemory>;
+    }
+  | { readonly status: "held"; readonly reason: "context-mismatch" };
+
 export interface RevalidateProjectMemoryDispatchInput {
   readonly threadId: ThreadId;
   readonly attemptSeq: number;
@@ -154,12 +169,41 @@ export interface ProjectMemoryAffectedState {
   readonly changes: ReadonlyArray<ProjectMemoryAffectedChange>;
 }
 
+export interface ProjectMemorySentToThreadInput {
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly limit: number;
+}
+
+export interface ProjectMemorySentForMessageInput {
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly messageId: string;
+}
+
+export interface ProjectMemorySentRecord {
+  readonly memoryId: ProjectMemoryId;
+  /** The version that was sent. */
+  readonly version: number;
+  readonly sentAt: string;
+  readonly via: "message" | "recall";
+  readonly state: ProjectMemorySendAttemptState;
+  /** Current memory row in the project; null once deleted. */
+  readonly current: { readonly title: string; readonly version: number } | null;
+}
+
 export class ProjectMemorySendLedger extends Context.Service<
   ProjectMemorySendLedger,
   {
     readonly commitDispatch: (
       input: CommitProjectMemoryDispatchInput,
     ) => Effect.Effect<ProjectMemorySendCommitResult, ProjectMemoryRepositoryError>;
+    /** Records memories handed to a provider through a pull tool: the same
+        attempt/item rows as a composer send, so a later edit or delete marks
+        the thread affected and the thread counts as memory-bearing. */
+    readonly recordRecall: (
+      input: RecordProjectMemoryRecallInput,
+    ) => Effect.Effect<ProjectMemoryRecallRecordResult, ProjectMemoryRepositoryError>;
     readonly captureMutationFence: () => ProjectMemoryMutationFence;
     readonly mutationFenceHolds: (fence: ProjectMemoryMutationFence) => boolean;
     readonly withMemoryMutation: <A, E, R>(
@@ -180,6 +224,19 @@ export class ProjectMemorySendLedger extends Context.Service<
     readonly affectedState: (
       input: ProjectMemoryAffectedStateInput,
     ) => Effect.Effect<ProjectMemoryAffectedState, ProjectMemoryRepositoryError>;
+    /** The thread's sends, newest first, at most `limit`, each joined to the
+        memory's current title and version. Read-only; never reads a body. */
+    readonly sentToThread: (
+      input: ProjectMemorySentToThreadInput,
+    ) => Effect.Effect<ReadonlyArray<ProjectMemorySentRecord>, ProjectMemoryRepositoryError>;
+    /** The (memory, version) pairs one message really sent to the thread: attempts that are
+        committed or accepted, not the ones whose delivery is unknown. Never reads a body. */
+    readonly sentForMessage: (
+      input: ProjectMemorySentForMessageInput,
+    ) => Effect.Effect<
+      ReadonlyArray<{ readonly memoryId: ProjectMemoryId; readonly version: number }>,
+      ProjectMemoryRepositoryError
+    >;
   }
 >()("t3/persistence/ProjectMemorySendLedger/ProjectMemorySendLedger") {}
 
@@ -216,7 +273,24 @@ const SendLedgerAcknowledgeLatestRow = Schema.Struct({ latest: NonNegativeInt })
 const SendLedgerAckedRow = Schema.Struct({ acked: NonNegativeInt });
 const SendLedgerAcknowledgeScopeRow = Schema.Struct({ live: NonNegativeInt });
 
+const SendLedgerSentRow = Schema.Struct({
+  memoryId: ProjectMemoryId,
+  memoryVersion: PositiveInt,
+  committedAt: Schema.String,
+  recall: Schema.Literals([0, 1]),
+  state: Schema.Literals(["dispatch_committed", "provider_accepted", "external_send_unknown"]),
+  currentTitle: Schema.NullOr(Schema.String),
+  currentVersion: Schema.NullOr(PositiveInt),
+});
+
+const SendLedgerMessageItemRow = Schema.Struct({
+  memoryId: ProjectMemoryId,
+  memoryVersion: PositiveInt,
+});
+
+const decodeSendLedgerMessageItemRow = Schema.decodeUnknownEffect(SendLedgerMessageItemRow);
 const decodeSendLedgerMemoryRow = Schema.decodeUnknownEffect(SendLedgerMemoryRow);
+const decodeSendLedgerSentRow = Schema.decodeUnknownEffect(SendLedgerSentRow);
 const decodeSendLedgerAttemptStateRow = Schema.decodeUnknownEffect(SendLedgerAttemptStateRow);
 const decodeSendLedgerAffectedRow = Schema.decodeUnknownEffect(SendLedgerAffectedRow);
 const decodeSendLedgerAffectedHeadRow = Schema.decodeUnknownEffect(SendLedgerAffectedHeadRow);
@@ -554,6 +628,99 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const recordRecall: ProjectMemorySendLedger["Service"]["recordRecall"] = Effect.fnUntraced(
+    function* (
+      input: RecordProjectMemoryRecallInput,
+    ): Effect.fn.Return<ProjectMemoryRecallRecordResult, ProjectMemoryRepositoryError> {
+      const operation = "ProjectMemorySendLedger.recordRecall";
+      const memoryIds = [...new Set(input.memoryIds)];
+      // A recall that found nothing hands out nothing, so nothing is recorded.
+      if (memoryIds.length === 0) {
+        return { status: "recorded", memories: [] } as const;
+      }
+      // Pull tools have no composer message; the synthetic id keeps the
+      // (thread, message) uniqueness and can never match a real message.
+      const messageId = `recall:${yield* crypto.randomUUIDv4.pipe(
+        Effect.mapError(() => sqlError(operation)),
+      )}`;
+      return yield* transact(
+        operation,
+        Effect.gen(function* () {
+          const context = yield* sql<{
+            readonly projectLive: number;
+            readonly threadLive: number;
+          }>`
+            SELECT
+              EXISTS(SELECT 1 FROM projection_projects p WHERE p.project_id = ${input.projectId} AND p.deleted_at IS NULL) AS "projectLive",
+              EXISTS(SELECT 1 FROM projection_threads t WHERE t.thread_id = ${input.threadId} AND t.project_id = ${input.projectId} AND t.deleted_at IS NULL) AS "threadLive"
+          `;
+          if (context[0]?.projectLive !== 1 || context[0]?.threadLive !== 1) {
+            return { status: "held", reason: "context-mismatch" } as const;
+          }
+          // Bodies are read in the same transaction that records the
+          // versions, so what is returned is exactly what is ledgered.
+          const rows = yield* sql<{
+            readonly memoryId: unknown;
+            readonly kind: unknown;
+            readonly title: unknown;
+            readonly body: unknown;
+            readonly version: unknown;
+            readonly validUntil: unknown;
+          }>`
+            SELECT memory_id AS "memoryId", kind, title, body, version, valid_until AS "validUntil"
+            FROM project_memories
+            WHERE project_id = ${input.projectId}
+              AND memory_id IN ${sql.in(memoryIds)}
+          `;
+          const decodedRows = yield* Effect.forEach(rows, (row) =>
+            decodeSendLedgerMemoryRow(row).pipe(Effect.mapError(() => rowInvalid(operation))),
+          );
+          const nowMillis = DateTime.toEpochMillis(input.now);
+          const selected = decodedRows.filter(
+            (row) => expiryHold(row.validUntil, nowMillis) === undefined,
+          );
+          if (selected.length === 0) {
+            return { status: "recorded", memories: [] } as const;
+          }
+          // The body leaves with the tool result, whose delivery is not
+          // observable here: recorded as already possibly exposed.
+          const at = DateTime.formatIso(input.now);
+          const inserted = yield* sql<{ readonly attemptSeq: number }>`
+            INSERT INTO project_memory_send_attempts (
+              thread_id, message_id, project_id, provider_instance_id,
+              owner_instance_id, state, committed_at, settled_at
+            )
+            VALUES (
+              ${input.threadId}, ${messageId}, ${input.projectId}, ${input.providerInstanceId},
+              ${ownerInstanceId}, 'external_send_unknown', ${at}, ${at}
+            )
+            RETURNING attempt_seq AS "attemptSeq"
+          `;
+          const attemptSeq = inserted[0]?.attemptSeq;
+          if (attemptSeq === undefined || !Number.isSafeInteger(attemptSeq)) {
+            return yield* rowInvalid(operation);
+          }
+          for (const row of selected) {
+            yield* sql`
+              INSERT INTO project_memory_send_items (attempt_seq, memory_id, memory_version)
+              VALUES (${attemptSeq}, ${row.memoryId}, ${row.version})
+            `;
+          }
+          return {
+            status: "recorded",
+            memories: selected.map((row) => ({
+              memoryId: row.memoryId,
+              version: row.version,
+              kind: row.kind,
+              title: row.title,
+              body: row.body,
+            })),
+          } as const;
+        }),
+      );
+    },
+  );
+
   const revalidateDispatch: ProjectMemorySendLedger["Service"]["revalidateDispatch"] =
     Effect.fnUntraced(function* (
       input: RevalidateProjectMemoryDispatchInput,
@@ -869,8 +1036,99 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  const sentToThread: ProjectMemorySendLedger["Service"]["sentToThread"] = Effect.fnUntraced(
+    function* (
+      input: ProjectMemorySentToThreadInput,
+    ): Effect.fn.Return<ReadonlyArray<ProjectMemorySentRecord>, ProjectMemoryRepositoryError> {
+      const operation = "ProjectMemorySendLedger.sentToThread";
+      if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
+        return yield* sqlError(operation, "invalid-input");
+      }
+      // The project filter on both tables keeps a reused thread id or a memory
+      // id from another project from leaking into this view; the LEFT JOIN
+      // reports a deleted memory as a null current row.
+      const rows = yield* transactRead(
+        operation,
+        sql<{
+          readonly memoryId: unknown;
+          readonly memoryVersion: unknown;
+          readonly committedAt: unknown;
+          readonly recall: unknown;
+          readonly state: unknown;
+          readonly currentTitle: unknown;
+          readonly currentVersion: unknown;
+        }>`
+          SELECT
+            i.memory_id AS "memoryId", i.memory_version AS "memoryVersion",
+            a.committed_at AS "committedAt", a.state AS "state",
+            (substr(a.message_id, 1, 7) = 'recall:') AS "recall",
+            m.title AS "currentTitle", m.version AS "currentVersion"
+          FROM project_memory_send_attempts a
+          JOIN project_memory_send_items i ON i.attempt_seq = a.attempt_seq
+          LEFT JOIN project_memories m
+            ON m.memory_id = i.memory_id AND m.project_id = a.project_id
+          WHERE a.thread_id = ${input.threadId} AND a.project_id = ${input.projectId}
+            AND NOT EXISTS (
+              SELECT 1
+              FROM project_memory_send_attempts a2
+              JOIN project_memory_send_items i2 ON i2.attempt_seq = a2.attempt_seq
+              WHERE a2.thread_id = a.thread_id AND a2.project_id = a.project_id
+                AND i2.memory_id = i.memory_id AND i2.memory_version = i.memory_version
+                AND a2.attempt_seq > a.attempt_seq
+            )
+          ORDER BY a.attempt_seq DESC, i.memory_id
+          LIMIT ${input.limit}
+        `,
+      );
+      return yield* Effect.forEach(rows, (row) =>
+        decodeSendLedgerSentRow(row).pipe(
+          Effect.mapError(() => rowInvalid(operation)),
+          Effect.map((decoded): ProjectMemorySentRecord => ({
+            memoryId: decoded.memoryId,
+            version: decoded.memoryVersion,
+            sentAt: decoded.committedAt,
+            via: decoded.recall === 1 ? "recall" : "message",
+            state: decoded.state,
+            current:
+              decoded.currentTitle === null || decoded.currentVersion === null
+                ? null
+                : { title: decoded.currentTitle, version: decoded.currentVersion },
+          })),
+        ),
+      );
+    },
+  );
+
+  const sentForMessage: ProjectMemorySendLedger["Service"]["sentForMessage"] = Effect.fnUntraced(
+    function* (input) {
+      const operation = "ProjectMemorySendLedger.sentForMessage";
+      const rows = yield* transactRead(
+        operation,
+        sql<{ readonly memoryId: unknown; readonly memoryVersion: unknown }>`
+          SELECT i.memory_id AS "memoryId", i.memory_version AS "memoryVersion"
+          FROM project_memory_send_attempts a
+          JOIN project_memory_send_items i ON i.attempt_seq = a.attempt_seq
+          WHERE a.thread_id = ${input.threadId} AND a.project_id = ${input.projectId}
+            AND a.message_id = ${input.messageId}
+            AND a.state IN ('dispatch_committed', 'provider_accepted')
+          ORDER BY i.memory_id
+        `,
+      );
+      return yield* Effect.forEach(rows, (row) =>
+        decodeSendLedgerMessageItemRow(row).pipe(
+          Effect.mapError(() => rowInvalid(operation)),
+          Effect.map((decoded) => ({
+            memoryId: decoded.memoryId,
+            version: decoded.memoryVersion,
+          })),
+        ),
+      );
+    },
+  );
+
   return {
     commitDispatch,
+    recordRecall,
     captureMutationFence,
     mutationFenceHolds,
     withMemoryMutation,
@@ -879,6 +1137,8 @@ export const make = Effect.gen(function* () {
     reconcileOtherOwners,
     acknowledge,
     affectedState,
+    sentToThread,
+    sentForMessage,
   } satisfies ProjectMemorySendLedger["Service"];
 });
 

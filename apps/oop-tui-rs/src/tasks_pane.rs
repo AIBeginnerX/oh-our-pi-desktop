@@ -1,6 +1,6 @@
 //! The task list under the conversation (`/tasks`): the thread's last `turn.plan.updated` list.
 //! Ports `deriveActivePlanState` (packages/client-runtime/src/threadPlan.ts) and
-//! apps/oop-tui/src/render/tasksPane.ts.
+//! the former TypeScript terminal's tasks pane.
 
 use crate::app::{Active, App};
 use crate::panels_common::{Ctx, Row, clip, fill, row_width, s, sp};

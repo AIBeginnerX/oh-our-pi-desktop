@@ -51,25 +51,25 @@ async function fixture(
     await fs.mkdir(path.join(source, "OOP.app", "Contents"), { recursive: true });
     await fs.writeFile(path.join(source, "OOP.app", "Contents", "fixture"), "new app");
     if (terminal) {
-      // Stands in for the app's Electron executable: shows what the launcher passed to it.
+      // Stands in for the app's Electron executable; the terminal command never runs it.
       const executable = path.join(source, "OOP.app", "Contents", "MacOS", "OOP");
       await fs.mkdir(path.dirname(executable), { recursive: true });
-      await fs.writeFile(
-        executable,
-        '#!/bin/sh\nprintf "run-as-node=%s\\n" "${ELECTRON_RUN_AS_NODE-unset}"\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n',
-        { mode: 0o755 },
-      );
-      const bundle = path.join(source, "OOP.app", "Contents", "Resources", "oop", "oop.mjs");
-      await fs.mkdir(path.dirname(bundle), { recursive: true });
-      await fs.writeFile(bundle, "// fixture terminal app\n");
-      if (terminal === "rust") {
-        // The Rust client shows how the launcher started it; OOP Terminal.app is a bundle with an identifier.
-        const resources = path.dirname(bundle);
+      await fs.writeFile(executable, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+      const resources = path.join(source, "OOP.app", "Contents", "Resources", "oop");
+      await fs.mkdir(resources, { recursive: true });
+      if (terminal === "old") {
+        // An app from before the Rust client: it carries the TypeScript bundle only.
+        await fs.writeFile(path.join(resources, "oop.mjs"), "// old terminal app\n");
+      } else {
+        // The Rust client shows how the launcher started it.
         await fs.writeFile(
           path.join(resources, "oop-rs"),
-          '#!/bin/sh\nprintf "rust ts-entry=%s node=%s electron=%s run-as-node=%s\\n" "$OOP_TS_ENTRY" "$OOP_TS_NODE" "${OOP_TS_NODE_ELECTRON-unset}" "${ELECTRON_RUN_AS_NODE-unset}"\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n',
+          '#!/bin/sh\nprintf "rust in-app=%s ts=%s tui=%s run-as-node=%s\\n" "${OOP_IN_DESKTOP_APP-unset}" "${OOP_TS_ENTRY-unset}" "${OOP_TUI-unset}" "${ELECTRON_RUN_AS_NODE-unset}"\nfor a in "$@"; do printf "[%s]\\n" "$a"; done\n',
           { mode: 0o755 },
         );
+      }
+      if (terminal === "rust") {
+        // OOP Terminal.app is a bundle with an identifier.
         const terminalApp = path.join(resources, "OOP Terminal.app", "Contents");
         await fs.mkdir(path.join(terminalApp, "MacOS"), { recursive: true });
         await fs.writeFile(
@@ -208,7 +208,7 @@ const ownedTerminalFiles = [
 ];
 
 test(
-  "macOS installer installs OOP Terminal.app beside OOP.app and an oop command that runs the Rust client",
+  "macOS installer installs OOP Terminal.app beside OOP.app and an oop command that runs the Rust client alone",
   { skip: process.platform !== "darwin", timeout: 60_000 },
   async (t) => {
     const setup = await fixture(t, { platform: "Darwin", terminal: "rust" });
@@ -222,23 +222,17 @@ test(
     const command = path.join(setup.home, ".local", "bin", "oop");
     const {
       ELECTRON_RUN_AS_NODE: _inherited,
-      OOP_TS_NODE: _node,
-      OOP_TS_NODE_ELECTRON: _electron,
+      OOP_IN_DESKTOP_APP: _inApp,
+      OOP_TS_ENTRY: _entry,
+      OOP_TUI: _tui,
       ...clean
     } = process.env;
     const rust = await run(command, ["--version", "two words"], clean);
-    const resources = path.join(installDir, "OOP.app", "Contents", "Resources", "oop");
-    // The Rust client is told how to run the TypeScript terminal: the app's own runtime is Electron
-    // acting as node, so OOP_TS_NODE names it and OOP_TS_NODE_ELECTRON=1 says so. ELECTRON_RUN_AS_NODE
-    // itself is not set for the client; oop-rs adds it to the child it starts.
-    const appRuntime = path.join(installDir, "OOP.app", "Contents", "MacOS", "OOP");
+    // The client runs as it is, told it is the app's own; no TypeScript terminal is involved.
     assert.equal(
       rust.output,
-      `rust ts-entry=${path.join(resources, "oop.mjs")} node=${appRuntime} electron=1 run-as-node=unset\n[--version]\n[two words]\n`,
+      "rust in-app=1 ts=unset tui=unset run-as-node=unset\n[--version]\n[two words]\n",
     );
-    // OOP_TUI=ts runs the TypeScript terminal on the app's runtime instead.
-    const ts = await run(command, ["--version"], { ...clean, OOP_TUI: "ts" });
-    assert.match(ts.output, /^run-as-node=1\n\[.*oop\.mjs\]\n\[--version\]\n$/);
     // A reinstall replaces our own copy; an app of that name with another identifier is left alone.
     const again = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
     assert.equal(again.code, 0, again.output);
@@ -252,7 +246,7 @@ test(
 );
 
 test(
-  "macOS installer adds an oop command that runs the app's runtime on the bundled terminal app",
+  "macOS installer adds an oop command that runs the app's Rust client",
   { skip: process.platform !== "darwin", timeout: 60_000 },
   async (t) => {
     const setup = await fixture(t, { platform: "Darwin", terminal: true });
@@ -262,21 +256,16 @@ test(
     assert.match(result.output, /Installed the terminal command/);
     assert.match(result.output, /not on PATH/);
     assert.equal((await fs.stat(command)).mode & 0o777, 0o755);
-    // The launcher keeps each argument whole, and the variable reaches only the app's process.
-    const {
-      ELECTRON_RUN_AS_NODE: _inherited,
-      OOP_TS_NODE: _node,
-      OOP_TS_NODE_ELECTRON: _electron,
-      ...clean
-    } = process.env;
+    const text = await fs.readFile(command, "utf8");
+    assert.doesNotMatch(text, /OOP_TS_|OOP_TUI|oop\.mjs/);
+    // The launcher keeps each argument whole, and the variable reaches only the client's process.
+    const { ELECTRON_RUN_AS_NODE: _inherited, OOP_IN_DESKTOP_APP: _inApp, ...clean } = process.env;
     const launch = await run(command, ["--version", "two words", "it's", "$HOME", "*"], clean);
     assert.equal(launch.code, 0, launch.output);
-    const app = path.join(setup.env.OOP_INSTALL_DIR, "OOP.app", "Contents");
     assert.equal(
       launch.output,
       [
-        "run-as-node=1",
-        `[${path.join(app, "Resources", "oop", "oop.mjs")}]`,
+        "rust in-app=1 ts=unset tui=unset run-as-node=unset",
         "[--version]",
         "[two words]",
         "[it's]",
@@ -287,7 +276,7 @@ test(
     );
     const after = await run(
       "sh",
-      ["-c", '"$0" --version > /dev/null; echo "after=${ELECTRON_RUN_AS_NODE-unset}"', command],
+      ["-c", '"$0" --version > /dev/null; echo "after=${OOP_IN_DESKTOP_APP-unset}"', command],
       clean,
     );
     assert.equal(after.output, "after=unset\n");
@@ -295,6 +284,17 @@ test(
     const again = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
     assert.equal(again.code, 0, again.output);
     assert.match(again.output, /Installed the terminal command/);
+  },
+);
+
+test(
+  "macOS installer makes no oop command for an app that has only the old TypeScript terminal",
+  { skip: process.platform !== "darwin", timeout: 60_000 },
+  async (t) => {
+    const setup = await fixture(t, { platform: "Darwin", terminal: "old" });
+    const result = await run("sh", [path.join(scripts, "install-desktop.sh")], setup.env);
+    assert.equal(result.code, 0, result.output);
+    await assert.rejects(fs.stat(path.join(setup.home, ".local", "bin", "oop")), { code: "ENOENT" });
   },
 );
 
@@ -307,9 +307,16 @@ test(
     assert.equal(result.code, 0, result.output);
     const command = path.join(setup.home, ".local", "bin", "oop");
     await fs.rm(path.join(setup.env.OOP_INSTALL_DIR, "OOP.app"), { recursive: true });
-    const gone = await run(command, ["--version"], { ...process.env, HOME: setup.home });
-    assert.equal(gone.code, 127);
-    assert.match(gone.output, /OOP\.app was not found/);
+    // The launcher also looks in /Applications; a real install there on this machine would answer.
+    const systemApp = await fs.access("/Applications/OOP.app/Contents/Resources/oop/oop-rs").then(
+      () => true,
+      () => false,
+    );
+    if (!systemApp) {
+      const gone = await run(command, ["--version"], { ...process.env, HOME: setup.home });
+      assert.equal(gone.code, 127);
+      assert.match(gone.output, /OOP\.app was not found/);
+    }
     const moved = path.join(setup.home, "Applications");
     await fs.mkdir(moved, { recursive: true });
     await fs.cp(path.join(setup.root, "image", "OOP.app"), path.join(moved, "OOP.app"), {

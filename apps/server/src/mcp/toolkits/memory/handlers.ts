@@ -4,6 +4,7 @@ import {
   ProjectMemoryStoreError,
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -56,32 +57,64 @@ const make = Effect.gen(function* () {
     if (Option.isNone(thread)) {
       return yield* new ProjectMemoryRejectedError({ reason: "thread-missing" });
     }
-    return { threadId: invocation.threadId, projectId: thread.value.projectId };
+    return {
+      threadId: invocation.threadId,
+      projectId: thread.value.projectId,
+      providerInstanceId: invocation.providerInstanceId,
+    };
   });
 
   return MemoryToolkit.of({
     memory_recall: ({ query }) =>
       Effect.gen(function* () {
-        const { projectId } = yield* requireMemory();
-        const page = yield* memories.search({ projectId, query, limit: MEMORY_RECALL_MAX_RESULTS });
+        const { projectId, threadId, providerInstanceId } = yield* requireMemory();
+        // A held thread has a memory it already received that changed since. Like a
+        // composer send, it gets no further memory until the user reviews that. A
+        // hold check that could not be read fails closed too, with its own message.
+        const hold = yield* gate.threadHold(threadId);
+        if (Option.isSome(hold)) {
+          return yield* new ProjectMemoryStoreError({
+            message:
+              hold.value === "store-failed"
+                ? "Project memory could not be checked for this thread right now. Continue without recalling memory."
+                : "Project memory is paused for this thread because memory it already received was changed or deleted. The user needs to review it in the app; continue without recalling memory.",
+          });
+        }
+        const page = yield* memories.search({
+          projectId,
+          query,
+          limit: MEMORY_RECALL_MAX_RESULTS,
+          relevantOnly: true,
+        });
         // validUntil is enforced where content is consumed, and this is it.
         const now = yield* Clock.currentTimeMillis;
         const live = page.items.filter(
           (item) => item.validUntil === null || Date.parse(item.validUntil) > now,
         );
-        const found = yield* Effect.forEach(live, (item) =>
-          memories.get({ projectId, memoryId: item.memoryId }).pipe(
-            Effect.map(({ memory }) => ({
-              title: memory.title,
-              kind: memory.kind,
-              text: clip(memory.body),
-            })),
-            // Deleted between the search and the read.
-            Effect.catchTag("ProjectMemoryNotFoundError", () => Effect.succeed(null)),
-          ),
-        );
+        // Bodies reach the provider only through the send ledger, like a
+        // composer send: the thread is recorded against each id and version,
+        // so a later edit or delete holds it and its diagnostics are masked.
+        const recorded = yield* gate.recordRecall({
+          threadId,
+          projectId,
+          providerInstanceId,
+          memoryIds: live.map((item) => item.memoryId),
+          now: DateTime.makeUnsafe(now),
+        });
+        if (recorded.status === "held") {
+          return yield* new ProjectMemoryStoreError({
+            message: "Project memory operation failed.",
+          });
+        }
+        // Memories deleted between the search and the read are simply absent.
+        const byId = new Map(recorded.memories.map((memory) => [memory.memoryId, memory]));
         return {
-          memories: found.filter((memory) => memory !== null),
+          memories: live.flatMap((item) => {
+            const memory = byId.get(item.memoryId);
+            return memory === undefined
+              ? []
+              : [{ title: memory.title, kind: memory.kind, text: clip(memory.body) }];
+          }),
           moreAvailable: page.truncated,
         };
       }),

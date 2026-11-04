@@ -2,8 +2,14 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   crewEvidence,
+  crewOverall,
+  crewPercent,
+  crewTodoCounts,
+  crewTodosProven,
+  crewProofOf,
   crewTaskActions,
   crewTurnUsage,
+  runningCrewTaskCount,
   type CrewEvidenceTask,
 } from "./crewBoard.ts";
 
@@ -131,5 +137,98 @@ describe("crewTaskActions", () => {
       expect(crewTaskActions({ role: "expert", outcome }).retry).toBe(true);
     }
     expect(crewTaskActions({ role: "auditor", outcome: "failed" }).retry).toBe(false);
+  });
+});
+
+describe("runningCrewTaskCount", () => {
+  it("counts crew tasks without a final report and ignores other nodes", () => {
+    const task = (outcome?: string) => ({ info: { crew: { outcome } } });
+    expect(
+      runningCrewTaskCount([task(), task("stopped"), task("completed"), task(), { info: {} }]),
+    ).toBe(2);
+    expect(runningCrewTaskCount([])).toBe(0);
+  });
+});
+
+describe("crew todo progress", () => {
+  const counts = (total: number, verified: number, claimed = 0) => ({
+    total,
+    verified,
+    claimed,
+    failed: 0,
+    blocked: 0,
+  });
+
+  it("reads the payload counts and ignores a payload without a positive total", () => {
+    expect(
+      crewTodoCounts({ todoTotal: 4, todoVerified: 1, todoClaimed: 2, todoFailed: -1 }),
+    ).toEqual({ total: 4, verified: 1, claimed: 2, failed: 0, blocked: 0 });
+    expect(crewTodoCounts({ todoTotal: 0 })).toBeUndefined();
+    expect(crewTodoCounts({ todoTotal: "4" })).toBeUndefined();
+    expect(crewTodoCounts({})).toBeUndefined();
+  });
+
+  it("floors the percent, so 100 means every item is finished", () => {
+    expect(crewPercent(1, 3)).toBe(33);
+    expect(crewPercent(2, 3)).toBe(66);
+    expect(crewPercent(199, 200)).toBe(99);
+    expect(crewPercent(5, 3)).toBe(100);
+    expect(crewPercent(0, 0)).toBe(0);
+  });
+
+  it("counts only proven items: five claimed and none verified is 0 percent", () => {
+    expect(crewTodosProven(counts(5, 0, 5))).toBe(0);
+    expect(crewTodosProven(counts(5, 2, 3))).toBe(2);
+    expect(crewOverall([{ todos: counts(5, 0, 5) }])).toEqual({ done: 0, total: 5, percent: 0 });
+    expect(crewPercent(crewTodosProven(counts(5, 0, 5)), 5)).toBe(0);
+  });
+
+  it("sums proven items over all items and counts a task without a list as one item", () => {
+    expect(crewOverall([{}, { outcome: "completed", proof: "verified" }])).toBeUndefined();
+    expect(
+      crewOverall([
+        { todos: counts(20, 8, 2) },
+        { outcome: "completed", proof: "verified" },
+        {},
+        { outcome: "partial" },
+      ]),
+    ).toEqual({ done: 9, total: 23, percent: 39 });
+    // A completed task whose proof says it was not verified is not a done item.
+    expect(
+      crewOverall([
+        { todos: counts(1, 1) },
+        { outcome: "completed", proof: "not-verified" },
+        { outcome: "completed", proof: "inconclusive" },
+      ]),
+    ).toEqual({ done: 1, total: 3, percent: 33 });
+    // Items added to a task move the share back down.
+    expect(crewOverall([{ todos: counts(4, 4) }])?.percent).toBe(100);
+    expect(crewOverall([{ todos: counts(5, 4) }])?.percent).toBe(80);
+  });
+
+  it("counts a worker's verified list and an approved auditor without a proof as 100 percent", () => {
+    expect(
+      crewOverall([
+        { todos: counts(4, 4) },
+        // An auditor never gets a proof: its verdict stands in for one.
+        { outcome: "completed" },
+        // An older server sends no proof at all.
+        { outcome: "completed", proof: undefined },
+      ]),
+    ).toEqual({ done: 6, total: 6, percent: 100 });
+  });
+
+  it("does not count a completed task without a list whose proof is inconclusive", () => {
+    expect(
+      crewOverall([{ todos: counts(4, 4) }, { outcome: "completed", proof: "inconclusive" }]),
+    ).toEqual({ done: 4, total: 5, percent: 80 });
+  });
+
+  it("reads only the three proof verdicts", () => {
+    expect(crewProofOf("verified")).toBe("verified");
+    expect(crewProofOf("not-verified")).toBe("not-verified");
+    expect(crewProofOf("inconclusive")).toBe("inconclusive");
+    expect(crewProofOf(undefined)).toBeUndefined();
+    expect(crewProofOf("VERIFIED")).toBeUndefined();
   });
 });

@@ -24,7 +24,6 @@ import {
   runCommand,
   releaseVersion,
   rustBuildEnvironment,
-  skipsRust,
   upstreamVersion,
   runtimePaths,
   smbShareUrlForPath,
@@ -1080,8 +1079,6 @@ NodeTest.test(
     NodeAssert.equal(env.GITHUB_REPOSITORY, undefined);
     NodeAssert.deepEqual(cargoReleaseArgs({ locked: false }), ["build", "--release"]);
     NodeAssert.deepEqual(cargoReleaseArgs({ locked: true }), ["build", "--release", "--locked"]);
-    NodeAssert.equal(skipsRust({ OOP_SKIP_RUST: "1" }), true);
-    NodeAssert.equal(skipsRust({}), false);
   },
 );
 
@@ -1162,7 +1159,7 @@ NodeTest.test(
 );
 
 NodeTest.test(
-  "buildRustClients refuses a stale oop-rs, and does nothing when skipped or absent",
+  "buildRustClients never falls back: a stale or missing oop-rs fails, OOP_SKIP_RUST is ignored",
   async () => {
     const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-rust-skip-"));
     try {
@@ -1172,13 +1169,16 @@ NodeTest.test(
         buildRustClients(paths, runner, "1.2.3", {}, () => "0.0.1"),
         /out of date/,
       );
+      // The old escape hatch no longer skips the build.
       const calls = [];
       const spy = async (...call) => calls.push(call);
-      NodeAssert.deepEqual(await buildRustClients(paths, spy, "1.2.3", { OOP_SKIP_RUST: "1" }), {});
+      await buildRustClients(paths, spy, "1.2.3", { OOP_SKIP_RUST: "1" }, () => "1.2.3");
+      NodeAssert.equal(calls.length, 1);
+      // A source without apps/oop-tui-rs cannot be packaged: there is no other terminal.
       const empty = { checkout: NodePath.join(root, "empty") };
       await NodeFSP.mkdir(empty.checkout);
-      NodeAssert.deepEqual(await buildRustClients(empty, spy, "1.2.3", {}), {});
-      NodeAssert.equal(calls.length, 0);
+      await NodeAssert.rejects(buildRustClients(empty, spy, "1.2.3", {}), /apps\/oop-tui-rs/);
+      NodeAssert.equal(calls.length, 1);
       // Without apps/oop-terminal only oop-rs is returned.
       const onlyCli = await buildRustClients(paths, runner, "1.2.3", {}, () => "1.2.3");
       NodeAssert.deepEqual(Object.keys(onlyCli), ["OOP_RS_BIN"]);

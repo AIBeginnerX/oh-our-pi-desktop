@@ -39,6 +39,15 @@ function encodeIco(images) {
 try {
   const macIcon = NodePath.join(assetDir, "oop-macos-1024.png");
   sips(["-s", "format", "png", source, "--out", macIcon]);
+  // The terminal app icon is the same mark plus a small "T"; only the macOS PNG is derived from it.
+  sips([
+    "-s",
+    "format",
+    "png",
+    NodePath.join(assetDir, "oop-terminal-icon.svg"),
+    "--out",
+    NodePath.join(assetDir, "oop-terminal-macos-1024.png"),
+  ]);
   const cropped = NodePath.join(temporaryDirectory, "cropped.png");
   sips(["-c", "824", "824", macIcon, "--out", cropped]);
 

@@ -19,7 +19,10 @@ import {
   crewMemberOutcome,
   crewTaskStatus,
   crewThreadTitle,
+  withTodoOutcome,
   delegatePrompt,
+  withCrewMemoryReferences,
+  withoutCrewMemoryReferences,
   isCrewThreadTitle,
   overlappingWriteScopes,
   parseAuditReport,
@@ -32,6 +35,7 @@ import {
   turnRanPassingTests,
   writeScopeWarning,
 } from "./crewLogic.ts";
+import { assignTodos } from "./crewTodos.ts";
 
 const turn = (state: "running" | "completed" | "interrupted" | "error") =>
   ({
@@ -255,6 +259,43 @@ describe("crew brief", () => {
     expect(brief).toContain("call crew_roster");
   });
 
+  it("tells the brain to give each task concrete todos with checks", () => {
+    // Without this rule the lead hands out tasks with no checklist, so nothing tells the member
+    // what "finished" means and the server has nothing to verify.
+    const brief = crewBrief({
+      worker: option("GLM-5.3 Flash", "OpenCode"),
+      expert: null,
+      auditor: null,
+    })!;
+    expect(brief).toContain("specific one-step todos");
+    expect(brief).toContain("a check (command or files)");
+    expect(brief).toContain("extra work in a new task");
+    expect(brief).toContain("unfinished items make it partial");
+  });
+
+  it("tells the brain to call work done only on a VERIFIED proof", () => {
+    const brief = crewBrief({ worker: option("GLM", "OpenCode"), expert: null, auditor: null })!;
+    expect(brief).toContain("Call work done only when crew_wait shows proof VERIFIED.");
+    expect(brief).toContain('say "finished, not verified" to the user');
+  });
+
+  it("asks for a why on delegating and stopping inside the Each task line", () => {
+    const brief = crewBrief({ worker: option("GLM", "OpenCode"), expert: null, auditor: null })!;
+    const line = brief.split("\n").find((entry) => entry.startsWith("Each task:"))!;
+    expect(line).toContain('"why"');
+    expect(line).toContain("crew_delegate and crew_stop");
+  });
+
+  it("explains the arena in a few lines the brain can follow", () => {
+    const brief = crewBrief({ worker: option("GLM", "OpenCode"), expert: null, auditor: null })!;
+    expect(brief).toContain("Arena (only when the user asks to compare approaches");
+    expect(brief).toContain('isolation "candidate"');
+    expect(brief).toContain("differentFrom");
+    expect(brief).toContain("judge was not independent");
+    expect(brief).toContain("remove the worktrees");
+    expect(brief).toContain("Candidate A");
+  });
+
   it("sends nothing when no worker or expert can take work", () => {
     expect(crewBrief({ worker: null, expert: null, auditor: option("Opus", "Claude") })).toBeNull();
   });
@@ -335,6 +376,23 @@ describe("crew follow-ups", () => {
     expect(plan.prompt).toContain("Expert · port parser (completed): done");
     expect(followUpRound(plan.prompt)).toEqual({ round: 1, fixes: 1 });
     expect(followUpRound("a real user message")).toEqual({ round: 0, fixes: 0 });
+  });
+
+  it("shows each late report's proof so the lead can tell finished from verified", () => {
+    const plan = planFollowUp({
+      current: { round: 0, fixes: 0 },
+      audits: [],
+      results: [
+        {
+          role: "worker",
+          subject: "tests",
+          status: "completed",
+          report: "done",
+          proof: "INCONCLUSIVE",
+        },
+      ],
+    });
+    expect(plan.prompt).toContain("Worker · tests (completed, proof INCONCLUSIVE): done");
   });
 
   it("stops asking for audit fixes after the limit but still delivers late reports", () => {
@@ -474,6 +532,61 @@ describe("delegation sections", () => {
     expect(full).toContain("DONE WHEN:\nevery login case has a test");
     // The static preamble does not depend on the task, so providers can cache it.
     expect(full.slice(0, full.indexOf("TASK:"))).toBe(bare.slice(0, bare.indexOf("TASK:")));
+  });
+});
+
+describe("delegation with a TODO list", () => {
+  const base = { role: "worker", leadTitle: "Fix login", task: "Add tests" } as const;
+  const todos = assignTodos(["first", { text: "second", check: { command: "vp test run a" } }]);
+
+  it("reads exactly as before without a list", () => {
+    expect(delegatePrompt({ ...base, todos: [] })).toBe(delegatePrompt(base));
+    expect(delegatePrompt({ ...base, todos: undefined })).toBe(delegatePrompt(base));
+  });
+
+  it("puts the list after every other section so the cacheable preamble is unchanged", () => {
+    const full = {
+      ...base,
+      writeScope: ["src/"],
+      verify: "vp test run a",
+      doneWhen: "all green",
+    };
+    const without = delegatePrompt(full);
+    const withList = delegatePrompt({ ...full, todos });
+    expect(withList.startsWith(without)).toBe(true);
+    expect(withList.slice(without.length)).toContain("- t1: first\n- t2: second");
+    expect(withList.slice(0, withList.indexOf("TASK:"))).toBe(
+      without.slice(0, without.indexOf("TASK:")),
+    );
+  });
+});
+
+describe("a finished task with a TODO list", () => {
+  const none = { pending: 0, failed: 0, blocked: 0 };
+
+  it("is partial while items are pending, failing, or blocked, and claimed ones do not count", () => {
+    expect(withTodoOutcome("completed", none)).toBe("completed");
+    expect(withTodoOutcome("completed", undefined)).toBe("completed");
+    for (const open of [{ pending: 1 }, { failed: 1 }, { blocked: 1 }]) {
+      expect(withTodoOutcome("completed", { ...none, ...open })).toBe("partial");
+    }
+    expect(withTodoOutcome("blocked", { ...none, pending: 2 })).toBe("blocked");
+    expect(withTodoOutcome("failed", { ...none, pending: 2 })).toBe("failed");
+  });
+
+  it("turns a member's own done into partial, and keeps partial and blocked as they are", () => {
+    const open = { ...none, failed: 1 };
+    expect(crewMemberOutcome("worker", "completed", "Status: done", open).status).toBe("partial");
+    expect(crewMemberOutcome("worker", "completed", "Status: blocked", open).status).toBe(
+      "blocked",
+    );
+    expect(crewMemberOutcome("worker", "completed", "Status: done", none).status).toBe("completed");
+    expect(crewMemberOutcome("worker", "interrupted", "Status: done", open).status).toBe(
+      "interrupted",
+    );
+    expect(crewMemberOutcome("auditor", "completed", "Verdict: approve", open).status).toBe(
+      "completed",
+    );
   });
 });
 
@@ -643,16 +756,122 @@ describe("structured reports", () => {
   });
 
   it("approves a review that asks for changes only because of failures that predate the turn", () => {
-    const blocking = { severity: "P1", confidence: 0.9, title: "Breaks login" };
+    const provenBlocking = {
+      severity: "P1",
+      confidence: 0.9,
+      title: "Breaks login",
+      proven: true,
+      level: "ran",
+      evidence: "login.test.ts fails",
+    };
     const nit = { severity: "P3", confidence: 0.4, title: "Naming" };
     const review = (findings: object[], preExistingFailures: string[]) =>
       json({ verdict: "needs changes", summary: "x", findings, preExistingFailures });
     expect(auditVerdict(review([], ["vp test run: fails in legacy.test.ts"]))).toBe("approve");
     expect(auditVerdict(review([nit], ["tsc: 12 errors in src/old.ts"]))).toBe("approve");
-    expect(auditVerdict(review([blocking], ["tsc: 12 errors in src/old.ts"]))).toBe(
+    expect(auditVerdict(review([provenBlocking], ["tsc: 12 errors in src/old.ts"]))).toBe(
       "needs-changes",
     );
     expect(auditVerdict(review([], []))).toBe("needs-changes");
+  });
+});
+
+describe("proven audit findings", () => {
+  const json = (value: unknown) => `\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
+  const unproven = { severity: "P1", confidence: 0.9, title: "Might break login" };
+  const proven = (extra: object = {}) => ({
+    ...unproven,
+    proven: true,
+    level: "ran",
+    evidence: "vp test run login.test.ts: 1 failed, expected 200 got 500",
+    ...extra,
+  });
+  const review = (findings: object[], extra: object = {}) =>
+    json({ verdict: "needs changes", summary: "x", findings, ...extra });
+
+  it("does not block on a P1 the auditor could only point at", () => {
+    expect(auditVerdict(review([unproven]))).toBe("approve");
+    expect(auditVerdict(review([{ ...unproven, proven: false, level: "line" }]))).toBe("approve");
+  });
+
+  it("blocks on a P0 or P1 proven by tracing, running, or the app", () => {
+    for (const level of ["traced", "ran", "app"]) {
+      expect(auditVerdict(review([proven({ level })]))).toBe("needs-changes");
+    }
+    expect(auditVerdict(review([proven({ severity: "P0" })]))).toBe("needs-changes");
+  });
+
+  it("treats proven true with level said or line, or without evidence, as unproven", () => {
+    expect(auditVerdict(review([proven({ level: "said" })]))).toBe("approve");
+    expect(auditVerdict(review([proven({ level: "line" })]))).toBe("approve");
+    expect(auditVerdict(review([proven({ level: undefined })]))).toBe("approve");
+    expect(auditVerdict(review([proven({ evidence: undefined })]))).toBe("approve");
+    expect(auditVerdict(review([proven({ evidence: "  " })]))).toBe("approve");
+    const parsed = parseAuditReport(review([proven({ level: "line" })]))!;
+    expect(parsed.findings[0]?.proven).toBe(false);
+  });
+
+  it("does not block on a proven P2 or P3", () => {
+    expect(auditVerdict(review([proven({ severity: "P2" })]))).toBe("approve");
+  });
+
+  it("still blocks a needs-changes review that lists no findings", () => {
+    expect(auditVerdict(review([]))).toBe("needs-changes");
+  });
+
+  it("keeps the Verdict line path and the pre-existing exception as before", () => {
+    expect(auditVerdict("Verdict: needs changes")).toBe("needs-changes");
+    expect(auditVerdict(review([unproven], { preExistingFailures: ["tsc: old"] }))).toBe("approve");
+    expect(auditVerdict(review([proven()], { preExistingFailures: ["tsc: old"] }))).toBe(
+      "needs-changes",
+    );
+  });
+
+  it("reads a report that has none of the new fields, and clips long evidence", () => {
+    const old = parseAuditReport(
+      json({
+        verdict: "needs changes",
+        summary: "x",
+        findings: [{ severity: "P2", confidence: 0.5, title: "t" }],
+      }),
+    )!;
+    expect(old.findings[0]).toEqual({ severity: "P2", confidence: 0.5, title: "t" });
+    const long = parseAuditReport(review([proven({ evidence: "e".repeat(900) })]))!;
+    expect(long.findings[0]?.evidence?.length).toBeLessThanOrEqual(300);
+  });
+
+  it("lists proven findings before unproven ones of the same severity", () => {
+    const parsed = parseAuditReport(review([unproven, proven({ title: "Proven one" })]))!;
+    expect(parsed.findings.map((finding) => finding.title)).toEqual([
+      "Proven one",
+      "Might break login",
+    ]);
+  });
+
+  it("reads the safety fact", () => {
+    const parsed = parseAuditReport(
+      json({
+        verdict: "approve",
+        summary: "ok",
+        safetyFact: { fact: "only drops dead cache entries", level: "ran", evidence: "ran x" },
+      }),
+    )!;
+    expect(parsed.safetyFact?.level).toBe("ran");
+  });
+
+  it("asks for proof by running code, or at least a traced failing input", () => {
+    const prompt = auditPrompt({ leadTitle: "Fix login", files: ["a.ts"], request: null });
+    expect(prompt).toContain("safetyFact");
+    expect(prompt).toContain("Prove it by running real code when your tools allow it");
+    expect(prompt).toContain("step-by-step trace through real file:line");
+    expect(prompt).toContain("never blocks");
+    expect(prompt).toContain("Do not report style, naming");
+    expect(prompt).toContain("blocking problems are proven P0 or P1 findings");
+  });
+
+  it("tells the lead that unproven findings are leads, not defects", () => {
+    const plan = planFollowUp({ current: { round: 0, fixes: 0 }, audits: ["x"], results: [] });
+    expect(plan.prompt).toContain("Findings marked unproven are leads, not defects");
   });
 });
 
@@ -677,5 +896,31 @@ describe("baseline-aware audit prompt", () => {
     expect(prompt).not.toContain("git diff refs/");
     expect(prompt).toContain("Read the diff to see whether the failing code was touched.");
     expect(prompt).toContain("preExistingFailures");
+  });
+});
+
+describe("crew memory references", () => {
+  const brief = delegatePrompt({ role: "worker", leadTitle: "Fix login", task: "Add tests" });
+
+  it("adds one reference and one identifier-only record per memory behind the plain brief", () => {
+    const { text, context } = withCrewMemoryReferences(brief, [
+      { memoryId: "mem-1", selectedVersion: 3 },
+      { memoryId: "mem-2", selectedVersion: 1 },
+    ]);
+    expect(text.startsWith(brief)).toBe(true);
+    expect(text.match(/t3-context:\/\/v1\/memory\//g)?.length).toBe(2);
+    expect(context?.records.map((record) => "payload" in record && record.payload)).toEqual([
+      { memoryId: "mem-1", selectedVersion: 3 },
+      { memoryId: "mem-2", selectedVersion: 1 },
+    ]);
+    // The brief is built without any memory input, so it can never carry a body.
+    expect(brief).not.toContain("t3-context://");
+  });
+
+  it("leaves the brief untouched when there is no memory, and strips references for a retry", () => {
+    expect(withCrewMemoryReferences(brief, [])).toEqual({ text: brief, context: undefined });
+    const { text } = withCrewMemoryReferences(brief, [{ memoryId: "mem-1", selectedVersion: 1 }]);
+    expect(withoutCrewMemoryReferences(text)).toBe(brief);
+    expect(withoutCrewMemoryReferences(brief)).toBe(brief);
   });
 });

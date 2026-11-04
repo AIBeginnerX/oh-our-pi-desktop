@@ -163,6 +163,12 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "turn/start") {
+    if (script.recordTurnStarts) {
+      NodeFS.appendFileSync(
+        `${process.env.T3_CODEX_COLLAB_SCRIPT}.requests`,
+        `${JSON.stringify({ method, params: message.params })}\n`,
+      );
+    }
     const turnId = script.turnIds?.[turnStartCount];
     const turn = turnId
       ? { ...fixture.responses.turnStart.turn, id: turnId }

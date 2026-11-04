@@ -469,6 +469,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.parentThreadId !== undefined
             ? { parentThreadId: command.parentThreadId }
             : {}),
+          ...(command.crew !== undefined ? { crew: command.crew } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -1481,6 +1482,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           runtimeMode: command.runtimeMode,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.crew.set": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.crew-set",
+        payload: {
+          threadId: command.threadId,
+          crew: command.crew,
           updatedAt: occurredAt,
         },
       };

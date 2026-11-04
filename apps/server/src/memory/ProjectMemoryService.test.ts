@@ -6,6 +6,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -17,7 +18,10 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   MessageId,
+  PROJECT_MEMORY_ANALYSER_PENDING_MAX,
+  PROJECT_MEMORY_DERIVED_VALID_DAYS,
   PROJECT_MEMORY_PENDING_PROPOSALS_MAX,
+  PROJECT_MEMORY_SENT_MAX,
   PROJECT_MEMORY_THREAD_CHANGES_MAX,
   ProjectId,
   ProjectMemoryId,
@@ -104,6 +108,7 @@ function withMemoryStack<A, E, R>(
         const real = yield* ProjectMemorySendLedger;
         return {
           commitDispatch: (input) => real.commitDispatch(input),
+          recordRecall: (input) => real.recordRecall(input),
           // The fence pair delegates to the same real instance, so a
           // service update/delete bumps the counters tests capture.
           captureMutationFence: () => real.captureMutationFence(),
@@ -112,6 +117,8 @@ function withMemoryStack<A, E, R>(
           revalidateDispatch: (input) => real.revalidateDispatch(input),
           settle: (input) => real.settle(input),
           reconcileOtherOwners: (input) => real.reconcileOtherOwners(input),
+          sentToThread: (input) => real.sentToThread(input),
+          sentForMessage: (input) => real.sentForMessage(input),
           affectedState: (input) =>
             hooks.ledgerFault?.method === "affectedState"
               ? (hooks.ledgerFault.effect as Effect.Effect<
@@ -374,6 +381,7 @@ const seedExposure = (input: {
   readonly memoryId: string;
   readonly projectId?: string;
   readonly version?: number;
+  readonly state?: "provider_accepted" | "external_send_unknown";
 }) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -384,7 +392,7 @@ const seedExposure = (input: {
       )
       VALUES (
         ${input.threadId}, ${input.messageId}, ${input.projectId ?? "project-1"}, 'provider', 'test-owner',
-        'provider_accepted', ${NOW}, ${NOW}
+        ${input.state ?? "provider_accepted"}, ${NOW}, ${NOW}
       )
       RETURNING attempt_seq AS "attemptSeq"
     `;
@@ -469,6 +477,13 @@ describe("ProjectMemoryService", () => {
       // Summaries carry no body.
       assert.isFalse("body" in page.items[0]!);
       assert.isFalse(page.truncated);
+
+      // Only a list that asks for bodies gets them.
+      const withBody = yield* service.list({
+        projectId: ProjectId.make("project-1"),
+        includeBody: true,
+      });
+      assert.equal(withBody.items[0]!.body, "Run migrations then restart the server");
     }));
 
   test("keeps memories isolated between projects", () =>
@@ -732,6 +747,39 @@ describe("ProjectMemoryService", () => {
       });
       assert.equal(english.items.length, 1);
       assert.equal(english.items[0]?.title, "Coverage 100% 달성");
+    }));
+
+  test("ranks a long request by how many of its words a memory matches", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      yield* service.create(
+        createInput({ title: "배포 절차", body: "배포 전에 pnpm build 를 실행한다." }),
+      );
+      yield* service.create(
+        createInput({
+          title: "Login error handling",
+          body: "Show the inline error when the login request fails.",
+        }),
+      );
+      yield* service.create(createInput({ title: "Spacing", body: "Use the 4px grid." }));
+      const top = (query: string) =>
+        service
+          .search({ projectId: ProjectId.make("project-1"), query })
+          .pipe(Effect.map((page) => page.items.map((item) => item.title)));
+
+      // English: a whole sentence still finds the memory, though not every word is in it.
+      assert.deepEqual(
+        (yield* top("please fix the login error handling for me")).at(0),
+        "Login error handling",
+      );
+      // Korean: particles and unmatched words do not hide the memory.
+      assert.deepEqual((yield* top("배포 절차 좀 알려줘")).at(0), "배포 절차");
+      // Mixed: Hangul and Latin terms count together.
+      assert.deepEqual((yield* top("배포 전에 pnpm 문제 있어")).at(0), "배포 절차");
+      // A query nothing matches finds nothing.
+      assert.deepEqual(yield* top("zzzzzz qqqqqq"), []);
     }));
 
   test("a whitespace-only query browses like list", () =>
@@ -1591,6 +1639,171 @@ describe("ProjectMemoryService", () => {
         // The failed acks never moved the watermark the normal call wrote.
         assert.equal(yield* ackedThrough("thread-1"), 1);
       }));
+
+    describe("sent to thread", () => {
+      const projectId = ProjectId.make("project-1");
+      const threadId = ThreadId.make("thread-1");
+
+      test("lists composer and recall sends newest first, without memory bodies", () =>
+        Effect.gen(function* () {
+          yield* runMigrations();
+          yield* seedProject("project-1");
+          yield* seedThread("project-1", "thread-1");
+          yield* seedMemory({ memoryId: "mem-1", title: "SECRET-T", body: "SECRET-B" });
+          yield* seedMemory({ memoryId: "mem-2", title: "Second", body: "SECRET-B" });
+          yield* seedExposure({ threadId: "thread-1", messageId: "message-1", memoryId: "mem-1" });
+          yield* seedExposure({
+            threadId: "thread-1",
+            messageId: "recall:11111111",
+            memoryId: "mem-2",
+            state: "external_send_unknown",
+          });
+          const service = yield* ProjectMemoryService;
+
+          const sent = yield* service.sentToThread({ projectId, threadId });
+          assert.deepEqual(
+            sent.items.map((item) => [item.memoryId, item.via, item.state]),
+            [
+              ["mem-2", "recall", "external_send_unknown"],
+              ["mem-1", "message", "provider_accepted"],
+            ],
+          );
+          assert.deepEqual(
+            sent.items.map((item) => [item.version, item.changedSinceSent, item.deleted]),
+            [
+              [1, false, false],
+              [1, false, false],
+            ],
+          );
+          assert.equal(sent.items[1]?.title, "SECRET-T");
+          assert.isFalse(sent.truncated);
+          assert.isFalse(sent.held);
+          assert.isTrue(sent.items.every((item) => !("body" in item)));
+        }));
+
+      test("marks edited and deleted memories and reports the hold", () =>
+        Effect.gen(function* () {
+          yield* runMigrations();
+          yield* seedProject("project-1");
+          yield* seedThread("project-1", "thread-1");
+          yield* seedMemory({ memoryId: "mem-edited" });
+          yield* seedMemory({ memoryId: "mem-gone" });
+          yield* seedExposure({
+            threadId: "thread-1",
+            messageId: "message-1",
+            memoryId: "mem-edited",
+          });
+          yield* seedExposure({
+            threadId: "thread-1",
+            messageId: "message-2",
+            memoryId: "mem-gone",
+          });
+          yield* bumpMemory("mem-edited", "second");
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`DELETE FROM project_memories WHERE memory_id = 'mem-gone'`;
+          const service = yield* ProjectMemoryService;
+
+          const sent = yield* service.sentToThread({ projectId, threadId });
+          const gone = sent.items[0]!;
+          assert.equal(gone.memoryId, ProjectMemoryId.make("mem-gone"));
+          assert.isTrue(gone.deleted);
+          assert.isTrue(gone.changedSinceSent);
+          assert.isFalse("title" in gone);
+          const edited = sent.items[1]!;
+          assert.isFalse(edited.deleted);
+          assert.isTrue(edited.changedSinceSent);
+          assert.equal(edited.version, 1);
+          assert.equal(edited.title, "Runbook second");
+          assert.isTrue(sent.held);
+        }));
+
+      test("shows only this thread's sends and rejects an out-of-scope thread", () =>
+        Effect.gen(function* () {
+          yield* runMigrations();
+          yield* seedProject("project-1");
+          yield* seedProject("project-2");
+          yield* seedThread("project-1", "thread-1");
+          yield* seedThread("project-1", "thread-2");
+          yield* seedMemory({ memoryId: "mem-1" });
+          yield* seedExposure({ threadId: "thread-2", messageId: "message-1", memoryId: "mem-1" });
+          const service = yield* ProjectMemoryService;
+
+          const own = yield* service.sentToThread({ projectId, threadId });
+          assert.deepEqual(own.items, []);
+          const other = yield* service.sentToThread({
+            projectId,
+            threadId: ThreadId.make("thread-2"),
+          });
+          assert.equal(other.items.length, 1);
+
+          expectRejected(
+            yield* Effect.flip(
+              service.sentToThread({ projectId: ProjectId.make("project-2"), threadId }),
+            ),
+            "thread-missing",
+          );
+          expectRejected(
+            yield* Effect.flip(
+              service.sentToThread({ projectId, threadId: ThreadId.make("thread-missing") }),
+            ),
+            "thread-missing",
+          );
+        }));
+
+      test("bounds the list and flags that older sends exist", () =>
+        Effect.gen(function* () {
+          yield* runMigrations();
+          yield* seedProject("project-1");
+          yield* seedThread("project-1", "thread-1");
+          yield* seedMemory({ memoryId: "mem-1" });
+          for (let index = 0; index < PROJECT_MEMORY_SENT_MAX + 1; index += 1) {
+            yield* seedExposure({
+              threadId: "thread-1",
+              messageId: `message-${index}`,
+              memoryId: "mem-1",
+              version: index + 1,
+            });
+          }
+          const service = yield* ProjectMemoryService;
+
+          const sent = yield* service.sentToThread({ projectId, threadId });
+          assert.equal(sent.items.length, PROJECT_MEMORY_SENT_MAX);
+          assert.isTrue(sent.truncated);
+        }));
+
+      test("lists a memory version once, from its latest send, before the cap applies", () =>
+        Effect.gen(function* () {
+          yield* runMigrations();
+          yield* seedProject("project-1");
+          yield* seedThread("project-1", "thread-1");
+          yield* seedMemory({ memoryId: "mem-1" });
+          yield* seedMemory({ memoryId: "mem-2" });
+          // The same version re-sent many times must not crowd out other memories.
+          for (let index = 0; index < PROJECT_MEMORY_SENT_MAX + 5; index += 1) {
+            yield* seedExposure({
+              threadId: "thread-1",
+              messageId: `message-${index}`,
+              memoryId: "mem-1",
+            });
+          }
+          yield* seedExposure({
+            threadId: "thread-1",
+            messageId: "message-other",
+            memoryId: "mem-2",
+          });
+          const service = yield* ProjectMemoryService;
+
+          const sent = yield* service.sentToThread({ projectId, threadId });
+          assert.deepEqual(
+            sent.items.map((item) => [item.memoryId, item.version]),
+            [
+              ["mem-2", 1],
+              ["mem-1", 1],
+            ],
+          );
+          assert.isFalse(sent.truncated);
+        }));
+    });
   });
 
   test("update and delete run inside the shared ledger mutation fence; create does not", () =>
@@ -1825,5 +2038,217 @@ describe("ProjectMemoryService agent proposals", () => {
         SELECT COUNT(*) AS c FROM project_memory_proposals
       `;
       assert.equal(rows[0]?.c, 0);
+    }));
+});
+
+describe("ProjectMemoryService work-analyser suggestions", () => {
+  const PROJECT = ProjectId.make("project-1");
+  const evidence = [
+    { threadId: ThreadId.make("thread-1"), eventSeq: 4 },
+    { threadId: ThreadId.make("thread-2"), eventSeq: 9 },
+  ];
+  const derived = (text: string, target: "memory" | "skill" = "memory", evidenceNamed = true) => ({
+    projectId: PROJECT,
+    target,
+    text,
+    evidence,
+    evidenceNamed,
+  });
+
+  test("a suggestion keeps its evidence and does not count against the agent cap", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      for (let index = 0; index < PROJECT_MEMORY_PENDING_PROPOSALS_MAX; index += 1) {
+        yield* service.propose({
+          projectId: PROJECT,
+          threadId: ThreadId.make("thread-1"),
+          text: `Agent fact ${index}`,
+          reason: "Because.",
+        });
+      }
+
+      const outcome = yield* service.proposeDerived(derived("Run lint before every commit"));
+      if (outcome.status !== "proposed") throw new Error(`got ${outcome.status}`);
+      assert.deepEqual(outcome.proposal.analysis?.evidence, evidence);
+      assert.equal(outcome.proposal.analysis?.target, "memory");
+      assert.equal(
+        (yield* service.listProposals({ projectId: PROJECT })).items.length,
+        PROJECT_MEMORY_PENDING_PROPOSALS_MAX + 1,
+      );
+    }));
+
+  test("the analyser has its own cap, and agents are not starved by it", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      for (let index = 0; index < PROJECT_MEMORY_ANALYSER_PENDING_MAX; index += 1) {
+        const outcome = yield* service.proposeDerived(derived(`Distinct lesson number ${index}x`));
+        assert.equal(outcome.status, "proposed");
+      }
+      const over = yield* service.proposeDerived(derived("Yet another unrelated lesson body"));
+      assert.equal(over.status, "limit-reached");
+      yield* service.propose({
+        projectId: PROJECT,
+        threadId: ThreadId.make("thread-1"),
+        text: "An agent can still propose",
+        reason: "Because.",
+      });
+    }));
+
+  test("a rejected suggestion is never offered again, however it is spelled", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const first = yield* service.proposeDerived(derived("Never edit the generated client"));
+      if (first.status !== "proposed") throw new Error(first.status);
+      yield* service.rejectProposal({
+        projectId: PROJECT,
+        proposalId: first.proposal.proposalId,
+      });
+
+      const again = yield* service.proposeDerived(derived("  never   EDIT the generated client "));
+      assert.equal(again.status, "tombstoned");
+      // Another project is unaffected.
+      yield* seedProject("project-2");
+      const other = yield* service.proposeDerived({
+        ...derived("Never edit the generated client"),
+        projectId: ProjectId.make("project-2"),
+      });
+      assert.equal(other.status, "proposed");
+    }));
+
+  test("rejecting a suggestion tombstones its evidence only when a check name matched it", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+
+      // Stand-in evidence is shared by unrelated lessons: rejecting one leaves the others.
+      const standIn = yield* service.proposeDerived(
+        derived("Prefer small commits", "memory", false),
+      );
+      if (standIn.status !== "proposed") throw new Error(standIn.status);
+      yield* service.rejectProposal({
+        projectId: PROJECT,
+        proposalId: standIn.proposal.proposalId,
+      });
+      const sibling = yield* service.proposeDerived(
+        derived("Name branches after tickets", "memory", false),
+      );
+      assert.equal(sibling.status, "proposed");
+      // Its own text stays rejected.
+      const same = yield* service.proposeDerived(derived("Prefer small commits", "memory", false));
+      assert.equal(same.status, "tombstoned");
+
+      // Evidence a check name matched identifies the lesson: a rewording is still rejected.
+      const named = yield* service.proposeDerived(
+        derived("Run lint before every commit", "memory", true),
+      );
+      if (named.status !== "proposed") throw new Error(named.status);
+      yield* service.rejectProposal({ projectId: PROJECT, proposalId: named.proposal.proposalId });
+      const reworded = yield* service.proposeDerived(
+        derived("Always lint prior to committing", "memory", true),
+      );
+      assert.equal(reworded.status, "tombstoned");
+    }));
+
+  test("a text an existing memory or pending suggestion already says is skipped", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      yield* seedMemory({ memoryId: "mem-1", title: "Lint", body: "Run lint before every commit" });
+      const service = yield* ProjectMemoryService;
+
+      const same = yield* service.proposeDerived(derived("run lint before every commit."));
+      assert.equal(same.status, "duplicate");
+
+      const fresh = yield* service.proposeDerived(derived("Keep migrations append only"));
+      assert.equal(fresh.status, "proposed");
+      const repeated = yield* service.proposeDerived(derived("Keep migrations append only"));
+      assert.equal(repeated.status, "duplicate");
+    }));
+
+  test("a close but different memory is listed beside the suggestion, not merged", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      yield* seedMemory({
+        memoryId: "mem-1",
+        title: "Lint",
+        body: "Run lint before opening a pull request",
+      });
+      const service = yield* ProjectMemoryService;
+
+      const outcome = yield* service.proposeDerived(
+        derived("Run lint before opening a pull request or commit"),
+      );
+      if (outcome.status !== "proposed") throw new Error(outcome.status);
+      assert.deepEqual(
+        outcome.proposal.analysis?.related.map((memory) => memory.memoryId),
+        [ProjectMemoryId.make("mem-1")],
+      );
+      assert.equal((yield* service.list({ projectId: PROJECT })).items.length, 1);
+    }));
+
+  test("secrets and empty text never become suggestions", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const empty = yield* service.proposeDerived(derived("   "));
+      assert.equal(empty.status, "invalid");
+      const secret = yield* service.proposeDerived(
+        derived("The key is sk-abcdefghijklmnopqrstuvwxyz0123456789"),
+      );
+      assert.equal(secret.status, "invalid");
+      assert.deepEqual((yield* service.listProposals({ projectId: PROJECT })).items, []);
+    }));
+
+  test("approving a suggestion saves a derived memory that expires in 90 days", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const outcome = yield* service.proposeDerived(derived("Run lint before every commit"));
+      if (outcome.status !== "proposed") throw new Error(outcome.status);
+
+      const before = yield* Clock.currentTimeMillis;
+      const approved = yield* service.approveProposal({
+        projectId: PROJECT,
+        proposalId: outcome.proposal.proposalId,
+      });
+      // The wire origin stays one an older client decodes; the evidence rides beside it.
+      assert.deepEqual(approved.memory.origin, { type: "manual" });
+      assert.deepEqual(approved.memory.derivedFrom, evidence);
+      const expires = Date.parse(approved.memory.validUntil ?? "");
+      const day = 24 * 60 * 60 * 1000;
+      assert.equal(expires, before + PROJECT_MEMORY_DERIVED_VALID_DAYS * day);
+      const stored = yield* service.get({ projectId: PROJECT, memoryId: approved.memory.memoryId });
+      assert.deepEqual(stored.memory.derivedFrom, evidence);
+      const listed = yield* service.list({ projectId: PROJECT });
+      assert.deepEqual(listed.items[0]?.derivedFrom, evidence);
+    }));
+
+  test("a skill suggestion is not saved as a memory", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const outcome = yield* service.proposeDerived(
+        derived("Release: bump version, run checks, tag", "skill"),
+      );
+      if (outcome.status !== "proposed") throw new Error(outcome.status);
+
+      const error = yield* Effect.flip(
+        service.approveProposal({ projectId: PROJECT, proposalId: outcome.proposal.proposalId }),
+      );
+      if (error._tag !== "ProjectMemoryRejectedError") throw new Error(error._tag);
+      assert.equal(error.reason, "proposal-not-memory");
+      assert.equal((yield* service.list({ projectId: PROJECT })).items.length, 0);
+      assert.equal((yield* service.listProposals({ projectId: PROJECT })).items.length, 1);
     }));
 });

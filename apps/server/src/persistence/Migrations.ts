@@ -77,6 +77,10 @@ import Migration0062 from "./Migrations/062_ProjectSkillTrialReconciliation.ts";
 import Migration0063 from "./Migrations/063_ProjectionThreadsParentThreadId.ts";
 import Migration0064 from "./Migrations/064_CrewRuntimeState.ts";
 import Migration0065 from "./Migrations/065_ProjectMemoryProposals.ts";
+import Migration0066 from "./Migrations/066_ProjectionThreadsCrew.ts";
+import Migration0067 from "./Migrations/067_ProjectMemoryAnalysisCursor.ts";
+import Migration0068 from "./Migrations/068_ProjectMemoryDerivedProposals.ts";
+import Migration0069 from "./Migrations/069_ProjectMemoryProposalEvidenceNamed.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -154,6 +158,10 @@ const migrationEntries = [
   [63, "ProjectionThreadsParentThreadId", Migration0063],
   [64, "CrewRuntimeState", Migration0064],
   [65, "ProjectMemoryProposals", Migration0065],
+  [66, "ProjectionThreadsCrew", Migration0066],
+  [67, "ProjectMemoryAnalysisCursor", Migration0067],
+  [68, "ProjectMemoryDerivedProposals", Migration0068],
+  [69, "ProjectMemoryProposalEvidenceNamed", Migration0069],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

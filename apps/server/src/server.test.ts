@@ -1112,8 +1112,10 @@ const buildAppUnderTest = (options?: {
               const real = yield* ProjectMemorySendGate;
               return ProjectMemorySendGate.of({
                 threadHold: real.threadHold,
+                sentForMessage: real.sentForMessage,
                 driverAllowed: real.driverAllowed,
                 admit: real.admit,
+                recordRecall: real.recordRecall,
                 settle: (attemptSeq, outcome) =>
                   real
                     .settle(attemptSeq, outcome)
@@ -1389,7 +1391,8 @@ const buildAppUnderTest = (options?: {
             }),
           ),
         ),
-        Layer.provide(serverSettingsLayer),
+        // The work analyser behind the memory routes also resolves text generation here.
+        Layer.provide(Layer.mergeAll(serverSettingsLayer, l2TextGenerationLayer)),
         Layer.provide(
           Layer.mergeAll(
             Layer.mock(ExternalLauncher.ExternalLauncher)({
@@ -8526,6 +8529,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 changes: [],
                 mayHaveMore: false,
               });
+              // Read-scope tokens may also see which memories were sent.
+              const sent = yield* client[WS_METHODS.projectMemorySentToThread]({
+                projectId,
+                threadId,
+              });
+              assert.equal(sent.items.length, 3);
+              assert.equal(sent.held, false);
+              // The edited memory keeps its title and is marked changed; the
+              // deleted one and the one outside this project report no title.
+              const sentEdited = sent.items.filter((item) => item.title === "held fact v2");
+              assert.equal(sentEdited.length, 1);
+              assert.deepEqual(
+                [sentEdited[0]?.changedSinceSent, sentEdited[0]?.deleted],
+                [true, false],
+              );
+              assert.equal(sent.items.filter((item) => item.deleted).length, 2);
               const error = yield* client[WS_METHODS.projectMemoryAcknowledgeThread]({
                 projectId,
                 threadId,
@@ -12728,6 +12747,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const eventThreadId =
           subscription === "thread" ? defaultThreadId : ThreadId.make("other-live-thread");
         const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+        // The shell stream ignores tool activity (it only bumps updatedAt), so
+        // exercise it with an activity kind that does produce a shell push.
         const baseEvent = makeLiveToolActivityEvent(2, "tool.completed");
         const event: OrchestrationEvent = {
           ...baseEvent,
@@ -12736,6 +12757,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             threadId: eventThreadId,
             activity: {
               ...baseEvent.payload.activity,
+              kind: subscription === "thread" ? "tool.completed" : "task.progress",
               summary: "Build complete",
               payload: {
                 itemType: "command_execution",
@@ -14034,6 +14056,107 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.include(liveUpsertedIds, busyThreadId);
       assert.include(liveUpsertedIds, newThreadId);
       assert.isBelow(shellFetches.filter((id) => id === busyThreadId).length, 20);
+    }).pipe(Effect.provide(LoopbackHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("subscribeShell does not resend the shell for streaming deltas and tool activity", () =>
+    Effect.gen(function* () {
+      const busyThreadId = ThreadId.make("thread-streaming");
+      const doneThreadId = ThreadId.make("thread-streaming-done");
+      const now = "2026-01-01T00:00:00.000Z";
+      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+      const synchronized = yield* Deferred.make<void>();
+      const busyShellFetches: Array<string> = [];
+
+      const makeEvent = (
+        sequence: number,
+        aggregateId: ThreadId,
+        type: OrchestrationEvent["type"],
+        payload: unknown,
+      ): OrchestrationEvent =>
+        ({
+          sequence,
+          eventId: EventId.make(`event-streaming-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type,
+          payload,
+        }) as OrchestrationEvent;
+      const delta = (sequence: number) =>
+        makeEvent(sequence, busyThreadId, "thread.message-sent", {
+          role: "assistant",
+          streaming: true,
+        });
+      const activity = (sequence: number, kind: string) =>
+        makeEvent(sequence, busyThreadId, "thread.activity-appended", { activity: { kind } });
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: { streamDomainEvents: Stream.fromPubSub(liveEvents) },
+          projectionSnapshotQuery: {
+            getThreadShellById: (threadId) =>
+              Effect.sync(() => {
+                if (threadId === busyThreadId) busyShellFetches.push(threadId);
+                return Option.some(makeDefaultOrchestrationThreadShell({ id: threadId }));
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const itemsFiber = yield* withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeShell]({
+              requestCompletionMarker: true,
+            }).pipe(
+              Stream.tap((item) =>
+                item.kind === "synchronized"
+                  ? Deferred.succeed(synchronized, undefined).pipe(Effect.ignore)
+                  : Effect.void,
+              ),
+              Stream.takeUntil(
+                (item) => item.kind === "thread-upserted" && item.thread.id === doneThreadId,
+              ),
+              Stream.runCollect,
+            ),
+          ).pipe(Effect.forkScoped);
+
+          yield* Deferred.await(synchronized);
+          // Ten streaming deltas with tool activity, each in its own 50 ms
+          // coalescing window (60 ms apart), as a long assistant turn would produce.
+          for (let index = 0; index < 10; index += 1) {
+            yield* PubSub.publish(liveEvents, delta(1 + index * 2));
+            yield* PubSub.publish(liveEvents, activity(2 + index * 2, "tool.updated"));
+            yield* Effect.sleep("60 millis");
+          }
+          // Events that do change the shell: plan progress, then the finished message.
+          yield* PubSub.publish(liveEvents, activity(21, "turn.plan.updated"));
+          yield* Effect.sleep("60 millis");
+          yield* PubSub.publish(
+            liveEvents,
+            makeEvent(22, busyThreadId, "thread.message-sent", {
+              role: "assistant",
+              streaming: false,
+            }),
+          );
+          yield* Effect.sleep("60 millis");
+          yield* PubSub.publish(liveEvents, makeEvent(23, doneThreadId, "thread.created", {}));
+          return yield* Fiber.join(itemsFiber);
+        }),
+      ).pipe(Effect.timeout("5 seconds"));
+
+      const busySequences = Array.from(items).flatMap((item) =>
+        item.kind === "thread-upserted" && item.thread.id === busyThreadId ? [item.sequence] : [],
+      );
+      // Before: 12 pushes (one per window). After: only the plan and final message.
+      assert.deepEqual(busySequences, [21, 22]);
+      assert.equal(busyShellFetches.length, 2);
     }).pipe(Effect.provide(LoopbackHttpServer.layerTest), TestClock.withLive),
   );
 
@@ -16561,7 +16684,7 @@ it.live(
   120_000,
 );
 
-it.effect("production memory policy binds descriptor and gate to Claude only", () =>
+it.effect("production memory policy binds descriptor and gate to Claude and Codex only", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
@@ -16579,8 +16702,10 @@ it.effect("production memory policy binds descriptor and gate to Claude only", (
       manage: true,
       send: true,
       threadRecovery: true,
+      sentToThread: true,
       proposals: true,
-      sendDriverKinds: [ProviderDriverKind.make("claudeAgent")],
+      analyser: true,
+      sendDriverKinds: [ProviderDriverKind.make("claudeAgent"), ProviderDriverKind.make("codex")],
     });
     assert.deepEqual(descriptor.capabilities.projectSkills, {
       manage: true,
@@ -16594,7 +16719,10 @@ it.effect("production memory policy binds descriptor and gate to Claude only", (
       Effect.provide(ProjectMemorySendGateLayerLive.pipe(Layer.provide(configLayer))),
     );
     assert.isTrue(gate.driverAllowed(ProviderDriverKind.make("claudeAgent")));
-    assert.isFalse(gate.driverAllowed(ProviderDriverKind.make("codex")));
+    assert.isTrue(gate.driverAllowed(ProviderDriverKind.make("codex")));
+    for (const driver of ["cursor", "grok", "opencode", "antigravity", "minimax", "zcode"]) {
+      assert.isFalse(gate.driverAllowed(ProviderDriverKind.make(driver)));
+    }
 
     const controlDescriptor = yield* Effect.gen(function* () {
       const environment = yield* ServerEnvironment.ServerEnvironment;
@@ -16611,7 +16739,9 @@ it.effect("production memory policy binds descriptor and gate to Claude only", (
       manage: true,
       send: false,
       threadRecovery: true,
+      sentToThread: true,
       proposals: true,
+      analyser: true,
     });
     assert.deepEqual(controlDescriptor.capabilities.projectSkills, {
       manage: true,

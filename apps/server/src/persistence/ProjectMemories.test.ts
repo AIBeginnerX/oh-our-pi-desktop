@@ -470,7 +470,7 @@ describe("ProjectMemoryRepository", () => {
       assert.deepEqual(missing, { status: "not-found" });
     }));
 
-  test("combines FTS terms and LIKE fallback with AND semantics", () =>
+  test("combines FTS terms and LIKE fallback with OR semantics, best match first", () =>
     Effect.gen(function* () {
       yield* runMigrations();
       yield* seedProject("project-1");
@@ -482,16 +482,27 @@ describe("ProjectMemoryRepository", () => {
         insertInput({ memoryId: "mem-2", title: "배포 UI", body: "no staging here" }),
       );
 
-      // 3+ codepoint term via FTS plus a 1-2 codepoint term via LIKE; both
-      // must match for a row to appear.
+      // 3+ codepoint term via FTS plus a 1-2 codepoint term via LIKE; either
+      // matches a row, and the row matching both ranks first.
       const page = yield* repository.search({
         projectId: ProjectId.make("project-1"),
         ftsMatch: '"staging"',
         likePatterns: ["%UI%"],
         limit: 100,
       });
-      assert.equal(page.items.length, 1);
-      assert.equal(page.items[0]?.memoryId, "mem-2");
+      assert.deepEqual(
+        page.items.map((item) => item.memoryId),
+        ["mem-2", "mem-1"],
+      );
+
+      // No terms at all browses by recency instead of failing on an empty ORDER BY.
+      const browsed = yield* repository.search({
+        projectId: ProjectId.make("project-1"),
+        ftsMatch: null,
+        likePatterns: [],
+        limit: 100,
+      });
+      assert.equal(browsed.items.length, 2);
 
       // LIKE wildcards in the pattern were escaped by the planner — fed what
       // the planner emits for term `배_`, an underscore does not stand in for
@@ -526,5 +537,19 @@ describe("ProjectMemoryRepository", () => {
       });
       assert.equal(page.items.length, 1);
       assert.equal(page.items[0]?.memoryId, "mem-a");
+    }));
+  test("keeps an analysis cursor per project that only moves forward and dies with the project", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const sql = yield* SqlClient.SqlClient;
+      const repository = yield* ProjectMemoryRepository;
+      const projectId = ProjectId.make("project-1");
+      assert.equal(yield* repository.getAnalysisCursor({ projectId }), 0);
+      yield* repository.advanceAnalysisCursor({ projectId, sequence: 40, now: NOW });
+      yield* repository.advanceAnalysisCursor({ projectId, sequence: 10, now: NOW });
+      assert.equal(yield* repository.getAnalysisCursor({ projectId }), 40);
+      yield* sql`UPDATE projection_projects SET deleted_at = ${NOW} WHERE project_id = 'project-1'`;
+      assert.equal(yield* repository.getAnalysisCursor({ projectId }), 0);
     }));
 });

@@ -15,7 +15,7 @@ import { cn } from "~/lib/utils";
 
 import { Badge } from "../ui/badge";
 import { hasElapsed, LiveElapsed } from "./LiveElapsed";
-import { nodeText, waveTitleText, type Translate } from "./workflowText";
+import { nodeText, proofText, todoText, waveTitleText, type Translate } from "./workflowText";
 
 export const WORKFLOW_STATE_TONE: Record<WorkflowNodeState, string> = {
   running: "text-primary",
@@ -227,7 +227,12 @@ const WorkflowNodeCard = memo(function WorkflowNodeCard(props: {
       : node.info.tokens === undefined
         ? undefined
         : t("{amount} tok", { amount: formatTokens(node.info.tokens) });
-  const meta = [crewTokens, workflowCostLabel(node.info, t)].filter(Boolean);
+  const meta = [
+    todoText(node.info, t),
+    proofText(node.info, t),
+    crewTokens,
+    workflowCostLabel(node.info, t),
+  ].filter(Boolean);
   const agentCard = node.info.actor !== undefined;
   return (
     <button

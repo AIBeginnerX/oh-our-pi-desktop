@@ -4,6 +4,7 @@ import {
   CommandId,
   EventId,
   type MessageId,
+  type CrewThreadOverride,
   type ModelSelection,
   type OrchestrationEvent,
   PROJECT_SKILL_CONTEXT_KIND,
@@ -15,7 +16,6 @@ import {
   type ProviderInstanceId,
   ThreadId,
   type ProviderSession,
-  type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
@@ -24,13 +24,11 @@ import {
   projectComposerContextForProvider,
   resolveProjectMemoryReferences,
 } from "@t3tools/shared/composerContextReferences";
-import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Exit from "effect/Exit";
@@ -39,21 +37,13 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as Schedule from "effect/Schedule";
-import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
-import {
-  ProviderAdapterProcessError,
-  ProviderAdapterRequestError,
-  ProviderAdapterValidationError,
-  ProviderWorkspaceMissingError,
-} from "../../provider/Errors.ts";
-import type { ProviderServiceError } from "../../provider/Errors.ts";
+import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../textGeneration/TextGeneration.ts";
 import {
   MEMORY_SEND_HOLD_DETAIL,
@@ -89,227 +79,51 @@ import {
   memoryEchoThreadShouldWithhold,
 } from "../memoryEcho.ts";
 import { forkParked, ServerActivation } from "../../serverActivation.ts";
-import {
-  formatThreadTitleContext,
-  type ThreadTitleMessage,
-} from "../../textGeneration/ThreadTitleContext.ts";
-import { canReplaceThreadTitle, DEFAULT_THREAD_TITLE } from "../threadTitles.ts";
-import {
-  resolveSourceControlWriterModelSelection,
-  ServerSettingsService,
-} from "../../serverSettings.ts";
+import { canReplaceThreadTitle } from "../threadTitles.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
-import { resolveCrew } from "@t3tools/shared/crew";
+import { canLeadCrew, resolveCrew } from "@t3tools/shared/crew";
 import {
   THREAD_GOAL_ACTIVITY,
   threadGoalNote,
   threadGoalProgress,
 } from "@t3tools/shared/threadGoal";
 import {
-  CREW_BRAIN_DRIVERS,
   claudeSubagentModel,
+  CREW_OFF_NOTE,
   crewBrief,
   isCrewThreadTitle,
+  PROVIDER_STOPPED_START_DETAIL,
 } from "../../crew/crewLogic.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
-const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
-const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
-const isProviderAdapterValidationError = Schema.is(ProviderAdapterValidationError);
-const isProviderWorkspaceMissingError = Schema.is(ProviderWorkspaceMissingError);
-const isProviderDriverKind = Schema.is(ProviderDriverKind);
-
-/**
- * Reactor-internal marker: a project-memory hold that surfaced inside the
- * compaction fork. Carries the fixed user-facing detail only — never a cause —
- * so the compaction failure path can give it the bounded cleanup (activity +
- * queue/map teardown) without session restoration or session error writes.
- */
-class MemoryHoldFailure extends Schema.TaggedError<MemoryHoldFailure>()("MemoryHoldFailure", {
-  detail: Schema.String,
-}) {}
-
-/**
- * Two publish-step observations of one send must agree on every scalar and
- * every captured block to count as the same observation; any disagreement
- * drops the capture permanently rather than settling partial evidence.
- */
-const sameSubmissionObservation = (
-  a: ProviderAdmissionObservation & ProviderSkillTrialRoute,
-  b: ProviderAdmissionObservation & ProviderSkillTrialRoute,
-): boolean => {
-  const aCandidate = a.submissionCandidate;
-  const bCandidate = b.submissionCandidate;
-  return (
-    a.sessionGeneration === b.sessionGeneration &&
-    a.nativeSessionId === b.nativeSessionId &&
-    a.providerInstanceId === b.providerInstanceId &&
-    a.driverKind === b.driverKind &&
-    (aCandidate === undefined
-      ? bCandidate === undefined
-      : bCandidate !== undefined &&
-        aCandidate.routeConfigSha256 === bCandidate.routeConfigSha256 &&
-        aCandidate.textBlocks.length === bCandidate.textBlocks.length &&
-        aCandidate.textBlocks.every((text, index) => text === bCandidate.textBlocks[index]))
-  );
-};
-
-type ProviderIntentEvent = Extract<
-  OrchestrationEvent,
-  {
-    type:
-      | "thread.meta-updated"
-      | "thread.runtime-mode-set"
-      | "thread.turn-start-requested"
-      | "thread.turn-interrupt-requested"
-      | "thread.approval-response-requested"
-      | "thread.user-input-response-requested"
-      | "thread.session-stop-requested"
-      | "thread.settled"
-      | "thread.session-set";
-  }
->;
-
-/**
- * Keeps only a cause's interrupts. Rethrowing it preserves interrupt semantics
- * while dropping failure and defect reasons that may carry private content.
- * Call it only once `Cause.hasInterrupts(cause)` holds, so the result is never empty.
- */
-const interruptOnly = (cause: Cause.Cause<unknown>) =>
-  Cause.fromReasons<never>(cause.reasons.filter(Cause.isInterruptReason));
-
-/**
- * A memory-failure report's claim on the session its failing ensure left
- * "starting": that ensure's last session-set sequence (null when it wrote none)
- * and the status to restore. Without it the report is activity-only.
- */
-type MemorySessionRestore = {
-  readonly sessionSetSequence: number | null;
-  readonly status: "ready" | "error";
-};
-
-function toNonEmptyProviderInput(value: string | undefined): string | undefined {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : undefined;
-}
-
-const isCompactCommandMessage = (message: ThreadTitleMessage): boolean =>
-  message.role === "user" &&
-  (message.attachments?.length ?? 0) === 0 &&
-  message.text.trim().toLowerCase() === "/compact";
-function mapProviderSessionStatusToOrchestrationStatus(
-  status: "connecting" | "ready" | "running" | "error" | "closed",
-): OrchestrationSession["status"] {
-  switch (status) {
-    case "connecting":
-      return "starting";
-    case "running":
-      return "running";
-    case "error":
-      return "error";
-    case "closed":
-      return "stopped";
-    case "ready":
-    default:
-      return "ready";
-  }
-}
-
-const turnStartKeyForEvent = (event: ProviderIntentEvent): string =>
-  event.commandId !== null ? `command:${event.commandId}` : `event:${event.eventId}`;
-
-const HANDLED_TURN_START_KEY_MAX = 10_000;
-const HANDLED_TURN_START_KEY_TTL = Duration.minutes(30);
-const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
-
-function providerErrorLabel(value: string | undefined): string {
-  const normalized = value?.trim();
-  return normalized && normalized.length > 0 ? normalized : "unknown";
-}
-
-export function providerErrorLabelFromInstanceHint(input: {
-  readonly instanceId?: string | undefined;
-  readonly modelSelectionInstanceId?: string | undefined;
-  readonly sessionProvider?: string | undefined;
-}): string {
-  return providerErrorLabel(
-    input.instanceId ?? input.modelSelectionInstanceId ?? input.sessionProvider,
-  );
-}
-
-function findProviderAdapterRequestError(
-  cause: Cause.Cause<ProviderServiceError>,
-): ProviderAdapterRequestError | undefined {
-  const failReason = cause.reasons.find(Cause.isFailReason);
-  return isProviderAdapterRequestError(failReason?.error) ? failReason.error : undefined;
-}
-
-function isUnknownPendingApprovalRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
-  const error = findProviderAdapterRequestError(cause);
-  if (error) {
-    const detail = error.detail.toLowerCase();
-    return (
-      detail.includes("unknown pending approval request") ||
-      detail.includes("unknown pending permission request") ||
-      detail.includes("unknown pending codex approval request")
-    );
-  }
-  const message = Cause.pretty(cause).toLowerCase();
-  return (
-    message.includes("unknown pending approval request") ||
-    message.includes("unknown pending permission request") ||
-    message.includes("unknown pending codex approval request")
-  );
-}
-
-function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServiceError>): boolean {
-  const error = findProviderAdapterRequestError(cause);
-  if (error) {
-    const detail = error.detail.toLowerCase();
-    return (
-      detail.includes("unknown pending user-input request") ||
-      detail.includes("unknown pending user input request") ||
-      detail.includes("unknown pending codex user input request")
-    );
-  }
-  const message = Cause.pretty(cause).toLowerCase();
-  return (
-    message.includes("unknown pending user-input request") ||
-    message.includes("unknown pending user input request") ||
-    message.includes("unknown pending codex user input request")
-  );
-}
-
-function stalePendingRequestDetail(
-  requestKind: "approval" | "user-input",
-  requestId: string,
-): string {
-  return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
-}
-
-function buildGeneratedWorktreeBranchName(raw: string): string {
-  const normalized = raw
-    .trim()
-    .toLowerCase()
-    .replace(/^refs\/heads\//, "")
-    .replace(/['"`]/g, "");
-
-  const withoutPrefix = normalized.startsWith(`${WORKTREE_BRANCH_PREFIX}/`)
-    ? normalized.slice(`${WORKTREE_BRANCH_PREFIX}/`.length)
-    : normalized;
-
-  const branchFragment = withoutPrefix
-    .replace(/[^a-z0-9/_-]+/g, "-")
-    .replace(/\/+/g, "/")
-    .replace(/-+/g, "-")
-    .replace(/^[./_-]+|[./_-]+$/g, "")
-    .slice(0, 64)
-    .replace(/[./_-]+$/g, "");
-
-  const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
-  return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
-}
+export { providerErrorLabelFromInstanceHint } from "./ProviderCommandReactor.helpers.ts";
+import { makeThreadTitleOperations } from "./ProviderCommandReactor.titles.ts";
+import {
+  isProviderAdapterProcessError,
+  isProviderAdapterRequestError,
+  isProviderAdapterValidationError,
+  isProviderWorkspaceMissingError,
+  isProviderDriverKind,
+  MemoryHoldFailure,
+  sameSubmissionObservation,
+  type ProviderIntentEvent,
+  interruptOnly,
+  type MemorySessionRestore,
+  toNonEmptyProviderInput,
+  isCompactCommandMessage,
+  mapProviderSessionStatusToOrchestrationStatus,
+  turnStartKeyForEvent,
+  HANDLED_TURN_START_KEY_MAX,
+  HANDLED_TURN_START_KEY_TTL,
+  DEFAULT_RUNTIME_MODE,
+  providerErrorLabel,
+  providerErrorLabelFromInstanceHint,
+  isUnknownPendingApprovalRequestError,
+  isUnknownPendingUserInputRequestError,
+  stalePendingRequestDetail,
+} from "./ProviderCommandReactor.helpers.ts";
 
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
@@ -600,12 +414,10 @@ const make = Effect.gen(function* () {
     yield* reportCanceledQueuedTurns(threadId, detachTurnsAfterCompaction(threadId), detail);
   });
 
-  const STOPPED_BEFORE_SEND_DETAIL = "Stopped before this message was sent.";
-  const STOPPED_DURING_SEND_DETAIL =
-    "Stopped while sending. The provider may have received this message.";
-  const STOPPED_BEFORE_COMPACTION_DETAIL = "Stopped before context compaction started.";
-  const STOPPED_DURING_COMPACTION_DETAIL =
-    "Stopped during context compaction. The provider may still finish it.";
+  const STOPPED_BEFORE_SEND_DETAIL = PROVIDER_STOPPED_START_DETAIL.beforeSend;
+  const STOPPED_DURING_SEND_DETAIL = PROVIDER_STOPPED_START_DETAIL.duringSend;
+  const STOPPED_BEFORE_COMPACTION_DETAIL = PROVIDER_STOPPED_START_DETAIL.beforeCompaction;
+  const STOPPED_DURING_COMPACTION_DETAIL = PROVIDER_STOPPED_START_DETAIL.duringCompaction;
   const RESUME_AFTER_COMPACTION_FAILED_DETAIL =
     "The queued message could not resume after context compaction. Send this message again to continue.";
   // A canceled preparation whose provider cleanup could not be confirmed lands
@@ -1279,11 +1091,15 @@ const make = Effect.gen(function* () {
   // The open thread goal travels the same way.
   const sentGoalNotes = new Map<ThreadId, string>();
 
-  /** The OOP Crew note for a lead turn, or null when the crew is off or the brain cannot reach it. */
+  /**
+   * The OOP Crew note for a lead turn, or null when the crew is off or the brain cannot reach it;
+   * undefined when that could not be worked out, so nothing about the note changes.
+   */
   const crewBriefFor = (thread: {
     readonly id: ThreadId;
     readonly title: string;
     readonly modelSelection: ModelSelection;
+    readonly crew?: CrewThreadOverride | null | undefined;
   }) =>
     Effect.gen(function* () {
       if (isCrewThreadTitle(thread.title)) return null;
@@ -1292,10 +1108,13 @@ const make = Effect.gen(function* () {
       const brainDriver = providers.find(
         (provider) => provider.instanceId === thread.modelSelection.instanceId,
       )?.driver;
-      if (brainDriver === undefined || !CREW_BRAIN_DRIVERS.has(brainDriver)) return null;
+      // A snapshot without the thread's instance cannot say whether the crew applies, so leave the
+      // note and its sent state as they are.
+      if (brainDriver === undefined) return undefined;
+      if (!canLeadCrew(brainDriver)) return null;
       const crew = resolveCrew({
         settings: settings.crew,
-        threadId: thread.id,
+        override: thread.crew,
         providers,
         brain: thread.modelSelection,
       });
@@ -1320,7 +1139,7 @@ const make = Effect.gen(function* () {
       });
     }).pipe(
       Effect.catchCause((cause) =>
-        Effect.logWarning("crew brief skipped", { cause }).pipe(Effect.as(null)),
+        Effect.logWarning("crew brief skipped", { cause }).pipe(Effect.as(undefined)),
       ),
     );
 
@@ -1353,17 +1172,26 @@ const make = Effect.gen(function* () {
       id: thread.id,
       title: thread.title,
       modelSelection: input.modelSelection ?? thread.modelSelection,
+      crew: thread.crew,
     });
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
         Effect.map((sessions) => sessions.find((session) => session.threadId === input.threadId)),
       );
-    const briefKey = brief === null ? null : `${activeSession?.createdAt ?? ""}\n${brief}`;
+    const sessionPrefix = `${activeSession?.createdAt ?? ""}\n`;
+    const briefKey = brief === null || brief === undefined ? null : `${sessionPrefix}${brief}`;
     const freshBrief =
-      briefKey !== null && sentCrewBriefs.get(input.threadId) !== briefKey ? brief : null;
-    if (briefKey === null) sentCrewBriefs.delete(input.threadId);
-    else sentCrewBriefs.set(input.threadId, briefKey);
+      briefKey !== null && sentCrewBriefs.get(input.threadId) !== briefKey ? (brief ?? null) : null;
+    // The earlier note stays in this session's conversation, so tell the model once it is void.
+    const crewOffNote =
+      brief === null && sentCrewBriefs.get(input.threadId)?.startsWith(sessionPrefix) === true
+        ? CREW_OFF_NOTE
+        : null;
+    if (brief !== undefined) {
+      if (briefKey === null) sentCrewBriefs.delete(input.threadId);
+      else sentCrewBriefs.set(input.threadId, briefKey);
+    }
     const goal = (yield* serverSettingsService.getSettings).threadGoals[input.threadId];
     const goalOpen =
       goal !== undefined &&
@@ -1383,7 +1211,9 @@ const make = Effect.gen(function* () {
     if (goalKey === null) sentGoalNotes.delete(input.threadId);
     else sentGoalNotes.set(input.threadId, goalKey);
     const normalizedInput = toNonEmptyProviderInput(
-      [freshGoalNote, freshBrief, input.messageText].filter((part) => part !== null).join("\n\n"),
+      [freshGoalNote, freshBrief, crewOffNote, input.messageText]
+        .filter((part) => part !== null)
+        .join("\n\n"),
     );
     const normalizedAttachments = input.attachments ?? [];
     const sessionModelSwitch =
@@ -1425,356 +1255,28 @@ const make = Effect.gen(function* () {
     };
   });
 
-  const maybeGenerateAndRenameWorktreeBranchForFirstTurn = Effect.fn(
-    "maybeGenerateAndRenameWorktreeBranchForFirstTurn",
-  )(function* (input: {
-    readonly threadId: ThreadId;
-    readonly branch: string | null;
-    readonly worktreePath: string | null;
-    readonly messageText: string;
-    readonly attachments?: ReadonlyArray<ChatAttachment>;
-  }) {
-    if (!input.branch || !input.worktreePath) {
-      return;
-    }
-    if (!isTemporaryWorktreeBranch(input.branch)) {
-      return;
-    }
-
-    const oldBranch = input.branch;
-    const cwd = input.worktreePath;
-    const attachments = input.attachments ?? [];
-    yield* Effect.gen(function* () {
-      const settings = yield* projectSettingsForThread(input.threadId);
-      const modelSelection =
-        settings.sourceControlWriterModelSelection === null
-          ? settings.textGenerationModelSelection
-          : resolveSourceControlWriterModelSelection(
-              settings,
-              yield* providerRegistry.getProviders,
-            );
-
-      const generated = yield* textGeneration.generateBranchName({
-        cwd,
-        message: input.messageText,
-        ...(attachments.length > 0 ? { attachments } : {}),
-        modelSelection,
-      });
-      if (!generated) return;
-
-      const targetBranch = buildGeneratedWorktreeBranchName(generated.branch);
-      if (targetBranch === oldBranch) return;
-
-      const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch });
-      yield* orchestrationEngine.dispatch({
-        type: "thread.meta.update",
-        commandId: yield* serverCommandId("worktree-branch-rename"),
-        threadId: input.threadId,
-        branch: renamed.branch,
-        worktreePath: cwd,
-      });
-      yield* vcsStatusBroadcaster.refreshStatus(cwd).pipe(Effect.ignoreCause({ log: true }));
-    }).pipe(
-      Effect.catchCause((cause) =>
-        Effect.logWarning("provider command reactor failed to generate or rename worktree branch", {
-          threadId: input.threadId,
-          cwd,
-          oldBranch,
-          cause: Cause.pretty(cause),
-        }),
-      ),
-    );
+  const {
+    maybeGenerateAndRenameWorktreeBranchForFirstTurn,
+    maybeGenerateThreadTitleForFirstTurn,
+    maybeRefineThreadTitle,
+    findPendingThreadTitles,
+    clearInterruptedThreadTitleRegenerations,
+    processThreadTitleRegenerationSafely,
+  } = makeThreadTitleOperations({
+    orchestrationEngine,
+    projectionSnapshotQuery,
+    providerRegistry,
+    gitWorkflow,
+    vcsStatusBroadcaster,
+    textGeneration,
+    serverSettingsService,
+    providerDiagnosticText,
+    projectSettingsForThread,
+    serverCommandId,
+    resolveProject,
+    resolveThreadShell,
+    resolveThreadDetail,
   });
-
-  const maybeGenerateThreadTitleForFirstTurn = Effect.fn("maybeGenerateThreadTitleForFirstTurn")(
-    function* (input: {
-      readonly threadId: ThreadId;
-      readonly cwd: string;
-      readonly messageText: string;
-      readonly attachments?: ReadonlyArray<ChatAttachment>;
-      readonly titleSeed?: string;
-      readonly expectedTitle: string;
-      readonly expectedVersion: CommandId | null;
-    }) {
-      const attachments = input.attachments ?? [];
-      yield* Effect.gen(function* () {
-        const { textGenerationModelSelection: modelSelection } = yield* projectSettingsForThread(
-          input.threadId,
-        );
-
-        const generated = yield* textGeneration
-          .generateThreadTitle({
-            cwd: input.cwd,
-            message: input.messageText,
-            ...(attachments.length > 0 ? { attachments } : {}),
-            modelSelection,
-          })
-          .pipe(
-            Effect.retry({
-              times: 2,
-              schedule: Schedule.exponential("2 seconds"),
-            }),
-          );
-        if (!generated) return;
-
-        const thread = yield* resolveThreadShell(input.threadId);
-        if (!thread) return;
-        if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
-          return;
-        }
-
-        yield* orchestrationEngine.dispatch({
-          type: "thread.title.generate.complete",
-          commandId: yield* serverCommandId("thread-title-rename"),
-          threadId: input.threadId,
-          title: generated.title === DEFAULT_THREAD_TITLE ? input.expectedTitle : generated.title,
-          expectedTitle: input.expectedTitle,
-          expectedVersion: input.expectedVersion,
-          needsRefinement:
-            generated.needsRefinement === true || generated.title === DEFAULT_THREAD_TITLE,
-        });
-      }).pipe(
-        Effect.catchCause((cause) =>
-          providerDiagnosticText(input.threadId, () => Cause.pretty(cause)).pipe(
-            Effect.flatMap((causeText) =>
-              Effect.logWarning(
-                "provider command reactor failed to generate or rename thread title",
-                {
-                  threadId: input.threadId,
-                  cwd: input.cwd,
-                  cause: causeText,
-                },
-              ),
-            ),
-          ),
-        ),
-      );
-    },
-  );
-
-  const maybeRefineThreadTitle = Effect.fn("maybeRefineThreadTitle")(function* (
-    threadId: ThreadId,
-  ) {
-    const thread = yield* resolveThreadShell(threadId);
-    if (
-      !thread?.titleState?.needsRefinement ||
-      thread.titleState.source !== "generated" ||
-      thread.titleRegeneration != null ||
-      thread.latestTurn?.state !== "completed" ||
-      thread.session?.status !== "ready"
-    )
-      return;
-    const detail = yield* resolveThreadDetail(threadId);
-    if (!detail || detail.messages.filter((message) => message.role === "user").length !== 1)
-      return;
-    yield* orchestrationEngine.dispatch({
-      type: "thread.title.refine",
-      commandId: yield* serverCommandId("thread-title-refine"),
-      threadId,
-      expectedVersion: thread.titleState.version,
-    });
-  });
-
-  const regenerateThreadTitle = Effect.fn("regenerateThreadTitle")(function* (
-    event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>,
-    requestId: CommandId,
-  ) {
-    if (event.payload.regenerateTitle !== true) {
-      return { _tag: "Superseded" } as const;
-    }
-
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
-    if (!thread || thread.titleRegeneration?.requestId !== requestId) {
-      return { _tag: "Superseded" } as const;
-    }
-
-    // Memory labels are normalized on an ephemeral copy only: assistant/system
-    // rows and the persisted thread stay untouched, and no envelope is built.
-    const { message, attachments } = formatThreadTitleContext(
-      thread.messages.map((entry) =>
-        entry.role === "user"
-          ? {
-              ...entry,
-              text: normalizeProjectMemoryReferenceLabels({
-                text: entry.text,
-                records: entry.context?.records ?? [],
-              }),
-            }
-          : entry,
-      ),
-    );
-    if (message.length === 0) {
-      return { _tag: "Completed", title: undefined } as const;
-    }
-
-    const previousTitle = event.payload.previousTitle ?? thread.title;
-    if (thread.title !== previousTitle) {
-      return { _tag: "Superseded" } as const;
-    }
-    const project = yield* resolveProject(thread.projectId);
-    const cwd =
-      resolveThreadWorkspaceCwd({
-        thread,
-        projects: project ? [project] : [],
-      }) ?? process.cwd();
-    const { textGenerationModelSelection: modelSelection } = resolveProjectSettings(
-      yield* serverSettingsService.getSettings,
-      thread.projectId,
-    ).settings;
-    const generated = yield* textGeneration.generateThreadTitle({
-      cwd,
-      message,
-      previousTitle,
-      ...(attachments.length > 0 ? { attachments } : {}),
-      modelSelection,
-    });
-    if (generated.title === DEFAULT_THREAD_TITLE || generated.title === previousTitle) {
-      return { _tag: "Completed", title: undefined } as const;
-    }
-
-    const latestThread = yield* resolveThreadShell(event.payload.threadId);
-    if (
-      !latestThread ||
-      latestThread.titleRegeneration?.requestId !== requestId ||
-      latestThread.title !== previousTitle
-    ) {
-      return { _tag: "Superseded" } as const;
-    }
-
-    return { _tag: "Completed", title: generated.title } as const;
-  });
-  const dispatchThreadTitleRegenerationCompletion = Effect.fn(
-    "dispatchThreadTitleRegenerationCompletion",
-  )(function* (input: {
-    readonly threadId: ThreadId;
-    readonly requestId: CommandId;
-    readonly title?: string;
-  }) {
-    yield* orchestrationEngine.dispatch({
-      type: "thread.title.regeneration.complete",
-      commandId: yield* serverCommandId("thread-title-regeneration-complete"),
-      threadId: input.threadId,
-      requestId: input.requestId,
-      ...(input.title !== undefined ? { title: input.title } : {}),
-    });
-  });
-  const findPendingThreadTitles = Effect.fn("findPendingThreadTitles")(function* () {
-    const readModel = yield* projectionSnapshotQuery.getCommandReadModel();
-    return {
-      interruptedRegenerations: readModel.threads.flatMap((thread) => {
-        const requestId = thread.titleRegeneration?.requestId;
-        return requestId === undefined ? [] : [{ threadId: thread.id, requestId }];
-      }),
-      refinementThreadIds: readModel.threads
-        .filter((thread) => thread.titleState?.needsRefinement)
-        .map((thread) => thread.id),
-    };
-  });
-  const clearInterruptedThreadTitleRegenerations = Effect.fn(
-    "clearInterruptedThreadTitleRegenerations",
-  )(function* (
-    interrupted: ReadonlyArray<{ readonly threadId: ThreadId; readonly requestId: CommandId }>,
-  ) {
-    yield* Effect.forEach(
-      interrupted,
-      ({ threadId, requestId }) => {
-        return dispatchThreadTitleRegenerationCompletion({
-          threadId,
-          requestId,
-        }).pipe(
-          Effect.catchCause((cause) => {
-            if (Cause.hasInterruptsOnly(cause)) {
-              return Effect.interrupt;
-            }
-            return providerDiagnosticText(threadId, () => Cause.pretty(cause)).pipe(
-              Effect.flatMap((causeText) =>
-                Effect.logWarning(
-                  "provider command reactor failed to clear interrupted title regeneration",
-                  {
-                    threadId,
-                    cause: causeText,
-                  },
-                ),
-              ),
-            );
-          }),
-        );
-      },
-      { discard: true },
-    );
-  });
-  const processThreadTitleRegenerationSafely = Effect.fn("processThreadTitleRegenerationSafely")(
-    function* (event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>) {
-      if (event.payload.regenerateTitle !== true) {
-        return;
-      }
-
-      const requestId = event.payload.titleRegeneration?.requestId ?? event.commandId;
-      if (requestId === null) {
-        return;
-      }
-      const result = yield* regenerateThreadTitle(event, requestId).pipe(
-        Effect.catchCauseIf(
-          (cause) => !Cause.hasInterruptsOnly(cause),
-          (cause) =>
-            providerDiagnosticText(event.payload.threadId, () => Cause.pretty(cause)).pipe(
-              Effect.flatMap((causeText) =>
-                Effect.logWarning("provider command reactor failed to regenerate thread title", {
-                  threadId: event.payload.threadId,
-                  cause: causeText,
-                }),
-              ),
-              Effect.as({ _tag: "Completed", title: undefined } as const),
-            ),
-        ),
-      );
-      if (result._tag === "Superseded") {
-        return;
-      }
-
-      const completion = {
-        threadId: event.payload.threadId,
-        requestId,
-        ...(result.title !== undefined ? { title: result.title } : {}),
-      };
-      yield* dispatchThreadTitleRegenerationCompletion(completion).pipe(
-        Effect.catchCauseIf(
-          (cause) => !Cause.hasInterruptsOnly(cause),
-          (cause) =>
-            providerDiagnosticText(event.payload.threadId, () => Cause.pretty(cause)).pipe(
-              Effect.flatMap((causeText) =>
-                Effect.logWarning(
-                  "provider command reactor retrying title regeneration completion",
-                  {
-                    threadId: event.payload.threadId,
-                    cause: causeText,
-                  },
-                ),
-              ),
-              Effect.andThen(dispatchThreadTitleRegenerationCompletion(completion)),
-            ),
-        ),
-      );
-    },
-    (effect, event) =>
-      effect.pipe(
-        Effect.catchCauseIf(
-          (cause) => !Cause.hasInterrupts(cause),
-          (cause) =>
-            providerDiagnosticText(event.payload.threadId, () => Cause.pretty(cause)).pipe(
-              Effect.flatMap((causeText) =>
-                Effect.logWarning(
-                  "provider command reactor failed to complete title regeneration",
-                  {
-                    threadId: event.payload.threadId,
-                    cause: causeText,
-                  },
-                ),
-              ),
-            ),
-        ),
-      ),
-  );
   const threadTitleRegenerationWorker = yield* makeDrainableWorker(
     processThreadTitleRegenerationSafely,
   );

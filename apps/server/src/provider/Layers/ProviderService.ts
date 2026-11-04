@@ -9,19 +9,15 @@
  *
  * @module ProviderServiceLive
  */
+
 import {
   EventId,
-  MessageId,
-  ModelSelection,
-  NonNegativeInt,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   RuntimeRequestId,
   ProviderSendTurnInput,
   type ChatImageAttachment,
-  type SnapShotAccessibility,
-  type SnapShotAccessibilityNode,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
@@ -39,7 +35,6 @@ import {
 import { expandAssistantCitationsForProvider } from "@t3tools/shared/assistantCitations";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { causeErrorTag } from "@t3tools/shared/observability";
-import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
@@ -51,10 +46,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
-import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
-
 import { appendUserInputAttachmentPaths } from "../userInputAttachments.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -78,7 +70,6 @@ import {
   ProviderMemoryHandoffRefusedError,
   ProviderSkillTrialHandoffRefusedError,
   type ProviderAdapterError,
-  ProviderSessionDirectoryPersistenceError,
   ProviderValidationError,
   ProviderWorkspaceMissingError,
 } from "../Errors.ts";
@@ -99,161 +90,39 @@ import * as ServerSettings from "../../serverSettings.ts";
 import * as ProjectionSnapshotQuery from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as RestartContinuations from "../../restartContinuations.ts";
 import { ProjectSkillUsePolicy } from "../../skills/ProjectSkillUsePolicy.ts";
-const isModelSelection = Schema.is(ModelSelection);
-const encodePromptJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-
-interface SnapShotPromptAccessibilityNode {
-  readonly role: string;
-  readonly name?: string;
-  readonly value?: string;
-  readonly description?: string;
-  readonly bounds?: NonNullable<SnapShotAccessibilityNode["bounds"]>;
-  readonly state?: SnapShotAccessibilityNode["state"];
-  readonly actions?: ReadonlyArray<string>;
-  readonly children?: ReadonlyArray<SnapShotPromptAccessibilityNode>;
-}
-
-type SnapShotPromptAccessibility =
-  | {
-      readonly format: "flat-text";
-      readonly text: string;
-      readonly truncated?: true;
-    }
-  | {
-      readonly format: "element-tree";
-      readonly coordinateSpace?: "captured-image";
-      readonly imageSize?: { readonly width: number; readonly height: number };
-      readonly truncated?: true;
-      readonly root: SnapShotPromptAccessibilityNode;
-    };
-
-function normalizedAccessibilityLabel(value: string): string {
-  return value.trim().replaceAll(/\s+/g, " ").toLowerCase();
-}
-
-function isRedundantWindowButtonDescription(node: SnapShotAccessibilityNode): boolean {
-  if (node.role !== "button" || !node.name || !node.description) return false;
-  return (
-    normalizedAccessibilityLabel(node.description) ===
-    `${normalizedAccessibilityLabel(node.name)} the window`
-  );
-}
-
-function isFullImageBounds(
-  bounds: NonNullable<SnapShotAccessibilityNode["bounds"]>,
-  imageSize: { readonly width: number; readonly height: number },
-): boolean {
-  return (
-    bounds.x === 0 &&
-    bounds.y === 0 &&
-    bounds.width === imageSize.width &&
-    bounds.height === imageSize.height
-  );
-}
-
-function compactAccessibilityNodeForPrompt(
-  node: SnapShotAccessibilityNode,
-  imageSize: { readonly width: number; readonly height: number },
-  options: { readonly isRoot: boolean; readonly parentName?: string },
-): ReadonlyArray<SnapShotPromptAccessibilityNode> {
-  const bounds =
-    node.bounds && !(options.isRoot && isFullImageBounds(node.bounds, imageSize))
-      ? node.bounds
-      : undefined;
-  const name = node.role !== "group" && node.name === options.parentName ? undefined : node.name;
-  const description = isRedundantWindowButtonDescription(node) ? undefined : node.description;
-  const actions = node.actions?.filter((action) => node.role !== "button" || action !== "press");
-  const children = node.children.flatMap((child) =>
-    compactAccessibilityNodeForPrompt(child, imageSize, {
-      isRoot: false,
-      ...(node.name
-        ? { parentName: node.name }
-        : options.parentName
-          ? { parentName: options.parentName }
-          : {}),
-    }),
-  );
-  const compacted: SnapShotPromptAccessibilityNode = {
-    role: node.role,
-    ...(name ? { name } : {}),
-    ...(node.value ? { value: node.value } : {}),
-    ...(description ? { description } : {}),
-    ...(bounds ? { bounds } : {}),
-    ...(node.state ? { state: node.state } : {}),
-    ...(actions && actions.length > 0 ? { actions } : {}),
-    ...(children.length > 0 ? { children } : {}),
-  };
-
-  const hasMetadata = Boolean(
-    compacted.name ||
-    compacted.value ||
-    compacted.description ||
-    compacted.bounds ||
-    compacted.state ||
-    compacted.actions,
-  );
-  if (!options.isRoot && node.role === "group" && !hasMetadata) return children;
-  if (
-    !options.isRoot &&
-    (node.role === "separator" || node.role === "tab_group") &&
-    !hasMetadata &&
-    children.length === 0
-  ) {
-    return [];
-  }
-  if (
-    !options.isRoot &&
-    node.role === "static_text" &&
-    node.name === options.parentName &&
-    !hasMetadata &&
-    children.length === 0
-  ) {
-    return [];
-  }
-  return [compacted];
-}
-
-function accessibilityNodeHasBounds(node: SnapShotPromptAccessibilityNode): boolean {
-  return Boolean(node.bounds || node.children?.some(accessibilityNodeHasBounds));
-}
-
-function compactAccessibilityForPrompt(
-  accessibility: SnapShotAccessibility,
-): SnapShotPromptAccessibility {
-  if (accessibility.format === "flat-text") {
-    return {
-      format: "flat-text",
-      text: accessibility.text,
-      ...(accessibility.truncated ? { truncated: true } : {}),
-    };
-  }
-
-  const root = compactAccessibilityNodeForPrompt(accessibility.root, accessibility.imageSize, {
-    isRoot: true,
-  })[0]!;
-  const hasBounds = accessibilityNodeHasBounds(root);
-  return {
-    format: "element-tree",
-    ...(hasBounds
-      ? { coordinateSpace: accessibility.coordinateSpace, imageSize: accessibility.imageSize }
-      : {}),
-    ...(accessibility.truncated ? { truncated: true } : {}),
-    root,
-  };
-}
-
-/** How long a manual context compaction may run before ProviderService gives up on it. */
-const COMPACTION_COMPLETION_TIMEOUT = "10 minutes";
-
-interface PendingCompaction {
-  readonly completion: Deferred.Deferred<string>;
-  readonly native: boolean;
-  readonly providerInstanceId: ProviderInstanceId;
-  readonly requestId: MessageId | undefined;
-  readonly earlyEvents: ProviderRuntimeEvent[];
-  compactedEventObserved: boolean;
-  expectedTurnId: TurnId | undefined;
-}
+import {
+  COMPACTION_COMPLETION_TIMEOUT,
+  type ContinuationRun,
+  type DeferredTurnAnalyticsCompletion,
+  MAX_ACTIVE_TURN_ANALYTICS_PER_SESSION,
+  MAX_COMPLETED_TURN_ANALYTICS_KEYS,
+  type PendingCompaction,
+  ProviderRollbackConversationInput,
+  type ProviderServiceMethod,
+  type TurnAnalyticsMetadata,
+  type TurnAnalyticsState,
+  accessibilityNodeHasBounds,
+  compactAccessibilityForPrompt,
+  correlateRuntimeEventWithInstance,
+  decodeInputOrValidationError,
+  dieOnMissingBindingInstanceId,
+  encodePromptJson,
+  isSettledBinding,
+  normalizeDirectoryWrite,
+  readPersistedCwd,
+  readPersistedModelSelection,
+  refuseHandoff,
+  refuseSkillTrial,
+  sameJson,
+  setActiveTurnAnalytics,
+  toContinuationRevokedError,
+  toRuntimePayloadFromSession,
+  toRuntimeStatus,
+  toValidationError,
+  turnAnalyticsCompletionKey,
+  turnAnalyticsSessionKey,
+  turnEffort,
+} from "./ProviderService.helpers.ts";
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -270,118 +139,6 @@ export interface ProviderServiceLiveOptions {
    */
   readonly issueMcpCredential?: typeof McpSessionRegistry.issueActiveMcpCredential;
 }
-
-interface TurnAnalyticsMetadata {
-  readonly requestId: number;
-  readonly provider: ProviderDriverKind;
-  readonly startedAtMs: number;
-  readonly mixedModels: boolean;
-  readonly subscriptionSharing?: boolean;
-  readonly model?: string;
-  readonly effort?: string;
-  readonly interactionMode?: string;
-  readonly runtimeMode?: string;
-}
-
-interface ActiveTurnAnalytics {
-  readonly metadata: TurnAnalyticsMetadata;
-  readonly requestAssociated: boolean;
-}
-
-interface DeferredTurnAnalyticsCompletion {
-  readonly completionKey: string;
-  readonly completedAtMs: number;
-  readonly terminalProperties: Readonly<Record<string, unknown>>;
-}
-
-interface TurnAnalyticsSessionState {
-  readonly pendingByRequestId: Map<number, TurnAnalyticsMetadata>;
-  readonly activeByTurnId: Map<string, ActiveTurnAnalytics>;
-  readonly deferredCompletionsByTurnId: Map<string, DeferredTurnAnalyticsCompletion>;
-}
-
-interface TurnAnalyticsState {
-  readonly sessions: Map<string, TurnAnalyticsSessionState>;
-  readonly completedKeys: Set<string>;
-  readonly completedOrder: Array<string>;
-}
-
-const MAX_COMPLETED_TURN_ANALYTICS_KEYS = 512;
-const MAX_ACTIVE_TURN_ANALYTICS_PER_SESSION = 8;
-
-function setActiveTurnAnalytics(
-  session: TurnAnalyticsSessionState,
-  turnId: string,
-  active: ActiveTurnAnalytics,
-): void {
-  session.activeByTurnId.set(turnId, active);
-  while (session.activeByTurnId.size > MAX_ACTIVE_TURN_ANALYTICS_PER_SESSION) {
-    const oldestTurnId = session.activeByTurnId.keys().next().value;
-    if (oldestTurnId === undefined) return;
-    session.activeByTurnId.delete(oldestTurnId);
-  }
-}
-
-function turnAnalyticsSessionKey(instanceId: ProviderInstanceId, threadId: ThreadId): string {
-  return `${String(instanceId)}\u0000${String(threadId)}`;
-}
-
-function turnAnalyticsCompletionKey(
-  instanceId: ProviderInstanceId,
-  threadId: ThreadId,
-  turnId: string,
-): string {
-  return `${turnAnalyticsSessionKey(instanceId, threadId)}\u0000${turnId}`;
-}
-
-function turnEffort(modelSelection: ProviderSendTurnInput["modelSelection"]): string | undefined {
-  return (
-    getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
-    getModelSelectionStringOptionValue(modelSelection, "effort")
-  );
-}
-
-type ProviderServiceMethod<Name extends keyof ProviderService.ProviderService["Service"]> =
-  ProviderService.ProviderService["Service"][Name];
-
-const ProviderRollbackConversationInput = Schema.Struct({
-  threadId: ThreadId,
-  numTurns: NonNegativeInt,
-});
-
-function toValidationError(
-  operation: string,
-  issue: string,
-  cause?: unknown,
-): ProviderValidationError {
-  return new ProviderValidationError({
-    operation,
-    issue,
-    ...(cause !== undefined ? { cause } : {}),
-  });
-}
-
-function toContinuationRevokedError(
-  operation: string,
-  threadId: ThreadId,
-  issue: string,
-): ProviderContinuationRevokedError {
-  return new ProviderContinuationRevokedError({
-    operation,
-    threadId,
-    issue,
-  });
-}
-
-const refuseHandoff = (
-  threadId: ThreadId,
-  reason: "binding-changed" | "check-refused",
-): ProviderMemoryHandoffRefusedError =>
-  new ProviderMemoryHandoffRefusedError({
-    operation: "ProviderService.sendTurn",
-    threadId,
-    reason,
-  });
 
 /**
  * Sanitize a memory-handoff observation into the fixed refusal. Interrupt
@@ -402,16 +159,6 @@ const sanitizeToRefusal = <A>(
     ),
   );
 
-const refuseSkillTrial = (
-  threadId: ThreadId,
-  reason: "binding-changed" | "claim-refused" | "conflicting-handoff",
-): ProviderSkillTrialHandoffRefusedError =>
-  new ProviderSkillTrialHandoffRefusedError({
-    operation: "ProviderService.sendTurn",
-    threadId,
-    reason,
-  });
-
 /**
  * Sanitize a skill-trial handoff observation into the fixed refusal — the
  * same boundary policy as `sanitizeToRefusal`: interrupt reasons propagate,
@@ -429,183 +176,6 @@ const sanitizeSkillToRefusal = <A>(
         : Effect.fail(refuseSkillTrial(threadId, reason)),
     ),
   );
-
-// Directory writes can fail with the memory-echo ledger's raw SqlError. At
-// this facade only that Fail becomes a fixed, cause-free persistence error;
-// directory domain errors, Die and Interrupt reasons pass through.
-const normalizeDirectoryWrite = <A>(
-  effect: Effect.Effect<A, ProviderSessionDirectory.ProviderSessionDirectoryWriteError>,
-): Effect.Effect<A, ProviderValidationError | ProviderSessionDirectoryPersistenceError> =>
-  effect.pipe(
-    Effect.catchCause((cause) =>
-      Effect.failCause(
-        Cause.map(cause, (error) =>
-          error._tag === "SqlError"
-            ? new ProviderSessionDirectoryPersistenceError({
-                operation: "ProviderService.writeBinding",
-                detail: "Failed to persist provider session binding.",
-              })
-            : error,
-        ),
-      ),
-    ),
-  );
-
-// Decoded JSON columns carry no identity; comparing their serialized shape is
-// the bounded observed-field check used by the memory recovery write.
-const sameJson = (left: unknown, right: unknown): boolean =>
-  JSON.stringify(left) === JSON.stringify(right);
-
-/**
- * ContinuationRun - Per-call fencing state for a restart-continuation send.
- *
- * `guard` is the single fence evaluated at every admission point and every
- * conditional binding write: token liveness (current identity plus all flags,
- * through `RestartContinuations.isLive`), the exact input thread, and the
- * actually-routed provider instance. `admitted` flips once a session-mutating
- * adapter effect has been entered, which is what licenses one best-effort
- * compensation stop if a later fenced point rejects.
- */
-interface ContinuationRun {
-  readonly token: RestartContinuations.ContinuationToken;
-  readonly guard: (instanceId: ProviderInstanceId) => boolean;
-  /**
-   * The first admitted adapter effect, bound once with `??=`. Compensation
-   * stops this captured adapter only; a later registry swap does not retarget
-   * it, and a replaced or retired token skips compensation entirely.
-   */
-  admitted:
-    | {
-        readonly instanceId: ProviderInstanceId;
-        readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
-      }
-    | undefined;
-}
-
-const decodeInputOrValidationError = <S extends Schema.Top>(input: {
-  readonly operation: string;
-  readonly schema: S;
-  readonly payload: unknown;
-}) => {
-  const decodeProviderRequestInput = Schema.decodeUnknownEffect(input.schema);
-  return decodeProviderRequestInput(input.payload).pipe(
-    Effect.mapError(
-      (schemaError) =>
-        new ProviderValidationError({
-          operation: input.operation,
-          issue: SchemaIssue.makeFormatterDefault()(schemaError.issue),
-          cause: schemaError,
-        }),
-    ),
-  );
-};
-
-function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "stopped" | "error" {
-  switch (session.status) {
-    case "connecting":
-      return "starting";
-    case "error":
-      return "error";
-    case "closed":
-      return "stopped";
-    case "ready":
-    case "running":
-    default:
-      return "running";
-  }
-}
-
-function toRuntimePayloadFromSession(
-  session: ProviderSession,
-  extra?: {
-    readonly modelSelection?: unknown;
-    readonly continueAfterServerUpdate?: TurnId;
-    readonly lastRuntimeEvent?: string;
-    readonly lastRuntimeEventAt?: string;
-  },
-): Record<string, unknown> {
-  return {
-    cwd: session.cwd ?? null,
-    model: session.model ?? null,
-    activeTurnId: session.activeTurnId ?? null,
-    lastError: session.lastError ?? null,
-    ...(extra?.continueAfterServerUpdate !== undefined
-      ? { continueAfterServerUpdate: extra.continueAfterServerUpdate }
-      : {}),
-    ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
-    ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
-    ...(extra?.lastRuntimeEventAt !== undefined
-      ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
-      : {}),
-  };
-}
-
-function readPersistedModelSelection(
-  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
-): ModelSelection | undefined {
-  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
-    return undefined;
-  }
-  const raw = "modelSelection" in runtimePayload ? runtimePayload.modelSelection : undefined;
-  return isModelSelection(raw) ? raw : undefined;
-}
-
-function readPersistedCwd(
-  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
-): string | undefined {
-  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
-    return undefined;
-  }
-  const rawCwd = "cwd" in runtimePayload ? runtimePayload.cwd : undefined;
-  if (typeof rawCwd !== "string") return undefined;
-  const trimmed = rawCwd.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-/** Stopped rows with no active turn are settled; shutdown leaves them untouched. */
-function isSettledBinding(binding: ProviderSessionDirectory.ProviderRuntimeBinding): boolean {
-  if (binding.status !== "stopped") return false;
-  const payload = binding.runtimePayload;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return true;
-  return !("activeTurnId" in payload) || payload.activeTurnId == null;
-}
-
-const dieOnMissingBindingInstanceId = (
-  operation: string,
-  payload: {
-    readonly providerInstanceId?: ProviderInstanceId | undefined;
-    readonly provider?: ProviderDriverKind | undefined;
-  },
-): ProviderInstanceId => {
-  if (payload.providerInstanceId !== undefined) {
-    return payload.providerInstanceId;
-  }
-  throw new Error(
-    payload.provider
-      ? `${operation}: provider instance id is required for provider '${payload.provider}'.`
-      : `${operation}: provider instance id is required.`,
-  );
-};
-
-const correlateRuntimeEventWithInstance = (
-  source: {
-    readonly instanceId: ProviderInstanceId;
-    readonly provider: ProviderDriverKind;
-  },
-  event: ProviderRuntimeEvent,
-): ProviderRuntimeEvent => {
-  if (event.provider !== source.provider) {
-    throw new Error(
-      `ProviderService.streamEvents: provider instance '${source.instanceId}' is backed by driver '${source.provider}' but emitted driver '${event.provider}'.`,
-    );
-  }
-  if (event.providerInstanceId !== undefined && event.providerInstanceId !== source.instanceId) {
-    throw new Error(
-      `ProviderService.streamEvents: provider instance '${source.instanceId}' emitted event for instance '${event.providerInstanceId}'.`,
-    );
-  }
-  return { ...event, providerInstanceId: source.instanceId };
-};
 
 const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
@@ -2275,6 +1845,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                       // cannot answer ownership, or an adapter that does not
                       // expose the accepted publish-admission marker cannot
                       // hold the final guard — fail closed before the claim.
+                      // The marker is also how project memory reaches other
+                      // drivers, so skill trials are opt-in: only an adapter
+                      // that sets `skillTrials: true` runs them.
                       if (
                         captureWriteFence === undefined ||
                         writeFenceHolds === undefined ||
@@ -2282,6 +1855,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                         routed.adapter.memoryAdmission === undefined
                       ) {
                         return yield* refuseSkillTrial(input.threadId, "binding-changed");
+                      }
+                      if (routed.adapter.memoryAdmission.skillTrials !== true) {
+                        return yield* refuseSkillTrial(input.threadId, "trials-unsupported");
                       }
                       // A revoked continuation must not burn the claim; the
                       // guard runs again inside the lazy adapter entry.

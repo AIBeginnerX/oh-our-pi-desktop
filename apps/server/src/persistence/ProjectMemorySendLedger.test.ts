@@ -605,6 +605,43 @@ describe("ProjectMemorySendLedger", () => {
       expect((yield* attemptRows).length).toBe(1);
     }));
 
+  test("sentForMessage names only what that message committed or had accepted", (_dbPath) =>
+    Effect.gen(function* () {
+      const ledger = yield* ProjectMemorySendLedger;
+      yield* setPragmas;
+      yield* runMigrations();
+      yield* seedSendContext;
+      yield* seedMemory({ memoryId: "mem-2", title: "Second", body: "Body two" });
+      const query = (messageId: string) => ({
+        threadId: ThreadId.make("thread-1"),
+        projectId: ProjectId.make("project-1"),
+        messageId,
+      });
+
+      yield* ledger.commitDispatch(
+        commitInput({
+          items: [
+            { memoryId: "mem-1", selectedVersion: 1 },
+            { memoryId: "mem-2", selectedVersion: 1 },
+          ],
+        }),
+      );
+      assert.deepEqual(yield* ledger.sentForMessage(query("message-1")), [
+        { memoryId: ProjectMemoryId.make("mem-1"), version: 1 },
+        { memoryId: ProjectMemoryId.make("mem-2"), version: 1 },
+      ]);
+      // Another message of the thread sent nothing of the first one's.
+      assert.deepEqual(yield* ledger.sentForMessage(query("message-2")), []);
+
+      // A send whose delivery is unknown is not shown as sent.
+      yield* ledger.settle({
+        attemptSeq: 1,
+        outcome: "external_send_unknown",
+        now: NOW,
+      });
+      assert.deepEqual(yield* ledger.sentForMessage(query("message-1")), []);
+    }));
+
   test("L5 commit-boundary failure: fixed error, zero durable rows, fresh-client retry", () =>
     withDbFile((dbPath) =>
       Effect.gen(function* () {

@@ -2,15 +2,28 @@
  * Pure rules for OOP Crew: how a delegated or audit thread is named and prompted, how its
  * progress reads from a thread shell, and which finished turns earn an audit.
  */
-import type { CrewRole, OrchestrationThreadShell } from "@t3tools/contracts";
+import type {
+  ComposerContextId,
+  ComposerContextRecord,
+  CrewRole,
+  OrchestrationMessageContext,
+  OrchestrationThreadShell,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 // Clients nest crew threads by this title too, so its rules live in the shared package.
 import { CREW_ROLE_LABEL, isCrewThreadTitle } from "@t3tools/shared/crew";
+import {
+  PROJECT_MEMORY_REFERENCE_LABEL,
+  formatComposerContextReference,
+} from "@t3tools/shared/composerContextReferences";
 
 export { CREW_ROLE_LABEL, isCrewThreadTitle };
+
+import { scopeSegments } from "./crewScope.ts";
+import { todoPromptLines, type TodoItem } from "./crewTodos.ts";
 
 const CREW_TITLE_PREFIX = "Crew ";
 
@@ -53,14 +66,14 @@ export function crewTaskStatus(
 export const isSettledCrewStatus = (status: CrewTaskStatus): boolean =>
   status === "completed" || status === "failed" || status === "interrupted";
 
-const FINDING_SHAPE =
-  '{"severity":"P0"|"P1"|"P2"|"P3","confidence":number from 0 to 1,"title":string,"file"?:string,"line"?:number}';
+const EVIDENCE_LEVELS = '"said"|"line"|"traced"|"ran"|"app"';
+const FINDING_SHAPE = `{"severity":"P0"|"P1"|"P2"|"P3","confidence":number from 0 to 1,"title":string,"file"?:string,"line"?:number,"proven"?:boolean,"level"?:${EVIDENCE_LEVELS},"evidence"?:string}`;
 const FINDING_SEVERITIES =
   "P0 breaks the build or loses data, P1 is wrong behavior, P2 should be fixed, P3 is a nit";
 
 const REPORT_SHAPE = `{"status":"done"|"partial"|"blocked","summary":string,"changedFiles":string[],"verification":{"command":string,"passed":boolean|null}|null,"findings":[${FINDING_SHAPE}]}`;
 
-const AUDIT_REPORT_SHAPE = `{"verdict":"approve"|"needs changes","summary":string,"findings":[${FINDING_SHAPE}],"preExistingFailures":string[]}`;
+const AUDIT_REPORT_SHAPE = `{"verdict":"approve"|"needs changes","summary":string,"safetyFact":{"fact":string,"level":${EVIDENCE_LEVELS},"evidence":string},"findings":[${FINDING_SHAPE}],"preExistingFailures":string[]}`;
 
 /**
  * The prompt for a delegated task. The preamble is the same for every task so providers can cache
@@ -75,6 +88,8 @@ export function delegatePrompt(input: {
   /** The literal command(s) that prove the task is done. */
   readonly verify?: string | undefined;
   readonly doneWhen?: string | undefined;
+  /** The checklist, already numbered by the server. */
+  readonly todos?: ReadonlyArray<TodoItem> | undefined;
 }): string {
   const verify = input.verify?.trim();
   const doneWhen = input.doneWhen?.trim();
@@ -103,6 +118,9 @@ export function delegatePrompt(input: {
         ]
       : []),
     ...(doneWhen ? ["", "DONE WHEN:", doneWhen] : []),
+    ...todoPromptLines(input.todos, {
+      scoped: input.writeScope !== undefined && input.writeScope.length > 0,
+    }),
   ].join("\n");
 }
 
@@ -110,11 +128,54 @@ export function delegatePrompt(input: {
 export const ISOLATED_CHECKOUT_PROMPT =
   "ISOLATED CHECKOUT: you work in your own copy of the repository, started from the lead's tracked files. Untracked and ignored files (for example installed dependencies) are not in it. There is no need to commit; your changes, new files included, are applied back to the lead's workspace when you finish.";
 
-/** A path as its directory segments, without "./" or trailing globs; none means the whole repo. */
-function scopeSegments(path: string): ReadonlyArray<string> {
-  const segments = path.split("/").filter((segment) => segment !== "" && segment !== ".");
-  const glob = segments.findIndex((segment) => segment.includes("*"));
-  return glob === -1 ? segments : segments.slice(0, glob);
+/** Appended to a candidate task's prompt: its work is kept for the lead to compare, not applied. */
+export const CANDIDATE_CHECKOUT_PROMPT =
+  "CANDIDATE CHECKOUT: you work in your own copy of the repository, started from the lead's tracked files. Your changes are NOT applied to the lead's workspace; they are kept as a patch for the lead to compare with other candidates. Untracked and ignored files (for example installed dependencies) are not in it: if you need an install to run the tests, say so in your report. Do not look at other candidates' work.";
+
+const CREW_MEMORY_HEADER = "Project memory selected by the lead for this task:";
+
+/** The project memories the lead's turn selected, by id and the version it selected. */
+export interface CrewMemoryRef {
+  readonly memoryId: string;
+  readonly selectedVersion: number;
+}
+
+/**
+ * A crew thread's first message when it carries project memory: the brief, then one inline
+ * reference per memory (id and version only) with the matching context records. The memory text is
+ * never put here. The orchestrator resolves the references on the member's own thread, so the
+ * member's turn passes the same ledger, hold and echo checks as any composer send.
+ */
+export function withCrewMemoryReferences(
+  prompt: string,
+  refs: ReadonlyArray<CrewMemoryRef>,
+): { readonly text: string; readonly context: OrchestrationMessageContext | undefined } {
+  if (refs.length === 0) return { text: prompt, context: undefined };
+  const contextIds = refs.map((_, index) => `crew_memory_${index + 1}` as ComposerContextId);
+  const links = refs.map((_, index) =>
+    formatComposerContextReference({
+      kind: "memory",
+      contextId: contextIds[index]!,
+      label: PROJECT_MEMORY_REFERENCE_LABEL,
+    }),
+  );
+  const records: ReadonlyArray<ComposerContextRecord> = refs.map((ref, index) => ({
+    version: 1,
+    contextId: contextIds[index]!,
+    kind: "memory",
+    label: PROJECT_MEMORY_REFERENCE_LABEL,
+    payload: { memoryId: ref.memoryId, selectedVersion: ref.selectedVersion },
+  }));
+  return {
+    text: `${prompt}\n\n${CREW_MEMORY_HEADER}\n${links.join(" ")}`,
+    context: { version: 1, records: [...records] },
+  };
+}
+
+/** A stored crew brief without the memory references, so a retry starts from the plain brief. */
+export function withoutCrewMemoryReferences(text: string): string {
+  const at = text.indexOf(`\n\n${CREW_MEMORY_HEADER}\n`);
+  return at === -1 ? text : text.slice(0, at);
 }
 
 /** Two write scopes overlap when one path is the other, or a directory containing it. */
@@ -220,9 +281,11 @@ export function auditPrompt(input: {
       ? "Read the diff to see whether the failing code was touched."
       : `The turn ran from the workspace snapshot \`${turnRefs.from}\` to \`${turnRefs.to}\`. \`git diff ${turnRefs.from} ${turnRefs.to} -- <path>\` shows what the turn changed in a file, and \`git show ${turnRefs.from}:<path>\` reads it as it was before. Never check out, stash, or reset anything.`,
     "A failure in code the turn did not touch, or one that also happens at the turn's start, is pre-existing: list it under preExistingFailures and do not call for changes because of it.",
+    'First find the one fact this change is safe because of (for example "this call only drops dead cache entries"), and say in safetyFact how far you proved it. Then interrogate the change: for each way it could break something that worked, find the callers and inputs it touches and try to make it fail.',
+    'Prove it by running real code when your tools allow it (level ran or app); when you cannot run anything, a step-by-step trace through real file:line to a concrete failing input (level traced) is the minimum for a finding to count. Put the command and its output line, or the trace, in `evidence` and set `proven` true with that `level`. A concern you could only point at (said, line) is unproven: list it, it never blocks. Do not report style, naming, or "might break in future" risks. A result that does not reproduce is not a finding.',
     "Reply with: blocking problems, risky or unclear changes, missing tests, then one verdict line: `Verdict: needs changes` only when a blocking problem remains, otherwise `Verdict: approve`.",
     `After that line, close the reply with the same review as one fenced \`\`\`json block of this shape: ${AUDIT_REPORT_SHAPE}`,
-    `In it, blocking problems are P0 or P1 findings and the rest are P2 or P3 (${FINDING_SEVERITIES}); \`preExistingFailures\` has one string per failure that predates the turn, naming the command or test; use [] when a list is empty.`,
+    `In it, blocking problems are proven P0 or P1 findings (level traced, ran, or app) and the rest are P2 or P3 (${FINDING_SEVERITIES}); \`preExistingFailures\` has one string per failure that predates the turn, naming the command or test; use [] when a list is empty.`,
   ].join("\n");
 }
 
@@ -385,13 +448,6 @@ export function reportExcerpt(text: string, limit = 280): string {
   return trimmed.length > limit ? `${trimmed.slice(0, limit - 3)}...` : trimmed;
 }
 
-/** Brains that receive the t3-code MCP server, so they can call the crew tools. */
-export const CREW_BRAIN_DRIVERS: ReadonlySet<string> = new Set([
-  "claudeAgent",
-  "codex",
-  "antigravity",
-]);
-
 const ROLE_DUTY: Record<CrewRole, string> = {
   worker: "routine, well-specified work: searches, data gathering, edits, tests",
   expert: "hard implementation, debugging, and deep analysis",
@@ -416,6 +472,10 @@ export interface CrewBriefRole {
   /** Set when the brain can run this role in-process with its own Agent tool (the fast path). */
   readonly native?: ClaudeSubagentModel | undefined;
 }
+
+/** Sent once when the crew is turned off after its note was already in the conversation. */
+export const CREW_OFF_NOTE =
+  "<oop_crew>OOP Crew is now off for this chat: ignore the earlier <oop_crew> note, do the work yourself, and do not call the crew tools.</oop_crew>";
 
 /**
  * The note sent ahead of each lead turn while the crew is on. Without it the brain never looks
@@ -454,6 +514,9 @@ export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string
           `${fast.length > 0 ? "3" : "2"}. Other roles (${delegated.join(", ")}): use the crew_delegate tool of the t3-code MCP server (in Claude Code: mcp__t3-code__crew_delegate; if it is not loaded yet, load it with ToolSearch query "select:mcp__t3-code__crew_delegate,mcp__t3-code__crew_wait"), then collect results with crew_wait, calling it again while tasks run. A failed crew model is replaced automatically by another model of the same level. Give each task that edits files a writeScope, and a verify command when one proves it done; if crew_delegate returns a warning, wait for the overlapping tasks or narrow the scopes. For parallel tasks that edit code, pass isolation "worktree" so they cannot clobber each other.`,
         ]
       : []),
+    'Each task: specific one-step todos, a check (command or files) where provable; extra work in a new task; unfinished items make it partial. Give crew_delegate and crew_stop a one-sentence "why".',
+    'Arena (only when the user asks to compare approaches, or a choice is hard to undo): write 3-6 criteria; give 2-3 tasks the same brief, isolation "candidate", titles "Candidate A: ...", each later one differentFrom the earlier ids; then one expert judge, also a candidate differentFrom all of them, with the criteria and patch paths (if it warns no other family exists, tell the user the judge was not independent). Pick a base, git apply its patch, graft the best parts, verify, remove the worktrees, and tell the user what you kept and rejected.',
+    'Call work done only when crew_wait shows proof VERIFIED. On INCONCLUSIVE, say "finished, not verified" to the user, then check it yourself or add a todo with a check.',
     "The user can change the crew while this turn runs. Before you hand out more tasks later in this turn, call crew_roster (mcp__t3-code__crew_roster; load it with ToolSearch if it is not loaded yet): when it differs from this note, follow crew_roster, and for a Claude role pass the Agent tool the matching model (haiku, sonnet, opus or fable).",
     "Do not use built-in subagents with other models, or Workflow tools, for work the crew can do. Check every report, combine them into your answer, and say which crew member did what.",
     "Name every task (the crew_delegate title, the Agent tool description) with a short English summary of its core work, at most eight words, even when you talk with the user in another language; the OOP Agents board shows it.",
@@ -474,12 +537,17 @@ export function crewExhaustedReport(
   ].join("\n");
 }
 
+const EvidenceLevel = Schema.Literals(["said", "line", "traced", "ran", "app"]);
+
 const Finding = Schema.Struct({
   severity: Schema.Literals(["P0", "P1", "P2", "P3"]),
   confidence: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
   title: Schema.String,
   file: Schema.optional(Schema.String),
   line: Schema.optional(Schema.Int),
+  proven: Schema.optional(Schema.Boolean),
+  level: Schema.optional(EvidenceLevel),
+  evidence: Schema.optional(Schema.String),
 });
 
 // Only the verdict or status and the summary are required: a crew model that drops an optional
@@ -503,6 +571,9 @@ export type CrewMemberReport = typeof CrewMemberReport.Type;
 export const CrewAuditReport = Schema.Struct({
   verdict: Schema.Literals(["approve", "needs changes"]),
   summary: Schema.String,
+  safetyFact: Schema.optional(
+    Schema.Struct({ fact: Schema.String, level: EvidenceLevel, evidence: Schema.String }),
+  ),
   findings: emptyList(Finding),
   preExistingFailures: emptyList(Schema.String),
 });
@@ -513,11 +584,39 @@ export const CREW_REPORT_MAX_FINDINGS = 20;
 
 const SEVERITY_RANK = { P0: 0, P1: 1, P2: 2, P3: 3 } as const;
 
-const capFindings = <T extends { readonly severity: keyof typeof SEVERITY_RANK }>(
-  findings: ReadonlyArray<T>,
-) =>
+/** Longest `evidence` a parsed finding keeps. */
+export const CREW_EVIDENCE_MAX_CHARS = 300;
+
+type FindingProof = Pick<typeof Finding.Type, "proven" | "level" | "evidence">;
+
+/**
+ * A finding counts as proven only when the model says so and backs it: a level that walked the
+ * failure (traced, ran, app) and some evidence. Pointing at a line is not proof.
+ */
+const isProvenFinding = (finding: FindingProof) =>
+  finding.proven === true &&
+  (finding.level === "traced" || finding.level === "ran" || finding.level === "app") &&
+  (finding.evidence?.trim() ?? "") !== "";
+
+const withCheckedProof = <T extends typeof Finding.Type>(finding: T): T => ({
+  ...finding,
+  ...(finding.proven === undefined ? {} : { proven: isProvenFinding(finding) }),
+  ...(finding.evidence === undefined
+    ? {}
+    : { evidence: clipText(finding.evidence.trim(), CREW_EVIDENCE_MAX_CHARS) }),
+});
+
+const clipText = (text: string, max: number) =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+
+const capFindings = <T extends typeof Finding.Type>(findings: ReadonlyArray<T>) =>
   findings
-    .toSorted((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+    .map(withCheckedProof)
+    .toSorted(
+      (a, b) =>
+        SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] ||
+        Number(b.proven === true) - Number(a.proven === true),
+    )
     .slice(0, CREW_REPORT_MAX_FINDINGS);
 
 const FENCED_JSON = /`{3,}json[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*`{3,}/gi;
@@ -550,16 +649,21 @@ export function parseAuditReport(text: string | null): CrewAuditReport | null {
 
 /**
  * The auditor's verdict: from its JSON review when it has one, else its last `Verdict:` line, or
- * null when the report has neither. A review that asks for changes only because of failures that
- * predate the turn (it lists some and names no P0 or P1 problem) approves.
+ * null when the report has neither. Only a proven P0 or P1 finding blocks; a review that asks for
+ * changes with no findings at all still blocks (a model that dropped the list is respected), and
+ * one that asks for changes only because of failures that predate the turn approves.
  */
 export function auditVerdict(report: string | null): "approve" | "needs-changes" | null {
   const audit = parseAuditReport(report);
   if (audit !== null) {
-    const onlyPreExisting =
-      audit.preExistingFailures.length > 0 &&
-      !audit.findings.some((finding) => finding.severity === "P0" || finding.severity === "P1");
-    return audit.verdict === "approve" || onlyPreExisting ? "approve" : "needs-changes";
+    const isHigh = (finding: (typeof audit.findings)[number]) =>
+      finding.severity === "P0" || finding.severity === "P1";
+    if (audit.findings.some((finding) => isHigh(finding) && isProvenFinding(finding)))
+      return "needs-changes";
+    const onlyPreExisting = audit.preExistingFailures.length > 0 && !audit.findings.some(isHigh);
+    return audit.verdict === "approve" || onlyPreExisting || audit.findings.length > 0
+      ? "approve"
+      : "needs-changes";
   }
   const verdicts = [
     ...withoutJsonBlocks(report).matchAll(/verdict\W{0,4}\s*(approve|needs changes)/gi),
@@ -599,6 +703,8 @@ export interface CrewFollowUpResult {
   readonly subject: string;
   readonly status: string;
   readonly report: string | null;
+  /** The verdict OOP reached on the work (VERIFIED, NOT VERIFIED, INCONCLUSIVE). */
+  readonly proof?: string | undefined;
 }
 
 /**
@@ -625,7 +731,7 @@ export function planFollowUp(input: {
       "OOP Crew sent this follow-up; it is not a new request from the user.",
       ...(audits.length > 0
         ? [
-            "The auditor reviewed your last turn and asked for changes. Fix the blocking problems it found (or explain why a point is wrong), verify the fix, then give the user an updated answer.",
+            "The auditor reviewed your last turn and asked for changes. Fix the blocking problems it found (or explain why a point is wrong), verify the fix, then give the user an updated answer. Findings marked unproven are leads, not defects; verify one only when it is cheap.",
             ...audits.map((report) => `Auditor report:\n${report.trim()}`),
           ]
         : []),
@@ -634,7 +740,7 @@ export function planFollowUp(input: {
             "These crew tasks finished after your last answer, so you have not read their reports. Check them, build on what they did, and update your answer to the user.",
             ...results.map(
               (result) =>
-                `- ${CREW_ROLE_LABEL[result.role]} · ${result.subject} (${result.status}): ${result.report?.trim() || "no report"}`,
+                `- ${CREW_ROLE_LABEL[result.role]} · ${result.subject} (${result.status}${result.proof === undefined ? "" : `, proof ${result.proof}`}): ${result.report?.trim() || "no report"}`,
             ),
           ]
         : []),
@@ -665,10 +771,28 @@ export function crewMemberOutcome(
   role: CrewRole,
   status: CrewTaskStatus,
   reply: string | null,
+  todos?: { readonly pending: number; readonly failed: number; readonly blocked: number },
 ): { readonly status: CrewTaskOutcome; readonly report: CrewMemberReport | null } {
   if (status !== "completed" || role === "auditor") return { status, report: null };
   const reported = crewReportStatus(reply);
-  return { status: reported === "done" ? status : reported, report: parseCrewReport(reply) };
+  return {
+    status: reported !== "done" ? reported : withTodoOutcome(status, todos),
+    report: parseCrewReport(reply),
+  };
+}
+
+/**
+ * A task that says it is done while TODO items are still pending, failing, or blocked has only
+ * finished part of the work. Claimed items do not hold it back; they were never checkable.
+ */
+export function withTodoOutcome(
+  status: CrewTaskOutcome,
+  todos:
+    | { readonly pending: number; readonly failed: number; readonly blocked: number }
+    | undefined,
+): CrewTaskOutcome {
+  const unfinished = todos !== undefined && todos.pending + todos.failed + todos.blocked > 0;
+  return status === "completed" && unfinished ? "partial" : status;
 }
 
 /**
@@ -691,3 +815,14 @@ export function crewFailureKind(error: string | null | undefined): "billing" | "
     return "auth";
   return "other";
 }
+
+/**
+ * What the reactor reports when the user's own stop cut a message off before it started. Any
+ * other refusal is a failure of the send, not a stop.
+ */
+export const PROVIDER_STOPPED_START_DETAIL = {
+  beforeSend: "Stopped before this message was sent.",
+  duringSend: "Stopped while sending. The provider may have received this message.",
+  beforeCompaction: "Stopped before context compaction started.",
+  duringCompaction: "Stopped during context compaction. The provider may still finish it.",
+} as const;
