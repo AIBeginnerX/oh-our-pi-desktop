@@ -381,6 +381,37 @@ pub(crate) mod testtls {
 mod tests {
     use super::*;
 
+    /// Tailscale's HTTPS certificates come from Let's Encrypt, whose chain ends at ISRG Root X1:
+    /// the bundled Mozilla roots must carry it, since the system keychain is never read.
+    #[test]
+    fn the_bundled_roots_trust_lets_encrypt_for_tailscale_https() {
+        let needle = b"ISRG Root X1";
+        assert!(webpki_roots::TLS_SERVER_ROOTS.iter().any(|anchor| {
+            anchor
+                .subject
+                .as_ref()
+                .windows(needle.len())
+                .any(|w| w == needle)
+        }));
+    }
+
+    #[test]
+    fn a_tailnet_name_is_read_as_a_tls_origin_on_443() {
+        let origin = Origin::parse("https://devbox.tail0000ab.ts.net").unwrap();
+        assert_eq!(origin.authority(), "devbox.tail0000ab.ts.net:443");
+        assert!(origin.tls);
+        assert_eq!(
+            ws_scheme("https://devbox.tail0000ab.ts.net").unwrap(),
+            "wss"
+        );
+        // A tailnet address over plain http keeps its port and stays ws.
+        assert_eq!(
+            authority("http://100.101.102.103:3773").unwrap(),
+            "100.101.102.103:3773"
+        );
+        assert_eq!(ws_scheme("http://100.101.102.103:3773").unwrap(), "ws");
+    }
+
     #[test]
     fn parses_a_plain_and_a_chunked_answer() {
         let plain = parse_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}").unwrap();

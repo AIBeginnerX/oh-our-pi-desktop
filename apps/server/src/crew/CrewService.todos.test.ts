@@ -253,11 +253,24 @@ const makeWorldIn = (
             const shell = (yield* Ref.get(shells)).get(threadId);
             if (shell === undefined) return Option.none();
             const reply = (yield* Ref.get(replies)).get(threadId);
+            // The brief this thread was started with, which a user's retry reads back.
+            const brief = (yield* Ref.get(commands)).flatMap((command) =>
+              command.type === "thread.turn.start" && command.threadId === threadId
+                ? [
+                    {
+                      id: command.message.messageId,
+                      role: "user" as const,
+                      text: command.message.text,
+                    },
+                  ]
+                : [],
+            );
             return Option.some({
               ...leadDetail,
               ...shell,
-              messages:
-                reply === undefined
+              messages: [
+                ...brief,
+                ...(reply === undefined
                   ? []
                   : [
                       {
@@ -269,7 +282,8 @@ const makeWorldIn = (
                         createdAt: NOW,
                         updatedAt: NOW,
                       },
-                    ],
+                    ]),
+              ],
               // The usage a finished turn records, so the board's evidence is read at once.
               activities: [usageObservation],
             } as unknown as OrchestrationThread);
@@ -1516,6 +1530,33 @@ describe("crew todos: items added by the lead", () => {
       const completed = yield* world.awaitActivity("task.completed", delegated.taskId);
       assert.strictEqual(completed.status, "completed");
       assert.strictEqual(yield* startsOf(world, second.threadId), 1);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+});
+
+describe("crew todos: retry in a fresh worktree", () => {
+  it.effect("restarts every item and sends no resume lines", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld;
+      const { service, delegated, turn, crew } = yield* delegateTask(world, {
+        isolation: "worktree",
+        todos: ["a", "b"],
+      });
+      yield* check(crew, turn.threadId, "t1", "done", "did a");
+      // A blocked item is not nudged, so the turn ends the task.
+      yield* check(crew, turn.threadId, "t2", "blocked", "cannot do b");
+      yield* world.finishTurn(turn.threadId, "Stopped early.\nStatus: partial");
+      yield* world.awaitActivity("task.completed", delegated.taskId);
+
+      const retried = yield* crew.retryTask({ threadId: LEAD, taskId: delegated.taskId });
+      const second = yield* world.nextMemberTurn;
+
+      assert.notInclude(second.text, "TODO PROGRESS");
+      assert.deepStrictEqual(
+        (yield* world.savedTask(retried.taskId)).todos?.map((todo) => `${todo.id}:${todo.status}`),
+        ["t1:pending", "t2:pending"],
+      );
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );

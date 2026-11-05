@@ -18,19 +18,23 @@ if (bin === undefined) {
 const { ELECTRON_RUN_AS_NODE: _drop, ...env } = process.env;
 // Ctrl-C belongs to the TUI (same foreground process group); the parent must outlive it.
 const ignore = () => {};
-const signals = ["SIGINT", "SIGTERM", "SIGHUP"];
-for (const s of signals) process.on(s, ignore);
+process.on("SIGINT", ignore);
 const child = NodeChildProcess.spawn(bin, process.argv.slice(2), {
   stdio: "inherit",
   env: { ...env, OOP_IN_DESKTOP_APP: "1" },
 });
+// A signal aimed at the shim alone never reaches the child through the TTY, so pass it on;
+// otherwise oop-rs is orphaned.
+const forwarded = ["SIGTERM", "SIGHUP"].map((sig) => [sig, () => child.kill(sig)]);
+for (const [sig, forward] of forwarded) process.on(sig, forward);
 child.on("error", (e) => {
   console.error(`OOP.app is too old or incomplete: cannot run ${bin} (${e.message}).`);
   process.exit(127);
 });
 child.on("exit", (code, signal) => {
   if (signal === null) process.exit(code ?? 1);
-  for (const s of signals) process.off(s, ignore);
-  if (signals.includes(signal)) process.kill(process.pid, signal);
+  process.off("SIGINT", ignore);
+  for (const [sig, forward] of forwarded) process.off(sig, forward);
+  if (["SIGINT", "SIGTERM", "SIGHUP"].includes(signal)) process.kill(process.pid, signal);
   process.exit(128 + (NodeOS.constants.signals[signal] ?? 1));
 });

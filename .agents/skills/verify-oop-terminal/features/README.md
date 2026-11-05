@@ -37,7 +37,7 @@ The maintained source for what to verify in the OOP Rust terminal app (`apps/oop
 - [Status and threads](./status-threads.md): `oop-rs status`, add folder, thread listing.
   Partly exercised by the proof (status after the run).
 - [Model and mode](./model-mode.md): `/model` picker, `/mode`, `/effort`. `/model` exercised.
-- [Right-hand panels](./side-panels.md): `/dag-workflow`, `/dag-agents`, `/savvy`, `/files`
+- [Right-hand panels](./side-panels.md): `/dag-workflow`, `/savvy`, `/files`
   toggles. `/savvy` exercised; the others seeded, not yet run.
 - Shell commands: `oop-rs config [get|set|path]`, `doctor`, `stop`, `update` and `provider` run
   without the full-screen UI. Run them with an isolated `OOP_CONFIG_DIR` and `OOP_HOME` (never the

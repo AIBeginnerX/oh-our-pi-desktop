@@ -4,6 +4,7 @@
  * models this environment can run right now, so the crew follows newly added models on its own.
  */
 import {
+  CREW_FALLBACK_LIMIT,
   CREW_ROLES,
   isProviderAvailable,
   type CrewPreset,
@@ -196,6 +197,13 @@ export interface ResolvedCrew {
   readonly preset: CrewPreset;
   readonly roles: Record<CrewRole, CrewModelOption | null>;
   readonly pinned: ReadonlySet<CrewRole>;
+  /** The user's fallback models per role, in order, that this environment can run now. */
+  readonly fallbacks: Record<CrewRole, ReadonlyArray<CrewModelOption>>;
+  /**
+   * The fallback lists as saved, including models this environment cannot run now, so an edit or
+   * "Use this crew for new chats" never drops one whose provider is only away for a while.
+   */
+  readonly fallbackSelections: Record<CrewRole, ReadonlyArray<ModelSelection>>;
   readonly source: CrewSource;
 }
 
@@ -214,9 +222,12 @@ export function resolveCrew(input: {
   const enabled = override?.enabled ?? input.settings.enabled;
   const preset = override?.preset ?? input.settings.preset;
   const pins = { ...input.settings.pinned, ...override?.pinned };
+  const lists = { ...input.settings.fallbacks, ...override?.fallbacks };
   const options = crewModelOptions(input.providers);
   const recommended = recommendCrew(options, input.brain, preset);
   const roles = {} as Record<CrewRole, CrewModelOption | null>;
+  const fallbacks = {} as Record<CrewRole, ReadonlyArray<CrewModelOption>>;
+  const fallbackSelections = {} as Record<CrewRole, ReadonlyArray<ModelSelection>>;
   const pinned = new Set<CrewRole>();
   for (const role of CREW_ROLES) {
     const pin = pins[role];
@@ -224,8 +235,21 @@ export function resolveCrew(input: {
       pin == null ? undefined : options.find((option) => sameModel(option.selection, pin));
     if (pinnedOption !== undefined) pinned.add(role);
     roles[role] = pinnedOption ?? recommended[role];
+    fallbackSelections[role] = (lists[role] ?? []).slice(0, CREW_FALLBACK_LIMIT);
+    // A listed model that is not ready here is skipped, not an error: it comes back with its provider.
+    fallbacks[role] = fallbackSelections[role].flatMap((selection) =>
+      options.filter((option) => sameModel(option.selection, selection)),
+    );
   }
-  return { enabled, preset, roles, pinned, source: override === undefined ? "default" : "thread" };
+  return {
+    enabled,
+    preset,
+    roles,
+    pinned,
+    fallbacks,
+    fallbackSelections,
+    source: override === undefined ? "default" : "thread",
+  };
 }
 
 export interface CrewChange {
@@ -233,6 +257,8 @@ export interface CrewChange {
   readonly preset?: CrewPreset;
   /** A model pins the role; null puts it back on Auto. */
   readonly pins?: Partial<Record<CrewRole, ModelSelection | null>>;
+  /** The role's complete fallback list, in order; an empty list clears it. */
+  readonly fallbacks?: Partial<Record<CrewRole, ReadonlyArray<ModelSelection>>>;
 }
 
 /**
@@ -249,6 +275,9 @@ export function applyCrewChange(
     ...(change.enabled === undefined ? {} : { enabled: change.enabled }),
     ...(change.preset === undefined ? {} : { preset: change.preset }),
     pinned: { ...current?.pinned, ...change.pins },
+    ...(change.fallbacks === undefined
+      ? {}
+      : { fallbacks: { ...current?.fallbacks, ...change.fallbacks } }),
   };
 }
 
@@ -259,11 +288,14 @@ export function applyCrewChange(
  */
 export function crewAsDefault(settings: CrewSettings, crew: ResolvedCrew): CrewSettings {
   let pinned: CrewSettings["pinned"] = {};
+  let fallbacks: CrewSettings["fallbacks"] = {};
   for (const role of CREW_ROLES) {
     const option = crew.roles[role];
     if (crew.pinned.has(role) && option !== null) pinned = { ...pinned, [role]: option.selection };
+    const listed = crew.fallbackSelections[role];
+    if (listed.length > 0) fallbacks = { ...fallbacks, [role]: listed };
   }
-  return { ...settings, enabled: crew.enabled, preset: crew.preset, pinned };
+  return { ...settings, enabled: crew.enabled, preset: crew.preset, pinned, fallbacks };
 }
 
 const ROLE_TIERS: Record<CrewRole, ReadonlyArray<CrewModelTier>> = {
@@ -273,40 +305,48 @@ const ROLE_TIERS: Record<CrewRole, ReadonlyArray<CrewModelTier>> = {
 };
 
 /**
- * Models a role tries in order when the one before fails: the role's own model, the preset's
- * default for the role, then other models of the same level before the next level, preferring
- * providers not already in the chain. The brain is never in it: it takes the work itself once
- * the chain runs dry. Providers in `unavailableInstances` (recently failed) are skipped.
+ * Models a role tries in order when the one before fails: the role's own model, the user's
+ * fallbacks for the role, the preset's default for the role, then other models of the same level
+ * before the next level, preferring providers not already in the chain. The brain is never in
+ * it: it takes the work itself once the chain runs dry. Providers in `unavailableInstances`
+ * (cooling down) and models in `unavailableModels` (refused by their provider) are skipped,
+ * except the role's own model: a task tries it once, since the user may have reset the limit.
  */
 export function crewFallbackChain(input: {
   readonly options: ReadonlyArray<CrewModelOption>;
   readonly role: CrewRole;
   readonly assigned: CrewModelOption | null;
+  /** The user's fallback models for the role, in order. */
+  readonly fallbacks?: ReadonlyArray<CrewModelOption>;
   readonly preset: CrewPreset;
   readonly brain: ModelSelection | null;
   readonly unavailableInstances?: ReadonlySet<string>;
+  readonly unavailableModels?: ReadonlyArray<ModelSelection>;
+  /** Defaults to three, and grows so that every user fallback and one pick of OOP's fit. */
   readonly limit?: number;
   /** Families to keep away from: models outside them come first. */
   readonly avoidFamilies?: ReadonlySet<string>;
   /** Models to keep away from when no model outside `avoidFamilies` is left: another one of the same family comes before these. */
   readonly avoidSelections?: ReadonlyArray<ModelSelection>;
 }): CrewModelOption[] {
-  const usable = input.options.filter(
-    (option) =>
-      !sameModel(option.selection, input.brain) &&
-      input.unavailableInstances?.has(option.selection.instanceId) !== true,
-  );
+  const available = (option: CrewModelOption) =>
+    input.unavailableInstances?.has(option.selection.instanceId) !== true &&
+    !(input.unavailableModels ?? []).some((selection) => sameModel(selection, option.selection));
+  const notBrain = input.options.filter((option) => !sameModel(option.selection, input.brain));
+  const usable = notBrain.filter(available);
   const chain: CrewModelOption[] = [];
-  const add = (option: CrewModelOption | null | undefined) => {
+  const add = (option: CrewModelOption | null | undefined, among = usable) => {
     if (
       option != null &&
-      usable.some((candidate) => sameModel(candidate.selection, option.selection)) &&
+      among.some((candidate) => sameModel(candidate.selection, option.selection)) &&
       !chain.some((entry) => sameModel(entry.selection, option.selection))
     ) {
       chain.push(option);
     }
   };
-  add(input.assigned);
+  add(input.assigned, notBrain);
+  const fallbacks = (input.fallbacks ?? []).slice(0, CREW_FALLBACK_LIMIT);
+  for (const option of fallbacks) add(option);
   add(recommendCrew(usable, input.brain, input.preset)[input.role]);
   const anchor = input.assigned?.tier ?? ROLE_TIERS[input.role][0]!;
   const tiers = [anchor, ...ROLE_TIERS[input.role].filter((tier) => tier !== anchor)];
@@ -318,8 +358,9 @@ export function crewFallbackChain(input: {
       Number(!a.isDefault) - Number(!b.isDefault),
   );
   for (const option of rest) add(option);
+  const limit = input.limit ?? Math.max(3, fallbacks.length + 2);
   const avoided = input.avoidFamilies;
-  if (avoided === undefined || avoided.size === 0) return chain.slice(0, input.limit ?? 3);
+  if (avoided === undefined || avoided.size === 0) return chain.slice(0, limit);
   // Another family first, then another model of an avoided family, then the very same model.
   const distance = (option: CrewModelOption) =>
     !avoided.has(modelFamily(option.selection.model, option.driver))
@@ -327,5 +368,5 @@ export function crewFallbackChain(input: {
       : (input.avoidSelections ?? []).some((selection) => sameModel(selection, option.selection))
         ? 2
         : 1;
-  return [...chain].sort((a, b) => distance(a) - distance(b)).slice(0, input.limit ?? 3);
+  return [...chain].sort((a, b) => distance(a) - distance(b)).slice(0, limit);
 }

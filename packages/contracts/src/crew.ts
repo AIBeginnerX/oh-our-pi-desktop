@@ -2,7 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
-import { CrewPinnedRoles, CrewPreset } from "./orchestration.ts";
+import { CrewFallbackRoles, CrewPinnedRoles, CrewPreset } from "./orchestration.ts";
 
 /**
  * OOP Crew: the thread's own model is the brain; it hands work to these roles through OOP's
@@ -21,6 +21,7 @@ export const CrewSettings = Schema.Struct({
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   preset: CrewPreset.pipe(Schema.withDecodingDefault(Effect.succeed("recommended" as const))),
   pinned: CrewPinnedRoles.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  fallbacks: CrewFallbackRoles.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
 });
 export type CrewSettings = typeof CrewSettings.Type;
 
@@ -28,6 +29,7 @@ export const DEFAULT_CREW_SETTINGS: CrewSettings = {
   enabled: false,
   preset: "recommended",
   pinned: {},
+  fallbacks: {},
 };
 
 /** Runs a crew task that ended without finishing again, as a new task on the same lead thread. */

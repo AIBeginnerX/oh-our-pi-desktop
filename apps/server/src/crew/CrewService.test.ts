@@ -121,6 +121,8 @@ const finishedTask: typeof CrewTaskRecoveryState.Type = {
   auditState: "none",
 };
 
+const decodeTaskRecovery = Schema.decodeEffect(CrewTaskRecoveryJson);
+
 const makeHarness = Effect.gen(function* () {
   const realStore = yield* CrewRuntimeStateLive.make;
   // How many times the service asked for one lead's pending deliveries.
@@ -428,6 +430,7 @@ describe("Crew service restart delivery", () => {
   it.effect("acknowledges only audits captured in the persisted delivery", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
+      yield* Ref.set(harness.crewOn, true);
       const audit: typeof CrewTaskRecoveryState.Type = {
         ...finishedTask,
         taskId: "audit-1",
@@ -468,6 +471,7 @@ describe("Crew service restart delivery", () => {
     () =>
       Effect.gen(function* () {
         const harness = yield* makeHarness;
+        yield* Ref.set(harness.crewOn, true);
         const finding = (extra: object) => ({
           severity: "P1",
           confidence: 0.9,
@@ -510,6 +514,95 @@ describe("Crew service restart delivery", () => {
         );
         yield* service.close;
       }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("hands a result that finished after the crew went off on as plain information", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      // The harness crew is off: this report arrived after the user switched it off.
+      yield* harness.seedTask(finishedTask);
+      const service = yield* harness.start;
+      const starts = (yield* Ref.get(harness.commands)).filter(
+        (command) => command.type === "thread.turn.start",
+      );
+      assert.equal(starts.length, 1);
+      const text = starts[0]!.type === "thread.turn.start" ? starts[0]!.message.text : "";
+      assert.include(text, "worker result");
+      assert.include(text, "OOP Crew is off: use these results if they help");
+      assert.include(text, "do not start new crew tasks");
+      assert.notInclude(text, "crew_wait");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("drops a pending audit fix request once the crew is off, and says why", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* harness.seedTask({
+        ...finishedTask,
+        taskId: "audit-1",
+        role: "auditor",
+        auditState: "pending",
+        report: {
+          taskId: "audit-1",
+          role: "auditor",
+          status: "completed",
+          result: "- missing test\n**Verdict:** needs changes",
+        },
+      });
+      const service = yield* harness.start;
+      const states = yield* Effect.forEach(yield* harness.store.readTasks, (row) =>
+        decodeTaskRecovery(row.record_json),
+      );
+      assert.equal(states[0]!.auditState, "skipped");
+      assert.equal(
+        (yield* Ref.get(harness.commands)).filter((command) => command.type === "thread.turn.start")
+          .length,
+        0,
+      );
+      const activities = (yield* Ref.get(harness.commands)).filter(
+        (command) => command.type === "thread.activity.append",
+      );
+      assert.isTrue(
+        activities.some(
+          (command) =>
+            command.type === "thread.activity.append" &&
+            command.activity.summary.includes("OOP Crew is off"),
+        ),
+      );
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("does not queue a fix when an audit finishes with the crew off", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* harness.seedTask({
+        ...finishedTask,
+        taskId: "audit-1",
+        role: "auditor",
+        ended: false,
+        auditState: "none",
+        report: {
+          taskId: "audit-1",
+          role: "auditor",
+          status: "completed",
+          result: "- missing test\n**Verdict:** needs changes",
+        },
+      });
+      const service = yield* harness.start;
+      yield* service.crew.wait({ threadId: LEAD, taskIds: ["audit-1"] });
+      const states = yield* Effect.forEach(yield* harness.store.readTasks, (row) =>
+        decodeTaskRecovery(row.record_json),
+      );
+      assert.equal(states[0]!.auditState, "skipped");
+      assert.equal(
+        (yield* Ref.get(harness.commands)).filter((command) => command.type === "thread.turn.start")
+          .length,
+        0,
+      );
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 
   it.effect("recovers the original worker turn without replaying or settling later work", () =>
@@ -835,6 +928,23 @@ describe("Crew service per-thread crew", () => {
       const reset = yield* service.crew.roster(LEAD);
       assert.isTrue(reset.enabled);
       assert.equal(workerOf(reset), defaultWorker);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("lists a role's fallback models in the order they are tried", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      assert.isUndefined((yield* service.crew.roster(LEAD)).roles[0]!.fallbacks);
+      yield* Ref.set(harness.leadCrew, {
+        fallbacks: { worker: [pin("gpt-5.4-mini"), pin("gpt-5.4")] },
+      });
+      const roles = (yield* service.crew.roster(LEAD)).roles;
+      assert.deepEqual(
+        roles.find((entry) => entry.role === "worker")?.fallbacks?.map((entry) => entry.model),
+        ["gpt-5.4-mini", "gpt-5.4"],
+      );
+      assert.isUndefined(roles.find((entry) => entry.role === "expert")?.fallbacks);
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );

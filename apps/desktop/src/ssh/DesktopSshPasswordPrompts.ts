@@ -326,6 +326,7 @@ export const make = Effect.fn("desktop.sshPasswordPrompts.make")(function* (
       username: input.username,
       prompt: input.prompt,
       expiresAt,
+      ...(input.kind === undefined ? {} : { kind: input.kind }),
     };
     const deferred = yield* Deferred.make<string, DesktopSshPasswordPromptRequestError>();
     const pending: PendingSshPasswordPrompt = {

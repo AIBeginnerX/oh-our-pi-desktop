@@ -18,6 +18,7 @@ import {
   parseTailscaleMagicDnsName,
   parseTailscaleStatus,
   readTailscaleStatus,
+  repointTailscaleServe,
   TAILSCALE_STATUS_TIMEOUT,
   TailscaleCommandExitError,
   TailscaleCommandSpawnError,
@@ -329,6 +330,53 @@ describe("tailscale", () => {
     });
 
     return ensureTailscaleServe({ localPort: 13773, servePort: 8443 }).pipe(Effect.provide(layer));
+  });
+
+  describe("repointTailscaleServe", () => {
+    const serveStatus = (proxy: string | null, key = "host.tail.ts.net:443") =>
+      JSON.stringify(
+        proxy === null ? {} : { Web: { [key]: { Handlers: { "/": { Proxy: proxy } } } } },
+      );
+    const run = (statusJson: string, input: { fromLocalPort: number; toLocalPort: number }) => {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const layer = mockSpawnerLayer((_command, args) => {
+        calls.push(args);
+        return args[1] === "status" ? { stdout: statusJson } : {};
+      });
+      return repointTailscaleServe({ servePort: 443, ...input }).pipe(
+        Effect.provide(layer),
+        Effect.map((result) => ({ result, calls })),
+      );
+    };
+
+    it.effect("moves a mapping that still points at the old port", () =>
+      Effect.gen(function* () {
+        const { result, calls } = yield* run(serveStatus("http://127.0.0.1:32855"), {
+          fromLocalPort: 32855,
+          toLocalPort: 33813,
+        });
+        assert.equal(result, "repointed");
+        assert.deepEqual(calls.at(-1), ["serve", "--bg", "--https=443", "http://127.0.0.1:33813"]);
+      }),
+    );
+
+    it.effect("leaves current, removed, and user-changed mappings alone", () =>
+      Effect.gen(function* () {
+        const ports = { fromLocalPort: 32855, toLocalPort: 33813 };
+        for (const [status, expected] of [
+          [serveStatus("http://127.0.0.1:33813"), "current"],
+          [serveStatus(null), "left-alone"],
+          [serveStatus("http://127.0.0.1:8080"), "left-alone"],
+          [serveStatus("https://example.com"), "left-alone"],
+          [serveStatus("http://127.0.0.1:32855", "host.tail.ts.net:8443"), "left-alone"],
+          ["not json", "left-alone"],
+        ] as const) {
+          const { result, calls } = yield* run(status, ports);
+          assert.equal(result, expected, status);
+          assert.equal(calls.length, 1, status);
+        }
+      }),
+    );
   });
 
   it.effect("retains tailscale serve exit diagnostics", () => {

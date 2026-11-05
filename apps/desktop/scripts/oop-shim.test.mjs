@@ -48,6 +48,50 @@ describe.skipIf(NodePath.sep === "\\")("oop.mjs compatibility shim", () => {
     }
   });
 
+  it("forwards SIGTERM to oop-rs instead of orphaning it", async () => {
+    const dir = stage(true);
+    const marker = NodePath.join(dir, "got-term");
+    // Overwrite the fake client: it announces itself, then waits for TERM, records it and dies of it.
+    NodeFS.writeFileSync(
+      NodePath.join(dir, "oop-rs"),
+      [
+        "#!/bin/sh",
+        "sleep 3600 &",
+        "pid=$!",
+        "trap 'kill $pid; echo term > \"$1\"; trap - TERM; kill -TERM $$' TERM",
+        "echo ready",
+        "wait $pid",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const shim = NodeChildProcess.spawn(process.execPath, [NodePath.join(dir, "oop.mjs"), marker], {
+      stdio: ["ignore", "pipe", "inherit"],
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    });
+    try {
+      const ready = new Promise((resolve) => {
+        let out = "";
+        shim.stdout.setEncoding("utf8");
+        shim.stdout.on("data", (chunk) => {
+          out += chunk;
+          if (out.includes("ready")) resolve(undefined);
+        });
+      });
+      const exited = new Promise((resolve) =>
+        shim.on("exit", (code, signal) => resolve({ code, signal })),
+      );
+      await ready;
+      shim.kill("SIGTERM");
+      const { code, signal } = await exited;
+      assert.equal(NodeFS.readFileSync(marker, "utf8"), "term\n");
+      assert.isTrue(signal === "SIGTERM" || code === 128 + NodeOS.constants.signals.SIGTERM);
+    } finally {
+      shim.kill("SIGKILL");
+      NodeFS.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("exits 127 with one clear line when oop-rs is missing", () => {
     const dir = stage(false);
     try {

@@ -553,6 +553,36 @@ mod tests {
     }
 
     #[test]
+    fn a_tailscale_https_link_or_bare_tailnet_name_gives_the_machines_origin() {
+        assert_eq!(
+            target("https://devbox.tail0000ab.ts.net/pair#token=abc", None).unwrap(),
+            ("abc".into(), "https://devbox.tail0000ab.ts.net".into())
+        );
+        // The MagicDNS name in capitals, with the default port written, is the same server.
+        assert_eq!(
+            target("https://Devbox.tail0000ab.ts.net:443/pair#token=abc", None)
+                .unwrap()
+                .1,
+            "https://devbox.tail0000ab.ts.net"
+        );
+        // `--server` takes the bare name: https is assumed.
+        for server in [
+            "devbox.tail0000ab.ts.net",
+            "https://devbox.tail0000ab.ts.net/",
+        ] {
+            assert_eq!(
+                target("tok", Some(server)).unwrap(),
+                ("tok".into(), "https://devbox.tail0000ab.ts.net".into())
+            );
+        }
+        // A tailnet address is plain http on the server's port, with the warning that says so.
+        let ip = target("http://100.101.102.103:3773/pair#token=abc", None).unwrap();
+        assert_eq!(ip.1, "http://100.101.102.103:3773");
+        assert!(plain_http_warning(&ip.1).is_some());
+        assert!(plain_http_warning("https://devbox.tail0000ab.ts.net").is_none());
+    }
+
+    #[test]
     fn percent_signs_and_plus_signs_in_a_link_are_decoded_like_a_browser_does() {
         assert_eq!(
             target("http://h.example/?token=a%2Bb+c", None).unwrap().0,

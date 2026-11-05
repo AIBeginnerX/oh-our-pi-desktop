@@ -1242,13 +1242,13 @@ impl App {
         }
     }
 
-    /// `/dag-workflow` and `/dag-agents`: each shows its own view; with the panel closed it opens,
+    /// `/dag-workflow`, `/savvy` and `/files`: each shows its own view; with the panel closed it opens,
     /// with the other view up it switches, and the same command again (or `off`) closes it. The
     /// words after it also pick which flow the Workflow view shows (`N`, `next`, `prev`, `live`).
     fn panel_command(&mut self, view: Side, argument: &str) -> bool {
         let usage = match view {
             Side::Workflow => "/dag-workflow [on|off|N|next|prev|live]",
-            Side::Agents => "/agents [on|off|live]",
+            Side::Agents => "/panel [on|off]",
             Side::Savvy => "/savvy [on|off]",
             Side::Files => "/files [on|off]",
         };
@@ -1258,7 +1258,15 @@ impl App {
         };
         let open = self.side_open;
         let shown = open.then_some(self.side_view);
-        let movement = side::plan_panel_move(view, action, shown);
+        let mut movement = side::plan_panel_move(view, action, shown);
+        // A panel with no room (no thread, window too narrow) is not on screen, so there is nothing
+        // for the bare command to close: it asks for the panel and says why it cannot be seen.
+        if movement == side::PanelMove::Close
+            && action == side::FlowAction::Toggle
+            && !self.panel_fits()
+        {
+            movement = side::PanelMove::Open;
+        }
         if movement == side::PanelMove::Close {
             self.side_open = false;
             self.notice = Some(tr("notice.panelOff").into());
@@ -1306,7 +1314,7 @@ impl App {
         self.side_open = true;
         self.side_view = view;
         if movement == side::PanelMove::Open {
-            self.notice = Some(tr("notice.panelOn").into());
+            self.notice = Some(self.panel_on_notice());
         }
         true
     }
@@ -2350,7 +2358,6 @@ impl App {
                 None => self.notice = Some(tr("notice.mouseUsage").into()),
             },
             "dag-workflow" | "workflow" => return self.panel_command(Side::Workflow, argument),
-            "dag-agents" | "agents" => return self.panel_command(Side::Agents, argument),
             "savvy" => return self.panel_command(Side::Savvy, argument),
             "files" => return self.panel_command(Side::Files, argument),
             _ => return crate::cmd::run(self, name, argument),

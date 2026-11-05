@@ -62,6 +62,8 @@ export function minimaxRemainsToWindows(payload: unknown): ServerProviderUsageWi
     const name = typeof entry.model_name === "string" ? entry.model_name.trim() : "";
     const id = name || "plan";
     const prefix = name && name !== "general" ? `${name[0]!.toUpperCase()}${name.slice(1)} · ` : "";
+    // A named allowance other than `general` limits only that model family.
+    const scope = prefix === "" ? {} : { modelFamilies: [name] };
 
     const intervalRemaining = finite(entry.current_interval_remaining_percent);
     if (intervalRemaining !== null) {
@@ -73,6 +75,7 @@ export function minimaxRemainsToWindows(payload: unknown): ServerProviderUsageWi
         ...cadence,
         id: `${id}_interval`,
         label: `${prefix}${cadence.label}`,
+        ...scope,
         usedPercent: clampPercent(100 - intervalRemaining),
         ...(resetsAt ? { resetsAt } : {}),
       });
@@ -85,6 +88,7 @@ export function minimaxRemainsToWindows(payload: unknown): ServerProviderUsageWi
         id: `${id}_weekly`,
         kind: "weekly",
         label: `${prefix}Weekly`,
+        ...scope,
         windowDurationMins: 10_080,
         usedPercent: clampPercent(100 - weeklyRemaining),
         ...(resetsAt ? { resetsAt } : {}),

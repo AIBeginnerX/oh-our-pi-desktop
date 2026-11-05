@@ -4544,6 +4544,63 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+  effectIt.effect("a failed first send leaves the OOP Crew brief for the next turn", () =>
+    Effect.gen(function* () {
+      let failFirst = true;
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          crewOn: true,
+          crewProviders: [
+            crewProvider("codex", "codex", ["gpt-5-codex", "gpt-5.4-mini"]),
+            crewProvider("claude", "claudeAgent", ["claude-opus-5", "claude-haiku-5"]),
+          ],
+          sendTurnEffect: (sendInput) => {
+            if (failFirst) {
+              failFirst = false;
+              return Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: "codex",
+                  method: "thread.turn.start",
+                  detail: "first send failed",
+                }),
+              );
+            }
+            return Effect.succeed({
+              threadId: sendInput.threadId,
+              turnId: asTurnId("turn-2"),
+            });
+          },
+        }),
+      );
+      const now = "2026-01-01T00:00:00.000Z";
+      const sendMessage = (n: number) =>
+        Effect.gen(function* () {
+          yield* harness.engine.dispatch({
+            type: "thread.turn.start",
+            commandId: CommandId.make(`cmd-crew-fail-turn-${n}`),
+            threadId: ThreadId.make("thread-1"),
+            message: {
+              messageId: asMessageId(`user-message-crew-fail-${n}`),
+              role: "user",
+              text: `message ${n}`,
+              attachments: [],
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: "approval-required",
+            createdAt: now,
+          });
+          yield* Effect.promise(() => waitFor(() => harness.sendTurn.mock.calls.length === n));
+          return String(
+            (harness.sendTurn.mock.calls[n - 1]?.[0] as { input?: string } | undefined)?.input,
+          );
+        });
+
+      expect(yield* sendMessage(1)).toContain("OOP Crew is on");
+      expect(yield* sendMessage(2)).toContain("OOP Crew is on");
+      expect(yield* sendMessage(3)).not.toContain("OOP Crew");
+    }),
+  );
+
   effectIt.effect(
     "sends no off note while the provider snapshot briefly lacks the thread's instance",
     () =>

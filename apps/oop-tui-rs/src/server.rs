@@ -1433,29 +1433,38 @@ pub async fn client_label() -> String {
     format!("oop terminal ({})", host.trim())
 }
 
-/// Asks the running server's own program for a one-time token (`pair --ttl 1m`), so it always
-/// matches the server's version. Whoever may run it can already read this user's OOP data.
-async fn mint_local_pairing_token(found: &Found, home: &Path, label: &str) -> Option<String> {
+/// Runs the running server's own program as `pair` and returns what it printed (the pairing link,
+/// the token and when it expires), so the token always matches the server's version. `ttl` is
+/// passed as `--ttl`; without it the server's own default applies. Whoever may run it can already
+/// read this user's OOP data.
+pub async fn pair_output(
+    found: &Found,
+    home: &Path,
+    label: &str,
+    ttl: Option<&str>,
+) -> Option<String> {
     let port = parse_port(&found.origin)?;
     let (executable, command) = inspect(found.pid, port).await?;
     let script = parse_server_script(&command)?;
-    let output = run(
-        &executable,
-        &[
-            &script,
-            "pair",
-            "--base-dir",
-            &home.to_string_lossy(),
-            "--label",
-            label,
-            "--ttl",
-            "1m",
-        ],
-        &[("ELECTRON_RUN_AS_NODE", "1")],
-    )
-    .await
-    .ok()?;
-    parse_pairing_token(&output)
+    let home = home.to_string_lossy();
+    let mut args = vec![
+        script.as_str(),
+        "pair",
+        "--base-dir",
+        &home,
+        "--label",
+        label,
+    ];
+    if let Some(ttl) = ttl {
+        args.extend(["--ttl", ttl]);
+    }
+    run(&executable, &args, &[("ELECTRON_RUN_AS_NODE", "1")])
+        .await
+        .ok()
+}
+
+async fn mint_local_pairing_token(found: &Found, home: &Path, label: &str) -> Option<String> {
+    parse_pairing_token(&pair_output(found, home, label, Some("1m")).await?)
 }
 
 /// Trades a one-time token for a bearer token at `/oauth/token` (form-encoded token exchange).
@@ -1466,7 +1475,7 @@ pub async fn exchange(origin: &str, credential: &str, label: &str) -> Result<Str
 }
 
 /// False only when the server says the token is no good (an unreachable server is not that).
-async fn session_valid(origin: &str, token: &str) -> bool {
+pub async fn session_valid(origin: &str, token: &str) -> bool {
     let auth = [("Authorization", format!("Bearer {token}"))];
     match http::request(
         "GET",

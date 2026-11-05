@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type CrewSettings,
   type OrchestrationCommand,
   type OrchestrationThread,
   type OrchestrationThreadShell,
@@ -174,9 +175,13 @@ const makeWorld = (
   holdStarts: ReadonlySet<number> = new Set(),
   /** The provider never reports the interrupted turn, so a stopped task cannot end. */
   ignoreInterrupt = false,
+  /** Crew settings beyond the crew being on, such as pinned and fallback models. */
+  crew: Partial<CrewSettings> = {},
 ) =>
   Effect.gen(function* () {
     const store = yield* CrewRuntimeStateLive.make;
+    /** What the provider registry reports; a test can change it, as a status check would. */
+    const providers = yield* Ref.make<ReadonlyArray<ServerProvider>>(PROVIDERS);
     const events = yield* PubSub.unbounded<never>();
     const shells = yield* Ref.make(
       new Map<ThreadId, OrchestrationThreadShell>([
@@ -238,11 +243,11 @@ const makeWorld = (
             Effect.map((rows) => rows.filter((row) => row.threadId === threadId)),
           ),
       }),
-      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(PROVIDERS) }),
+      Layer.mock(ProviderRegistry)({ getProviders: Ref.get(providers) }),
       Layer.mock(ServerSettingsService)({
         getSettings: Effect.succeed({
           ...DEFAULT_SERVER_SETTINGS,
-          crew: { ...DEFAULT_SERVER_SETTINGS.crew, enabled: true },
+          crew: { ...DEFAULT_SERVER_SETTINGS.crew, enabled: true, ...crew },
         }),
       }),
       Layer.mock(CheckpointDiffQuery)({}),
@@ -515,6 +520,7 @@ const makeWorld = (
     return {
       store,
       events,
+      providers,
       start,
       stopLead,
       awaitActivity,
@@ -1125,6 +1131,59 @@ describe("crew stop: races around a stop", () => {
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );
 
+  it.effect("a user's retry keeps finished items and the lead's why, and reopens the rest", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld();
+      const service = yield* world.start;
+      const delegated = yield* service.crew.delegate({
+        threadId: LEAD,
+        role: "worker",
+        task: "Do it",
+        title: "First",
+        todos: ["a", "b"],
+        why: "the login bug blocks the release",
+      });
+      const member = yield* Queue.take(world.memberTurns);
+      yield* service.crew.checkTodo({
+        threadId: member,
+        todoId: "t1",
+        status: "done",
+        note: "did a",
+      });
+      yield* service.crew.stop({ threadId: LEAD, taskId: delegated.taskId });
+      yield* world.stopLead(LEAD);
+      yield* drain;
+
+      const retried = yield* service.crew.retryTask({ threadId: LEAD, taskId: delegated.taskId });
+      yield* Queue.take(world.memberTurns);
+
+      const saved = yield* world.saved(retried.taskId);
+      assert.deepStrictEqual(
+        saved.todos?.map((todo) => `${todo.id}:${todo.status}`),
+        ["t1:claimed", "t2:pending"],
+      );
+      const starts = commandsOfType(yield* world.issued, "thread.turn.start").filter(
+        (command) => command.type === "thread.turn.start" && command.threadId !== LEAD,
+      );
+      const lastStart = starts.at(-1);
+      const retryText = lastStart?.type === "thread.turn.start" ? lastStart.message.text : "";
+      assert.include(retryText, "Finished, do not redo: t1 (done, unverified).");
+      const open = retryText.slice(retryText.indexOf("TODO PROGRESS"));
+      assert.include(open, "- t2: b");
+      assert.notInclude(open, "- t1:");
+      const started = (yield* world.activityRows).find(
+        (entry) =>
+          entry.kind === "task.started" &&
+          (entry.payload as { taskId?: string }).taskId === retried.taskId,
+      );
+      assert.strictEqual(
+        (started?.payload as { why?: string } | undefined)?.why,
+        "the login bug blocks the release",
+      );
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
   it.effect("interrupts a nudge that a stop raced with, instead of leaving it running", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld();
@@ -1415,6 +1474,246 @@ describe("crew decision log: why", () => {
       yield* Fiber.join(stopRun);
       const receipt = yield* world.awaitActivity(CREW_STOPPING_ACTIVITY);
       assert.strictEqual(receipt.why, "Too slow.");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+});
+
+describe("crew: cooling after a failure", () => {
+  const CLAUDE = ProviderInstanceId.make("claude");
+  const CODEX = ProviderInstanceId.make("codex");
+  const pinnedHaiku = { worker: { instanceId: CLAUDE, model: "claude-haiku-5" } };
+  /** Claude with one more worker-sized model, so a fallback on the same provider exists. */
+  const withSonnet = [
+    provider("claude", "claudeAgent", ["claude-opus-5", "claude-haiku-5", "claude-sonnet-5"]),
+    PROVIDERS[1]!,
+  ];
+  const createdModels = (all: ReadonlyArray<OrchestrationCommand>) =>
+    all.flatMap((command) =>
+      command.type === "thread.create"
+        ? [`${command.modelSelection.instanceId}/${command.modelSelection.model}`]
+        : [],
+    );
+  /**
+   * Delegates a worker task; the reactor refuses its first start with this session error, and the
+   * model the task moves on to finishes it.
+   */
+  const failFirstThenFinish = (
+    world: Effect.Success<ReturnType<typeof makeWorld>>,
+    crew: CrewService.CrewService["Service"],
+    error: string,
+  ) =>
+    Effect.gen(function* () {
+      const delegated = yield* crew.delegate({ threadId: LEAD, role: "worker", task: "Do it" });
+      yield* world.failStart(yield* Queue.take(world.heldStarts), {
+        detail: error,
+        sessionError: error,
+      });
+      yield* world.completeMember(yield* Queue.take(world.memberTurns), true);
+      const [report] = yield* crew.wait({ threadId: LEAD, taskIds: [delegated.taskId] });
+      assert.strictEqual(report!.status, "completed");
+      return delegated.taskId;
+    });
+  const switchSummaries = (world: Effect.Success<ReturnType<typeof makeWorld>>, taskId: string) =>
+    world.activityRows.pipe(
+      Effect.map((rows) =>
+        rows.flatMap((row) => {
+          const payload = row.payload as { taskId?: string; summary?: string };
+          return row.kind === "task.progress" && payload.taskId === taskId && payload.summary
+            ? [payload.summary]
+            : [];
+        }),
+      ),
+    );
+
+  it.effect("blocks only the refused model, so its provider's other model takes over", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1]), false, {
+        pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CLAUDE, model: "claude-sonnet-5" }] },
+      });
+      yield* Ref.set(world.providers, withSonnet);
+      const service = yield* world.start;
+      yield* failFirstThenFinish(
+        world,
+        service.crew,
+        "The agent could not switch to model claude-haiku-5.",
+      );
+      assert.deepStrictEqual(createdModels(yield* world.issued), [
+        "claude/claude-haiku-5",
+        "claude/claude-sonnet-5",
+      ]);
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, [
+        { provider: "claude", model: "claude-haiku-5", reason: "model refused" },
+      ]);
+      // The provider's next status check lifts the block.
+      yield* Ref.set(
+        world.providers,
+        withSonnet.map((entry) => ({ ...entry, checkedAt: NOW }) as ServerProvider),
+      );
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("cools a provider until its full usage window resets", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1, 3]), false, {
+        pinned: pinnedHaiku,
+      });
+      const resetsAt = IsoDateTime.make("1970-01-01T02:00:00.000Z");
+      yield* Ref.set(world.providers, [
+        {
+          ...PROVIDERS[0]!,
+          usageLimits: {
+            checkedAt: NOW,
+            windows: [
+              { id: "five_hour", kind: "session", label: "5-hour", usedPercent: 100, resetsAt },
+              { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 40 },
+            ],
+          },
+        } as ServerProvider,
+        PROVIDERS[1]!,
+      ]);
+      const service = yield* world.start;
+      const limit =
+        "1308 Usage limit reached for 5 hour. Your limit will reset at 2026-11-04 21:15:17";
+      yield* failFirstThenFinish(world, service.crew, limit);
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, [
+        { provider: "claude", until: resetsAt, reason: "5-hour limit" },
+      ]);
+
+      // A new task still tries the role's own model once first, in case the limit was reset.
+      yield* TestClock.adjust("1 hour");
+      yield* failFirstThenFinish(world, service.crew, limit);
+      const created = createdModels(yield* world.issued);
+      assert.strictEqual(created[2], "claude/claude-haiku-5");
+      assert.isTrue(created[3]!.startsWith("codex/"));
+
+      yield* TestClock.adjust("1 hour");
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("cools a provider for 15 minutes when no window reports a reset", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1]), false, {
+        pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CLAUDE, model: "claude-sonnet-5" }] },
+      });
+      yield* Ref.set(world.providers, withSonnet);
+      const service = yield* world.start;
+      const taskId = yield* failFirstThenFinish(
+        world,
+        service.crew,
+        "429 Too Many Requests: rate limit exceeded",
+      );
+      // The fallback on the cooling provider is skipped, and the switch message says why.
+      const created = createdModels(yield* world.issued);
+      assert.strictEqual(created.length, 2);
+      assert.isTrue(created[1]!.startsWith("codex/"));
+      const [summary] = yield* switchSummaries(world, taskId);
+      assert.include(summary, "cooling claude for 15 more minutes (usage limit)");
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, [
+        { provider: "claude", until: "1970-01-01T00:15:00.000Z", reason: "usage limit" },
+      ]);
+
+      yield* TestClock.adjust("14 minutes");
+      assert.strictEqual((yield* service.crew.roster(LEAD)).cooling.length, 1);
+      yield* TestClock.adjust("1 minute");
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("holds back only the model whose own usage window is full", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1]), false, {
+        pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CLAUDE, model: "claude-sonnet-5" }] },
+      });
+      const scoped = (haikuUsed: number, checkedAt: string) =>
+        [
+          {
+            ...withSonnet[0]!,
+            usageLimits: {
+              checkedAt,
+              windows: [
+                {
+                  id: "seven_day_haiku",
+                  kind: "weekly",
+                  label: "Weekly · Haiku",
+                  modelFamilies: ["Haiku"],
+                  usedPercent: haikuUsed,
+                  resetsAt: "1970-01-03T00:00:00.000Z",
+                },
+                // Another model's full window says nothing about this one.
+                {
+                  id: "seven_day_opus",
+                  kind: "weekly",
+                  label: "Weekly · Opus",
+                  modelFamilies: ["Opus"],
+                  usedPercent: 100,
+                  resetsAt: "1970-01-05T00:00:00.000Z",
+                },
+              ],
+            },
+          } as ServerProvider,
+          withSonnet[1]!,
+        ] as const;
+      yield* Ref.set(world.providers, scoped(100, NOW));
+      const service = yield* world.start;
+      yield* failFirstThenFinish(world, service.crew, "rate limit exceeded");
+      assert.deepStrictEqual(createdModels(yield* world.issued), [
+        "claude/claude-haiku-5",
+        "claude/claude-sonnet-5",
+      ]);
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, [
+        {
+          provider: "claude",
+          model: "claude-haiku-5",
+          until: "1970-01-03T00:00:00.000Z",
+          reason: "Weekly · Haiku limit",
+        },
+      ]);
+      // A newer usage check shows the window no longer full (the user reset it): it ends now.
+      yield* Ref.set(world.providers, scoped(40, "2026-11-03T00:05:00.000Z"));
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("ends a cooling as soon as the role's own model finishes a turn there", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1]), false, {
+        pinned: pinnedHaiku,
+      });
+      const service = yield* world.start;
+      yield* failFirstThenFinish(world, service.crew, "429 Too Many Requests");
+      assert.strictEqual((yield* service.crew.roster(LEAD)).cooling.length, 1);
+      // The next task tries the role's model first, and it works: the limit was reset.
+      const next = yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "Again" });
+      yield* world.completeMember(yield* Queue.take(world.memberTurns), true);
+      yield* service.crew.wait({ threadId: LEAD, taskIds: [next.taskId] });
+      assert.strictEqual(createdModels(yield* world.issued)[2], "claude/claude-haiku-5");
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("hands a failed task to the user's fallback before OOP's own pick", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1]), false, {
+        pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CODEX, model: "gpt-5.4" }] },
+      });
+      const service = yield* world.start;
+      yield* failFirstThenFinish(world, service.crew, "The session crashed.");
+      assert.deepStrictEqual(createdModels(yield* world.issued), [
+        "claude/claude-haiku-5",
+        "codex/gpt-5.4",
+      ]);
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
   );

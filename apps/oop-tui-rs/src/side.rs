@@ -50,7 +50,7 @@ impl Side {
     pub fn command(self) -> &'static str {
         match self {
             Side::Workflow => "/dag-workflow",
-            Side::Agents => "/dag-agents",
+            Side::Agents => "/panel off",
             Side::Savvy => "/savvy",
             Side::Files => "/files",
         }
@@ -105,7 +105,7 @@ fn with_input<R>(app: &App, f: impl FnOnce(&FlowInput) -> R) -> R {
     f(&input)
 }
 
-// ---- `/dag-workflow` and `/dag-agents` ----------------------------------------------------------
+// ---- `/dag-workflow`, `/savvy` and `/files` ----------------------------------------------------------
 
 /// What the words after `/dag-workflow` ask for.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -147,14 +147,19 @@ pub enum PanelMove {
 
 /// Each command shows its own view. Closed, the panel opens; with the other view up it switches
 /// without closing; the same command again closes it, and so does `off`. `off` for the view that
-/// is not shown has nothing to turn off.
+/// is not shown has nothing to turn off. `/dag-workflow` is the panel's own switch: bare or with
+/// `off` it closes the panel whatever view is up.
 pub fn plan_panel_move(view: Side, action: FlowAction, shown: Option<Side>) -> PanelMove {
+    let is_switch = view == Side::Workflow && shown.is_some();
     if action == FlowAction::Off {
-        return if shown == Some(view) {
+        return if shown == Some(view) || is_switch {
             PanelMove::Close
         } else {
             PanelMove::Nothing
         };
+    }
+    if action == FlowAction::Toggle && is_switch {
+        return PanelMove::Close;
     }
     if shown == Some(view) {
         return if action == FlowAction::Toggle {
@@ -598,13 +603,20 @@ mod tests {
     fn each_command_opens_switches_or_closes() {
         use FlowAction::*;
         use PanelMove::*;
-        let (w, a) = (Side::Workflow, Side::Agents);
+        let (w, a, v) = (Side::Workflow, Side::Agents, Side::Savvy);
         assert_eq!(plan_panel_move(w, Toggle, None), Open);
         assert_eq!(plan_panel_move(w, Toggle, Some(w)), Close);
-        assert_eq!(plan_panel_move(w, Toggle, Some(a)), Switch);
+        // `/dag-workflow` turns the panel off whatever view is up; `on` still switches to it.
+        assert_eq!(plan_panel_move(w, Toggle, Some(a)), Close);
+        assert_eq!(plan_panel_move(w, Off, Some(a)), Close);
+        assert_eq!(plan_panel_move(w, On, Some(a)), Switch);
         assert_eq!(plan_panel_move(w, Off, Some(w)), Close);
-        assert_eq!(plan_panel_move(w, Off, Some(a)), Nothing);
         assert_eq!(plan_panel_move(w, Pick(2), Some(w)), Nothing);
+        assert_eq!(plan_panel_move(w, Pick(2), Some(a)), Switch);
+        // The other views keep their own commands: they switch, and `off` is only theirs.
+        assert_eq!(plan_panel_move(v, Toggle, Some(w)), Switch);
+        assert_eq!(plan_panel_move(v, Off, Some(w)), Nothing);
+        assert_eq!(plan_panel_move(v, Toggle, Some(v)), Close);
     }
 
     #[test]

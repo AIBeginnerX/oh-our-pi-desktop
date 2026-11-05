@@ -56,6 +56,7 @@ import {
   renderTerminalQrCode,
   resolveHeadlessConnectionString,
 } from "../startupAccess.ts";
+import { writePersistedTailscaleServe } from "../tailscaleServeState.ts";
 import { baseDirFlag, DurationFromString } from "./config.ts";
 
 const WELL_KNOWN_ENVIRONMENT_PATH = "/.well-known/t3/environment";
@@ -235,6 +236,7 @@ const probeEnvironmentDescriptor = (
 interface DiscoveredPairTarget {
   readonly baseDir: string;
   readonly variant: PairStateVariant;
+  readonly stateDir: string;
   readonly state: PersistedServerRuntimeState;
   readonly descriptor: ExecutionEnvironmentDescriptor;
 }
@@ -284,6 +286,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
       return {
         baseDir,
         variant,
+        stateDir: derivedPaths.stateDir,
         state: state.value,
         descriptor: probed.descriptor,
       } satisfies DiscoveredPairTarget;
@@ -375,6 +378,27 @@ const resolveTailscalePairingBase = Effect.fn("pair.resolveTailscalePairingBase"
       servePort: input.servePort,
     });
 
+    // Remember the mapping so the server can re-aim it when it restarts on a
+    // new port (see server.ts). Dev servers and servers bound to one specific
+    // interface are not tracked.
+    const rememberMapping = (localPort: number) =>
+      input.target.state.devUrl !== undefined
+        ? Effect.void
+        : writePersistedTailscaleServe(input.target.stateDir, {
+            servePort: input.servePort,
+            localPort,
+          }).pipe(
+            Effect.catch(() =>
+              Effect.sync(() => {
+                notes.push(
+                  "Could not record this mapping, so it will not follow the server to a new port after a restart. Re-run this command after restarting.",
+                );
+              }),
+            ),
+          );
+    const isLoopbackTarget = (state: PersistedServerRuntimeState) =>
+      state.host === undefined || isWildcardHost(state.host) || isLoopbackHost(state.host);
+
     // Only an unreachable port, or a mapping already fronting this exact
     // environment, is safe to (re)configure. Any other responder — T3 or not
     // — must not have its mapping silently replaced.
@@ -389,6 +413,9 @@ const resolveTailscalePairingBase = Effect.fn("pair.resolveTailscalePairingBase"
       // the web origin. Reuse as-is for regular servers; fall through and
       // repoint our own mapping at the web port for dev servers.
       if (input.target.state.devUrl === undefined) {
+        if (isLoopbackTarget(input.target.state)) {
+          yield* rememberMapping(input.target.state.port);
+        }
         return { baseUrl, notes };
       }
     }
@@ -409,6 +436,9 @@ const resolveTailscalePairingBase = Effect.fn("pair.resolveTailscalePairingBase"
         (cause) => new TailscaleServeFailedError({ servePort: input.servePort, cause }),
       ),
     );
+    if (localTarget.localHost === undefined) {
+      yield* rememberMapping(localTarget.localPort);
+    }
     notes.push(
       `Tailscale Serve now maps ${baseUrl} to this server and persists across restarts. Remove it with \`tailscale serve --https=${String(input.servePort)} off\`.`,
     );

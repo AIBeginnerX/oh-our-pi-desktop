@@ -17,9 +17,18 @@ Every chat has its own crew. A change you make applies to that chat only: it nev
 
 **Use the default crew** (in the terminal, `/crew reset`) drops the chat's own crew. **Use this crew for new chats** (`/crew default`) is the only way to edit the default; no existing chat's own crew changes with it. Chats created before per-chat crews use the default.
 
-If a crew model fails, for example because its account is out of credit, OOP hands the same task to another signed-in model of the same level and shows the switch on the board. A provider that just failed sits out new tasks for ten minutes; one that is out of credit or signed out sits out until OOP checks its status again. Only when every model in that chain fails does the chat's own model do the task itself.
+Next to each role, the **Fallback** button adds a model to that role's fallbacks (up to three, tried in the order you added them; remove one with its minus button; in the terminal, on the `/crew` screen). A fallback whose provider is not available right now stays on the list, dimmed, and is skipped until it is back. If a crew model fails, OOP hands the same task to that role's fallbacks first, then to another signed-in model of the same level, and shows each switch and its reason on the board; the next model is told which checklist items are already done. Only when every model in that chain fails does the chat's own model do the task itself.
 
-When the auditor asks for changes, or a crew task finishes after the brain has already answered, OOP sends the brain a follow-up turn with that report so it can fix the work or update its answer. The auditor checks whether a failing test or build already failed before the turn, and does not ask for fixes to failures that predate it. Audit fixes stop after two rounds per message you send. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
+How long a provider sits out depends on why it failed:
+
+- **Usage limit.** When the provider reports its usage windows and one is full, the provider sits out until that window resets, for example the end of a 5-hour or weekly window. A window for one model only, such as a weekly Opus limit, benches only that model. When OOP can only tell that a limit was hit, it waits 15 minutes and then tries the provider again on the next task.
+- **Model refused.** When a provider refuses one model (for example, it cannot switch to it), only that model sits out until OOP checks the provider's status again. The provider's other models keep working.
+- **Out of credit or signed out.** The provider sits out until OOP checks its status again.
+- **Anything else**, such as a crash or a timeout: the provider sits out new tasks for ten minutes.
+
+A role's own model is still tried once at the start of every new task, even while it is sitting out, so a limit you reset yourself is picked up right away. A provider stops sitting out as soon as one of its models finishes a turn, or when its next usage check shows the full window is no longer full. `crew_roster` lists what is sitting out right now and until when.
+
+When the auditor asks for changes, or a crew task finishes after the brain has already answered, OOP sends the brain a follow-up turn with that report so it can fix the work or update its answer. The auditor checks whether a failing test or build already failed before the turn, and does not ask for fixes to failures that predate it. Audit fixes stop after two rounds per message you send. When you turn the crew off for a chat, tasks already running keep going and their results still reach the brain, as plain information it may use; the brain starts no new crew tasks, and an auditor's request for changes is dropped. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
 
 ## Task checklists
 

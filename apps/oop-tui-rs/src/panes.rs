@@ -64,15 +64,29 @@ impl App {
     pub(crate) fn set_panel(&mut self, open: Option<bool>) {
         let open = open.unwrap_or(!self.side_open);
         self.side_open = open;
-        self.notice = Some(if !open {
+        self.notice = Some(if open {
+            self.panel_on_notice()
+        } else {
             tr("notice.panelOff").into()
-        } else if self.active == Active::None {
+        });
+    }
+
+    /// Whether the panel has room: a thread is open and the window is wide enough (the width is
+    /// not known before the first drawing, and is then assumed to fit).
+    pub(crate) fn panel_fits(&self) -> bool {
+        self.active != Active::None
+            && (self.width.get() == 0 || self.width.get() >= crate::ui::PANEL_MIN_COLUMNS)
+    }
+
+    /// What is said when the panel is asked to open: that it is, or why it cannot be seen yet.
+    pub(crate) fn panel_on_notice(&self) -> String {
+        if self.active == Active::None {
             tr("notice.panelWait").into()
-        } else if self.width.get() != 0 && self.width.get() < crate::ui::PANEL_MIN_COLUMNS {
+        } else if !self.panel_fits() {
             too_narrow(crate::ui::PANEL_MIN_COLUMNS)
         } else {
             tr("notice.panelOn").into()
-        });
+        }
     }
 
     /// What the status line says about the side panes that are shut, so the way back is on screen.

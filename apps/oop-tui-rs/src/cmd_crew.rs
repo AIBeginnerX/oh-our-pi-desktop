@@ -1,6 +1,7 @@
-//! `/crew`: turn the crew on or off for a thread, choose its preset and the model of each role, make
-//! a thread's settings the default, and follow the crew's tasks: the settings arithmetic, the model
-//! list, and the screen (main, preset, model and task views).
+//! `/crew`: turn the crew on or off for a thread, choose its preset and the model of each role,
+//! list the fallback models each role takes when its own fails, make a thread's settings the
+//! default, and follow the crew's tasks: the settings arithmetic, the model list, and the screen
+//! (main, preset, model, fallback and task views).
 //!
 //! The default crew lives in the server's settings (`crew`); a thread's own crew lives with the
 //! thread on the server (`thread.crew.set`). A change in a thread gives that thread its own crew and
@@ -175,6 +176,8 @@ struct Context {
     preset: String,
     roles: [Option<ModelOption>; 3],
     pinned: [bool; 3],
+    /// The fallback lists as stored (the thread's over the default's), which an edit rewrites.
+    listed: [Vec<Value>; 3],
     /// The thread has a crew of its own, rather than running the default.
     own: bool,
     /// Why the thread's model cannot lead a crew.
@@ -230,6 +233,7 @@ fn context(app: &App, now: i64) -> Context {
         preset,
         roles,
         pinned,
+        listed,
         own,
     } = crew::resolve(&app.config, app.own_crew().as_ref(), brain);
     let loaded = thread.is_some_and(|id| app.conv.loaded && app.conv.thread_id == id);
@@ -255,6 +259,7 @@ fn context(app: &App, now: i64) -> Context {
     Context {
         autos: crew::auto_picks(&app.config, brain, &preset),
         options: crew::model_options(&app.config),
+        listed,
         problem: brain_problem(&app.config, brain),
         own,
         enabled,
@@ -298,7 +303,7 @@ pub fn crew_settings(settings: &Value) -> Value {
     if settings["crew"].is_object() {
         settings["crew"].clone()
     } else {
-        json!({"enabled": false, "preset": "recommended", "pinned": {}})
+        json!({"enabled": false, "preset": "recommended", "pinned": {}, "fallbacks": {}})
     }
 }
 
@@ -309,6 +314,8 @@ pub struct Change {
     pub preset: Option<String>,
     /// A model pins the role; `None` puts it back on Auto.
     pub pins: Vec<(&'static str, Option<Value>)>,
+    /// The role's complete fallback list, in order; an empty list clears it.
+    pub fallbacks: Vec<(&'static str, Vec<Value>)>,
 }
 
 /// A thread's next crew after `change`, stored as the thread's complete crew (`applyCrewChange`).
@@ -334,14 +341,26 @@ pub fn apply_change(current: Option<&Value>, change: &Change) -> Value {
         pinned.insert((*role).into(), selection.clone().unwrap_or(Value::Null));
     }
     entry.insert("pinned".into(), Value::Object(pinned));
+    if !change.fallbacks.is_empty() {
+        let mut listed = entry
+            .get("fallbacks")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        for (role, list) in &change.fallbacks {
+            listed.insert((*role).into(), json!(list));
+        }
+        entry.insert("fallbacks".into(), Value::Object(listed));
+    }
     Value::Object(entry)
 }
 
-/// "Use this crew for new chats": what the thread runs with (on or off, preset, and the roles
-/// pinned by hand) becomes the default. It is the only way the default is edited, and no thread's
-/// own crew changes with it (`crewAsDefault`).
+/// "Use this crew for new chats": what the thread runs with (on or off, preset, the roles pinned
+/// by hand, and each role's fallback list) becomes the default. It is the only way the default is
+/// edited, and no thread's own crew changes with it (`crewAsDefault`).
 pub fn as_default(settings: &Value, crew: &Resolved) -> Value {
     let mut pinned = Map::new();
+    let mut listed = Map::new();
     for (slot, role) in ROLES.iter().enumerate() {
         if let (true, Some(option)) = (crew.pinned[slot], &crew.roles[slot]) {
             pinned.insert(
@@ -349,11 +368,17 @@ pub fn as_default(settings: &Value, crew: &Resolved) -> Value {
                 json!({"instanceId": option.instance_id, "model": option.model}),
             );
         }
+        // The list as stored, so a model whose provider is away for now is not dropped.
+        let fallbacks = &crew.listed[slot];
+        if !fallbacks.is_empty() {
+            listed.insert((*role).into(), json!(fallbacks));
+        }
     }
     let mut next = settings.clone();
     next["enabled"] = json!(crew.enabled);
     next["preset"] = json!(crew.preset);
     next["pinned"] = Value::Object(pinned);
+    next["fallbacks"] = Value::Object(listed);
     next
 }
 
@@ -604,6 +629,20 @@ fn pick_items(ctx: &Context, role: usize, query: &str) -> Vec<PickItem> {
     items
 }
 
+/// What the model list offers when it fills a fallback list: the models alone, for Auto is not
+/// something a role can fall back to.
+fn pick_for(ctx: &Context, role: usize, query: &str, for_fallback: bool) -> Vec<PickItem> {
+    let items = pick_items(ctx, role, query);
+    if for_fallback {
+        items
+            .into_iter()
+            .filter(|item| !matches!(item, PickItem::Auto { .. }))
+            .collect()
+    } else {
+        items
+    }
+}
+
 /// Whether the item is what the role has now: Auto for an unpinned role, else the pinned model.
 fn is_current(item: &PickItem, ctx: &Context, role: usize) -> bool {
     match item {
@@ -625,6 +664,40 @@ fn role_model_text(ctx: &Context, role: usize) -> String {
             "{}{}",
             if ctx.pinned[role] { "" } else { "Auto · " },
             option.label
+        ),
+    }
+}
+
+/// A role's fallback models on one line: `A, B` in order, else `none`.
+fn fallback_text(ctx: &Context, role: usize) -> String {
+    if ctx.listed[role].is_empty() {
+        return text("providers.crewScreen.fallbackNone").into();
+    }
+    ctx.listed[role]
+        .iter()
+        .map(|selection| match listed_option(ctx, selection) {
+            Some(option) => option.label.clone(),
+            None => selection["model"].as_str().unwrap_or("?").to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The model a stored fallback entry names, when this environment can run it now.
+fn listed_option<'a>(ctx: &'a Context, selection: &Value) -> Option<&'a ModelOption> {
+    ctx.options
+        .iter()
+        .find(|option| crew::same_selection(selection, option))
+}
+
+/// `Provider / Model` for a stored fallback entry; one that cannot run now shows its raw ids.
+fn listed_label(ctx: &Context, selection: &Value) -> String {
+    match listed_option(ctx, selection) {
+        Some(option) => format!("{} / {}", option.provider_label, option.label),
+        None => format!(
+            "{} / {}",
+            selection["instanceId"].as_str().unwrap_or("?"),
+            selection["model"].as_str().unwrap_or("?")
         ),
     }
 }
@@ -771,6 +844,8 @@ enum Row {
     Toggle,
     Preset,
     Role(usize),
+    /// The role's fallback list, reached from its own row.
+    Fallbacks(usize),
     AutoAll,
     Default,
     Reset,
@@ -795,7 +870,10 @@ fn main_rows(ctx: &Context) -> Vec<Row> {
         .map(|(i, _)| Row::Thread(i))
         .collect();
     rows.extend([Row::Toggle, Row::Preset]);
-    rows.extend((0..ROLES.len()).map(Row::Role));
+    for role in 0..ROLES.len() {
+        rows.push(Row::Role(role));
+        rows.push(Row::Fallbacks(role));
+    }
     if ctx.pinned.iter().any(|p| *p) {
         rows.push(Row::AutoAll);
     }
@@ -809,6 +887,7 @@ fn main_rows(ctx: &Context) -> Vec<Row> {
 fn row_id(ctx: &Context, row: Row) -> String {
     match row {
         Row::Role(role) => format!("role:{}", ROLES[role]),
+        Row::Fallbacks(role) => format!("fallback:{}", ROLES[role]),
         Row::Task(i) => format!(
             "task:{}",
             ctx.board.as_ref().map_or("", |b| &b.tasks[i].task_id)
@@ -840,6 +919,13 @@ enum View {
         role: usize,
         selected: usize,
         query: String,
+        /// Picking a model to add to the role's fallback list, rather than to pin the role.
+        for_fallback: bool,
+    },
+    /// A role's fallback list: Enter on an entry takes it out, the last item opens the picker.
+    Fallback {
+        role: usize,
+        selected: usize,
     },
     Task {
         task_id: String,
@@ -854,6 +940,7 @@ impl View {
             View::Main { selected, .. }
             | View::Preset { selected }
             | View::Model { selected, .. }
+            | View::Fallback { selected, .. }
             | View::Task { selected, .. } => *selected,
         }
     }
@@ -904,14 +991,18 @@ fn open_view(ctx: &Context) -> View {
 }
 
 /// The model list of a role; the pointer starts on the role's current model.
-fn model_view(ctx: &Context, role: usize, query: &str) -> View {
-    let current = pick_items(ctx, role, query)
-        .iter()
-        .position(|item| is_current(item, ctx, role));
+fn model_view(ctx: &Context, role: usize, query: &str, for_fallback: bool) -> View {
+    let items = pick_for(ctx, role, query, for_fallback);
+    let current = if for_fallback {
+        None
+    } else {
+        items.iter().position(|item| is_current(item, ctx, role))
+    };
     View::Model {
         role,
         selected: current.unwrap_or(0),
         query: query.to_string(),
+        for_fallback,
     }
 }
 
@@ -947,7 +1038,14 @@ fn count_of(view: &View, ctx: &Context) -> usize {
     match view {
         View::Main { .. } => main_rows(ctx).len(),
         View::Preset { .. } => PRESETS.len(),
-        View::Model { role, query, .. } => pick_items(ctx, *role, query).len(),
+        View::Model {
+            role,
+            query,
+            for_fallback,
+            ..
+        } => pick_for(ctx, *role, query, *for_fallback).len(),
+        // The role's entries, and the item that opens the picker.
+        View::Fallback { role, .. } => ctx.listed[*role].len() + 1,
         View::Task {
             task_id,
             confirm_stop,
@@ -966,7 +1064,20 @@ enum Effect {
     None,
     Toggle,
     Preset(&'static str),
-    Pin { role: usize, pick: PickItem },
+    Pin {
+        role: usize,
+        pick: PickItem,
+    },
+    /// Appends the model to the role's fallback list.
+    AddFallback {
+        role: usize,
+        option: ModelOption,
+    },
+    /// Takes the stored entry out of the role's fallback list, runnable now or not.
+    RemoveFallback {
+        role: usize,
+        selection: Value,
+    },
     AutoAll,
     Default,
     Reset,
@@ -1039,10 +1150,20 @@ fn with_selected(view: &View, ctx: &Context, selected: usize) -> View {
     match view {
         View::Main { .. } => main_view_at(ctx, selected),
         View::Preset { .. } => View::Preset { selected },
-        View::Model { role, query, .. } => View::Model {
+        View::Model {
+            role,
+            query,
+            for_fallback,
+            ..
+        } => View::Model {
             role: *role,
             selected,
             query: query.clone(),
+            for_fallback: *for_fallback,
+        },
+        View::Fallback { role, .. } => View::Fallback {
+            role: *role,
+            selected,
         },
         View::Task {
             task_id,
@@ -1092,9 +1213,19 @@ fn crew_key(shown: &View, ctx: &Context, key: KeyEvent) -> KeyResult {
                 ctx,
                 row_index(ctx, |row| *row == Row::Preset),
             ))),
-            View::Model { role, .. } => stay(Some(main_view_at(
+            View::Model {
+                role, for_fallback, ..
+            } => stay(Some(match for_fallback {
+                // The picker goes back to the list it fills, a pin to the settings row.
+                true => View::Fallback {
+                    role: *role,
+                    selected: 0,
+                },
+                false => main_view_at(ctx, row_index(ctx, |row| *row == Row::Role(*role))),
+            })),
+            View::Fallback { role, .. } => stay(Some(main_view_at(
                 ctx,
-                row_index(ctx, |row| *row == Row::Role(*role)),
+                row_index(ctx, |row| *row == Row::Fallbacks(*role)),
             ))),
         }
     };
@@ -1103,13 +1234,22 @@ fn crew_key(shown: &View, ctx: &Context, key: KeyEvent) -> KeyResult {
         role,
         selected: _,
         query,
+        ..
     } = &view
     {
+        let for_fallback = matches!(
+            &view,
+            View::Model {
+                for_fallback: true,
+                ..
+            }
+        );
         let edit = |query: String| {
             stay(Some(View::Model {
                 role: *role,
                 selected: 0,
                 query,
+                for_fallback,
             }))
         };
         match key.code {
@@ -1147,10 +1287,16 @@ fn crew_key(shown: &View, ctx: &Context, key: KeyEvent) -> KeyResult {
         KeyCode::Up => go(view.selected().saturating_sub(1)),
         KeyCode::Down => go((view.selected() + 1).min(count.saturating_sub(1))),
         KeyCode::Esc => match &view {
-            View::Model { role, query, .. } if !query.is_empty() => stay(Some(View::Model {
+            View::Model {
+                role,
+                query,
+                for_fallback,
+                ..
+            } if !query.is_empty() => stay(Some(View::Model {
                 role: *role,
                 selected: 0,
                 query: String::new(),
+                for_fallback: *for_fallback,
             })),
             _ => back(),
         },
@@ -1174,20 +1320,61 @@ fn activate(view: &View, ctx: &Context) -> KeyResult {
             role,
             selected,
             query,
+            for_fallback,
         } => {
-            let Some(pick) = pick_items(ctx, *role, query).get(*selected).cloned() else {
+            let Some(pick) = pick_for(ctx, *role, query, *for_fallback)
+                .get(*selected)
+                .cloned()
+            else {
                 return KeyResult {
                     view: Some(view.clone()),
                     effect: Effect::None,
                     notice: Some(text("providers.crewScreen.noMatch").into()),
                 };
             };
+            if *for_fallback {
+                // A model goes onto the list; the pointer waits on it for the next key.
+                let PickItem::Model { option, .. } = pick else {
+                    return stay(Some(view.clone()));
+                };
+                return with_effect(
+                    Some(View::Fallback {
+                        role: *role,
+                        selected: ctx.listed[*role].len(),
+                    }),
+                    Effect::AddFallback {
+                        role: *role,
+                        option,
+                    },
+                );
+            }
             with_effect(
                 Some(main_view_at(
                     ctx,
                     row_index(ctx, |row| *row == Row::Role(*role)),
                 )),
                 Effect::Pin { role: *role, pick },
+            )
+        }
+        View::Fallback { role, selected } => {
+            let entries = &ctx.listed[*role];
+            if *selected >= entries.len() {
+                return stay(Some(View::Model {
+                    role: *role,
+                    selected: 0,
+                    query: String::new(),
+                    for_fallback: true,
+                }));
+            }
+            with_effect(
+                Some(View::Fallback {
+                    role: *role,
+                    selected: *selected,
+                }),
+                Effect::RemoveFallback {
+                    role: *role,
+                    selection: entries[*selected].clone(),
+                },
             )
         }
         View::Task {
@@ -1241,7 +1428,8 @@ fn activate(view: &View, ctx: &Context) -> KeyResult {
                         .position(|p| p.value == ctx.preset)
                         .unwrap_or(0),
                 })),
-                Row::Role(role) => stay(Some(model_view(ctx, role, ""))),
+                Row::Role(role) => stay(Some(model_view(ctx, role, "", false))),
+                Row::Fallbacks(role) => stay(Some(View::Fallback { role, selected: 0 })),
                 Row::Task(i) => stay(Some(View::Task {
                     task_id: ctx
                         .board
@@ -1301,6 +1489,60 @@ fn run_effect(app: &mut App, effect: Effect, ctx: &Context) {
                 Save::Change(pin_change(role, selection)),
                 text_with("session.c.roleModel", &[("role", role_name(ROLES[role]))]),
                 value,
+            );
+        }
+        Effect::AddFallback { role, option } => {
+            let mut list = ctx.listed[role].clone();
+            if list
+                .iter()
+                .any(|selection| crew::same_selection(selection, &option))
+            {
+                app.notice = Some(text("providers.crewScreen.alreadyListed").into());
+                return;
+            }
+            if list.len() >= crew::CREW_FALLBACK_LIMIT {
+                app.notice = Some(text_with(
+                    "providers.crewScreen.fallbackFull",
+                    &[("max", crew::CREW_FALLBACK_LIMIT.to_string())],
+                ));
+                return;
+            }
+            let label = format!("{} / {}", option.provider_label, option.label);
+            list.push(selection_of(&option));
+            save(
+                app,
+                Save::Change(Change {
+                    fallbacks: vec![(ROLES[role], list)],
+                    ..Default::default()
+                }),
+                text_with(
+                    "session.c.roleFallbacks",
+                    &[("role", role_name(ROLES[role]))],
+                ),
+                label,
+            );
+        }
+        Effect::RemoveFallback { role, selection } => {
+            let Some(at) = ctx.listed[role]
+                .iter()
+                .position(|entry| *entry == selection)
+            else {
+                return;
+            };
+            let label = listed_label(ctx, &selection);
+            let mut list = ctx.listed[role].clone();
+            list.remove(at);
+            save(
+                app,
+                Save::Change(Change {
+                    fallbacks: vec![(ROLES[role], list)],
+                    ..Default::default()
+                }),
+                text_with(
+                    "session.c.roleFallbacks",
+                    &[("role", role_name(ROLES[role]))],
+                ),
+                label,
             );
         }
         Effect::AutoAll => save(
@@ -1913,7 +2155,7 @@ fn run_model(app: &mut App, ctx: &Context, args: &[&str]) {
     let label = text_with("session.c.roleModel", &[("role", role_name(ROLES[role]))]);
     if query.is_empty() {
         app.screen = Some(Box::new(CrewScreen {
-            view: model_view(ctx, role, ""),
+            view: model_view(ctx, role, "", false),
         }));
         return;
     }
@@ -1952,7 +2194,7 @@ fn run_model(app: &mut App, ctx: &Context, args: &[&str]) {
         // Several models fit the words: the list, already narrowed, lets the user choose.
         _ => {
             app.screen = Some(Box::new(CrewScreen {
-                view: model_view(ctx, role, &query),
+                view: model_view(ctx, role, &query, false),
             }));
         }
     }
@@ -2053,48 +2295,99 @@ fn frame_of(shown: &View, ctx: &Context, room: usize) -> Content {
             role,
             selected,
             query,
-        } => Content {
-            title: text_with(
-                "providers.crewScreen.roleModel",
-                &[("role", role_name(ROLES[*role]))],
-            ),
-            items: pick_items(ctx, *role, query)
-                .iter()
-                .map(|item| Item {
-                    label: item.label().into(),
-                    note: [
-                        if is_current(item, ctx, *role) {
-                            text("providers.screen.current")
-                        } else {
-                            ""
-                        },
-                        item.note(),
-                    ]
+            for_fallback,
+        } => {
+            let items = pick_for(ctx, *role, query, *for_fallback);
+            Content {
+                title: text_with(
+                    if *for_fallback {
+                        "providers.crewScreen.roleFallbacks"
+                    } else {
+                        "providers.crewScreen.roleModel"
+                    },
+                    &[("role", role_name(ROLES[*role]))],
+                ),
+                items: items
                     .iter()
-                    .filter(|part| !part.is_empty())
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .join(" · "),
+                    .map(|item| {
+                        let picked = match item {
+                            PickItem::Model { option, .. } => {
+                                if *for_fallback {
+                                    ctx.listed[*role]
+                                        .iter()
+                                        .any(|s| crew::same_selection(s, option))
+                                        .then(|| text("providers.crewScreen.alreadyListed"))
+                                } else if is_current(item, ctx, *role) {
+                                    Some(text("providers.screen.current"))
+                                } else {
+                                    None
+                                }
+                            }
+                            PickItem::Auto { .. } => is_current(item, ctx, *role)
+                                .then(|| text("providers.screen.current")),
+                        };
+                        Item {
+                            label: item.label().into(),
+                            note: [picked.unwrap_or_default(), item.note()]
+                                .iter()
+                                .filter(|part| !part.is_empty())
+                                .copied()
+                                .collect::<Vec<_>>()
+                                .join(" · "),
+                        }
+                    })
+                    .collect(),
+                selected: *selected,
+                empty: text("providers.crewScreen.noMatch").into(),
+                before: vec![if query.is_empty() {
+                    dim(text_with(
+                        "providers.crewScreen.typeToFilter",
+                        &[("hint", role_hint(*role).to_string())],
+                    ))
+                } else {
+                    (
+                        format!(
+                            "{} {}",
+                            text("providers.crewScreen.search"),
+                            sanitize(query)
+                        ),
+                        Shade::Plain,
+                    )
+                }],
+            }
+        }
+        View::Fallback { role, selected } => {
+            let mut items = ctx.listed[*role]
+                .iter()
+                .map(|selection| Item {
+                    label: listed_label(ctx, selection),
+                    note: text(if listed_option(ctx, selection).is_some() {
+                        "providers.crewScreen.fallbackRemoveNote"
+                    } else {
+                        "providers.crewScreen.fallbackAwayNote"
+                    })
+                    .into(),
                 })
-                .collect(),
-            selected: *selected,
-            empty: text("providers.crewScreen.noMatch").into(),
-            before: vec![if query.is_empty() {
-                dim(text_with(
-                    "providers.crewScreen.typeToFilter",
-                    &[("hint", role_hint(*role).to_string())],
-                ))
-            } else {
-                (
-                    format!(
-                        "{} {}",
-                        text("providers.crewScreen.search"),
-                        sanitize(query)
-                    ),
-                    Shade::Plain,
-                )
-            }],
-        },
+                .collect::<Vec<_>>();
+            items.push(Item {
+                label: text("providers.crewScreen.fallbackAdd").into(),
+                note: text("providers.crewScreen.fallbackAddNote").into(),
+            });
+            let mut before = Vec::new();
+            if ctx.listed[*role].is_empty() {
+                before.push(dim(text("providers.crewScreen.fallbackNoneYet")));
+            }
+            Content {
+                title: text_with(
+                    "providers.crewScreen.roleFallbacks",
+                    &[("role", role_name(ROLES[*role]))],
+                ),
+                items,
+                selected: *selected,
+                empty: String::new(),
+                before,
+            }
+        }
         View::Task {
             task_id,
             selected,
@@ -2214,6 +2507,17 @@ fn frame_of(shown: &View, ctx: &Context, room: usize) -> Content {
                             role_model_text(ctx, role)
                         ),
                         note: role_hint(role).into(),
+                    },
+                    Row::Fallbacks(role) => Item {
+                        label: format!(
+                            "{}  {}",
+                            text_with(
+                                "session.c.roleFallbacks",
+                                &[("role", role_name(ROLES[role]))]
+                            ),
+                            fallback_text(ctx, role)
+                        ),
+                        note: text("providers.crewScreen.fallbackNote").into(),
                     },
                     Row::AutoAll => Item {
                         label: text("providers.crewScreen.autoAll").into(),
@@ -2364,6 +2668,7 @@ impl Screen for CrewScreen {
             View::Preset { .. } => text("providers.crewScreen.hintPreset"),
             View::Model { query, .. } if query.is_empty() => text("providers.crewScreen.hintModel"),
             View::Model { .. } => text("providers.crewScreen.hintModelClear"),
+            View::Fallback { .. } => text("providers.crewScreen.hintFallback"),
             View::Task {
                 confirm_stop: true, ..
             } => text("providers.crewScreen.hintConfirm"),

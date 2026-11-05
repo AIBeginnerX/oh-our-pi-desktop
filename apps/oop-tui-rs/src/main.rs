@@ -37,6 +37,7 @@ mod input;
 mod link;
 mod lists;
 mod markdown;
+mod mobile;
 mod notes;
 mod notify;
 mod panels_common;
@@ -60,8 +61,10 @@ mod settings_write;
 mod side;
 mod sidebar;
 mod slash;
+mod ssh;
 mod state;
 mod stats_view;
+mod tailscale;
 mod tasks_pane;
 mod terminal;
 mod text;
@@ -136,7 +139,9 @@ const RUNTIME_MODES: [&str; 4] = [
     "full-access",
 ];
 /// The words that start a command of their own; any other first word begins a message.
-const COMMAND_WORDS: [&str; 6] = ["pair", "config", "doctor", "stop", "update", "provider"];
+const COMMAND_WORDS: [&str; 8] = [
+    "pair", "config", "doctor", "stop", "update", "provider", "ssh", "mobile",
+];
 
 enum Command {
     Help,
@@ -166,10 +171,17 @@ enum Command {
         server: Option<String>,
         home: Option<String>,
     },
+    Mobile {
+        home: Option<String>,
+    },
     Provider {
         request: provider_args::ProviderRequest,
         server: Option<String>,
         home: Option<String>,
+    },
+    Ssh {
+        host: String,
+        launch: app::Launch,
     },
     Error(String),
 }
@@ -339,10 +351,36 @@ fn parse_args(args: &[String]) -> Command {
                 None => Command::Error(t("cli.err.usageConfig").into()),
             }
         }
+        "ssh" => {
+            if server.is_some() || home.is_some() {
+                return Command::Error(
+                    panels_common::s(
+                        "oop ssh does not take --server or --home.",
+                        "oop ssh 에는 --server 와 --home 을 쓸 수 없습니다.",
+                    )
+                    .into(),
+                );
+            }
+            match ssh::parse_host(rest) {
+                Ok(host) => Command::Ssh {
+                    host,
+                    launch: app::Launch {
+                        continue_last,
+                        mode,
+                        prompt: None,
+                    },
+                },
+                Err(message) => Command::Error(message),
+            }
+        }
         "doctor" if rest.is_empty() => Command::Doctor { home },
         "doctor" => Command::Error(t("cli.err.usageDoctor").into()),
         "stop" if rest.is_empty() => Command::Stop { home },
         "stop" => Command::Error(t("cli.err.usageStop").into()),
+        "mobile" if rest.is_empty() => Command::Mobile { home },
+        "mobile" => {
+            Command::Error(panels_common::s("Usage: oop mobile", "사용법: oop mobile").into())
+        }
         "update" if rest.is_empty() => Command::Update { server, home },
         "update" => Command::Error(t("cli.err.usageUpdate").into()),
         _ => {
@@ -442,11 +480,13 @@ async fn main() {
             };
             cli_update::run(&version(), &ports).await
         }
+        Command::Mobile { home } => mobile::run_cli(home).await,
         Command::Provider {
             request,
             server,
             home,
         } => provider_cmd::run_cli(request, server, home).await,
+        Command::Ssh { host, launch } => ssh_session(host, launch).await,
         Command::Status { home, server } => match status(home, server).await {
             Ok(()) => 0,
             Err(error) => {
@@ -549,6 +589,47 @@ fn read_clipboard(tools: Vec<clipboard::Tool>, tx: tokio::sync::mpsc::UnboundedS
 
 /// Reads the language setting first, as `run` does: a one-shot command's messages are translated
 /// too.
+/// `oop ssh <host>`: connects the host's server through an SSH forward and runs the usual screen
+/// against it. The forward goes away with the terminal; if ssh ends first the screen is left.
+async fn ssh_session(host: String, launch: app::Launch) -> i32 {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        eprintln!(
+            "{}",
+            panels_common::s(
+                "oop only runs in an interactive terminal (standard input/output is not a terminal).",
+                "oop 은 대화형 터미널에서만 실행됩니다. (표준 입출력이 터미널이 아닙니다.)"
+            )
+        );
+        return 2;
+    }
+    let mut tunnel = match ssh::connect(&host, |what| eprintln!("{what}")).await {
+        Ok(tunnel) => tunnel,
+        Err(error) => {
+            eprintln!("oop: {error}");
+            return 1;
+        }
+    };
+    let code = tokio::select! {
+        result = run(None, Some(tunnel.origin.clone()), launch) => match result {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("oop: {error}");
+                1
+            }
+        },
+        () = tunnel.exited() => {
+            eprintln!(
+                "oop: {}",
+                panels_common::s("the SSH connection ended.", "SSH 연결이 끝났습니다.")
+            );
+            1
+        }
+    };
+    drop(tunnel);
+    code
+}
+
 async fn status(home: Option<String>, address: Option<String>) -> Result<(), String> {
     i18n::init(
         settings::read_settings(&settings::settings_path())
@@ -757,6 +838,24 @@ mod tests {
 
     fn args(words: &[&str]) -> Vec<String> {
         words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn ssh_takes_one_host_and_no_server_address() {
+        assert!(matches!(
+            parse_args(&args(&["ssh", "devbox", "--continue"])),
+            Command::Ssh { host, launch } if host == "devbox" && launch.continue_last
+        ));
+        for bad in [
+            &["ssh"][..],
+            &["ssh", "a", "b"],
+            &["ssh", "devbox", "--server", "x"],
+        ] {
+            assert!(
+                matches!(parse_args(&args(bad)), Command::Error(_)),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]

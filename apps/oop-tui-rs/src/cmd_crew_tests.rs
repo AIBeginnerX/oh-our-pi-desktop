@@ -229,8 +229,11 @@ fn the_main_screen_lists_settings_then_tasks_and_keys_move_the_pointer() {
             Row::Toggle,
             Row::Preset,
             Row::Role(0),
+            Row::Fallbacks(0),
             Row::Role(1),
+            Row::Fallbacks(1),
             Row::Role(2),
+            Row::Fallbacks(2),
             Row::Task(0)
         ],
         "no Auto-all row while nothing is pinned; no make-default or reset row while the thread runs the default"
@@ -238,7 +241,7 @@ fn the_main_screen_lists_settings_then_tasks_and_keys_move_the_pointer() {
     set_lead_crew(&mut app, Some(json!({"pinned": {}})));
     let own = main_rows(&context(&app, scenes::ms(100)));
     assert_eq!(
-        &own[5..7],
+        &own[8..10],
         [Row::Default, Row::Reset],
         "a thread with a crew of its own can make it the default or give it up"
     );
@@ -246,14 +249,8 @@ fn the_main_screen_lists_settings_then_tasks_and_keys_move_the_pointer() {
     assert_eq!(view.selected(), 0);
     let down = pressed(&view, &ctx, key(KeyCode::Down));
     assert_eq!(down.view.unwrap().selected(), 1);
-    let digit = pressed(&view, &ctx, letter('6'));
-    assert_eq!(digit.view.unwrap().selected(), 5);
-    let beyond = pressed(&view, &ctx, letter('7'));
-    assert_eq!(
-        beyond.view.unwrap().selected(),
-        0,
-        "a digit past the last row does nothing"
-    );
+    let digit = pressed(&view, &ctx, letter('9'));
+    assert_eq!(digit.view.unwrap().selected(), 8);
     assert!(
         pressed(&view, &ctx, key(KeyCode::Esc)).view.is_none(),
         "Esc closes the main screen"
@@ -307,10 +304,222 @@ fn enter_on_a_setting_asks_for_its_change_and_on_a_list_opens_it() {
         View::Model {
             role: 1,
             selected: 0,
-            query: String::new()
+            query: String::new(),
+            for_fallback: false
         },
         "Auto is the current choice"
     );
+    let fallback = pressed(&at(Row::Fallbacks(1)), &ctx, key(KeyCode::Enter))
+        .view
+        .unwrap();
+    assert_eq!(
+        fallback,
+        View::Fallback {
+            role: 1,
+            selected: 0
+        }
+    );
+}
+
+#[test]
+fn a_fallback_change_rewrites_one_role_and_keeps_the_others() {
+    let current = json!({"enabled": true, "pinned": {},
+        "fallbacks": {"worker": [{"instanceId": "codex", "model": "gpt-5"}]}});
+    let next = apply_change(
+        Some(&current),
+        &Change {
+            fallbacks: vec![(
+                "expert",
+                vec![json!({"instanceId": "claude", "model": "claude-opus-5-5"})],
+            )],
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        next["fallbacks"]["worker"][0]["model"], "gpt-5",
+        "the role the change does not name stays as it was"
+    );
+    assert_eq!(next["fallbacks"]["expert"][0]["model"], "claude-opus-5-5");
+    // An empty list clears the role and stays stored: over the default's list it means none.
+    let cleared = apply_change(
+        Some(&current),
+        &Change {
+            fallbacks: vec![("worker", vec![])],
+            ..Default::default()
+        },
+    );
+    assert_eq!(cleared["fallbacks"]["worker"], json!([]));
+    // A change that names no role adds no fallbacks key.
+    let kept = apply_change(Some(&current), &Change::default());
+    assert_eq!(kept, current);
+    let first = apply_change(
+        None,
+        &Change {
+            enabled: Some(true),
+            ..Default::default()
+        },
+    );
+    assert_eq!(first, json!({"enabled": true, "pinned": {}}));
+}
+
+#[test]
+fn make_default_copies_the_fallback_lists_the_thread_runs_with() {
+    let config = json!({"settings": {"crew": {"enabled": false, "preset": "recommended",
+        "pinned": {}, "fallbacks": {}}}, "providers": providers()});
+    let opus = json!({"instanceId": "claude", "model": "claude-opus-5-5"});
+    let mini = json!({"instanceId": "codex", "model": "gpt-5-mini"});
+    let gone = json!({"instanceId": "codex", "model": "gpt-9"});
+    let own = json!({"enabled": true, "fallbacks": {
+        "worker": [opus.clone(), gone.clone()], "expert": [mini.clone()]}});
+    let resolved = crew::resolve(&config, Some(&own), Some(("claude", "claude-sonnet-5-5")));
+    let next = as_default(&config["settings"]["crew"], &resolved);
+    assert_eq!(
+        next["fallbacks"],
+        json!({"worker": [opus, gone], "expert": [mini]}),
+        "each role's list in order, as stored: a model no provider offers now is kept"
+    );
+}
+
+#[test]
+fn a_fallback_that_cannot_run_now_stays_listed_and_can_be_taken_out() {
+    english();
+    let mut app = app_with(json!({"enabled": true, "fallbacks": {"worker":
+        [{"instanceId": "cursor", "model": "composer-2"},
+         {"instanceId": "codex", "model": "gpt-5"}]}}));
+    on_lead(&mut app, vec![], false);
+    let ctx = context(&app, 0);
+    assert_eq!(fallback_text(&ctx, 0), "composer-2, GPT-5");
+    let view = View::Fallback {
+        role: 0,
+        selected: 0,
+    };
+    assert_eq!(count_of(&view, &ctx), 3, "both entries and the add item");
+    match pressed(&view, &ctx, key(KeyCode::Enter)).effect {
+        Effect::RemoveFallback {
+            role: 0,
+            ref selection,
+        } => assert_eq!(selection["model"], "composer-2", "the away entry goes too"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_fallback_list_removes_on_enter_and_the_picker_adds() {
+    let mut app = app_with(json!({"enabled": true, "fallbacks": {"worker":
+        [{"instanceId": "codex", "model": "gpt-5"},
+         {"instanceId": "claude", "model": "claude-opus-5-5"}]}}));
+    on_lead(&mut app, vec![], false);
+    let ctx = context(&app, 0);
+    let view = View::Fallback {
+        role: 0,
+        selected: 0,
+    };
+    assert_eq!(count_of(&view, &ctx), 3, "two entries and the add item");
+    let remove = pressed(&view, &ctx, key(KeyCode::Enter));
+    match remove.effect {
+        Effect::RemoveFallback {
+            role: 0,
+            ref selection,
+        } => assert_eq!(selection["model"], "gpt-5", "the entry the pointer is on"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        remove.view,
+        Some(View::Fallback {
+            role: 0,
+            selected: 0
+        }),
+        "the list stays open, the entries after the removed one move up"
+    );
+    // the add item opens the picker, models only: nothing falls back to Auto
+    let add = pressed(
+        &View::Fallback {
+            role: 0,
+            selected: 2,
+        },
+        &ctx,
+        key(KeyCode::Enter),
+    );
+    assert_eq!(add.effect, Effect::None);
+    assert_eq!(
+        add.view,
+        Some(View::Model {
+            role: 0,
+            selected: 0,
+            query: String::new(),
+            for_fallback: true
+        })
+    );
+    let picker = add.view.unwrap();
+    assert_eq!(count_of(&picker, &ctx), 6, "the six models, Auto left out");
+    let added = pressed(&picker, &ctx, key(KeyCode::Enter));
+    match added.effect {
+        Effect::AddFallback {
+            role: 0,
+            ref option,
+        } => assert_eq!(option.model, "claude-haiku-5-5"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        added.view,
+        Some(View::Fallback {
+            role: 0,
+            selected: 2
+        }),
+        "the pointer waits on the entry the add puts last"
+    );
+    // Esc walks back through the picker and the list, and the list row is named
+    let back = pressed(&picker, &ctx, key(KeyCode::Esc));
+    assert_eq!(
+        back.view,
+        Some(View::Fallback {
+            role: 0,
+            selected: 0
+        })
+    );
+    let back2 = pressed(&back.view.unwrap(), &ctx, key(KeyCode::Esc));
+    assert!(matches!(back2.view, Some(View::Main { .. })));
+    assert_eq!(row_id(&ctx, Row::Fallbacks(0)), "fallback:worker");
+}
+
+#[test]
+fn adding_a_fallback_twice_or_past_the_limit_says_so_and_sends_nothing() {
+    let mut app = app_with(json!({"enabled": true, "fallbacks": {"worker":
+        [{"instanceId": "codex", "model": "gpt-5"},
+         {"instanceId": "claude", "model": "claude-opus-5-5"},
+         {"instanceId": "codex", "model": "gpt-5-mini"}]}}));
+    on_lead(&mut app, vec![], false);
+    let ctx = context(&app, 0);
+    let option = |model: &str| {
+        ctx.options
+            .iter()
+            .find(|o| o.model == model)
+            .unwrap()
+            .clone()
+    };
+    run_effect(
+        &mut app,
+        Effect::AddFallback {
+            role: 0,
+            option: option("gpt-5"),
+        },
+        &ctx,
+    );
+    assert_eq!(
+        app.notice.as_deref(),
+        Some(text("providers.crewScreen.alreadyListed"))
+    );
+    run_effect(
+        &mut app,
+        Effect::AddFallback {
+            role: 0,
+            option: option("grok-4"),
+        },
+        &ctx,
+    );
+    let full = text_with("providers.crewScreen.fallbackFull", &[("max", "3".into())]);
+    assert_eq!(app.notice.as_deref(), Some(full.as_str()));
+    assert!(app.log.is_empty(), "a refused add sends nothing");
 }
 
 #[test]
@@ -322,6 +531,7 @@ fn the_model_list_filters_as_letters_are_typed_and_esc_clears_before_it_goes_bac
         role: 0,
         selected: 0,
         query: String::new(),
+        for_fallback: false,
     };
     for ch in "mini".chars() {
         view = pressed(&view, &ctx, letter(ch)).view.unwrap();
@@ -331,7 +541,8 @@ fn the_model_list_filters_as_letters_are_typed_and_esc_clears_before_it_goes_bac
         View::Model {
             role: 0,
             selected: 0,
-            query: "mini".into()
+            query: "mini".into(),
+            for_fallback: false
         },
         "'q' and digits are letters here too"
     );
@@ -356,6 +567,7 @@ fn the_model_list_filters_as_letters_are_typed_and_esc_clears_before_it_goes_bac
         role: 0,
         selected: 0,
         query: "zzzz".into(),
+        for_fallback: false,
     };
     let result = pressed(&none, &ctx, key(KeyCode::Enter));
     assert_eq!(result.effect, Effect::None);
@@ -657,6 +869,53 @@ fn the_screen_draws_the_settings_and_the_board() {
     assert_eq!(
         app.screen.as_ref().unwrap().hint(),
         text("providers.crewScreen.hintMain")
+    );
+}
+
+#[test]
+fn the_screen_shows_each_role_s_fallbacks_and_the_list_editor() {
+    let mut app = app_with(json!({"enabled": true, "fallbacks": {"worker":
+        [{"instanceId": "codex", "model": "gpt-5"},
+         {"instanceId": "claude", "model": "claude-opus-5-5"}]}}));
+    on_lead(&mut app, vec![], false);
+    run(&mut app, "");
+    let rows = rows_of(&app, 110, 24).join("\n");
+    assert!(rows.contains("Worker fallbacks  GPT-5, Opus 5.5"), "{rows}");
+    assert!(rows.contains("Expert fallbacks  none"), "{rows}");
+    assert!(
+        rows.contains("Tried in order when the role's model fails"),
+        "{rows}"
+    );
+    // The list screen: the entries in order, the add item, and a word while the list is empty.
+    app.screen = Some(Box::new(CrewScreen {
+        view: View::Fallback {
+            role: 1,
+            selected: 0,
+        },
+    }));
+    let empty = rows_of(&app, 80, 12).join("\n");
+    assert!(empty.contains("Expert fallbacks"), "{empty}");
+    assert!(empty.contains("Add a model"), "{empty}");
+    assert!(empty.contains("No fallbacks yet"), "{empty}");
+    assert_eq!(
+        app.screen.as_ref().unwrap().hint(),
+        text("providers.crewScreen.hintFallback")
+    );
+    // The picker marks what the role lists already.
+    app.screen = Some(Box::new(CrewScreen {
+        view: View::Model {
+            role: 0,
+            selected: 2,
+            query: String::new(),
+            for_fallback: true,
+        },
+    }));
+    let picker = rows_of(&app, 100, 16).join("\n");
+    assert!(picker.contains("Worker fallbacks"), "{picker}");
+    assert!(picker.contains("already listed"), "{picker}");
+    assert!(
+        !picker.contains("Auto"),
+        "the picker lists models alone\n{picker}"
     );
 }
 
@@ -1060,6 +1319,90 @@ async fn crew_off_preset_reset_and_default_go_where_they_belong() {
         json!({"enabled": false, "pinned": {}})
     );
     assert_eq!(fake.called(UPDATE_SETTINGS).len(), 1);
+}
+
+#[tokio::test]
+async fn fallback_keys_write_the_thread_crew_and_make_default_writes_the_settings() {
+    let (fake, mut app, mut rx) = connected_on_lead().await;
+    // The pointer to the worker's fallback row (4), into the list (Enter), onto Add (Enter),
+    // the first model of the picker (Enter): the list gets it and the change goes to the thread.
+    let mut screen = {
+        run(&mut app, "");
+        app.screen.take().unwrap()
+    };
+    screen.key(letter('4'), &mut app);
+    screen.key(key(KeyCode::Enter), &mut app);
+    screen.key(key(KeyCode::Enter), &mut app);
+    screen.key(key(KeyCode::Enter), &mut app);
+    assert_eq!(
+        server_stores_the_crew(&mut app)["fallbacks"],
+        json!({"worker": [{"instanceId": "claude", "model": "claude-haiku-5-5"}]}),
+        "thread.crew.fallbacks, the same shape as a pin, in an array"
+    );
+    // Making the thread the default writes the list into the settings, built from what the
+    // server reports just now.
+    run(&mut app, "default");
+    fake::pump(&mut app, &mut rx, |a| {
+        a.config["settings"]["crew"]["fallbacks"]["worker"][0]["model"] == "claude-haiku-5-5"
+    })
+    .await;
+    assert_eq!(
+        stored(&fake)["fallbacks"],
+        json!({"worker": [{"instanceId": "claude", "model": "claude-haiku-5-5"}]})
+    );
+    // Back on the list, Enter on the entry takes it out and an empty list is stored.
+    let mut screen = {
+        run(&mut app, "");
+        app.screen.take().unwrap()
+    };
+    screen.key(letter('4'), &mut app);
+    screen.key(key(KeyCode::Enter), &mut app);
+    screen.key(key(KeyCode::Enter), &mut app);
+    assert_eq!(
+        server_stores_the_crew(&mut app)["fallbacks"]["worker"],
+        json!([]),
+        "an empty list clears the role over the default's list"
+    );
+    assert_eq!(
+        fake.called(UPDATE_SETTINGS).len(),
+        1,
+        "only 'default' wrote"
+    );
+}
+
+#[tokio::test]
+async fn the_fallback_lists_shown_come_from_the_thread_over_the_default() {
+    english();
+    let fake = fake::start_with(
+        json!({"crew": {"enabled": true, "preset": "recommended", "pinned": {},
+            "fallbacks": {"worker": [{"instanceId": "codex", "model": "gpt-5"}]}}}),
+        providers(),
+    )
+    .await;
+    let (mut app, _rx) = fake::connected(&fake).await;
+    on_lead(&mut app, vec![], false);
+    // The thread lists its own: the default's entry is gone, a thread's empty list means none.
+    set_lead_crew(&mut app, Some(json!({"fallbacks": {"worker": []}})));
+    let ctx = context(&app, 0);
+    assert!(ctx.listed[0].is_empty());
+    set_lead_crew(
+        &mut app,
+        Some(json!({"fallbacks": {"expert":
+        [{"instanceId": "codex", "model": "gpt-5"}]}})),
+    );
+    let ctx = context(&app, 0);
+    let models = |slot: usize| {
+        ctx.listed[slot]
+            .iter()
+            .map(|selection| selection["model"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        models(0),
+        ["gpt-5"],
+        "the thread's list over the default's, which also lists the worker here"
+    );
+    assert_eq!(models(1), ["gpt-5"]);
 }
 
 #[tokio::test]

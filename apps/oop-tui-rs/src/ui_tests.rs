@@ -1083,8 +1083,6 @@ fn slash_commands_drive_the_panel_the_pet_the_list_and_the_mouse() {
         "closed"
     );
     assert!(!app.side_open);
-    run(&mut app, "/dag-agents");
-    assert!(app.side_open && app.side_view == crate::app::Side::Agents);
     run(&mut app, "/dag-workflow");
     assert!(app.side_open && app.side_view == crate::app::Side::Workflow);
     run(&mut app, "/dag-workflow off");
@@ -1341,7 +1339,7 @@ fn a_click_on_a_tab_shows_that_view_and_a_click_below_does_nothing_to_the_panel(
         y + 3,
     );
     assert_eq!(app.side_view, Side::Workflow);
-    // the way out still works from every view
+    // the way out still works from every view: /dag-workflow and the view's own command
     for view in [Side::Savvy, Side::Files] {
         app.side_view = view;
         app.side_open = true;
@@ -1349,8 +1347,9 @@ fn a_click_on_a_tab_shows_that_view_and_a_click_below_does_nothing_to_the_panel(
             press(&mut app, KeyCode::Char(ch));
         }
         press(&mut app, KeyCode::Enter);
-        assert!(app.side_open, "off for another view closes nothing");
+        assert!(!app.side_open, "/dag-workflow off from {view:?}");
         app.input.take(true);
+        app.side_open = true;
         for ch in format!("{} off", view.command()).chars() {
             press(&mut app, KeyCode::Char(ch));
         }
@@ -1787,4 +1786,104 @@ fn the_help_names_the_keys_and_commands() {
     assert!(tr("notice.help").contains("/panel") && tr("notice.help").contains("Ctrl-B"));
     assert!(tr("hint.composer").contains("Ctrl-B/G") && tr("hint.list").contains("Ctrl-B"));
     assert!(crate::slash::COMMANDS.iter().any(|c| c.name == "panel"));
+}
+
+/// Types `text` the way a user does (the screen is drawn after every key, the slash list open) and
+/// presses Enter.
+fn type_and_enter(app: &mut App, width: u16, text: &str) {
+    for ch in text.chars() {
+        press(app, KeyCode::Char(ch));
+        let _ = screen(app, width, 40);
+    }
+    press(app, KeyCode::Enter);
+}
+
+#[test]
+fn dag_workflow_flips_the_panel_on_and_off_every_time_it_is_run() {
+    let panel_drawn = |app: &App| screen(app, 140, 40).iter().any(|r| r.contains("Workflow"));
+    let mut app = open_conversation();
+    assert!(panel_drawn(&app));
+    for round in 0..3 {
+        type_and_enter(&mut app, 140, "/dag-workflow");
+        assert!(
+            !app.side_open && !panel_drawn(&app),
+            "round {round}: closes"
+        );
+        type_and_enter(&mut app, 140, "/dag-workflow");
+        assert!(app.side_open && panel_drawn(&app), "round {round}: opens");
+        assert_eq!(app.side_view, crate::app::Side::Workflow);
+    }
+    // Picked from the open list with the arrow keys and Enter, and by a click on its row.
+    press(&mut app, KeyCode::Char('/'));
+    for ch in "dag-w".chars() {
+        press(&mut app, KeyCode::Char(ch));
+    }
+    let _ = screen(&app, 140, 40);
+    press(&mut app, KeyCode::Enter);
+    assert!(!app.side_open, "Enter on the highlighted row closes it");
+    for ch in "/dag-w".chars() {
+        press(&mut app, KeyCode::Char(ch));
+    }
+    let rows = screen(&app, 140, 40);
+    let (x, y) = cell_of(&rows, "dag-workflow");
+    mouse(
+        &mut app,
+        ratatui::crossterm::event::MouseEventKind::Down(
+            ratatui::crossterm::event::MouseButton::Left,
+        ),
+        x,
+        y,
+    );
+    mouse(
+        &mut app,
+        ratatui::crossterm::event::MouseEventKind::Up(ratatui::crossterm::event::MouseButton::Left),
+        x,
+        y,
+    );
+    assert!(
+        app.side_open && panel_drawn(&app),
+        "a click on the row opens it"
+    );
+    assert!(app.input.text().is_empty());
+}
+
+#[test]
+fn dag_workflow_does_not_flip_a_panel_that_has_no_room() {
+    // 80 columns: the panel cannot be drawn, so there is nothing to close and nothing to open.
+    let mut app = open_conversation();
+    for _ in 0..3 {
+        type_and_enter(&mut app, 80, "/dag-workflow");
+        assert!(app.side_open, "the choice to have the panel is not undone");
+        assert!(
+            app.notice.as_deref().is_some_and(|n| n.contains("90")),
+            "{:?}",
+            app.notice
+        );
+    }
+    // `off` still turns it off, so it does not appear when the window is widened.
+    type_and_enter(&mut app, 80, "/dag-workflow off");
+    assert!(!app.side_open);
+}
+
+#[test]
+fn dag_agents_is_gone_from_the_commands_but_its_tab_is_still_there() {
+    assert!(
+        !crate::slash::COMMANDS
+            .iter()
+            .any(|c| c.name == "dag-agents" || c.aliases.contains(&"agents"))
+    );
+    let mut app = open_conversation();
+    type_and_enter(&mut app, 140, "/dag-agents");
+    assert_eq!(app.notice.as_deref(), Some(tr("notice.unknownCommand")));
+    let rows = screen(&app, 140, 40);
+    let (x, y) = cell_of(&rows, "Agents");
+    mouse(
+        &mut app,
+        ratatui::crossterm::event::MouseEventKind::Down(
+            ratatui::crossterm::event::MouseButton::Left,
+        ),
+        x,
+        y,
+    );
+    assert_eq!(app.side_view, crate::app::Side::Agents);
 }

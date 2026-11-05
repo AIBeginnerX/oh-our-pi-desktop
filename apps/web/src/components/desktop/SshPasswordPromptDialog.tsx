@@ -146,6 +146,7 @@ function ActiveSshPasswordPrompt({
   };
 
   const target = describeSshTarget(request);
+  const isHostKey = request.kind === "host-key";
 
   return (
     <Dialog
@@ -158,10 +159,20 @@ function ActiveSshPasswordPrompt({
     >
       <DialogPopup className="max-w-md" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>SSH Password Required</DialogTitle>
+          <DialogTitle>{isHostKey ? "Trust SSH Host?" : "SSH Password Required"}</DialogTitle>
           <DialogDescription>
-            OOP needs your SSH password to connect to <code>{target}</code>. The password is passed
-            to the local SSH process for this connection attempt and is not saved by OOP.
+            {isHostKey ? (
+              <>
+                This is the first connection to <code>{target}</code>. Compare the fingerprint with
+                the one on the host (<code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code>)
+                before trusting it. If the host key ever changes, SSH will refuse to connect.
+              </>
+            ) : (
+              <>
+                OOP needs your SSH password to connect to <code>{target}</code>. The password is
+                passed to the local SSH process for this connection attempt and is not saved by OOP.
+              </>
+            )}
           </DialogDescription>
         </DialogHeader>
         <DialogPanel scrollFade={false}>
@@ -170,12 +181,14 @@ function ActiveSshPasswordPrompt({
             id={formId}
             onSubmit={(event) => {
               event.preventDefault();
-              void respond(password);
+              void respond(isHostKey ? "trust" : password);
             }}
           >
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-medium text-foreground">{request.prompt}</p>
+                <p className="whitespace-pre-wrap break-all text-sm font-medium text-foreground">
+                  {request.prompt}
+                </p>
                 {remainingLabel ? (
                   <span
                     className={
@@ -188,19 +201,21 @@ function ActiveSshPasswordPrompt({
                   </span>
                 ) : null}
               </div>
-              <Input
-                ref={inputRef}
-                autoComplete="current-password"
-                disabled={isResponding || isExpired}
-                name="ssh-password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
+              {isHostKey ? null : (
+                <Input
+                  ref={inputRef}
+                  autoComplete="current-password"
+                  disabled={isResponding || isExpired}
+                  name="ssh-password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+              )}
             </div>
             {visibleResponseError ? (
               <p className="text-sm text-destructive">{visibleResponseError}</p>
-            ) : (
+            ) : isHostKey ? null : (
               <p className="text-sm text-muted-foreground">
                 Use SSH keys to avoid repeated password prompts on new SSH sessions.
               </p>
@@ -212,7 +227,7 @@ function ActiveSshPasswordPrompt({
             {isExpired ? "Dismiss" : "Cancel"}
           </Button>
           <Button disabled={isResponding || isExpired} form={formId} type="submit">
-            Continue
+            {isHostKey ? "Trust and connect" : "Continue"}
           </Button>
         </DialogFooter>
       </DialogPopup>

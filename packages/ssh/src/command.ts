@@ -183,6 +183,7 @@ const runSshCommandInScope = Effect.fn("ssh/command.runSshCommand.inScope")(func
   const environment = yield* buildSshChildEnvironment({
     ...(input.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
     ...(input.authSecret === undefined ? {} : { authSecret: input.authSecret }),
+    ...(input.hostKeyAnswer === undefined ? {} : { hostKeyAnswer: input.hostKeyAnswer }),
   }).pipe(
     Effect.mapError(
       (cause) =>

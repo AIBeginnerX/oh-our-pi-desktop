@@ -125,15 +125,8 @@ pub const COMMANDS: &[Command] = &[
         "dag-workflow",
         &["workflow"],
         Some("[on|off|n]"),
-        "Show the workflow in the side panel",
-        "오른쪽 패널에 워크플로 표시",
-    ),
-    cmd(
-        "dag-agents",
-        &["agents"],
-        Some("[on|off]"),
-        "Show the agents in the side panel",
-        "오른쪽 패널에 에이전트 표시",
+        "Turn the side panel on or off (shows the workflow)",
+        "오른쪽 패널 켜기/끄기 (워크플로 표시)",
     ),
     cmd(
         "savvy",
@@ -166,6 +159,13 @@ pub const COMMANDS: &[Command] = &[
         "프로젝트 고르기",
     ),
     cmd("stats", &[], None, "Usage statistics", "사용 통계"),
+    cmd(
+        "mobile",
+        &[],
+        None,
+        "Connect a phone (QR code)",
+        "휴대폰 연결 (QR 코드)",
+    ),
     cmd(
         "tasks",
         &[],
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn a_word_narrows_by_name_start_alias_and_inner_text() {
-        assert_eq!(names("mo"), ["model", "mode", "mouse"]);
+        assert_eq!(names("mo"), ["model", "mode", "mobile", "mouse"]);
         assert_eq!(
             names("MODE"),
             ["mode", "model"],

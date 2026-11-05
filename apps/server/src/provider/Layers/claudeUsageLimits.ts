@@ -74,6 +74,7 @@ function scopedWindow(
     kind: "weekly",
     label: `Weekly · ${displayName}`,
     windowDurationMins: WEEK_MINS,
+    modelFamilies: [displayName],
     usedPercent: clampPercent(usedPercent),
     ...(resetsAt ? { resetsAt } : {}),
   };

@@ -13,11 +13,14 @@ import {
   buildRustClient,
   copyRunnerLog,
   driveRootCandidates,
+  installWithRepair,
   moveTaskToRunner,
   parseArgs,
   prependPath,
   releaseFilesToPrune,
   removeBrokenNsisCache,
+  removeStaleProjects,
+  resetInstalledDependencies,
   RUNNER_SCRIPTS,
   runnerLauncherScript,
   scheduleTaskArgs,
@@ -383,4 +386,71 @@ NodeTest.test("the Windows Rust client build is mandatory and fails the release 
   const noBinary = build({ has: new Set([NodePath.join(dir, "Cargo.toml")]) });
   NodeAssert.throws(() => noBinary.attempt(), /prints "", not 1\.2\.3/);
   NodeAssert.deepEqual(noBinary.runs[0]?.args ?? ["build", "--release"], ["build", "--release"]);
+});
+
+NodeTest.test(
+  "removes dropped projects without following the links inside their node_modules",
+  async () => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oop-stale-"));
+    const touch = (...segments) => {
+      const file = NodePath.join(root, ...segments);
+      NodeFS.mkdirSync(NodePath.dirname(file), { recursive: true });
+      NodeFS.writeFileSync(file, "");
+    };
+    try {
+      touch("source", "apps", "web", "package.json");
+      touch("checkout", "apps", "web", "package.json");
+      touch("checkout", "apps", "oop-tui", "package.json");
+      touch("checkout", "node_modules", ".pnpm", "vite-plus", "package.json");
+      NodeFS.mkdirSync(NodePath.join(root, "checkout", "apps", "oop-tui", "node_modules"));
+      NodeFS.symlinkSync(
+        NodePath.join(root, "checkout", "node_modules", ".pnpm", "vite-plus"),
+        NodePath.join(root, "checkout", "apps", "oop-tui", "node_modules", "vite-plus"),
+        "junction",
+      );
+
+      NodeAssert.deepEqual(
+        await removeStaleProjects(NodePath.join(root, "source"), NodePath.join(root, "checkout")),
+        ["apps/oop-tui"],
+      );
+      NodeAssert.deepEqual(NodeFS.readdirSync(NodePath.join(root, "checkout", "apps")), ["web"]);
+      NodeAssert.ok(
+        NodeFS.existsSync(
+          NodePath.join(root, "checkout", "node_modules", ".pnpm", "vite-plus", "package.json"),
+        ),
+      );
+
+      await resetInstalledDependencies(NodePath.join(root, "checkout"));
+      NodeAssert.equal(NodeFS.existsSync(NodePath.join(root, "checkout", "node_modules")), false);
+      NodeAssert.ok(NodeFS.existsSync(NodePath.join(root, "checkout", "apps", "web")));
+    } finally {
+      NodeFS.rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+NodeTest.test("reinstalls once from empty node_modules when the install fails", async () => {
+  const calls = [];
+  let attempts = 0;
+  await installWithRepair({
+    install: () => {
+      attempts += 1;
+      calls.push("install");
+      if (attempts === 1) throw new Error("pnpm.cmd exited with 1");
+    },
+    repair: async () => calls.push("repair"),
+    log: () => {},
+  });
+  NodeAssert.deepEqual(calls, ["install", "repair", "install"]);
+
+  await NodeAssert.rejects(
+    installWithRepair({
+      install: () => {
+        throw new Error("still broken");
+      },
+      repair: async () => {},
+      log: () => {},
+    }),
+    /still broken/,
+  );
 });

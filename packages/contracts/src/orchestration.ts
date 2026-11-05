@@ -140,6 +140,25 @@ export const CrewPinnedRoles = Schema.Struct({
 });
 export type CrewPinnedRoles = typeof CrewPinnedRoles.Type;
 
+/** How many fallback models the user can list for one crew role. */
+export const CREW_FALLBACK_LIMIT = 3;
+
+const CrewFallbackList = Schema.Array(ModelSelection).check(
+  Schema.isMaxLength(CREW_FALLBACK_LIMIT),
+);
+
+/**
+ * Models the user listed for a role to take over, in order, when the role's own model fails or
+ * its provider is cooling down; OOP's own picks come after them. In a thread's crew, an empty
+ * list means none even when the defaults list some.
+ */
+export const CrewFallbackRoles = Schema.Struct({
+  worker: Schema.optionalKey(CrewFallbackList),
+  expert: Schema.optionalKey(CrewFallbackList),
+  auditor: Schema.optionalKey(CrewFallbackList),
+});
+export type CrewFallbackRoles = typeof CrewFallbackRoles.Type;
+
 /**
  * A thread's own crew: what the user changed inside that thread, layered over the default crew
  * in the server settings. Lives here rather than in `crew.ts` because the thread schemas embed it.
@@ -148,6 +167,7 @@ export const CrewThreadOverride = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   preset: Schema.optionalKey(CrewPreset),
   pinned: Schema.optionalKey(CrewPinnedRoles),
+  fallbacks: Schema.optionalKey(CrewFallbackRoles),
 });
 export type CrewThreadOverride = typeof CrewThreadOverride.Type;
 

@@ -25,6 +25,8 @@ If the shell says `command not found`, the folder holding `oop` is not on your `
 | Start a thread with a first message     | `oop "fix the login bug"`    |
 | Manage providers                        | `oop provider`               |
 | Connect to OOP on another computer      | `oop pair <link>`            |
+| Work on another computer over SSH       | `oop ssh <host>`             |
+| Connect a phone with a QR code          | `oop mobile` or `/mobile`    |
 | Check your setup                        | `oop doctor`                 |
 | See what is new in the latest release   | `oop update`                 |
 | Stop the server the terminal started    | `oop stop`                   |
@@ -32,6 +34,32 @@ If the shell says `command not found`, the folder holding `oop` is not on your `
 
 If you used an earlier terminal app, nothing changes for you: the commands, `settings.json`,
 saved logins and threads are the same, and `OOP_TUI=ts` is no longer read.
+
+## Work on another computer over SSH
+
+`oop ssh devbox` opens OOP on a host you can reach with `ssh`, so you work on that machine's
+projects and threads. `devbox` can be `user@host` or an alias from `~/.ssh/config`. Password and
+passphrase prompts appear in the terminal before the screen opens, and so does the question about
+an unknown host key. If you refuse it, or the key changed, `oop` shows ssh's own message and says
+to check `~/.ssh/known_hosts`.
+
+It uses the same server folder on the host (`~/.oop-desktop`) as the desktop app's SSH
+connections: a server that is already running is reused, and otherwise the terminal starts one
+from the newest runtime installed there. If the host has none, connect to it once from the desktop
+app (**Settings -> Connections -> Add environment -> SSH**). The terminal does not copy a runtime
+over. The server keeps running on the host when you close `oop`; the SSH tunnel closes. Run
+`oop ssh devbox` again to reconnect; the saved login is reused.
+
+## Over Tailscale
+
+On a tailnet, either of these works from a Mac or Windows terminal to a host that runs OOP:
+
+- `oop pair https://<machine>.<tailnet>.ts.net/pair#token=...` with a link from `t3 pair --tailscale`
+  on the host. A bare token works with `--server <machine>.<tailnet>.ts.net`. The connection is
+  HTTPS, and `oop` trusts Tailscale's certificates without any setup.
+- `oop ssh <machine>.<tailnet>.ts.net` (or the `100.x` address), with the same prompts as any ssh.
+
+A plain `http://100.x.x.x:<port>` link also pairs, but `oop` warns that it is not HTTPS.
 
 ## OOP Terminal and splits
 
@@ -173,14 +201,28 @@ on.
 Without the desktop app, install the terminal app on its own (INSTALL.md, "Terminal app only"). It carries its own server and
 needs no OOP Desktop. The Linux AppImage does not include the terminal app.
 
+## Connect a phone
+
+`/mobile` (or `oop mobile`) shows the QR code from the app's **Connect mobile** dialog: scan it with
+the phone camera to open OOP in the phone's browser. It uses the relay address saved in the app, so
+it works away from home. Without one, the phone must be on the same network. Press Esc to close.
+
+If this computer publishes the server with Tailscale Serve (`t3 serve --tailscale-serve`), a
+**Tailscale HTTPS** route is offered too, for a phone with the Tailscale app on the same tailnet.
+The relay stays the first choice; press Tab to switch between routes. `oop mobile` prints the
+other routes' links under the code.
+
+The code works for one phone and expires after a few minutes; run the command again for a new one.
+It needs the OOP server on the same computer, and in the app, mobile connections allowed (and the
+relay address saved) under **Connect mobile**.
+
 ## Task list
 
 `/tasks` opens the thread's task list under the conversation, on the left of the terminal, and
 `/tasks` again closes it. It shows the steps the agent is keeping (waiting, in progress, done) and
 how many are done, and it keeps the last list after the turn ends. An agent that keeps no list
 leaves it empty. The terminal switches to a full-screen view while the list is open, and it needs
-a terminal at least 16 rows tall. It works with or without the side panels of `/dag-workflow` and
-`/dag-agents`.
+a terminal at least 16 rows tall. It works with or without the side panels of `/dag-workflow`.
 
 ## Plans
 

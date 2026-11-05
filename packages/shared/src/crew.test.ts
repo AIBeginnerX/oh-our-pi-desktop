@@ -50,6 +50,7 @@ const settings = (overrides: Partial<CrewSettings> = {}): CrewSettings => ({
   enabled: true,
   preset: "recommended",
   pinned: {},
+  fallbacks: {},
   ...overrides,
 });
 
@@ -200,6 +201,64 @@ describe("crewAsDefault", () => {
     expect(Object.keys(next.pinned)).toEqual(["worker"]);
     expect(next.pinned.worker?.model).toBe("gpt-5.4");
   });
+
+  it("carries the thread's fallback lists into the default", () => {
+    const mini = { instanceId: "codex", model: "gpt-5.4-mini" } as never;
+    const crew = resolveCrew({
+      settings: settings(),
+      override: { fallbacks: { worker: [mini] } },
+      providers,
+      brain,
+    });
+    expect(crewAsDefault(settings(), crew).fallbacks).toEqual({ worker: [mini] });
+  });
+});
+
+describe("crew fallbacks", () => {
+  const mini = { instanceId: "codex", model: "gpt-5.4-mini" } as never;
+  const haiku = { instanceId: "claude", model: "claude-haiku-5" } as never;
+  const gone = { instanceId: "cursor", model: "composer-2" } as never;
+  const listed = (crew: ReturnType<typeof resolveCrew>) =>
+    crew.fallbacks.worker.map((option) => option.selection.model);
+
+  it("lists only models this environment can run, in the user's order", () => {
+    const crew = resolveCrew({
+      settings: settings({ fallbacks: { worker: [gone, mini, haiku] } }),
+      override: undefined,
+      providers,
+      brain,
+    });
+    expect(listed(crew)).toEqual(["gpt-5.4-mini", "claude-haiku-5"]);
+    // The saved list keeps the model that is away, so an edit or a new default does not drop it.
+    expect(crew.fallbackSelections.worker).toEqual([gone, mini, haiku]);
+    expect(crewAsDefault(settings(), crew).fallbacks).toEqual({ worker: [gone, mini, haiku] });
+  });
+
+  it("lets a thread replace or clear the default list", () => {
+    const defaults = settings({ fallbacks: { worker: [mini] } });
+    const replaced = resolveCrew({
+      settings: defaults,
+      override: { fallbacks: { worker: [haiku] } },
+      providers,
+      brain,
+    });
+    const cleared = resolveCrew({
+      settings: defaults,
+      override: { fallbacks: { worker: [] } },
+      providers,
+      brain,
+    });
+    expect(listed(replaced)).toEqual(["claude-haiku-5"]);
+    expect(listed(cleared)).toEqual([]);
+  });
+
+  it("stores a role's new list and keeps the other roles' lists", () => {
+    const next = applyCrewChange(
+      { fallbacks: { expert: [haiku] } },
+      { fallbacks: { worker: [mini] } },
+    );
+    expect(next.fallbacks).toEqual({ expert: [haiku], worker: [mini] });
+  });
 });
 
 describe("crewFallbackChain", () => {
@@ -225,13 +284,60 @@ describe("crewFallbackChain", () => {
     const chain = crewFallbackChain({
       options,
       role: "worker",
-      assigned: glm,
+      assigned: null,
+      preset: "recommended",
+      brain,
+      unavailableInstances: new Set(["claude"]),
+      limit: 5,
+    });
+    expect(models(chain)).toEqual(["glm-5.3-flash", "gpt-5.4-mini", "gpt-5.4"]);
+  });
+
+  it("still tries the role's own model once while its provider cools down", () => {
+    const zai = crewModelOptions([
+      provider("zai", "opencode", [{ slug: "glm-5.3-flash" }, { slug: "glm-5.3" }]),
+      ...team.slice(1),
+    ]);
+    const own = zai.find((option) => option.selection.model === "glm-5.3-flash") ?? null;
+    const chain = crewFallbackChain({
+      options: zai,
+      role: "worker",
+      assigned: own,
       preset: "recommended",
       brain,
       unavailableInstances: new Set(["zai"]),
       limit: 5,
     });
-    expect(models(chain)).toEqual(["claude-haiku-5", "gpt-5.4-mini", "gpt-5.4"]);
+    expect(models(chain)).toEqual(["glm-5.3-flash", "claude-haiku-5", "gpt-5.4-mini", "gpt-5.4"]);
+  });
+
+  it("puts the user's fallbacks right after the role's own model, skipping cooling ones", () => {
+    const pick = (model: string) => options.filter((option) => option.selection.model === model);
+    const chain = crewFallbackChain({
+      options,
+      role: "worker",
+      assigned: glm,
+      fallbacks: [...pick("gpt-5.4"), ...pick("claude-haiku-5"), ...pick("gpt-5.4-mini")],
+      preset: "recommended",
+      brain,
+      unavailableInstances: new Set(["claude"]),
+    });
+    // Three fallbacks make room for five; the cooling Claude fallback is left out.
+    expect(models(chain)).toEqual(["glm-5.3-flash", "gpt-5.4", "gpt-5.4-mini"]);
+  });
+
+  it("skips one refused model without dropping the rest of its provider", () => {
+    const chain = crewFallbackChain({
+      options,
+      role: "worker",
+      assigned: null,
+      preset: "recommended",
+      brain,
+      unavailableModels: [{ instanceId: "claude", model: "claude-haiku-5" } as never],
+      limit: 5,
+    });
+    expect(models(chain)).not.toContain("claude-haiku-5");
+    expect(models(chain)).toContain("glm-5.3-flash");
   });
 
   it("keeps an expert on strong models before dropping a level", () => {

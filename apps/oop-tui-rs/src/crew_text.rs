@@ -71,16 +71,46 @@ pub fn text(key: &str) -> &'static str {
         "providers.crewScreen.autoAllNote" => {
             s("Releases the models you picked", "직접 고른 모델을 풉니다")
         }
+        "providers.crewScreen.alreadyListed" => s("already listed", "이미 목록에 있음"),
         "providers.crewScreen.cancel" => s("Cancel", "취소"),
         "providers.crewScreen.confirmStop" => s("Confirm stop", "중단 확인"),
         "providers.crewScreen.confirmStopNote" => {
             s("You can retry it later", "이후 재시도할 수 있습니다")
         }
         "providers.crewScreen.enterToOpen" => s("Enter to open", "Enter 로 열기"),
+        "providers.crewScreen.fallbackAdd" => s("Add a model", "모델 추가"),
+        "providers.crewScreen.fallbackAddNote" => s(
+            "Enter to pick a model for the role to fall back to",
+            "Enter 로 역할이 돌아갈 모델을 고릅니다",
+        ),
+        "providers.crewScreen.fallbackFull" => s(
+            "The list is full — {max} at most",
+            "목록이 가득 찼습니다 — 최대 {max}개",
+        ),
+        "providers.crewScreen.fallbackNone" => s("none", "없음"),
+        "providers.crewScreen.fallbackNoneYet" => s(
+            "No fallbacks yet. Add a model for the role to fall back to.",
+            "아직 폴백이 없습니다. 역할이 돌아갈 모델을 추가하세요.",
+        ),
+        "providers.crewScreen.fallbackNote" => s(
+            "Tried in order when the role's model fails",
+            "역할 모델이 실패하면 순서대로 시도합니다",
+        ),
+        "providers.crewScreen.fallbackRemoveNote" => {
+            s("Enter takes it out of the list", "Enter 로 목록에서 뺍니다")
+        }
+        "providers.crewScreen.fallbackAwayNote" => s(
+            "Not available now, skipped until it is back · Enter takes it out",
+            "지금은 쓸 수 없어 돌아올 때까지 건너뜁니다 · Enter 로 뺍니다",
+        ),
         "providers.crewScreen.hintBack" => s("Esc back", "Esc 뒤로"),
         "providers.crewScreen.hintConfirm" => s(
             "↑/↓ move • Enter confirm • Esc cancel",
             "↑/↓ 이동 • Enter 확인 • Esc 취소",
+        ),
+        "providers.crewScreen.hintFallback" => s(
+            "↑/↓ move • Enter remove • Esc back",
+            "↑/↓ 이동 • Enter 제거 • Esc 뒤로",
         ),
         "providers.crewScreen.hintMain" => s(
             "↑/↓ move • 1-9 pick • Enter run • Esc close",
@@ -140,6 +170,7 @@ pub fn text(key: &str) -> &'static str {
             s("Runs it again as a new task", "새 작업으로 다시 실행합니다")
         }
         "providers.crewScreen.roleModel" => s("{role} model", "{role} 모델"),
+        "providers.crewScreen.roleFallbacks" => s("{role} fallbacks", "{role} 폴백"),
         "providers.crewScreen.roleTask" => s("{role} task", "{role} 작업"),
         "providers.crewScreen.scopeDefault" => s(
             "this thread only (still on the default crew)",
@@ -378,6 +409,7 @@ pub fn text(key: &str) -> &'static str {
         "session.c.off" => s("off", "꺼짐"),
         "session.c.on" => s("on", "켜짐"),
         "session.c.roleModel" => s("{role} model", "{role} 모델"),
+        "session.c.roleFallbacks" => s("{role} fallbacks", "{role} 폴백"),
         "session.c.threadNotFound" => s(
             "Cannot find the thread yet. Try again in a moment.",
             "스레드를 아직 찾을 수 없습니다. 잠시 뒤 다시 시도하세요.",
@@ -401,8 +433,8 @@ pub fn text(key: &str) -> &'static str {
         "session.goal.stopped" => s("stopped", "중지"),
         "session.goal.working" => s("working", "진행 중"),
         "session.slash.crew.note" => s(
-            "Turn Crew on or off, role models, task board",
-            "Crew 켜고 끄기·역할 모델·작업 보드",
+            "Turn Crew on or off, role models and fallbacks, task board",
+            "Crew 켜고 끄기·역할 모델과 폴백·작업 보드",
         ),
         "session.slash.crew.usage" => s(
             "[on|off|preset|model|default|reset|stop|log|back]",

@@ -15,6 +15,7 @@ import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Random from "effect/Random";
 import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
@@ -200,7 +201,15 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import * as RelayClient from "@t3tools/shared/relayClient";
-import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import {
+  disableTailscaleServe,
+  ensureTailscaleServe,
+  repointTailscaleServe,
+} from "@t3tools/tailscale";
+import {
+  readPersistedTailscaleServe,
+  writePersistedTailscaleServe,
+} from "./tailscaleServeState.ts";
 import { forkParked, ServerActivation } from "./serverActivation.ts";
 
 // MCP handoff thread IDs include escaped provenance and can exceed find-my-way's
@@ -866,6 +875,44 @@ const makeServerLayer = Layer.unwrap(
           ),
         )
       : Layer.empty;
+    // `t3 pair --tailscale` leaves a mapping that outlives this process but
+    // points at its port, and the background service picks a new port on every
+    // restart. Re-aim that mapping at the port this server got. Unlike
+    // --tailscale-serve it is never removed on shutdown.
+    const pairedTailscaleServe = config.tailscaleServeEnabled
+      ? Option.none()
+      : yield* readPersistedTailscaleServe(config.stateDir);
+    const tailscaleRepointLayer = Option.isSome(pairedTailscaleServe)
+      ? Layer.effectDiscard(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(tailscaleParked, undefined).pipe(Effect.orDie);
+            yield* awaitActivation;
+            const server = yield* HttpServer.HttpServer;
+            const address = server.address;
+            if (typeof address === "string" || !("port" in address)) {
+              return;
+            }
+            const { servePort, localPort: fromLocalPort } = pairedTailscaleServe.value;
+            const toLocalPort = address.port;
+            const result = yield* repointTailscaleServe({ servePort, fromLocalPort, toLocalPort });
+            if (result === "repointed") {
+              yield* writePersistedTailscaleServe(config.stateDir, {
+                servePort,
+                localPort: toLocalPort,
+              });
+            }
+            yield* Effect.logInfo("Tailscale Serve mapping checked", {
+              result,
+              servePort,
+              localPort: toLocalPort,
+            });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to re-aim Tailscale Serve mapping", { cause }),
+            ),
+          ),
+        )
+      : Layer.empty;
     const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
       Effect.gen(function* () {
         const releaseManagedTunnel = releaseManagedTunnelOnShutdown().pipe(
@@ -1090,7 +1137,9 @@ const makeServerLayer = Layer.unwrap(
           Deferred.await(runtimeStateParked),
           Deferred.await(cloudLinkParked),
           Deferred.await(routesReady),
-          ...(config.tailscaleServeEnabled ? [Deferred.await(tailscaleParked)] : []),
+          ...(config.tailscaleServeEnabled || Option.isSome(pairedTailscaleServe)
+            ? [Deferred.await(tailscaleParked)]
+            : []),
         ],
         { concurrency: "unbounded" },
       ).pipe(Effect.asVoid),
@@ -1105,6 +1154,7 @@ const makeServerLayer = Layer.unwrap(
       httpListeningLayer,
       runtimeStateLayer.pipe(Layer.provide(launcherLayer)),
       tailscaleServeLayer,
+      tailscaleRepointLayer,
       cloudDesiredLinkReconcileLayer,
       HeapSnapshot.layer,
     );

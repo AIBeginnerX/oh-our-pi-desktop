@@ -1,6 +1,54 @@
 {
   "versions": [
     {
+      "version": "0.0.145",
+      "date": "2026-11-05",
+      "highlights": [
+        {
+          "en": "The terminal works on remote hosts: `oop ssh <host>` connects to OOP on another machine over SSH, and `/mobile` (or `oop mobile`) shows a QR code a phone can scan to connect.",
+          "ko": "터미널에서 원격 호스트를 쓸 수 있습니다. `oop ssh <host>`로 SSH를 통해 다른 컴퓨터의 OOP에 연결하고, `/mobile`(또는 `oop mobile`)로 휴대폰이 스캔해 연결할 QR 코드를 띄웁니다."
+        },
+        {
+          "en": "Tailscale: the desktop app asks before trusting a new SSH host key, so a tailnet name or 100.x address connects on the first try. A `t3 pair --tailscale` address keeps working after the server restarts on a new port, and the terminal's `/mobile` offers Tailscale routes (Tab switches).",
+          "ko": "Tailscale: 데스크탑 앱이 처음 보는 SSH 호스트 키를 신뢰할지 앱 안에서 물어보므로, tailnet 이름이나 100.x 주소로 처음부터 연결됩니다. `t3 pair --tailscale` 주소는 서버가 새 포트로 다시 시작해도 계속 동작하고, 터미널의 `/mobile`에서 Tailscale 경로를 고를 수 있습니다(Tab으로 전환)."
+        },
+        {
+          "en": "Connecting over SSH to a host that runs an older OOP background service switches the service to your version, waits for one that is restarting, and no longer starts a second server.",
+          "ko": "이전 버전 OOP 백그라운드 서비스가 도는 호스트에 SSH로 연결하면 서비스를 내 버전으로 바꾸고, 재시작 중인 서비스는 기다리며, 두 번째 서버를 띄우지 않습니다."
+        },
+        {
+          "en": "In the terminal, `/dag-workflow` turns the right panel on and off whatever view is up; `/dag-agents` is gone, and the Agents view is a tab in the panel.",
+          "ko": "터미널에서 `/dag-workflow`가 어떤 화면이 떠 있든 우측창을 켜고 끕니다. `/dag-agents`는 없어졌고, Agents 화면은 패널의 탭으로 볼 수 있습니다."
+        },
+        {
+          "en": "Crew fallback models are set with a small button per role and listed so each can be removed; crew_roster shows them too.",
+          "ko": "Crew 폴백 모델은 역할마다 작은 버튼으로 정하고 목록에서 하나씩 지울 수 있습니다. crew_roster에도 표시됩니다."
+        },
+        {
+          "en": "Reliability: a crew retry keeps its memory and finished todo items, the Windows build no longer empties its package store, and the oop command passes stop signals on to the terminal.",
+          "ko": "안정성: Crew 재시도가 메모리와 끝난 할 일을 유지하고, Windows 빌드가 패키지 저장소를 비우지 않으며, oop 명령이 종료 신호를 터미널에 전달합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.144",
+      "date": "2026-11-05",
+      "highlights": [
+        {
+          "en": "Crew roles can list up to three fallback models, in order. A failed task moves to them first, then to another model of the same level, and the board says why it switched.",
+          "ko": "Crew 역할마다 폴백 모델을 순서대로 세 개까지 정할 수 있습니다. 실패한 작업은 먼저 폴백으로 넘어가고, 그다음 같은 수준의 다른 모델로 넘어가며, 보드에 넘어간 이유가 표시됩니다."
+        },
+        {
+          "en": "A provider that hit its usage limit sits out until its 5-hour or weekly window resets when it reports one, or 15 minutes when it does not, and is then tried again. A full window for one model, such as weekly Opus, benches only that model.",
+          "ko": "사용량 한도에 걸린 provider는 사용량 창을 알려 주면 그 5시간·주간 창이 리셋될 때까지, 알려 주지 않으면 15분 동안 쉬었다가 다시 시도됩니다. 주간 Opus처럼 한 모델의 창만 가득 차면 그 모델만 쉽니다."
+        },
+        {
+          "en": "A model a provider refuses no longer benches the provider's other models: only that model sits out. A role's own model is still tried once at the start of each task, so a limit you reset is picked up right away.",
+          "ko": "provider가 거부한 모델 하나 때문에 그 provider의 다른 모델까지 쉬지 않습니다. 그 모델만 쉽니다. 역할에 정한 모델은 작업을 시작할 때마다 한 번 시도하므로, 직접 리셋한 한도는 바로 반영됩니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.143",
       "date": "2026-11-04",
       "highlights": [

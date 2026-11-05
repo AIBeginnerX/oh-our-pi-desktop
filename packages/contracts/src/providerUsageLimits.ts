@@ -24,6 +24,11 @@ export const ServerProviderUsageWindow = Schema.Struct({
   usedPercent: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
   resetsAt: Schema.optional(IsoDateTime),
   windowDurationMins: Schema.optional(NonNegativeInt),
+  /**
+   * The model families this window alone limits (`Opus`, `gemini`), matched against the words of
+   * a model's id; empty when it limits a tool rather than a model. Absent: the whole account.
+   */
+  modelFamilies: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
 

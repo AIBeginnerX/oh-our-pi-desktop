@@ -698,6 +698,22 @@ it.layer(NodeServices.layer)("EnvironmentAuth.layer", (it) => {
         { origin: "https://evil.example", forwarded: "host=app.example.com" },
         false,
       ],
+      [
+        "Sec-Fetch-Site same-origin behind a proxy that rewrote Host",
+        { origin: "https://app.example.com", "sec-fetch-site": "same-origin" },
+        true,
+      ],
+      [
+        "Sec-Fetch-Site same-site",
+        { origin: "https://evil.example", "sec-fetch-site": "same-site" },
+        false,
+      ],
+      [
+        "Sec-Fetch-Site cross-site",
+        { origin: "https://evil.example", "sec-fetch-site": "cross-site" },
+        false,
+      ],
+      ["Sec-Fetch-Site none", { origin: "https://evil.example", "sec-fetch-site": "none" }, false],
     ] as const) {
       it.effect(`${accepted ? "accepts" : "rejects"} a cookie upgrade with ${label}`, () =>
         Effect.gen(function* () {

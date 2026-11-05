@@ -32,6 +32,8 @@ import {
   type SshAuthOptions,
   SshPasswordPrompt,
   isSshAuthFailure,
+  isSshHostKeyFailure,
+  parseSshHostKeyProbe,
 } from "./auth.ts";
 import {
   baseSshArgs,
@@ -184,6 +186,8 @@ interface SshAuthOperationInput<T> {
 interface SshAuthAttemptInput<T> extends SshAuthOperationInput<T> {
   readonly promptCount: number;
   readonly authSecret: string | null;
+  /** The unknown-host-key question is asked at most once per operation. */
+  readonly hostKeyPrompted: boolean;
 }
 
 export interface SshEnvironmentManagerShape {
@@ -591,10 +595,34 @@ LOG_FILE="$STATE_DIR/server.log"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
 RUNNER_NEXT="$STATE_DIR/run-t3.next.$$"
 mkdir -p "$STATE_DIR"
-cleanup_runner_next() {
+# Two launches for one target share the port, pid and managed files, so they
+# take turns: the second sees the first's server instead of starting its own
+# and orphaning it. mkdir is the atomic lock; a dead owner's lock is reclaimed
+# and a lock nobody releases is given up on after the wait (fail open).
+LAUNCH_LOCK="$STATE_DIR/launch.lock"
+LAUNCH_LOCK_HELD=0
+cleanup_launch() {
   rm -f "$RUNNER_NEXT"
+  if [ "$LAUNCH_LOCK_HELD" -eq 1 ]; then
+    rm -rf "$LAUNCH_LOCK"
+  fi
 }
-trap cleanup_runner_next EXIT
+trap cleanup_launch EXIT
+LOCK_TICKS=0
+while [ "$LOCK_TICKS" -lt @@T3_LAUNCH_LOCK_TICKS@@ ]; do
+  if mkdir "$LAUNCH_LOCK" 2>/dev/null; then
+    printf '%s\\n' "$$" >"$LAUNCH_LOCK/pid"
+    LAUNCH_LOCK_HELD=1
+    break
+  fi
+  LOCK_OWNER="$(cat "$LAUNCH_LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$LOCK_OWNER" ] && ! kill -0 "$LOCK_OWNER" 2>/dev/null; then
+    rm -rf "$LAUNCH_LOCK"
+    continue
+  fi
+  LOCK_TICKS=$((LOCK_TICKS + 1))
+  sleep 0.5
+done
 cat >"$RUNNER_NEXT" <<'SH'
 @@T3_RUNNER_SCRIPT@@
 SH
@@ -666,16 +694,100 @@ try {
 }
 NODE
 }
+load_default_runtime() {
+  DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
+  DEFAULT_RUNTIME_PID=""
+  DEFAULT_REMOTE_PORT=""
+  if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
+    DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
+    DEFAULT_REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
+  fi
+}
+# The OOP background service (\`t3 service install\`) of this T3 home: its
+# state file is here, the user-level unit points into this home, and the
+# service manager reports it loaded. A \`t3 serve\` someone started by hand is
+# none of these, so it is never treated as the service.
+LAUNCH_VERSION=@@T3_LAUNCH_VERSION@@
+SERVICE_STATE_FILE="$DEFAULT_SERVER_HOME/runtime/service-state.json"
+if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
+  SERVICE_UNIT_FILE="$HOME/Library/LaunchAgents/com.t3tools.t3code.service.plist"
+else
+  SERVICE_UNIT_FILE="$HOME/.config/systemd/user/t3code.service"
+fi
+service_running() {
+  [ -f "$SERVICE_STATE_FILE" ] && [ -f "$SERVICE_UNIT_FILE" ] || return 1
+  grep -qF "$DEFAULT_SERVER_HOME/runtime/" "$SERVICE_UNIT_FILE" 2>/dev/null || return 1
+  if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
+    # KeepAlive restarts the job, so a loaded job counts as running.
+    launchctl print "gui/$(id -u)/com.t3tools.t3code.service" >/dev/null 2>&1
+    return
+  fi
+  case "$(systemctl --user is-active t3code.service 2>/dev/null || true)" in
+    active|activating|reloading) return 0 ;;
+  esac
+  return 1
+}
+service_active_version() {
+  sed -n 's/.*"activeVersion"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$SERVICE_STATE_FILE" 2>/dev/null | head -n 1
+}
+# True only when $1 is strictly older than $2 by major.minor.patch. Equal cores
+# (including prerelease-only differences) and unparsable input are "not older",
+# so a client never moves the service backwards or loops on it.
+version_older() {
+  VO_A="\${1%%[-+]*}"
+  VO_B="\${2%%[-+]*}"
+  VO_I=0
+  while [ "$VO_I" -lt 3 ]; do
+    VO_I=$((VO_I + 1))
+    VO_AN="\${VO_A%%.*}"
+    VO_BN="\${VO_B%%.*}"
+    case "$VO_AN" in ""|*[!0-9]*) return 1 ;; esac
+    case "$VO_BN" in ""|*[!0-9]*) return 1 ;; esac
+    if [ "$VO_AN" -lt "$VO_BN" ]; then return 0; fi
+    if [ "$VO_AN" -gt "$VO_BN" ]; then return 1; fi
+    case "$VO_A" in *.*) VO_A="\${VO_A#*.}" ;; *) VO_A=0 ;; esac
+    case "$VO_B" in *.*) VO_B="\${VO_B#*.}" ;; *) VO_B=0 ;; esac
+  done
+  return 1
+}
+# Waits for a service server that is ready and is not the process in $1 (the
+# one being replaced). Used while the service starts or restarts: its runtime
+# file is missing for a few seconds, and a managed server started in that
+# window would put a second server on the same database.
+wait_for_service_runtime() {
+  SERVICE_WAIT_TICKS=0
+  while [ "$SERVICE_WAIT_TICKS" -lt @@T3_SERVICE_WAIT_TICKS@@ ]; do
+    load_default_runtime
+    if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$DEFAULT_RUNTIME_PID" != "\${1:-}" ]; then
+      REMOTE_PORT="$DEFAULT_REMOTE_PORT"
+      if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
+        return 0
+      fi
+    fi
+    SERVICE_WAIT_TICKS=$((SERVICE_WAIT_TICKS + 1))
+    sleep 0.5
+  done
+  return 1
+}
+load_default_runtime
+if service_running; then
+  if [ -z "$DEFAULT_REMOTE_PORT" ]; then
+    wait_for_service_runtime "" || true
+  elif [ -n "$LAUNCH_VERSION" ] && version_older "$(service_active_version)" "$LAUNCH_VERSION"; then
+    # The service runs an older server than this client. \`service install\`
+    # repoints the unit at the runtime this launch uploaded, restarts the
+    # service and refuses downgrades. If it fails, keep using the server that
+    # is already there.
+    SERVICE_OLD_PID="$DEFAULT_RUNTIME_PID"
+    if "$RUNNER_FILE" service install --base-dir "$DEFAULT_SERVER_HOME" >>"$LOG_FILE" 2>&1 </dev/null; then
+      wait_for_service_runtime "$SERVICE_OLD_PID" || true
+    fi
+  fi
+fi
 REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 REMOTE_PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
 REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
-DEFAULT_RUNTIME_INFO="$(resolve_default_runtime_port 2>/dev/null || true)"
-DEFAULT_RUNTIME_PID=""
-DEFAULT_REMOTE_PORT=""
-if [ -n "$DEFAULT_RUNTIME_INFO" ]; then
-  DEFAULT_RUNTIME_PID="\${DEFAULT_RUNTIME_INFO%% *}"
-  DEFAULT_REMOTE_PORT="\${DEFAULT_RUNTIME_INFO#* }"
-fi
+load_default_runtime
 if [ -n "$DEFAULT_REMOTE_PORT" ]; then
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
@@ -901,6 +1013,9 @@ export function buildRemoteLaunchScript(input?: RemoteT3RunnerOptions): string {
     T3_READY_TIMEOUT_MS: String(REMOTE_READY_TIMEOUT_MS),
     T3_REUSE_READY_TIMEOUT_MS: String(REMOTE_REUSE_READY_TIMEOUT_MS),
     T3_READY_PROBE_TIMEOUT_MS: String(SSH_READY_PROBE_TIMEOUT_MS),
+    T3_LAUNCH_VERSION: shellSingleQuote(input?.archiveVersion?.trim() || ""),
+    T3_SERVICE_WAIT_TICKS: String(REMOTE_READY_TIMEOUT_MS / 500),
+    T3_LAUNCH_LOCK_TICKS: String(REMOTE_READY_TIMEOUT_MS / 500),
   });
 }
 
@@ -1658,12 +1773,66 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
     return password;
   });
 
+  /**
+   * BatchMode ssh cannot ask about an unknown host key, so show its fingerprint
+   * in the app. On approval ssh adds the key itself, but only if it still
+   * matches the fingerprint the user saw (typed as the answer to its prompt).
+   * Returns false when there is nothing to approve, the user declined, or the
+   * key changed.
+   */
+  const trustUnknownHostKey = Effect.fn("ssh/tunnel.trustUnknownHostKey")(function* (
+    target: DesktopSshEnvironmentTarget,
+  ): Effect.fn.Return<boolean, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+    const promptService = yield* SshPasswordPrompt;
+    if (!promptService.isAvailable) {
+      return false;
+    }
+    const probe = yield* runSshCommand(target, {
+      batchMode: "yes",
+      preHostArgs: ["-v"],
+      remoteCommandArgs: ["true"],
+    }).pipe(
+      Effect.as(null),
+      Effect.catchTag("SshCommandError", (error) =>
+        Effect.succeed(parseSshHostKeyProbe(error.stderr)),
+      ),
+    );
+    if (probe === null) {
+      return false;
+    }
+    const destination = target.alias.trim() || target.hostname.trim();
+    const reply = yield* promptService.request({
+      attempt: 1,
+      kind: "host-key",
+      destination,
+      username: target.username,
+      prompt: `The authenticity of host '${destination}' can't be established.\n${probe.keyType} key fingerprint is ${probe.fingerprint}.`,
+    });
+    if (reply === null) {
+      return false;
+    }
+    yield* runSshCommand(target, {
+      batchMode: "no",
+      interactiveAuth: true,
+      hostKeyAnswer: probe.fingerprint,
+      preHostArgs: ["-o", "PreferredAuthentications=none"],
+      remoteCommandArgs: ["true"],
+    }).pipe(Effect.ignore);
+    return true;
+  });
+
   const handleSshAuthFailure = Effect.fn("ssh/tunnel.runWithSshAuthAttempt.handleFailure")(
     function* <T>(
       input: SshAuthAttemptInput<T> & {
         readonly error: SshEnvironmentEffectError;
       },
     ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext> {
+      if (!input.hostKeyPrompted && isSshHostKeyFailure(input.error)) {
+        if (yield* trustUnknownHostKey(input.target)) {
+          return yield* runWithSshAuthAttempt({ ...input, hostKeyPrompted: true });
+        }
+        return yield* input.error;
+      }
       if (!isSshAuthFailure(input.error)) {
         return yield* input.error;
       }
@@ -1724,6 +1893,7 @@ const makeSshEnvironmentManager = Effect.fn("ssh/tunnel.SshEnvironmentManager.ma
       ...input,
       promptCount: 0,
       authSecret: authSecrets.get(input.key) ?? null,
+      hostKeyPrompted: false,
     });
   });
 

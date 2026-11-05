@@ -9,6 +9,7 @@ import {
   auditVerdict,
   clipCrewReport,
   crewFailureKind,
+  crewLimitWindowName,
   crewReportStatus,
   followUpRound,
   isCrewFollowUp,
@@ -255,6 +256,7 @@ describe("crew brief", () => {
     })!;
     expect(brief).toContain("replaces any earlier <oop_crew> note");
     expect(brief).toContain("the model you pass to the Agent tool");
+    expect(brief).toContain("Fast-path agents get no OOP fallback or cooling");
     // A change made while the turn runs reaches the brain through crew_roster.
     expect(brief).toContain("call crew_roster");
   });
@@ -296,8 +298,17 @@ describe("crew brief", () => {
     expect(brief).toContain("Candidate A");
   });
 
-  it("sends nothing when no worker or expert can take work", () => {
-    expect(crewBrief({ worker: null, expert: null, auditor: option("Opus", "Claude") })).toBeNull();
+  it("sends nothing when no role is staffed", () => {
+    expect(crewBrief({ worker: null, expert: null, auditor: null })).toBeNull();
+  });
+
+  it("tells a lead with only an auditor the truth: do the work itself, the auditor reviews on its own", () => {
+    const brief = crewBrief({ worker: null, expert: null, auditor: option("Opus", "Claude") })!;
+    expect(brief).toContain("only the auditor is set");
+    expect(brief).toContain("do the work yourself");
+    expect(brief).toContain("auditor (Opus, Claude)");
+    expect(brief).not.toContain("Rules for this turn");
+    expect(brief).not.toContain("now off");
   });
 });
 
@@ -395,6 +406,25 @@ describe("crew follow-ups", () => {
     expect(plan.prompt).toContain("Worker · tests (completed, proof INCONCLUSIVE): done");
   });
 
+  it("hands results on as plain information once the crew is off, with no audit fix", () => {
+    const plan = planFollowUp({
+      current: { round: 0, fixes: 0 },
+      audits: ["- blocking: off by one"],
+      results: [{ role: "expert", subject: "port parser", status: "completed", report: "done" }],
+      crewOff: true,
+    });
+    expect(plan.prompt).toContain("Expert · port parser (completed): done");
+    expect(plan.prompt).toContain("OOP Crew is off: use these results if they help");
+    expect(plan.prompt).toContain("do not start new crew tasks");
+    expect(plan.prompt).not.toContain("off by one");
+    expect(plan.prompt).not.toContain("crew_wait");
+    expect(followUpRound(plan.prompt)).toEqual({ round: 1, fixes: 0 });
+    expect(
+      planFollowUp({ current: { round: 0, fixes: 0 }, audits: ["x"], results: [], crewOff: true })
+        .prompt,
+    ).toBeNull();
+  });
+
   it("stops asking for audit fixes after the limit but still delivers late reports", () => {
     const plan = planFollowUp({
       current: { round: 2, fixes: CREW_MAX_FIX_ROUNDS },
@@ -432,6 +462,75 @@ describe("crew failure handling", () => {
     expect(crewFailureKind("Request failed with status 401")).toBe("auth");
     expect(crewFailureKind("the turn failed")).toBe("other");
     expect(crewFailureKind(undefined)).toBe("other");
+  });
+
+  it("classifies usage limits and model refusals from the real provider wording", () => {
+    expect(
+      crewFailureKind(
+        "1308 Usage limit reached for 5 hour. Your limit will reset at 2026-11-04 21:15:17",
+      ),
+    ).toBe("limit");
+    expect(crewFailureKind("rate limit exceeded, retry later")).toBe("limit");
+    expect(crewFailureKind("rate_limit_error: slow down")).toBe("limit");
+    expect(crewFailureKind("429 Too Many Requests")).toBe("limit");
+    expect(crewFailureKind("You have hit your usage limit for this plan.")).toBe("limit");
+    expect(crewFailureKind("Weekly quota reached for this workspace.")).toBe("limit");
+    expect(crewFailureKind("The agent could not switch to model 'claude-haiku-5'")).toBe("model");
+    expect(crewFailureKind("model gpt-9 is not available")).toBe("model");
+    expect(crewFailureKind("model claude-opus does not exist")).toBe("model");
+    expect(crewFailureKind("unknown model: x-unknown")).toBe("model");
+    expect(crewFailureKind("invalid model name")).toBe("model");
+    expect(crewFailureKind("no such model 'x-unknown'")).toBe("model");
+    // The judgments that need a human still come first.
+    expect(crewFailureKind("insufficient quota")).toBe("billing");
+    expect(crewFailureKind("401 unauthorized")).toBe("auth");
+    expect(crewFailureKind("the turn failed")).toBe("other");
+    expect(crewFailureKind("HTTP 429: slow down")).toBe("limit");
+    // A bare number or a model context server is not a limit or a refused model.
+    expect(crewFailureKind("TypeError at app.js:429:12")).toBe("other");
+    expect(crewFailureKind("exit code 1308")).toBe("other");
+    expect(crewFailureKind("model context protocol server not found")).toBe("other");
+  });
+
+  it.each([
+    // Real usage and rate limits, in the providers' own wording.
+    ["Claude usage limit reached. Send the message again once the limit resets.", "limit"],
+    ["Codex usage limit reached. The weekly limit resets in 5d 5h.", "limit"],
+    ["You've hit your limit", "limit"],
+    ["You've hit your usage limit.", "limit"],
+    ["5-hour limit reached", "limit"],
+    ["Weekly limit exceeded", "limit"],
+    ["API Error: 429 Too Many Requests", "limit"],
+    ["status 429", "limit"],
+    // A limit on one request or resource is not the account running dry.
+    ["Prompt is too long: context limit exceeded", "other"],
+    ["max_output_tokens limit reached", "other"],
+    ["git push rejected: repository size limit exceeded", "other"],
+    ["API Error: 400 context length exceeded: input limit exceeded", "other"],
+    // The provider refusing one model.
+    ["model not found", "model"],
+    ["The model `gpt-9` does not exist or you do not have access to it.", "model"],
+    ["model: claude-x is not available", "model"],
+    ["Your key does not have access to model gpt-9", "model"],
+    // A tool that is missing is not a refused model.
+    ["The model tried to run rg but ripgrep: command not found", "other"],
+    ["model context protocol server not found", "other"],
+  ] as const)("reads %j as %s", (error, kind) => {
+    expect(crewFailureKind(error)).toBe(kind);
+  });
+
+  it("names the limit window an error mentions, without reading its reset time", () => {
+    expect(
+      crewLimitWindowName(
+        "1308 Usage limit reached for 5 hour. Your limit will reset at 2026-11-04 21:15:17",
+      ),
+    ).toBe("5-hour");
+    expect(crewLimitWindowName("5-hour limit reached")).toBe("5-hour");
+    expect(crewLimitWindowName("five hour window is exhausted")).toBe("5-hour");
+    expect(crewLimitWindowName("You are out of weekly capacity.")).toBe("weekly");
+    expect(crewLimitWindowName("Limit resets in 7 day.")).toBe("weekly");
+    expect(crewLimitWindowName("too many requests")).toBeNull();
+    expect(crewLimitWindowName(undefined)).toBeNull();
   });
 
   it("asks crew members for a status line before the task text", () => {

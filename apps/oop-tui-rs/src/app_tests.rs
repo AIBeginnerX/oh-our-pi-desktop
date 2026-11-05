@@ -894,33 +894,28 @@ async fn the_panel_commands_pick_flows_and_say_why_not() {
     type_text(&mut app, "/dag-workflow live");
     app.handle(key(KeyCode::Enter));
     assert!(app.side_open && app.side_view == Side::Workflow);
-    type_text(&mut app, "/dag-agents 1");
+    type_text(&mut app, "/savvy 1");
     app.handle(key(KeyCode::Enter));
     assert!(
         app.notice
             .as_deref()
-            .is_some_and(|n| n.starts_with("The Agents panel shows the current turn")),
+            .is_some_and(|n| n.starts_with("The Savvy panel shows the current turn")),
         "{:?}",
         app.notice
     );
     app.input.take(true);
-    type_text(&mut app, "/dag-agents");
+    type_text(&mut app, "/savvy");
     app.handle(key(KeyCode::Enter));
     assert!(
-        app.side_open && app.side_view == Side::Agents,
+        app.side_open && app.side_view == Side::Savvy,
         "switches without closing"
     );
     app.input.take(true);
     type_text(&mut app, "/dag-workflow off");
     app.handle(key(KeyCode::Enter));
     assert!(
-        app.side_open,
-        "off for the view that is not shown closes nothing"
-    );
-    assert!(
-        app.notice
-            .as_deref()
-            .is_some_and(|n| n.contains("close it with /dag-agents"))
+        !app.side_open,
+        "/dag-workflow turns the panel off whatever view is up"
     );
 }
 

@@ -57,6 +57,9 @@ const ROBOCOPY_EXCLUDED_DIRECTORIES = [
   "credentials",
   ".credentials",
 ];
+// pnpm-workspace.yaml globs: every child of these folders is a project with its own node_modules.
+const WORKSPACE_PARENTS = ["apps", "infra", "packages"];
+const WORKSPACE_ROOT_PROJECTS = ["scripts", "oxlint-plugin-t3code"];
 const ROBOCOPY_EXCLUDED_FILES = [".env", ".env.*", ".npmrc", "*.pem", "*.p12", "*.p8", "*.key"];
 
 export const AUTO_BUILD_TASK_NAME = "OoP Windows Auto Build";
@@ -161,6 +164,63 @@ export function autoBuildDecision({ sourceVersion, publishedVersion, failed, now
     return "wait-after-failure";
   }
   return "build";
+}
+
+/**
+ * robocopy /MIR purges a checkout folder the source no longer has, and the purge walks through
+ * the junctions inside that folder's node_modules into pnpm's shared virtual store and deletes the
+ * packages there (removing apps/oop-tui emptied vite-plus for every later install). Node's rm
+ * only unlinks a junction, so projects the source dropped are removed here first.
+ */
+export async function removeStaleProjects(sourceRoot, checkout) {
+  const removed = [];
+  for (const parent of WORKSPACE_PARENTS) {
+    const names = async (root) =>
+      (await NodeFSP.readdir(NodePath.join(root, parent), { withFileTypes: true }).catch(() => []))
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+    const kept = new Set(await names(sourceRoot));
+    for (const name of await names(checkout)) {
+      if (kept.has(name)) continue;
+      await NodeFSP.rm(NodePath.join(checkout, parent, name), { recursive: true, force: true });
+      removed.push(`${parent}/${name}`);
+    }
+  }
+  return removed;
+}
+
+/** Deletes every node_modules (and with it pnpm's virtual store) of the checkout this script owns. */
+export async function resetInstalledDependencies(checkout) {
+  const projects = [...WORKSPACE_ROOT_PROJECTS, ""];
+  for (const parent of WORKSPACE_PARENTS) {
+    const entries = await NodeFSP.readdir(NodePath.join(checkout, parent), {
+      withFileTypes: true,
+    }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.isDirectory()) projects.push(NodePath.join(parent, entry.name));
+    }
+  }
+  for (const project of projects) {
+    await NodeFSP.rm(NodePath.join(checkout, project, "node_modules"), {
+      recursive: true,
+      force: true,
+    });
+  }
+}
+
+/**
+ * A failed install may be a node_modules a past sync emptied (pnpm sees its own bookkeeping and
+ * reuses the hollow virtual store), which would fail every attempt of this source: reinstall once
+ * from a clean slate before reporting the failure.
+ */
+export async function installWithRepair({ install, repair, log = console.log }) {
+  try {
+    install();
+  } catch (error) {
+    log(`pnpm install failed (${error.message}); reinstalling from empty node_modules.`);
+    await repair();
+    install();
+  }
 }
 
 /** Every few minutes while the user is signed in (their session holds the NAS login), no window. */
@@ -403,12 +463,16 @@ async function packageInstaller(
   );
   await NodeFSP.rm(artifactsRoot, { recursive: true, force: true });
   await NodeFSP.mkdir(checkout, { recursive: true });
+  for (const removed of await removeStaleProjects(sourceRoot, checkout)) {
+    console.log(`Removed a project the source no longer has: ${removed}`);
+  }
   run(
     "robocopy",
     [
       sourceRoot,
       checkout,
       "/MIR",
+      "/XJ",
       "/NFL",
       "/NDL",
       "/NJH",
@@ -455,24 +519,28 @@ async function packageInstaller(
   }
   prependPath(env, NodePath.join(checkout, "node_modules", ".bin"));
 
-  run(
-    "pnpm.cmd",
-    [
-      "install",
-      "--frozen-lockfile",
-      "--filter",
-      ".",
-      "--filter",
-      "@t3tools/desktop...",
-      "--filter",
-      "@t3tools/web...",
-      "--filter",
-      "@t3tools/scripts...",
-      "--filter",
-      "t3...",
-    ],
-    { cwd: checkout, env },
-  );
+  await installWithRepair({
+    install: () =>
+      run(
+        "pnpm.cmd",
+        [
+          "install",
+          "--frozen-lockfile",
+          "--filter",
+          ".",
+          "--filter",
+          "@t3tools/desktop...",
+          "--filter",
+          "@t3tools/web...",
+          "--filter",
+          "@t3tools/scripts...",
+          "--filter",
+          "t3...",
+        ],
+        { cwd: checkout, env },
+      ),
+    repair: () => resetInstalledDependencies(checkout),
+  });
   const version = await releaseVersion(sourceRoot);
   run(
     process.execPath,

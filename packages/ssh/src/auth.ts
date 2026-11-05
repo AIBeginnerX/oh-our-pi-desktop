@@ -15,6 +15,8 @@ export interface SshPasswordRequest {
   readonly username: string | null;
   readonly prompt: string;
   readonly attempt: number;
+  /** `host-key` asks the user to trust an unknown host key; any non-null reply means "trust". */
+  readonly kind?: "password" | "host-key";
 }
 
 interface SshAskpassFile {
@@ -32,6 +34,8 @@ export interface SshAuthOptions {
   readonly authSecret?: string | null;
   readonly batchMode?: "yes" | "no";
   readonly interactiveAuth?: boolean;
+  /** Answer to ssh's "continue connecting" question. Unset means the askpass helper answers "no". */
+  readonly hostKeyAnswer?: string;
 }
 
 export interface SshPasswordPromptShape {
@@ -58,6 +62,7 @@ export interface SshChildEnvironmentOptions {
   readonly baseEnv?: NodeJS.ProcessEnv;
   readonly askpassDirectory?: string;
   readonly authSecret?: string | null;
+  readonly hostKeyAnswer?: string;
 }
 
 const SSH_ASKPASS_DIR_NAME = "t3code-ssh-askpass";
@@ -75,6 +80,20 @@ const ASKPASS_POSIX_SCRIPT = `#!/bin/sh
 # Invoked by ssh via SSH_ASKPASS when T3 Code re-runs ssh with a cached password
 # from the renderer's in-app prompt. We never expose a native dialog here - if
 # T3_SSH_AUTH_SECRET is missing, that's a caller bug and we fail loudly.
+# T3_SSH_HOSTKEY_ANSWER is set only on the run that accepts a host key (no
+# authentication is tried), so it answers whatever ssh asks; ssh's prompt text
+# is not relied on. A repeated question is always declined, and a host key
+# question on any other run gets "no".
+case "$1" in
+  "Please type"*) printf 'no\\n'; exit 0 ;;
+esac
+if [ "\${T3_SSH_HOSTKEY_ANSWER+x}" = "x" ]; then
+  printf "%s\\n" "$T3_SSH_HOSTKEY_ANSWER"
+  exit 0
+fi
+case "$1" in
+  *"authenticity of host"*|*"(yes/no"*) printf 'no\\n'; exit 0 ;;
+esac
 if [ "\${T3_SSH_AUTH_SECRET+x}" = "x" ]; then
   printf "%s\\n" "$T3_SSH_AUTH_SECRET"
   exit 0
@@ -90,7 +109,24 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0ssh-askpass.ps1" %*\r
 const ASKPASS_WINDOWS_SCRIPT = `# Invoked by ssh via SSH_ASKPASS (through ssh-askpass.cmd) when T3 Code re-runs\r
 # ssh with a cached password from the renderer's in-app prompt. We never expose\r
 # a native dialog here - if T3_SSH_AUTH_SECRET is missing, that's a caller bug\r
-# and we fail loudly.\r
+# and we fail loudly. T3_SSH_HOSTKEY_ANSWER is set only on the run that accepts\r
+# a host key (no authentication is tried), so it answers whatever ssh asks:\r
+# cmd.exe cuts ssh's prompt at its first newline, so its text is not relied on.\r
+# A repeated question is declined, and a host key question on any other run\r
+# gets "no".\r
+$prompt = "$args"\r
+if ($prompt -match "^Please type") {\r
+  [Console]::Out.WriteLine("no")\r
+  exit 0\r
+}\r
+if ($null -ne $env:T3_SSH_HOSTKEY_ANSWER) {\r
+  [Console]::Out.WriteLine($env:T3_SSH_HOSTKEY_ANSWER)\r
+  exit 0\r
+}\r
+if ($prompt -match "authenticity of host|\\(yes/no") {\r
+  [Console]::Out.WriteLine("no")\r
+  exit 0\r
+}\r
 if ($null -ne $env:T3_SSH_AUTH_SECRET) {\r
   [Console]::Out.WriteLine($env:T3_SSH_AUTH_SECRET)\r
   exit 0\r
@@ -198,6 +234,7 @@ export const buildSshChildEnvironment = Effect.fn("ssh/auth.buildSshChildEnviron
     SSH_ASKPASS: sshAskpass,
     SSH_ASKPASS_REQUIRE: "force",
     ...(input.authSecret === undefined ? {} : { T3_SSH_AUTH_SECRET: input.authSecret ?? "" }),
+    ...(input.hostKeyAnswer === undefined ? {} : { T3_SSH_HOSTKEY_ANSWER: input.hostKeyAnswer }),
     ...(platform === "win32" || baseEnv.DISPLAY || hostDisplay ? {} : { DISPLAY: "t3code" }),
   };
 });
@@ -212,4 +249,31 @@ export function isSshAuthFailure(error: unknown): boolean {
     /authentication failed/u.test(normalized) ||
     /too many authentication failures/u.test(normalized)
   );
+}
+
+/**
+ * ssh refused an unknown host key (BatchMode cannot ask). A key that changed
+ * is a different, hard failure and is excluded.
+ */
+export function isSshHostKeyFailure(error: unknown): boolean {
+  const normalized = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    normalized.includes("host key verification failed") &&
+    !/host identification has changed|man-in-the-middle|offending .* key/u.test(normalized)
+  );
+}
+
+/**
+ * Reads the fingerprint ssh logs with `-v` ("Server host key: ssh-ed25519
+ * SHA256:...") from a failed probe. Returns null unless the key is simply
+ * unknown, so a changed key never produces a trust question.
+ */
+export function parseSshHostKeyProbe(
+  stderr: string,
+): { readonly keyType: string; readonly fingerprint: string } | null {
+  if (!isSshHostKeyFailure(stderr)) {
+    return null;
+  }
+  const match = /Server host key: (\S+) (SHA256:\S+|MD5:\S+)/u.exec(stderr);
+  return match?.[1] && match[2] ? { keyType: match[1], fingerprint: match[2] } : null;
 }

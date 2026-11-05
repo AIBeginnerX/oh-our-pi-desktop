@@ -470,6 +470,8 @@ export interface DesktopSshPasswordPromptRequest {
   username: string | null;
   prompt: string;
   expiresAt: string;
+  /** `host-key` asks to trust an unknown host key (answer any string to trust, null to decline). Absent means password. */
+  kind?: "password" | "host-key";
 }
 
 export const DesktopSshPasswordPromptCancelledType = "ssh-password-prompt-cancelled" as const;

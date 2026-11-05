@@ -14,6 +14,7 @@ pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
         "goal" => crate::cmd_goal::run(app, argument),
         "crew" => crate::cmd_crew::run(app, argument),
         "provider" => crate::cmd_provider::run(app, argument),
+        "mobile" => crate::mobile::command(app),
         "stats" => crate::cmd_stats::stats(app),
         "tasks" => crate::cmd_stats::tasks(app, argument),
         "history" => crate::cmd_history::history(app, argument),

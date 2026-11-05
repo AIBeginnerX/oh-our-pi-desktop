@@ -20,6 +20,28 @@ const CREW_GUIDE =
 
 export const CrewToolError = Schema.Union([McpCapabilityUnavailableError, CrewError]);
 
+const CrewCoolingEntry = Schema.Struct({
+  provider: Schema.String.annotate({
+    description: "Display name of the provider that is cooling down.",
+  }),
+  model: Schema.optional(
+    Schema.String.annotate({
+      description:
+        "Set when only this one model is blocked (its provider refused it), so the provider's other models still work.",
+    }),
+  ),
+  until: Schema.optional(
+    Schema.String.annotate({
+      description:
+        "When the cooling ends, as ISO time. Absent when it ends the next time the provider is checked (a billing or sign-in failure, or a refused model).",
+    }),
+  ),
+  reason: Schema.String.annotate({
+    description:
+      'Short why, for example "usage limit", "5-hour limit", "billing", "model refused".',
+  }),
+});
+
 const CrewRosterResult = Schema.Struct({
   enabled: Schema.Boolean,
   roles: Schema.Array(
@@ -27,8 +49,18 @@ const CrewRosterResult = Schema.Struct({
       role: Schema.Literals(["worker", "expert", "auditor"]),
       model: Schema.NullOr(Schema.String),
       provider: Schema.NullOr(Schema.String),
+      fallbacks: Schema.optional(
+        Schema.Array(Schema.Struct({ model: Schema.String, provider: Schema.String })).annotate({
+          description:
+            "The user's fallback models for this role, in the order they are tried when the role's own model fails; absent when none are set.",
+        }),
+      ),
     }),
   ),
+  cooling: Schema.Array(CrewCoolingEntry).annotate({
+    description:
+      "Providers and single models cooling down after failures right now, so you know which crew members are temporarily unavailable; empty when none.",
+  }),
 });
 
 const CrewTodoCheckSpec = Schema.Struct({
@@ -208,7 +240,7 @@ const CrewStopResult = Schema.Struct({
 });
 
 const CrewRosterTool = Tool.make("crew_roster", {
-  description: `${CREW_GUIDE} Shows whether the crew is on for this thread and which model fills each role right now; the user can change it mid-chat, so this is the current crew even if an earlier note differs.`,
+  description: `${CREW_GUIDE} Shows whether the crew is on for this thread and which model fills each role right now; the user can change it mid-chat, so this is the current crew even if an earlier note differs. Fast-path runs of your Agent tool get no OOP fallback or cooling; only crew_delegate does.`,
   success: CrewRosterResult,
   failure: CrewToolError,
   dependencies,
@@ -220,7 +252,7 @@ const CrewRosterTool = Tool.make("crew_roster", {
   .annotate(Tool.OpenWorld, false);
 
 const CrewDelegateTool = Tool.make("crew_delegate", {
-  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace (or, with isolation "worktree", its own worktree) as its own thread. Give it a todos checklist and, on each item something can prove, a check the server runs for you (command or files) that fails until the item is done and can run in that task's environment, so prefer a command you know works there (name test files, not a folder) and one that proves the content, since files alone only proves a change; keep each item to one step, and finish or hand on anything left undone, since it comes back partial. Returns at once with a taskId (and a warning when the task's writeScope overlaps one still running); start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to another model of the same level on its own. Fails when the crew is off; then do the work yourself.`,
+  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace (or, with isolation "worktree", its own worktree) as its own thread. Give it a todos checklist and, on each item something can prove, a check the server runs for you (command or files) that fails until the item is done and can run in that task's environment, so prefer a command you know works there (name test files, not a folder) and one that proves the content, since files alone only proves a change; keep each item to one step, and finish or hand on anything left undone, since it comes back partial. Returns at once with a taskId (and a warning when the task's writeScope overlaps one still running); start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to the role's fallback models first, then another model of the same level. Fails when the crew is off; then do the work yourself.`,
   parameters: CrewDelegateInput,
   success: CrewDelegateResult,
   failure: CrewToolError,

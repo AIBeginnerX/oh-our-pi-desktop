@@ -114,8 +114,9 @@ t3 pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
-The mapping created by `pair --tailscale` persists across restarts. Remove its
-default-port mapping with:
+The mapping created by `pair --tailscale` persists across restarts and follows
+the server when it restarts on a new port, as the background service does.
+Remove its default-port mapping with:
 
 ```bash
 tailscale serve --https=443 off
@@ -123,6 +124,12 @@ tailscale serve --https=443 off
 
 If that port is already in use, choose another with
 `--tailscale-serve-port`. See `t3 pair --help` for other pairing options.
+
+### Behind a reverse proxy
+
+If your proxy rewrites the `Host` header, make it forward the original in
+`X-Forwarded-Host` so browser sessions can open WebSocket connections. Modern
+browsers also work without it when the page and the server share an origin.
 
 ### Hosted web app
 
@@ -137,9 +144,14 @@ scheme uses HTTP, so include `https://` when your server uses HTTPS.
 ## Desktop-managed SSH
 
 In the desktop app, open **Settings → Connections → Add environment**, choose
-**SSH**, and enter a host or SSH alias such as `user@example.com`. OOP starts
-or reuses a server there and opens the port forward for you. Projects, provider
-credentials, and agent work stay on the remote machine.
+**SSH**, and enter a host or SSH alias such as `user@example.com`. A Tailscale
+name or address (`user@machine.tailnet.ts.net`, `user@100.x.y.z`) works the
+same way. OOP starts or reuses a server there and opens the port forward for
+you. Projects, provider credentials, and agent work stay on the remote machine.
+
+The first time you connect to a host, OOP shows its key fingerprint and asks
+whether to trust it; compare it with the host's own before you accept. A key
+that later changes is refused.
 
 The remote host must be Linux (x64 or arm64) or an Apple Silicon Mac with `tar`, `sha256sum` or
 `shasum`, and [provider setup](./install.md#providers). The first launch copies
@@ -157,6 +169,11 @@ ssh user@example.com 'sh -lc "command -v claude codex"'
 The remote server has its own provider settings and sign-ins. To turn a provider
 on there, open **Settings → Providers**, pick the remote environment at the top,
 and enable it; its CLI must be installed and signed in on the remote host.
+
+If the host runs OOP's background service for `~/.oop-desktop` (`t3 service
+install`), the desktop app uses that server. When the service is older than the
+app, the app switches it to the app's version and restarts it; it never moves
+the service to an older version. A server you started by hand is left alone.
 
 If SSH reconnecting fails after an app update, retry the launch once. Removing
 the connection stops a server that OOP launched; a server that was already

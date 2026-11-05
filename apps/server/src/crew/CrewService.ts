@@ -20,9 +20,12 @@ import {
   crewTaskProgressActivityId,
   type CrewRole,
   type CrewTodoStatus,
+  type ModelSelection,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
+  type ServerProvider,
+  type ServerProviderUsageWindow,
   ThreadTurnDiffCompletedPayload,
   type TurnId,
 } from "@t3tools/contracts";
@@ -112,6 +115,7 @@ import {
   planFollowUp,
   crewTaskStatus,
   crewExhaustedReport,
+  crewLimitWindowName,
   crewThreadTitle,
   delegatePrompt,
   withCrewMemoryReferences,
@@ -144,6 +148,7 @@ import {
   STOPPED_ON_REQUEST,
   DELETED_LEAD,
   FAILED_PROVIDER_COOLDOWN_MS,
+  LIMIT_COOLDOWN_MS,
   type AvoidedTask,
   type CrewAttempt,
   type CrewTaskRecord,
@@ -175,6 +180,17 @@ export interface CrewRosterEntry {
   readonly role: CrewRole;
   readonly model: string | null;
   readonly provider: string | null;
+  /** The user's fallback models for the role, in the order they are tried; absent when none. */
+  readonly fallbacks?: ReadonlyArray<{ readonly model: string; readonly provider: string }>;
+}
+
+/** One cooling entry as crew_roster shows it: a provider, or one model its provider refused. */
+export interface CrewCoolingEntry {
+  readonly provider: string;
+  readonly model?: string | undefined;
+  /** When the cooling ends; absent when it ends when the provider is checked again. */
+  readonly until?: string | undefined;
+  readonly reason: string;
 }
 
 export interface CrewTaskReport {
@@ -204,9 +220,15 @@ export interface CrewTodoCheckResult {
 export class CrewService extends Context.Service<
   CrewService,
   {
-    readonly roster: (
-      threadId: ThreadId,
-    ) => Effect.Effect<{ readonly enabled: boolean; readonly roles: CrewRosterEntry[] }, CrewError>;
+    readonly roster: (threadId: ThreadId) => Effect.Effect<
+      {
+        readonly enabled: boolean;
+        readonly roles: CrewRosterEntry[];
+        /** Providers and single models cooling down right now; empty when none. */
+        readonly cooling: CrewCoolingEntry[];
+      },
+      CrewError
+    >;
     readonly delegate: (input: {
       readonly threadId: ThreadId;
       readonly role: "worker" | "expert";
@@ -327,33 +349,288 @@ export const make = Effect.gen(function* () {
   const failedProviders = new Map<string, number>();
   // A billing or sign-in failure lasts until the provider's status is checked again (the
   // provider's checkedAt then passes the one recorded here); a cooldown would only retry it.
-  const blockedProviders = new Map<string, string>();
+  const blockedProviders = new Map<
+    string,
+    { readonly checkedAt: string; readonly reason: string }
+  >();
+  /**
+   * Full usage windows a limit cooling waits on. A newer usage check that shows none of them
+   * full any more (the user reset the limit, or redeemed a reset credit) ends the cooling early.
+   */
+  interface FullWindows {
+    readonly ids: ReadonlyArray<string>;
+    readonly checkedAt: string;
+  }
+  // A usage limit cools the whole provider until its full windows reset; without such a window,
+  // for a short while, so the next attempt probes it again soon.
+  const limitedProviders = new Map<
+    string,
+    { readonly until: number; readonly reason: string; readonly windows?: FullWindows }
+  >();
+  // A provider that refused one model, or whose window for that one model is full, works fine for
+  // its others: only that model is blocked. A refusal lasts until the provider's status is checked
+  // again, like a billing or sign-in failure; a full model window, until it resets.
+  const blockedModels = new Map<
+    string,
+    Map<
+      string,
+      {
+        readonly selection: ModelSelection;
+        readonly checkedAt: string;
+        readonly reason: string;
+        readonly until?: number;
+        readonly windows?: FullWindows;
+      }
+    >
+  >();
+
+  /** A provider (or one model on it) that new tasks skip for now. */
+  interface Cooling {
+    readonly providers: ReadonlySet<string>;
+    readonly models: ReadonlyArray<ModelSelection>;
+    /** The same cooling as crew_roster shows it: one entry per provider, and per blocked model. */
+    readonly entries: ReadonlyArray<CrewCoolingEntry>;
+    /** The switch-message phrase per cooling provider, for the task progress summary. */
+    readonly notes: ReadonlyMap<string, string>;
+    /** The switch-message phrase per blocked model, keyed by `modelKey`. */
+    readonly modelNotes: ReadonlyMap<string, string>;
+  }
+  const modelKey = (selection: ModelSelection) => `${selection.instanceId}\u0000${selection.model}`;
+  const isoOf = (millis: number) => DateTime.formatIso(DateTime.makeUnsafe(millis));
+  /** Whether a newer usage check shows none of the windows a cooling waits on full any more. */
+  const windowsCleared = (
+    provider: ServerProvider | undefined,
+    windows: FullWindows | undefined,
+  ) => {
+    const usage = provider?.usageLimits;
+    // A failed usage check reports no windows; that says nothing about the full ones.
+    if (
+      windows === undefined ||
+      usage === undefined ||
+      usage.unavailable !== undefined ||
+      usage.checkedAt <= windows.checkedAt
+    )
+      return false;
+    return !usage.windows.some(
+      (window) => windows.ids.includes(window.id) && window.usedPercent >= 100,
+    );
+  };
+
   const cooling = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
-    if (blockedProviders.size > 0) {
-      const snapshot = yield* providers.getProviders;
-      for (const [instanceId, checkedAt] of blockedProviders) {
-        const provider = snapshot.find((entry) => entry.instanceId === instanceId);
-        if (provider === undefined || provider.checkedAt > checkedAt) {
-          blockedProviders.delete(instanceId);
-        }
+    for (const [instanceId, until] of failedProviders) {
+      if (until <= now) failedProviders.delete(instanceId);
+    }
+    if (
+      failedProviders.size + limitedProviders.size + blockedProviders.size + blockedModels.size ===
+      0
+    ) {
+      return {
+        providers: new Set<string>(),
+        models: [] as ReadonlyArray<ModelSelection>,
+        entries: [] as ReadonlyArray<CrewCoolingEntry>,
+        notes: new Map<string, string>(),
+        modelNotes: new Map<string, string>(),
+      } satisfies Cooling;
+    }
+    const snapshot = yield* providers.getProviders;
+    const providerOf = (instanceId: string) =>
+      snapshot.find((entry) => entry.instanceId === instanceId);
+    for (const [instanceId, cooled] of limitedProviders) {
+      if (cooled.until <= now || windowsCleared(providerOf(instanceId), cooled.windows)) {
+        limitedProviders.delete(instanceId);
       }
     }
-    return new Set([
-      ...[...failedProviders].flatMap(([instanceId, until]) => (until > now ? [instanceId] : [])),
+    for (const [instanceId, blocked] of blockedProviders) {
+      const provider = providerOf(instanceId);
+      if (provider === undefined || provider.checkedAt > blocked.checkedAt) {
+        blockedProviders.delete(instanceId);
+      }
+    }
+    for (const [instanceId, models] of blockedModels) {
+      const provider = providerOf(instanceId);
+      for (const [model, blocked] of models) {
+        const ended =
+          provider === undefined ||
+          (blocked.until === undefined
+            ? provider.checkedAt > blocked.checkedAt
+            : blocked.until <= now || windowsCleared(provider, blocked.windows));
+        if (ended) models.delete(model);
+      }
+      if (models.size === 0) blockedModels.delete(instanceId);
+    }
+    const labelOf = (instanceId: string) => providerOf(instanceId)?.displayName ?? instanceId;
+    /** What the switch message says about a cooling that ends at `until`. */
+    const span = (until: number | undefined, probing: boolean) =>
+      until === undefined
+        ? ""
+        : probing
+          ? ` for ${Math.max(1, Math.ceil((until - now) / 60_000))} more minutes`
+          : ` until ${isoOf(until)}`;
+    const entries: CrewCoolingEntry[] = [];
+    const notes = new Map<string, string>();
+    const providerIds = new Set<string>([
+      ...failedProviders.keys(),
+      ...limitedProviders.keys(),
       ...blockedProviders.keys(),
     ]);
-  });
-  const markFailed = (instanceId: string, error: string | undefined) =>
-    Effect.gen(function* () {
-      const now = yield* Clock.currentTimeMillis;
-      failedProviders.set(instanceId, now + FAILED_PROVIDER_COOLDOWN_MS);
-      if (crewFailureKind(error) === "other") return;
-      const provider = (yield* providers.getProviders).find(
-        (entry) => entry.instanceId === instanceId,
+    // One entry per provider: a block that waits on a status check outlasts any timed one, and
+    // of two timed ones the later end is the one that holds.
+    for (const instanceId of providerIds) {
+      const blocked = blockedProviders.get(instanceId);
+      const limited = limitedProviders.get(instanceId);
+      const failed = failedProviders.get(instanceId);
+      const shown =
+        blocked !== undefined
+          ? { reason: blocked.reason, until: undefined, probing: false }
+          : limited !== undefined && (failed === undefined || limited.until >= failed)
+            ? {
+                reason: limited.reason,
+                until: limited.until,
+                probing: limited.windows === undefined,
+              }
+            : { reason: "failed", until: failed, probing: false };
+      const provider = labelOf(instanceId);
+      entries.push({
+        provider,
+        ...(shown.until === undefined ? {} : { until: isoOf(shown.until) }),
+        reason: shown.reason,
+      });
+      notes.set(
+        instanceId,
+        `cooling ${provider}${span(shown.until, shown.probing)} (${shown.reason})`,
       );
-      blockedProviders.set(instanceId, provider?.checkedAt ?? "");
+    }
+    const models: ModelSelection[] = [];
+    const modelNotes = new Map<string, string>();
+    for (const modelsOfProvider of blockedModels.values()) {
+      for (const blocked of modelsOfProvider.values()) {
+        const provider = labelOf(blocked.selection.instanceId);
+        models.push(blocked.selection);
+        entries.push({
+          provider,
+          model: blocked.selection.model,
+          ...(blocked.until === undefined ? {} : { until: isoOf(blocked.until) }),
+          reason: blocked.reason,
+        });
+        modelNotes.set(
+          modelKey(blocked.selection),
+          blocked.until === undefined
+            ? `${blocked.selection.model} is refused by ${provider}; skipping it until the provider is checked again`
+            : `skipping ${blocked.selection.model} on ${provider}${span(blocked.until, false)} (${blocked.reason})`,
+        );
+      }
+    }
+    return { providers: providerIds, models, entries, notes, modelNotes } satisfies Cooling;
+  });
+
+  /**
+   * Which full usage windows a limit on this model waits on: the account's own windows, and those
+   * that name this model's family (`modelFamilies`, matched against the words of its id). A window
+   * for another family, or for a tool, holds back nothing here.
+   */
+  const fullWindowsFor = (
+    provider: ServerProvider | undefined,
+    model: string,
+    now: number,
+  ): {
+    readonly provider: ServerProviderUsageWindow[];
+    readonly model: ServerProviderUsageWindow[];
+  } => {
+    const wordsOf = (text: string) =>
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+    const words = new Set(wordsOf(model));
+    const result = {
+      provider: [] as ServerProviderUsageWindow[],
+      model: [] as ServerProviderUsageWindow[],
+    };
+    for (const window of provider?.usageLimits?.windows ?? []) {
+      if (window.usedPercent < 100 || window.resetsAt === undefined) continue;
+      if (Date.parse(window.resetsAt) <= now) continue;
+      if (window.modelFamilies === undefined) result.provider.push(window);
+      else if (window.modelFamilies.some((family) => words.has(wordsOf(family)[0] ?? "")))
+        result.model.push(window);
+    }
+    return result;
+  };
+  const latestReset = (windows: ReadonlyArray<ServerProviderUsageWindow>) =>
+    windows.reduce((latest, window) =>
+      Date.parse(window.resetsAt!) > Date.parse(latest.resetsAt!) ? window : latest,
+    );
+
+  /**
+   * Cools what the failure kind names: a refused model alone, its provider until a usage window
+   * resets (15 minutes when none reports one), the whole provider after a crash or timeout, and
+   * a billing or sign-in failure until the provider is checked again.
+   */
+  const markFailed = (selection: ModelSelection, error: string | undefined) =>
+    Effect.gen(function* () {
+      const kind = crewFailureKind(error);
+      const now = yield* Clock.currentTimeMillis;
+      const provider = (yield* providers.getProviders).find(
+        (entry) => entry.instanceId === selection.instanceId,
+      );
+      const blockModel = (block: {
+        readonly reason: string;
+        readonly until?: number;
+        readonly windows?: FullWindows;
+      }) => {
+        const models = blockedModels.get(selection.instanceId) ?? new Map();
+        models.set(selection.model, { selection, checkedAt: provider?.checkedAt ?? "", ...block });
+        blockedModels.set(selection.instanceId, models);
+      };
+      if (kind === "model") {
+        blockModel({ reason: "model refused" });
+        return;
+      }
+      if (kind === "limit") {
+        const full = fullWindowsFor(provider, selection.model, now);
+        const checkedAt = provider?.usageLimits?.checkedAt ?? "";
+        if (full.provider.length > 0) {
+          const latest = latestReset(full.provider);
+          limitedProviders.set(selection.instanceId, {
+            until: Date.parse(latest.resetsAt!),
+            reason: `${latest.label} limit`,
+            windows: { ids: full.provider.map((window) => window.id), checkedAt },
+          });
+          return;
+        }
+        if (full.model.length > 0) {
+          const latest = latestReset(full.model);
+          blockModel({
+            reason: `${latest.label} limit`,
+            until: Date.parse(latest.resetsAt!),
+            windows: { ids: full.model.map((window) => window.id), checkedAt },
+          });
+          return;
+        }
+        const window = crewLimitWindowName(error);
+        limitedProviders.set(selection.instanceId, {
+          until: now + LIMIT_COOLDOWN_MS,
+          reason: window === null ? "usage limit" : `${window} limit`,
+        });
+        return;
+      }
+      failedProviders.set(selection.instanceId, now + FAILED_PROVIDER_COOLDOWN_MS);
+      if (kind === "other") return;
+      blockedProviders.set(selection.instanceId, {
+        checkedAt: provider?.checkedAt ?? "",
+        reason: kind === "billing" ? "billing" : "sign-in required",
+      });
     });
+
+  /** A model that just finished a turn proves its provider works: its cooling ends now. */
+  const markWorked = (selection: ModelSelection) => {
+    failedProviders.delete(selection.instanceId);
+    limitedProviders.delete(selection.instanceId);
+    blockedProviders.delete(selection.instanceId);
+    const models = blockedModels.get(selection.instanceId);
+    models?.delete(selection.model);
+    if (models?.size === 0) blockedModels.delete(selection.instanceId);
+  };
 
   const uuid = crypto.randomUUIDv4.pipe(Effect.orDie);
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -442,6 +719,13 @@ export const make = Effect.gen(function* () {
       canLead: driver === undefined || canLeadCrew(driver),
     };
   });
+
+  /** Whether the lead's crew is on right now; an unreadable setting counts as on, as before. */
+  const crewIsOn = (lead: OrchestrationThreadShell) =>
+    crewFor(lead).pipe(
+      Effect.map(({ resolved, canLead }) => resolved.enabled && canLead),
+      Effect.orElseSucceed(() => true),
+    );
 
   const appendActivity = (input: {
     /** A fixed id makes the activity replace the earlier one with that id. */
@@ -858,6 +1142,19 @@ export const make = Effect.gen(function* () {
       },
     }).pipe(Effect.ignore);
 
+  /** An audit's fix request is dropped once the crew is off; the thread's activity says why. */
+  const skipAuditFixForCrewOff = (record: CrewTaskRecord) =>
+    Effect.gen(function* () {
+      yield* updateTask(record, { auditState: "skipped" });
+      yield* appendActivity({
+        threadId: record.leadThreadId,
+        kind: CREW_AUDIT_SKIPPED_ACTIVITY,
+        summary: "Audit fix request dropped: OOP Crew is off",
+        turnId: record.leadTurnId,
+        payload: { crewRole: "auditor", crewOff: true },
+      });
+    });
+
   /**
    * An audit that asked for changes becomes a follow-up lead turn while the fix limit allows.
    * The follow-up is announced before the audit's completion so nothing watching the lead sees
@@ -872,6 +1169,13 @@ export const make = Effect.gen(function* () {
         return;
       }
       const current = followUpRound(yield* latestUserText(record.leadThreadId));
+      if (auditVerdict(report) === "needs-changes" && report !== null) {
+        const lead = yield* shellOf(record.leadThreadId);
+        if (Option.isSome(lead) && !(yield* crewIsOn(lead.value))) {
+          yield* skipAuditFixForCrewOff(record);
+          return;
+        }
+      }
       if (
         auditVerdict(report) !== "needs-changes" ||
         report === null ||
@@ -1515,7 +1819,12 @@ export const make = Effect.gen(function* () {
           );
           if (records.some(([, record]) => record.role === "auditor" && record.report === null))
             return;
+          const crewOff = !(yield* crewIsOn(lead.value));
           const auditRecords = records.filter(([, record]) => record.auditState === "pending");
+          if (crewOff) {
+            // The audit loop is crew work the user switched off, so a waiting fix request is dropped.
+            for (const [, record] of auditRecords) yield* skipAuditFixForCrewOff(record);
+          }
           const audits = auditRecords.flatMap(([, record]) =>
             record.report?.result === null || record.report?.result === undefined
               ? []
@@ -1528,7 +1837,8 @@ export const make = Effect.gen(function* () {
           if (audits.length === 0 && late.length === 0) return;
           const plan = planFollowUp({
             current: followUpRound(yield* latestUserText(leadId)),
-            audits,
+            audits: crewOff ? [] : audits,
+            crewOff,
             results: late.map(([, record]) => ({
               role: record.role,
               subject: record.subject,
@@ -1541,8 +1851,10 @@ export const make = Effect.gen(function* () {
             for (const [taskId, record] of late) {
               yield* markCollected(taskId, record, { dropped: true });
             }
-            for (const [, record] of auditRecords) {
-              yield* updateTask(record, { auditState: "skipped" });
+            if (!crewOff) {
+              for (const [, record] of auditRecords) {
+                yield* updateTask(record, { auditState: "skipped" });
+              }
             }
             return;
           }
@@ -1551,7 +1863,7 @@ export const make = Effect.gen(function* () {
           const data: typeof CrewFollowUpRecoveryJson.Type = {
             version: 1,
             taskIds: late.map(([taskId]) => taskId),
-            auditTaskIds: auditRecords.map(([taskId]) => taskId),
+            auditTaskIds: crewOff ? [] : auditRecords.map(([taskId]) => taskId),
             command: {
               type: "thread.turn.start",
               commandId: CommandId.make(`server:crew-follow-up:${deliveryId}`),
@@ -1775,11 +2087,25 @@ export const make = Effect.gen(function* () {
           yield* Deferred.succeed(record.done, undefined);
         });
 
+      const skipped: string[] = [];
       for (const option of input.chain) {
         // A stopped task is never handed to another model.
         if (record.stopped !== undefined) break;
-        if (record.attempts.length > 0 && (yield* cooling).has(option.selection.instanceId))
-          continue;
+        // The first attempt ignores cooling; from the second on, a cooling provider is skipped,
+        // and so is a model the provider refused, and the switch message says why.
+        if (record.attempts.length > 0) {
+          const state = yield* cooling;
+          const modelNote = state.modelNotes.get(modelKey(option.selection));
+          if (modelNote !== undefined) {
+            skipped.push(modelNote);
+            continue;
+          }
+          const note = state.notes.get(option.selection.instanceId);
+          if (note !== undefined) {
+            skipped.push(note);
+            continue;
+          }
+        }
         const previous = record.attempts.at(-1);
         // A model that takes over mid-task is told which TODO items the earlier one finished.
         const resumed =
@@ -1821,6 +2147,8 @@ export const make = Effect.gen(function* () {
               : {
                   summary: reportExcerpt(
                     `${previous.model} failed (${previous.error ?? "failed"}); retrying with ${option.label}.${
+                      skipped.length === 0 ? "" : ` ${skipped.join("; ")}.`
+                    }${
                       memoryBlocked(record, option)
                         ? " Project memory is not sent to this model."
                         : ""
@@ -1829,6 +2157,8 @@ export const make = Effect.gen(function* () {
                 }),
           },
         });
+        // Each switch message names only the skips since the attempt before it.
+        skipped.length = 0;
         if (previous === undefined) yield* emitProgress(record);
         const launched = yield* Effect.exit(
           launchCrewThread({
@@ -1848,7 +2178,7 @@ export const make = Effect.gen(function* () {
         if (Exit.isFailure(launched)) {
           attempt.error = "could not start";
           yield* persistTask(record);
-          yield* markFailed(option.selection.instanceId, attempt.error);
+          yield* markFailed(option.selection, attempt.error);
           continue;
         }
         const threadId = launched.value;
@@ -1919,6 +2249,7 @@ export const make = Effect.gen(function* () {
         // Status and verdict are judged on the full report; only the stored result is clipped.
         const reply = yield* lastAssistantText(threadId);
         if (status === "completed" || status === "interrupted") {
+          if (status === "completed") markWorked(option.selection);
           // The checks run in the task's workspace, which merging an isolated one removes.
           if (status === "completed") yield* sweepTodos(record);
           const stoppedNow = record.stopped !== undefined && status === "interrupted";
@@ -1996,7 +2327,7 @@ export const make = Effect.gen(function* () {
         }
         attempt.error = (yield* lastErrorOf(threadId)) ?? "the turn failed";
         yield* persistTask(record);
-        yield* markFailed(option.selection.instanceId, attempt.error);
+        yield* markFailed(option.selection, attempt.error);
         yield* settleThread(threadId);
       }
 
@@ -2082,11 +2413,15 @@ export const make = Effect.gen(function* () {
     readonly memory?: ReadonlyArray<CrewMemoryRef> | undefined;
   }) {
     const brain = input.lead.modelSelection;
+    const coolingState = yield* cooling;
+    // Only the role's own model is tried while cooling; OOP's fast pick skips what is cooling.
     const fastest =
       input.preferFast === true
         ? (input.options.find(
             (option) =>
               option.tier === 1 &&
+              !coolingState.providers.has(option.selection.instanceId) &&
+              !coolingState.modelNotes.has(modelKey(option.selection)) &&
               (brain === null ||
                 option.selection.instanceId !== brain.instanceId ||
                 option.selection.model !== brain.model),
@@ -2096,9 +2431,12 @@ export const make = Effect.gen(function* () {
       options: input.options,
       role: input.role,
       assigned: fastest ?? input.resolved.roles[input.role],
+      // The user's fallback models come before OOP's own picks.
+      fallbacks: input.resolved.fallbacks[input.role],
       preset: input.resolved.preset,
       brain: input.lead.modelSelection,
-      unavailableInstances: yield* cooling,
+      unavailableInstances: coolingState.providers,
+      unavailableModels: coolingState.models,
       ...(input.avoid === undefined || input.avoid.length === 0
         ? {}
         : {
@@ -2164,6 +2502,7 @@ export const make = Effect.gen(function* () {
       // lead turn that hands it over was already stopped (a late tool call from that turn).
       stopped: stoppedAtStart(),
       memory: input.memory,
+      why: input.why,
       report: null,
       collected: false,
       ended: false,
@@ -2235,13 +2574,23 @@ export const make = Effect.gen(function* () {
     function* (threadId) {
       const lead = yield* requireLead(threadId);
       const { resolved, canLead } = yield* crewFor(lead);
+      const { entries } = yield* cooling;
       return {
         enabled: resolved.enabled && canLead,
         roles: (["worker", "expert", "auditor"] as const).map((role) => ({
           role,
           model: resolved.roles[role]?.label ?? null,
           provider: resolved.roles[role]?.providerLabel ?? null,
+          ...(resolved.fallbacks[role].length === 0
+            ? {}
+            : {
+                fallbacks: resolved.fallbacks[role].map((option) => ({
+                  model: option.label,
+                  provider: option.providerLabel,
+                })),
+              }),
         })),
+        cooling: [...entries],
       };
     },
   );
@@ -2253,6 +2602,15 @@ export const make = Effect.gen(function* () {
       if (!canLead) return yield* fail(CREW_LEAD_REFUSAL);
       if (!resolved.enabled) {
         return yield* fail("OOP Crew is off for this thread. Do the work yourself.");
+      }
+      if (
+        resolved.roles.worker === null &&
+        resolved.roles.expert === null &&
+        resolved.roles.auditor !== null
+      ) {
+        return yield* fail(
+          `Only the auditor is set (${resolved.roles.auditor.label}): there is no worker or expert to delegate to. The auditor reviews file-changing turns on its own. Do the work yourself.`,
+        );
       }
       const task = input.task.trim();
       if (task.length === 0) return yield* fail("Describe the task to hand over.");
@@ -2415,8 +2773,20 @@ export const make = Effect.gen(function* () {
       if (record.report === null || record.report.status === "completed") {
         return yield* fail("Only a task that ended without finishing can be retried.");
       }
-      const prompt = yield* originalPrompt(record);
-      if (prompt === null) return yield* fail("The task's original brief is no longer available.");
+      const original = yield* originalPrompt(record);
+      if (original === null)
+        return yield* fail("The task's original brief is no longer available.");
+      // In the shared workspace the earlier attempt's changes are still there, so its finished
+      // items stay finished and only the open ones start again from pending. A fresh worktree
+      // does not have those changes (a failed task's was dropped, a candidate's is never
+      // applied, and the record does not say whether a merge landed), so every item restarts.
+      const finished = (todo: TodoItem) =>
+        record.worktree === undefined && (todo.status === "verified" || todo.status === "claimed");
+      const todos = record.todos?.map((todo) => (finished(todo) ? todo : resetTodos([todo])[0]!));
+      // The same resume lines a failover model reads: they replace the list in the original brief.
+      const prompt = todos?.some(finished)
+        ? [original, ...todoResumeLines(todos)].join("\n")
+        : original;
       return yield* startTask({
         lead,
         role: record.role,
@@ -2429,8 +2799,9 @@ export const make = Effect.gen(function* () {
         // A task that had its own worktree gets a fresh one; the old one is the earlier attempt's.
         isolation:
           record.worktree === undefined ? undefined : record.candidate ? "candidate" : "worktree",
-        // The brief it reads lists the items, so the new task starts them again from pending.
-        todos: record.todos === undefined ? undefined : resetTodos(record.todos),
+        todos,
+        memory: record.memory,
+        why: record.why,
       }).pipe(Effect.map(({ taskId, model }) => ({ taskId, model })));
     },
   );

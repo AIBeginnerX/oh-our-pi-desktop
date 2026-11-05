@@ -10,6 +10,15 @@ use serde_json::Value;
 
 pub const ROLES: [&str; 3] = ["worker", "expert", "auditor"];
 
+/// How many fallback models a role can list (`CREW_FALLBACK_LIMIT` in packages/contracts).
+pub const CREW_FALLBACK_LIMIT: usize = 3;
+
+/// Whether the stored selection (`{ instanceId, model }`) names the option.
+pub fn same_selection(selection: &Value, option: &ModelOption) -> bool {
+    selection["instanceId"].as_str() == Some(option.instance_id.as_str())
+        && selection["model"].as_str() == Some(option.model.as_str())
+}
+
 /// Drivers that can lead a crew; used only when the server does not say (`canLeadCrew` on the
 /// provider), and a copy of `canLeadCrew` in packages/shared/src/crew.ts.
 const BRAIN_DRIVERS: [&str; 2] = ["claudeAgent", "codex"];
@@ -208,12 +217,34 @@ fn pin<'a>(
     Some((pinned["instanceId"].as_str()?, pinned["model"].as_str()?))
 }
 
+/// The fallback models listed for a role, the thread's list over the default's; a thread's empty
+/// list means none even when the default lists some.
+pub fn fallback_list(settings: &Value, role: &str, thread: Option<&Value>) -> Vec<Value> {
+    let listed = thread
+        .and_then(|t| t["fallbacks"].as_object())
+        .and_then(|listed| listed.get(role))
+        .or_else(|| settings["fallbacks"].get(role));
+    listed.and_then(Value::as_array).map_or(Vec::new(), |list| {
+        list.iter().take(CREW_FALLBACK_LIMIT).cloned().collect()
+    })
+}
+
+/// The fallback lists as stored, the thread's over the default's, which an edit rewrites.
+pub fn fallback_lists(config: &Value, own: Option<&Value>) -> [Vec<Value>; 3] {
+    let settings = &config["settings"]["crew"];
+    let thread = own.filter(|crew| crew.is_object());
+    ROLES.map(|role| fallback_list(settings, role, thread))
+}
+
 pub struct Resolved {
     pub enabled: bool,
     pub preset: String,
     pub roles: [Option<ModelOption>; 3],
     /// The roles a model was pinned for (and still can run) rather than left to the preset.
     pub pinned: [bool; 3],
+    /// The fallback lists as stored, including models that cannot run now (`fallback_list`); a
+    /// model that is not ready here is skipped when tasks run, and comes back with its provider.
+    pub listed: [Vec<Value>; 3],
     /// The thread has a crew of its own, rather than running the default.
     pub own: bool,
 }
@@ -239,6 +270,7 @@ pub fn resolve(config: &Value, own: Option<&Value>, brain: Brain) -> Resolved {
     let options = model_options(config);
     let recommended = recommend(&options, brain, preset);
     let mut roles: [Option<ModelOption>; 3] = [None, None, None];
+    let listed = fallback_lists(config, own);
     let mut pinned_roles = [false; 3];
     for (slot, role) in ROLES.iter().enumerate() {
         let pinned = pin(settings, role, thread).and_then(|(instance, model)| {
@@ -256,12 +288,14 @@ pub fn resolve(config: &Value, own: Option<&Value>, brain: Brain) -> Resolved {
         preset: preset.to_string(),
         roles,
         pinned: pinned_roles,
+        listed,
         own: thread.is_some(),
     }
 }
 
-/// Why the thread's model cannot use the crew; `false` when it can. A thread with no model yet is
-/// not blamed.
+/// Whether the thread's model cannot use the crew; `false` when it can. A thread with no model yet
+/// cannot (`true`), so `roles_of` hides the crew for it; `brain_problem` words that case itself.
+/// Only a provider the snapshot does not list is not blamed.
 pub fn brain_cannot(config: &Value, brain: Brain) -> bool {
     let Some((instance, _)) = brain else {
         return true;
@@ -384,6 +418,61 @@ mod tests {
         let auto = json!({"pinned": {"worker": null}});
         let roles = roles_of(&cfg, Some(&auto), brain, true).unwrap();
         assert_eq!(roles[0].model.as_deref(), Some("Haiku 5.5"));
+    }
+
+    #[test]
+    fn fallback_lists_follow_the_thread_over_the_default_and_keep_away_models() {
+        let gpt = json!({"instanceId": "codex", "model": "gpt-5"});
+        let mini = json!({"instanceId": "codex", "model": "gpt-5-mini"});
+        let opus = json!({"instanceId": "claude", "model": "claude-opus-5-5"});
+        let models = |list: &[Value]| {
+            list.iter()
+                .map(|selection| selection["model"].as_str().unwrap_or_default().to_string())
+                .collect::<Vec<_>>()
+        };
+        let cfg = config(json!({
+            "enabled": true,
+            "fallbacks": {"worker": [mini.clone(), opus.clone(), gpt.clone()]},
+        }));
+        let brain = Some(("claude", "claude-sonnet-5-5"));
+        let resolved = resolve(&cfg, None, brain);
+        assert_eq!(
+            models(&resolved.listed[0]),
+            ["gpt-5-mini", "claude-opus-5-5", "gpt-5"],
+            "the default's list in order"
+        );
+        assert!(resolved.listed[1].is_empty());
+        // A thread's list for the role replaces the default's; an empty list means none.
+        let own = json!({"fallbacks": {"worker": [gpt.clone(), mini.clone()], "expert": []}});
+        let resolved = resolve(&cfg, Some(&own), brain);
+        assert_eq!(models(&resolved.listed[0]), ["gpt-5", "gpt-5-mini"]);
+        assert!(resolved.listed[1].is_empty(), "an empty list clears it");
+        // A model no provider offers now stays listed, and the list never grows past the limit.
+        let gone = json!({"instanceId": "codex", "model": "gpt-9"});
+        let cfg = config(json!({"enabled": true, "fallbacks": {"auditor":
+            [opus.clone(), gone, opus.clone(), mini.clone(), gpt.clone()]}}));
+        let resolved = resolve(&cfg, None, brain);
+        assert_eq!(
+            resolved.listed[2].len(),
+            CREW_FALLBACK_LIMIT,
+            "the stored list is cut"
+        );
+        assert_eq!(
+            models(&resolved.listed[2]),
+            ["claude-opus-5-5", "gpt-9", "claude-opus-5-5"]
+        );
+        // The stored selection names a model here; one gone from the environment names nothing.
+        let options = model_options(&cfg);
+        assert!(
+            options
+                .iter()
+                .any(|o| same_selection(&resolved.listed[2][0], o))
+        );
+        assert!(
+            !options
+                .iter()
+                .any(|o| same_selection(&resolved.listed[2][1], o))
+        );
     }
 
     #[test]

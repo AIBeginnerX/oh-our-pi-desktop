@@ -81,6 +81,8 @@ function quotaWindow(
   quota: typeof Quota.Type,
   kind: ServerProviderUsageWindow["kind"] = "other",
   windowDurationMins?: number,
+  /** The model families the quota alone limits; absent when it is the account's. */
+  modelFamilies?: ReadonlyArray<string>,
 ): ServerProviderUsageWindow | undefined {
   if (quota.remainingFraction === undefined || !Number.isFinite(quota.remainingFraction)) {
     return undefined;
@@ -93,6 +95,7 @@ function quotaWindow(
     usedPercent: (1 - Math.max(0, Math.min(1, quota.remainingFraction))) * 100,
     ...(resetsAt ? { resetsAt } : {}),
     ...(windowDurationMins === undefined ? {} : { windowDurationMins }),
+    ...(modelFamilies === undefined ? {} : { modelFamilies }),
   };
 }
 
@@ -110,6 +113,11 @@ function summaryWindows(summary: typeof Summary.Type) {
         : bucket.bucketId.startsWith("3p-")
           ? "Claude & GPT (shared)"
           : group.displayName?.trim() || bucket.bucketId;
+      const families = bucket.bucketId.startsWith("gemini-")
+        ? ["gemini"]
+        : bucket.bucketId.startsWith("3p-")
+          ? ["claude", "gpt"]
+          : undefined;
       const weekly = bucket.window === "weekly";
       const session = bucket.window === "5h";
       const window = quotaWindow(
@@ -118,6 +126,7 @@ function summaryWindows(summary: typeof Summary.Type) {
         bucket,
         weekly ? "weekly" : session ? "session" : "other",
         weekly ? 7 * 24 * 60 : session ? 5 * 60 : undefined,
+        families,
       );
       if (window) windows.set(window.id, window);
     }
@@ -149,6 +158,7 @@ function modelWindows(models: typeof Models.Type) {
         quota,
         suffix === "weekly" ? "weekly" : "other",
         suffix === "weekly" ? 7 * 24 * 60 : undefined,
+        [family.toLowerCase()],
       );
       if (!window) continue;
       const previous = windows.get(window.id);

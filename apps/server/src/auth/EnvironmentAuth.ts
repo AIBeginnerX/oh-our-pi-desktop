@@ -1145,11 +1145,14 @@ export const make = Effect.gen(function* () {
       // Cookies ride along on cross-origin WebSocket upgrades (SameSite is port-agnostic),
       // so a browser-sent Origin must be one we serve. Bearer/DPoP credentials are attached
       // by the client itself and need no check; requests without Origin are not browsers.
+      // `Sec-Fetch-Site: same-origin` is set by the browser itself and page JS cannot forge
+      // it, so it also covers a proxy that rewrites Host without forwarding the original.
       const origin = request.headers["origin"];
       if (
         typeof origin === "string" &&
         usesCookieCredential(request) &&
-        !isAllowedUpgradeOrigin(origin, request.headers)
+        !isAllowedUpgradeOrigin(origin, request.headers) &&
+        request.headers["sec-fetch-site"] !== "same-origin"
       ) {
         return yield* new ServerAuthInvalidCredentialError({
           diagnostic: "WebSocket upgrade origin is not allowed for cookie authentication.",

@@ -1188,10 +1188,13 @@ const make = Effect.gen(function* () {
       brief === null && sentCrewBriefs.get(input.threadId)?.startsWith(sessionPrefix) === true
         ? CREW_OFF_NOTE
         : null;
-    if (brief !== undefined) {
+    // Recorded only once sendTurn succeeds: a Stop, hold, or start failure
+    // before that must leave the brief undelivered so the next turn carries it.
+    const commitCrewBrief = () => {
+      if (brief === undefined) return;
       if (briefKey === null) sentCrewBriefs.delete(input.threadId);
       else sentCrewBriefs.set(input.threadId, briefKey);
-    }
+    };
     const goal = (yield* serverSettingsService.getSettings).threadGoals[input.threadId];
     const goalOpen =
       goal !== undefined &&
@@ -1250,6 +1253,7 @@ const make = Effect.gen(function* () {
       // The actual session instance that admitted turns are bound to; the L1′
       // instance hint is only an early rejection, never proof of this value.
       activeInstanceId: activeSession?.providerInstanceId,
+      commitCrewBrief,
       // This ensure's own last session-set; the only write a failure report may restore.
       sessionSetSequence,
     };
@@ -1833,6 +1837,7 @@ const make = Effect.gen(function* () {
     let sendTurnRequest: BuiltSendTurn["request"];
     let activeInstanceId: BuiltSendTurn["activeInstanceId"];
     let sessionSetSequence: BuiltSendTurn["sessionSetSequence"] = null;
+    let commitCrewBrief: BuiltSendTurn["commitCrewBrief"] = () => {};
 
     // Committed-turn failures report fixed detail only — the attempt is
     // already durably committed, and neither the original cause nor a
@@ -2037,6 +2042,7 @@ const make = Effect.gen(function* () {
                     })
                     .pipe(
                       Effect.as(true),
+                      Effect.tap(() => Effect.sync(() => commitCrewBrief())),
                       // A handoff refusal provably never entered the adapter,
                       // so it reports like a hold — fixed detail, ready
                       // restoration — and the finalizer leaves the committed
@@ -2068,6 +2074,7 @@ const make = Effect.gen(function* () {
         }
         progress.providerCalled = true;
         yield* providerService.sendTurn(sendTurnRequest).pipe(Effect.asVoid);
+        commitCrewBrief();
         return;
       }
 
@@ -2181,6 +2188,7 @@ const make = Effect.gen(function* () {
                 )
                 .pipe(
                   Effect.as(true),
+                  Effect.tap(() => Effect.sync(() => commitCrewBrief())),
                   // The turn provably never entered the adapter, so the refusal
                   // reports like a hold — fixed detail, ready restoration —
                   // and the finalizer still settles the attempt unknown.
@@ -2312,6 +2320,7 @@ const make = Effect.gen(function* () {
               sendTurnRequest = prepared.value.request;
               activeInstanceId = prepared.value.activeInstanceId;
               sessionSetSequence = prepared.value.sessionSetSequence;
+              commitCrewBrief = prepared.value.commitCrewBrief;
               return send;
             })
           : Effect.void,

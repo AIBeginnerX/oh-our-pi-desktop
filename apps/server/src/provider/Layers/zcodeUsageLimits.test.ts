@@ -48,6 +48,7 @@ describe("zcodeQuotaToWindows", () => {
         id: "mcp",
         kind: "monthly",
         label: "MCP tools · Monthly",
+        modelFamilies: [],
         usedPercent: 25,
         resetsAt: iso(1792938650998),
       },

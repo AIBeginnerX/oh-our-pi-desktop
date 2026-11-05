@@ -475,7 +475,7 @@ export interface CrewBriefRole {
 
 /** Sent once when the crew is turned off after its note was already in the conversation. */
 export const CREW_OFF_NOTE =
-  "<oop_crew>OOP Crew is now off for this chat: ignore the earlier <oop_crew> note, do the work yourself, and do not call the crew tools.</oop_crew>";
+  "<oop_crew>OOP Crew is now off for this chat: ignore the earlier <oop_crew> note, do the work yourself, and do not call the crew tools. Tasks started earlier may still report results; use them if they help.</oop_crew>";
 
 /**
  * The note sent ahead of each lead turn while the crew is on. Without it the brain never looks
@@ -484,7 +484,16 @@ export const CREW_OFF_NOTE =
  */
 export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string | null {
   const staffed = (["worker", "expert", "auditor"] as const).filter((role) => roles[role] !== null);
-  if (roles.worker === null && roles.expert === null) return null;
+  if (roles.worker === null && roles.expert === null) {
+    const auditor = roles.auditor;
+    if (auditor === null) return null;
+    return [
+      "<oop_crew>",
+      "OOP Crew is on for this chat, but only the auditor is set: there is no worker or expert to delegate to, so do the work yourself and do not call crew_delegate or the Agent tool for crew work. This note replaces any earlier <oop_crew> note in this chat.",
+      `The auditor (${auditor.label}, ${auditor.providerLabel}) reviews on its own every turn that changes files; you do not start it. If it asks for changes, you get a follow-up turn.`,
+      "</oop_crew>",
+    ].join("\n");
+  }
   const fast = (["worker", "expert"] as const).filter((role) => roles[role]?.native !== undefined);
   const delegated = (["worker", "expert"] as const).filter(
     (role) => roles[role] !== null && roles[role]?.native === undefined,
@@ -521,7 +530,7 @@ export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string
     "Do not use built-in subagents with other models, or Workflow tools, for work the crew can do. Check every report, combine them into your answer, and say which crew member did what.",
     "Name every task (the crew_delegate title, the Agent tool description) with a short English summary of its core work, at most eight words, even when you talk with the user in another language; the OOP Agents board shows it.",
     "A report with status partial or blocked is not finished: do the rest yourself or hand a follow-up task to the crew.",
-    "If a fast-path agent fails, hand that task to crew_delegate. Only when crew_delegate fails or crew_wait reports that every crew model failed, do the task yourself and say so.",
+    "Fast-path agents get no OOP fallback or cooling. If one fails, hand that task to crew_delegate. Only when crew_delegate fails or crew_wait reports that every crew model failed, do the task yourself and say so.",
     "</oop_crew>",
   ].join("\n");
 }
@@ -716,11 +725,21 @@ export function planFollowUp(input: {
   readonly current: { readonly round: number; readonly fixes: number };
   readonly audits: ReadonlyArray<string>;
   readonly results: ReadonlyArray<CrewFollowUpResult>;
+  /**
+   * The crew was turned off after these tasks started: results are handed on as plain information
+   * and audit fix requests are dropped, since the audit loop is crew work the user switched off.
+   */
+  readonly crewOff?: boolean;
 }): { readonly prompt: string | null; readonly dropped: boolean } {
   const withinFollowUps = input.current.round < CREW_MAX_FOLLOW_UPS;
-  const audits = withinFollowUps && input.current.fixes < CREW_MAX_FIX_ROUNDS ? input.audits : [];
+  const audits =
+    input.crewOff !== true && withinFollowUps && input.current.fixes < CREW_MAX_FIX_ROUNDS
+      ? input.audits
+      : [];
   const results = withinFollowUps ? input.results : [];
-  const dropped = audits.length < input.audits.length || results.length < input.results.length;
+  const dropped =
+    (input.crewOff !== true && audits.length < input.audits.length) ||
+    results.length < input.results.length;
   if (audits.length === 0 && results.length === 0) return { prompt: null, dropped };
   const round = input.current.round + 1;
   const fixes = input.current.fixes + (audits.length > 0 ? 1 : 0);
@@ -737,7 +756,9 @@ export function planFollowUp(input: {
         : []),
       ...(results.length > 0
         ? [
-            "These crew tasks finished after your last answer, so you have not read their reports. Check them, build on what they did, and update your answer to the user.",
+            input.crewOff === true
+              ? "OOP Crew is off: use these results if they help; do not start new crew tasks. These tasks finished after your last answer, so you have not read their reports."
+              : "These crew tasks finished after your last answer, so you have not read their reports. Check them, build on what they did, and update your answer to the user.",
             ...results.map(
               (result) =>
                 `- ${CREW_ROLE_LABEL[result.role]} · ${result.subject} (${result.status}${result.proof === undefined ? "" : `, proof ${result.proof}`}): ${result.report?.trim() || "no report"}`,
@@ -796,10 +817,15 @@ export function withTodoOutcome(
 }
 
 /**
- * Failures that repeat until someone fixes the provider (an empty balance, a signed-out CLI), as
- * opposed to a crash or a timeout that the next attempt may not hit.
+ * How a provider failure reads, and what the crew should do about it:
+ * - `billing` and `auth` last until someone fixes the provider (an empty balance, a signed-out CLI).
+ * - `limit` is a usage or rate limit the next attempt after the reset may clear.
+ * - `model` is the provider refusing that one model, so nothing is wrong with the provider itself.
+ * - `other` is a crash or a timeout that the next attempt may not hit.
  */
-export function crewFailureKind(error: string | null | undefined): "billing" | "auth" | "other" {
+export function crewFailureKind(
+  error: string | null | undefined,
+): "billing" | "auth" | "limit" | "model" | "other" {
   const text = error ?? "";
   if (
     /insufficient (balance|credit|funds|quota)|recharge|out of credits|payment required|billing|resource package/i.test(
@@ -813,7 +839,31 @@ export function crewFailureKind(error: string | null | undefined): "billing" | "
     )
   )
     return "auth";
+  if (
+    /usage[ _-]?limit|rate[ _-]?limit|(?:5[ -]?hours?|five[ -]?hours?|weekly|session|daily|monthly) limit (?:reached|exceeded)|limit will reset|quota (exceeded|reached)|too many requests|(?:hit|reached) your (?:\w+ )?limit|(?:status|code|http|error)[ :=]*429\b/i.test(
+      text,
+    )
+  )
+    return "limit";
+  if (
+    /could not switch to model|unknown model|invalid model|no such model|(?:not|n't) have access to (?:the )?model|\bmodel(?! context)(?:[:\s]+[`'"]?[\w.:/@-]+[`'"]?)?\s+(?:is |was |does |do )?(?:not found|not available|not supported|not exist|n't exist)/i.test(
+      text,
+    )
+  )
+    return "model";
   return "other";
+}
+
+/**
+ * The usage window an error names, when it names one: the five-hour session window, or the
+ * weekly one. The reset time printed beside it is not interpreted (providers leave the time
+ * zone off); how long to cool comes from the provider's own window snapshot instead.
+ */
+export function crewLimitWindowName(error: string | null | undefined): "5-hour" | "weekly" | null {
+  const text = error ?? "";
+  if (/5[ -]?hours?\b|five hours?\b/i.test(text)) return "5-hour";
+  if (/\bweek(?:ly)?\b|7[ -]?days?\b|seven days?\b/i.test(text)) return "weekly";
+  return null;
 }
 
 /**

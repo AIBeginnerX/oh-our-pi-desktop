@@ -201,7 +201,7 @@ _Usage: provider별 토큰 및 추정 비용 기록._
 _터미널 앱(`oop`): 터미널에서 대화하는 화면 녹화._
 
 - **앱 없이도 실행.** 데스크톱 앱이 꺼져 있으면 `oop`이 앱에 들어 있는 서버를 백그라운드 프로세스로 띄웁니다. 앱을 켜면 앱이 그 서버를 이어받고 `oop`은 다시 연결합니다. 둘 다 같은 데이터 폴더(`~/.oop-desktop`)를 쓰므로 스레드가 공유됩니다. 앱이 서버를 이어받는 순간 진행 중이던 턴은 중단됩니다. `oop`을 닫아도 서버는 계속 실행되며, `oop stop`으로 멈춥니다.
-- **슬래시 명령.** `/`를 입력하면 메뉴가 열립니다. `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-agents`, `/dag-workflow` 등이 있습니다. `/diff`는 턴의 변경을, `/undo`는 마지막 턴 되돌리기를 보여 주고, `/tasks`와 `/dag-agents`는 작업 목록과 현재 턴의 에이전트를 대화 옆에 보여 줍니다. 터미널이 충분히 넓으면 작업 목록과 `/dag-workflow` 패널이 저절로 열리고, 로고·상태·작은 펫이 대화 위에 고정됩니다. `oop config set workflow false`와 `oop config set pet false`로 패널과 펫을 끌 수 있습니다.
+- **슬래시 명령.** `/`를 입력하면 메뉴가 열립니다. `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-workflow` 등이 있습니다. `/diff`는 턴의 변경을, `/undo`는 마지막 턴 되돌리기를 보여 주고, `/tasks`는 작업 목록을 대화 옆에 보여 줍니다. 터미널이 충분히 넓으면 작업 목록과 `/dag-workflow` 패널이 저절로 열리고, 로고·상태·작은 펫이 대화 위에 고정됩니다. `oop config set workflow false`와 `oop config set pet false`로 패널과 펫을 끌 수 있습니다.
 - **메시지 대기열.** 턴이 실행되는 동안 보낸 메시지는 스레드별 대기열에서 기다립니다. 대기열은 `oop`이 열려 있는 동안에만 유지됩니다.
 - **터미널 벨.** 턴이 끝나거나 승인·답변을 기다리면 벨이 울립니다. `oop config set notify false`로 끕니다.
 - **영어와 한국어.** 터미널 앱은 `language` 설정을 따르고, 설정이 비어 있으면 시스템 로캘을 따릅니다(`oop config set language en` 또는 `ko`).

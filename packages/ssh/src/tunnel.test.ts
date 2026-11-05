@@ -491,6 +491,86 @@ describe("ssh tunnel scripts", () => {
     }).pipe(Effect.provide(processLayer));
   });
 
+  it.effect.each(["trust", "decline"] as const)(
+    "asks before trusting an unknown host key and the user chooses to %s",
+    (choice) => {
+      const requests: Array<{ kind?: string; prompt: string }> = [];
+      const hostKeyAnswers: Array<string> = [];
+      let trusted = false;
+      const failed = (stderr: string) => ({
+        ...makeSuccessfulProcess(""),
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(255)),
+        stderr: Stream.make(new TextEncoder().encode(stderr)),
+      });
+      const spawner = ChildProcessSpawner.make((command) =>
+        Effect.sync(() => {
+          const args = commandArgs(command);
+          const answer =
+            command._tag === "StandardCommand"
+              ? command.options.env?.T3_SSH_HOSTKEY_ANSWER
+              : undefined;
+          if (answer !== undefined) {
+            hostKeyAnswers.push(answer);
+            trusted = true;
+            return failed("Permission denied (publickey).\n");
+          }
+          if (!trusted) {
+            return failed(
+              args.includes("-v")
+                ? "debug1: Server host key: ssh-ed25519 SHA256:abc\nHost key verification failed.\n"
+                : "Host key verification failed.\n",
+            );
+          }
+          if (args.includes("-N")) {
+            return makeRunningProcess(() => {});
+          }
+          if (args.includes("sh") && args.includes("--")) {
+            return makeSuccessfulProcess('{"remotePort":3773}\n');
+          }
+          return makeSuccessfulProcess("\n");
+        }),
+      );
+      const prompt = SshPasswordPrompt.of({
+        isAvailable: true,
+        request: (request) =>
+          Effect.sync(() => {
+            requests.push(request);
+            return choice === "trust" ? "trust" : null;
+          }),
+      });
+      const layer = Layer.mergeAll(
+        NodeServices.layer,
+        Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Layer.succeed(HttpClient.HttpClient, testHttpClient),
+        Layer.succeed(NetService.NetService, testNetService),
+        Layer.succeed(SshPasswordPrompt, prompt),
+        SshEnvironmentManager.layer({ resolveCliRunner: Effect.succeed(ARCHIVE) }),
+      );
+      const target = {
+        alias: "devbox",
+        hostname: "devbox.tail0000ab.ts.net",
+        username: "kcc",
+        port: null,
+      } as const;
+
+      return Effect.gen(function* () {
+        const manager = yield* SshEnvironmentManager;
+        const result = yield* Effect.result(manager.ensureEnvironment(target));
+
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0]?.kind, "host-key");
+        assert.include(requests[0]?.prompt, "SHA256:abc");
+        if (choice === "trust") {
+          assert.isTrue(Result.isSuccess(result));
+          assert.deepEqual(hostKeyAnswers, ["SHA256:abc"]);
+        } else {
+          assert.isTrue(Result.isFailure(result));
+          assert.deepEqual(hostKeyAnswers, []);
+        }
+      }).pipe(Effect.provide(layer), Effect.scoped);
+    },
+  );
+
   it.effect.each(["successful stop", "failed stop"] as const)(
     "closes the tunnel scope and starts fresh after a %s",
     (mode) => {
@@ -804,5 +884,234 @@ describe("archive runner script", () => {
         assert.isFalse(yield* fs.exists(lock));
       }).pipe(Effect.provide(NodeServices.layer)),
     60_000,
+  );
+});
+
+// The launch script decides between the OOP background service, a hand-started
+// server and a new managed one. Run the real script against a fake HOME whose
+// `t3`, `systemctl` and `launchctl` are small shell stubs.
+describe("launch script with an OOP background service", () => {
+  const windowsHost = HostProcessPlatform.defaultValue() === "win32";
+  const darwinHost = HostProcessPlatform.defaultValue() === "darwin";
+  const SERVICE_PORT = 3773;
+  const UPGRADED_PORT = 3999;
+
+  const fakeT3 = (version: string) => `#!/bin/sh
+BASE="$HOME/.t3"
+field() { sed -n "s/.*\\"$2\\":[ ]*\\"*\\([^,\\"}]*\\).*/\\1/p" "$1"; }
+case "$1" in
+  --version) echo "t3 v${version}" ;;
+  __ssh-helper)
+    case "$2" in
+      runtime-port)
+        [ -f "$3" ] || exit 1
+        pid="$(field "$3" pid)"; port="$(field "$3" port)"
+        kill -0 "$pid" 2>/dev/null || exit 1
+        printf '%s %s' "$pid" "$port" ;;
+      wait-ready) exit 0 ;;
+      pick-port) printf 39001 ;;
+    esac ;;
+  serve) echo "serve" >>"$FAKE_LOG" ;;
+  service)
+    echo "$*" >>"$FAKE_LOG"
+    [ "\${FAKE_INSTALL_FAIL:-0}" = "1" ] && exit 1
+    printf '{"protocol":3,"activeVersion":"${version}"}' >"$BASE/runtime/service-state.json"
+    printf '{"pid":%s,"port":${UPGRADED_PORT},"origin":"http://127.0.0.1:${UPGRADED_PORT}"}' "$PPID" >"$BASE/userdata/server-runtime.json" ;;
+esac
+`;
+  const fakeServiceManager = `#!/bin/sh
+[ "\${FAKE_SERVICE_ACTIVE:-1}" = "1" ] && { echo active; exit 0; }
+echo inactive
+exit 3
+`;
+
+  const setup = Effect.fn("setupServiceHost")(function* (input: {
+    readonly clientVersion: string;
+    readonly serviceVersion: string | null;
+    readonly runtimeFile?: boolean;
+  }) {
+    const fs = yield* FileSystem.FileSystem;
+    const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-service-launch-" });
+    const home = `${root}/home`;
+    const base = `${home}/.t3`;
+    const bin = `${root}/bin`;
+    const unitDir = darwinHost ? `${home}/Library/LaunchAgents` : `${home}/.config/systemd/user`;
+    const unit = darwinHost
+      ? `${unitDir}/com.t3tools.t3code.service.plist`
+      : `${unitDir}/t3code.service`;
+    const runtimeDir = `${base}/runtime/versions/${input.clientVersion}`;
+    yield* fs.makeDirectory(`${base}/userdata`, { recursive: true });
+    yield* fs.makeDirectory(runtimeDir, { recursive: true });
+    yield* fs.makeDirectory(unitDir, { recursive: true });
+    yield* fs.makeDirectory(bin, { recursive: true });
+    yield* fs.writeFileString(`${runtimeDir}/t3`, fakeT3(input.clientVersion), { mode: 0o755 });
+    yield* fs.writeFileString(`${runtimeDir}/.install-complete`, `${input.clientVersion}\n`);
+    for (const name of ["systemctl", "launchctl"]) {
+      yield* fs.writeFileString(`${bin}/${name}`, fakeServiceManager, { mode: 0o755 });
+    }
+    if (input.serviceVersion !== null) {
+      yield* fs.writeFileString(
+        `${base}/runtime/service-state.json`,
+        `{"protocol":3,"activeVersion":"${input.serviceVersion}"}`,
+      );
+      yield* fs.writeFileString(
+        unit,
+        `ExecStart=${base}/runtime/versions/x/t3 __service-launcher\n`,
+      );
+    }
+    const writeRuntime = (port: number) =>
+      fs.writeFileString(
+        `${base}/userdata/server-runtime.json`,
+        `{"pid":${process.pid},"port":${port},"origin":"http://127.0.0.1:${port}"}`,
+      );
+    if (input.runtimeFile !== false) yield* writeRuntime(SERVICE_PORT);
+    return { fs, root, home, base, bin, writeRuntime, clientVersion: input.clientVersion };
+  });
+  type Host = Effect.Success<ReturnType<typeof setup>>;
+
+  const launch = Effect.fn("runServiceLaunch")(function* (
+    host: Host,
+    env: Record<string, string> = {},
+  ) {
+    const script = `${host.root}/launch.sh`;
+    yield* host.fs.writeFileString(
+      script,
+      buildRemoteLaunchScript({ archiveVersion: host.clientVersion, archiveDownloads: false }),
+    );
+    const log = `${host.root}/fake.log`;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const child = yield* spawner.spawn(
+      ChildProcess.make("sh", [script, "target"], {
+        env: {
+          PATH: `${host.bin}:${process.env.PATH ?? ""}`,
+          HOME: host.home,
+          FAKE_LOG: log,
+          ...env,
+        },
+        extendEnv: false,
+      }),
+    );
+    const collect = <E>(stream: Stream.Stream<Uint8Array, E>) =>
+      stream.pipe(
+        Stream.decodeText(),
+        Stream.runFold(
+          () => "",
+          (acc, chunk) => acc + chunk,
+        ),
+      );
+    const [stdout, stderr, exitCode] = yield* Effect.all(
+      [collect(child.stdout), collect(child.stderr), child.exitCode.pipe(Effect.map(Number))],
+      { concurrency: "unbounded" },
+    );
+    assert.equal(exitCode, 0, stderr);
+    const calls = (yield* host.fs.exists(log)) ? (yield* host.fs.readFileString(log)).trim() : "";
+    const summary = stdout.trim().split("\n").at(-1) ?? "";
+    const result = {
+      remotePort: Number(/"remotePort":(\d+)/u.exec(summary)?.[1]),
+      serverKind: /"serverKind":"(\w+)"/u.exec(summary)?.[1],
+    };
+    return { result, calls };
+  });
+
+  const activeVersion = (host: Host) =>
+    host.fs
+      .readFileString(`${host.base}/runtime/service-state.json`)
+      .pipe(Effect.map((text) => /"activeVersion":"([^"]+)"/u.exec(text)?.[1]));
+
+  it.effect.skipIf(windowsHost)(
+    "switches an older service to the launching client's version",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* setup({ clientVersion: "0.0.144", serviceVersion: "0.0.101" });
+        const { result, calls } = yield* launch(host);
+        assert.equal(calls, `service install --base-dir ${host.base}`);
+        assert.equal(yield* activeVersion(host), "0.0.144");
+        assert.deepEqual(result, { remotePort: UPGRADED_PORT, serverKind: "external" });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "leaves a same-version or newer service alone",
+    () =>
+      Effect.gen(function* () {
+        for (const serviceVersion of ["0.0.144", "0.0.150", "0.1.0"]) {
+          const host = yield* setup({ clientVersion: "0.0.144", serviceVersion });
+          const { result, calls } = yield* launch(host);
+          assert.equal(calls, "", serviceVersion);
+          assert.equal(yield* activeVersion(host), serviceVersion);
+          assert.deepEqual(result, { remotePort: SERVICE_PORT, serverKind: "external" });
+        }
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "leaves a server that is not the service untouched",
+    () =>
+      Effect.gen(function* () {
+        // No service installed for this home: a hand-started `t3 serve`.
+        const handStarted = yield* setup({ clientVersion: "0.0.144", serviceVersion: null });
+        const first = yield* launch(handStarted);
+        assert.equal(first.calls, "");
+        assert.deepEqual(first.result, { remotePort: SERVICE_PORT, serverKind: "external" });
+
+        // Service files exist but the service is not running.
+        const stopped = yield* setup({ clientVersion: "0.0.144", serviceVersion: "0.0.101" });
+        const second = yield* launch(stopped, { FAKE_SERVICE_ACTIVE: "0" });
+        assert.equal(second.calls, "");
+        assert.equal(yield* activeVersion(stopped), "0.0.101");
+        assert.deepEqual(second.result, { remotePort: SERVICE_PORT, serverKind: "external" });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "keeps using the old service when switching it fails",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* setup({ clientVersion: "0.0.144", serviceVersion: "0.0.101" });
+        const { result, calls } = yield* launch(host, { FAKE_INSTALL_FAIL: "1" });
+        assert.equal(calls, `service install --base-dir ${host.base}`);
+        assert.deepEqual(result, { remotePort: SERVICE_PORT, serverKind: "external" });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
+  );
+
+  it.live.skipIf(windowsHost)(
+    "waits for a restarting service instead of starting a managed server",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* setup({
+          clientVersion: "0.0.144",
+          serviceVersion: "0.0.144",
+          runtimeFile: false,
+        });
+        // The service's runtime file reappears a moment after the launch starts.
+        const restart = yield* Effect.sleep(Duration.millis(1500)).pipe(
+          Effect.andThen(host.writeRuntime(SERVICE_PORT)),
+          Effect.forkScoped,
+        );
+        const { result, calls } = yield* launch(host);
+        yield* Fiber.join(restart);
+        assert.notInclude(calls, "serve");
+        assert.deepEqual(result, { remotePort: SERVICE_PORT, serverKind: "external" });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "reclaims a launch lock left by a dead launch",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* setup({ clientVersion: "0.0.144", serviceVersion: null });
+        const lock = `${host.base}/ssh-launch/target/launch.lock`;
+        yield* host.fs.makeDirectory(lock, { recursive: true });
+        yield* host.fs.writeFileString(`${lock}/pid`, "999999\n");
+        const { result } = yield* launch(host);
+        assert.equal(result.remotePort, SERVICE_PORT);
+        assert.isFalse(yield* host.fs.exists(lock));
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
   );
 });

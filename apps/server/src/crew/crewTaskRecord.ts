@@ -56,6 +56,8 @@ export const DELETED_LEAD = "Stopped because the lead thread was deleted.";
 // A provider that just failed (sign-in, balance, outage) is skipped by new chains for a while,
 // so parallel tasks do not each spend a minute rediscovering the same failure.
 export const FAILED_PROVIDER_COOLDOWN_MS = 10 * 60_000;
+// How long a provider that hit a usage limit cools down when no snapshot window reports a reset.
+export const LIMIT_COOLDOWN_MS = 15 * 60_000;
 
 export interface AvoidedTask {
   readonly taskId: string;
@@ -98,6 +100,8 @@ export interface CrewTaskRecord {
    * whose provider may receive memory re-admits them on its own thread.
    */
   memory?: ReadonlyArray<CrewMemoryRef> | undefined;
+  /** The lead's own reason for the task, so a user's retry carries it on; memory only. */
+  why?: string | undefined;
   /** The attempt running now, for progress activities; memory only. */
   live?: {
     readonly threadId: ThreadId;

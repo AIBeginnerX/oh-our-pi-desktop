@@ -288,7 +288,7 @@ export function buildTailscaleHttpsBaseUrl(input: {
 const runTailscaleCommand = (
   args: readonly string[],
   timeoutInput: Duration.Input,
-): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
+): Effect.Effect<string, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const hostPlatform = yield* HostProcessPlatform;
@@ -306,8 +306,12 @@ const runTailscaleCommand = (
           Effect.fail(new TailscaleCommandSpawnError({ ...commandContext, cause })),
         ),
       );
-      const [stderr, exitCode] = yield* Effect.all(
-        [collectStderr(child.stderr), child.exitCode.pipe(Effect.map(Number))],
+      const [stdout, stderr, exitCode] = yield* Effect.all(
+        [
+          collectStdout(child.stdout),
+          collectStderr(child.stderr),
+          child.exitCode.pipe(Effect.map(Number)),
+        ],
         { concurrency: "unbounded" },
       ).pipe(
         Effect.mapError((cause) => new TailscaleCommandOutputError({ ...commandContext, cause })),
@@ -322,6 +326,7 @@ const runTailscaleCommand = (
             : {}),
         });
       }
+      return stdout;
     }).pipe(
       Effect.scoped,
       Effect.timeout(timeout),
@@ -346,8 +351,63 @@ export const ensureTailscaleServe = (input: {
   const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
   const localHost = input.localHost ?? "127.0.0.1";
   const args = ["serve", "--bg", `--https=${servePort}`, `http://${localHost}:${input.localPort}`];
-  return runTailscaleCommand(args, TAILSCALE_SERVE_TIMEOUT);
+  return runTailscaleCommand(args, TAILSCALE_SERVE_TIMEOUT).pipe(Effect.asVoid);
 };
+
+/**
+ * The loopback port a Tailscale Serve HTTPS mapping currently proxies `/` to,
+ * or null when there is no such mapping. `tailscale serve --bg` mappings
+ * outlive the process that made them, so a server whose port changed on
+ * restart uses this to find its own stale mapping.
+ */
+export const readTailscaleServeProxyPort = (
+  servePort: number,
+): Effect.Effect<number | null, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
+  runTailscaleCommand(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT).pipe(
+    Effect.map((stdout) => {
+      try {
+        const web = (JSON.parse(stdout) as { Web?: Record<string, unknown> }).Web ?? {};
+        for (const [hostPort, site] of Object.entries(web)) {
+          if (!hostPort.endsWith(`:${servePort}`)) continue;
+          const proxy = (site as { Handlers?: Record<string, { Proxy?: unknown }> }).Handlers?.["/"]
+            ?.Proxy;
+          if (typeof proxy !== "string") continue;
+          const url = new URL(proxy);
+          if (["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) && url.port !== "") {
+            return Number(url.port);
+          }
+        }
+      } catch {
+        // Unreadable status counts as no mapping: callers then leave serve alone.
+      }
+      return null;
+    }),
+  );
+
+/**
+ * Re-aims a mapping this process created earlier (at `fromLocalPort`) at the
+ * port the server has now. A mapping that is gone, already current, or points
+ * anywhere else (the user changed it) is left alone.
+ */
+export const repointTailscaleServe = (input: {
+  readonly servePort: number;
+  readonly fromLocalPort: number;
+  readonly toLocalPort: number;
+}): Effect.Effect<
+  "repointed" | "current" | "left-alone",
+  TailscaleCommandError,
+  ChildProcessSpawner.ChildProcessSpawner
+> =>
+  Effect.gen(function* () {
+    const proxyPort = yield* readTailscaleServeProxyPort(input.servePort);
+    if (proxyPort === input.toLocalPort) return "current" as const;
+    if (proxyPort !== input.fromLocalPort) return "left-alone" as const;
+    yield* ensureTailscaleServe({
+      localPort: input.toLocalPort,
+      servePort: input.servePort,
+    });
+    return "repointed" as const;
+  });
 
 export const disableTailscaleServe = (
   input: {
@@ -356,10 +416,7 @@ export const disableTailscaleServe = (
 ): Effect.Effect<void, TailscaleCommandError, ChildProcessSpawner.ChildProcessSpawner> =>
   Effect.gen(function* () {
     const servePort = input.servePort ?? DEFAULT_TAILSCALE_SERVE_PORT;
-    return yield* runTailscaleCommand(
-      ["serve", `--https=${servePort}`, "off"],
-      TAILSCALE_SERVE_TIMEOUT,
-    );
+    yield* runTailscaleCommand(["serve", `--https=${servePort}`, "off"], TAILSCALE_SERVE_TIMEOUT);
   });
 
 export const probeTailscaleHttpsEndpoint = (input: {

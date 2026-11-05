@@ -115,6 +115,8 @@ export function zcodeQuotaToWindows(payload: unknown): ServerProviderUsageWindow
       ...cadence,
       id: type === "TOKENS_LIMIT" ? `token_${key}` : tool ? "mcp" : type.toLowerCase(),
       label: type === "TOKENS_LIMIT" ? cadence.label : tool ? `MCP tools · ${cadence.label}` : type,
+      // The MCP tool allowance limits tools, not any model.
+      ...(tool ? { modelFamilies: [] } : {}),
       usedPercent,
       ...(resetsAt ? { resetsAt } : {}),
     });

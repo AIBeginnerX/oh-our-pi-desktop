@@ -244,8 +244,8 @@ fn lookup(key: &str, ko: bool) -> &'static str {
         "notice.petOff" => pick("Mocha is off.", "모카를 껐습니다."),
         "notice.sidebarUsage" => pick("Usage: /sidebar [on|off]", "사용법: /sidebar [on|off]"),
         "notice.panelUsage" => pick(
-            "Usage: /dag-workflow [on|off], /agents [on|off], /savvy [on|off], /files [on|off]",
-            "사용법: /dag-workflow [on|off], /agents [on|off], /savvy [on|off], /files [on|off]",
+            "Usage: /dag-workflow [on|off], /savvy [on|off], /files [on|off]",
+            "사용법: /dag-workflow [on|off], /savvy [on|off], /files [on|off]",
         ),
         "notice.panelOn" => pick("The side panel is open.", "오른쪽 패널을 열었습니다."),
         "notice.panelOff" => pick(
@@ -273,8 +273,8 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "새 스레드입니다. 메시지를 입력하면 시작합니다.",
         ),
         "notice.help" => pick(
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /dag-agents /savvy /files /replay /new /threads /projects /stats /tasks /sidebar /panel /mouse /pet /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /dag-agents /savvy /files /replay /new /threads /projects /stats /tasks /sidebar /panel /mouse /pet /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /new /threads /projects /stats /tasks /sidebar /panel /mouse /pet /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /new /threads /projects /stats /tasks /sidebar /panel /mouse /pet /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
         ),
         "notice.unsupported" => pick(
             "Not in oop-rs yet: use the TypeScript terminal for it.",
@@ -345,8 +345,8 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "/goal 로 스레드의 목표를 정하거나 확인합니다.",
         ),
         "tip.17" => pick(
-            "/dag-workflow, /dag-agents, /savvy and /files open a panel on the right (100+ columns).",
-            "/dag-workflow, /dag-agents, /savvy, /files 로 오른쪽 패널에서 워크플로·에이전트·진행·파일을 봅니다 (100열 이상).",
+            "/dag-workflow, /savvy and /files open a panel on the right (100+ columns).",
+            "/dag-workflow, /savvy, /files 로 오른쪽 패널에서 워크플로·진행·파일을 봅니다 (100열 이상).",
         ),
         "tip.18" => pick(
             "In OOP Terminal, Cmd+D splits the window to the right and Cmd+Shift+D below.",
