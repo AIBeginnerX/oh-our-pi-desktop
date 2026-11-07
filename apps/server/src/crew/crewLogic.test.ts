@@ -5,9 +5,12 @@ import {
   CREW_MAX_FIX_ROUNDS,
   CREW_REPORT_MAX_FINDINGS,
   auditDiff,
+  LIGHT_AUDIT_DIFF_MAX_CHARS,
   auditPrompt,
   auditVerdict,
+  lightAuditPrompt,
   clipCrewReport,
+  clipLeadReport,
   crewFailureKind,
   crewLimitWindowName,
   crewReportStatus,
@@ -101,10 +104,10 @@ describe("audits", () => {
     expect(planTurnAudit({ ...base, hasAuditor: false })).toBe("none");
   });
 
-  it("skips a small change the turn's own tests passed, and hands the rest to a fast model", () => {
-    expect(planTurnAudit({ ...base, changedLines: 8, testsPassed: true })).toBe("skipped");
+  it("lightly audits a small change the turn's own tests passed, and hands the rest to a fast model", () => {
+    expect(planTurnAudit({ ...base, changedLines: 8, testsPassed: true })).toBe("light");
     expect(planTurnAudit({ ...base, changedLines: 8 })).toBe("fast");
-    expect(planTurnAudit({ ...base, changedLines: 20, testsPassed: true })).toBe("skipped");
+    expect(planTurnAudit({ ...base, changedLines: 20, testsPassed: true })).toBe("light");
     expect(planTurnAudit({ ...base, changedLines: 21, testsPassed: true })).toBe("full");
   });
 
@@ -113,7 +116,7 @@ describe("audits", () => {
     expect(planTurnAudit({ ...small, testsPassed: true, changesRequested: true })).toBe("full");
     expect(planTurnAudit({ ...small, changesRequested: true })).toBe("full");
     expect(planTurnAudit({ ...small, auditorPinned: true })).toBe("full");
-    expect(planTurnAudit({ ...small, auditorPinned: true, testsPassed: true })).toBe("skipped");
+    expect(planTurnAudit({ ...small, auditorPinned: true, testsPassed: true })).toBe("light");
   });
 
   it("never counts a turn with a zero-line file, such as a binary or a rename, as small", () => {
@@ -288,14 +291,28 @@ describe("crew brief", () => {
     expect(line).toContain("crew_delegate and crew_stop");
   });
 
-  it("explains the arena in a few lines the brain can follow", () => {
+  it("keeps the arena steps in the brief, since the arena skill is user-invoked only", () => {
     const brief = crewBrief({ worker: option("GLM", "OpenCode"), expert: null, auditor: null })!;
     expect(brief).toContain("Arena (only when the user asks to compare approaches");
     expect(brief).toContain('isolation "candidate"');
-    expect(brief).toContain("differentFrom");
-    expect(brief).toContain("judge was not independent");
-    expect(brief).toContain("remove the worktrees");
-    expect(brief).toContain("Candidate A");
+  });
+
+  it("keeps the policy prefix byte-identical across different rosters, roster last", () => {
+    const policyOf = (brief: string) => brief.slice(0, brief.indexOf("Crew roster"));
+    const a = crewBrief({
+      worker: { label: "Haiku", providerLabel: "Claude", native: "haiku" },
+      expert: null,
+      auditor: null,
+    })!;
+    const b = crewBrief({
+      worker: option("GLM", "OpenCode"),
+      expert: option("GPT-6.1 Sol", "Codex"),
+      auditor: option("Opus", "Claude"),
+    })!;
+    expect(policyOf(a)).toBe(policyOf(b));
+    expect(policyOf(a).length).toBeGreaterThan(1000);
+    expect(a.indexOf("Crew roster")).toBeGreaterThan(a.indexOf("Fast-path agents get no"));
+    expect(a.endsWith("</oop_crew>")).toBe(true);
   });
 
   it("sends nothing when no role is staffed", () => {
@@ -351,17 +368,17 @@ describe("crew fast path", () => {
       '- worker: Haiku (Claude) [fast path: your Agent tool with model "haiku"]',
     );
     expect(brief).toContain("- expert: GPT-6.1 Sol (Codex) [crew_delegate]");
-    expect(brief).toContain("2. Fast path (worker)");
-    expect(brief).toContain("3. Other roles (expert)");
+    expect(brief).toContain("2. Roles marked [fast path ...]");
+    expect(brief).toContain("3. Roles marked [crew_delegate]");
   });
 
-  it("leaves out the crew_delegate rule when every role takes the fast path", () => {
+  it("lists no crew_delegate route when every role takes the fast path", () => {
     const brief = crewBrief({
       worker: { label: "Haiku", providerLabel: "Claude", native: "haiku" },
       expert: { label: "Opus", providerLabel: "Claude", native: "opus" },
       auditor: null,
     })!;
-    expect(brief).not.toContain("Other roles");
+    expect(brief.slice(brief.indexOf("Crew roster"))).not.toContain("[crew_delegate]");
   });
 });
 
@@ -538,6 +555,43 @@ describe("crew failure handling", () => {
     expect(prompt).toContain("`Status: partial`");
     expect(prompt.endsWith("Add tests")).toBe(true);
   });
+
+  it("tells crew members to cite files by path and to reproduce a bug first", () => {
+    const prompt = delegatePrompt({ role: "expert", leadTitle: "Fix login", task: "Fix it" });
+    expect(prompt).toContain("Reference files by path and line instead of pasting their contents");
+    expect(prompt).toContain("first build a way to reproduce the failure");
+  });
+});
+
+describe("lightAuditPrompt", () => {
+  const base = { leadTitle: "Fix login", files: ["a.ts", "b.ts"], request: "Fix login" };
+  const turnRefs = { from: "refs/from", to: "refs/to" };
+
+  it("reviews the diff on two axes without re-running tests, and keeps the report shape", () => {
+    const diff = "+const a = 1;\n";
+    const prompt = lightAuditPrompt({ ...base, diff, turnRefs });
+    expect(prompt).toContain("```diff\n+const a = 1;\n```");
+    expect(prompt).toContain("do not re-run them or the build");
+    expect(prompt).toContain("spec (does it do exactly what the user asked");
+    expect(prompt).toContain("improvement (at most 3 findings");
+    expect(prompt).toContain("about 200 words");
+    expect(prompt).toContain("`Verdict: needs changes` only for a proven blocking problem");
+    expect(prompt).toContain('"verdict":"approve"|"needs changes"');
+    expect(prompt).toBe(lightAuditPrompt({ ...base, diff, turnRefs }));
+    expect(prompt.length).toBeLessThan(auditPrompt({ ...base, diff, turnRefs }).length);
+  });
+
+  it("lists files and turn refs instead of a diff over its smaller cap", () => {
+    const diff = "x".repeat(LIGHT_AUDIT_DIFF_MAX_CHARS + 1);
+    expect(auditDiff(diff)).not.toBeNull();
+    const prompt = lightAuditPrompt({ ...base, diff, turnRefs });
+    expect(prompt).not.toContain("```diff");
+    expect(prompt).toContain("- a.ts\n- b.ts");
+    expect(prompt).toContain("git diff refs/from refs/to -- <path>");
+    expect(lightAuditPrompt({ ...base, diff: "x".repeat(LIGHT_AUDIT_DIFF_MAX_CHARS) })).toContain(
+      "```diff",
+    );
+  });
 });
 
 describe("auditPrompt", () => {
@@ -552,6 +606,13 @@ describe("auditPrompt", () => {
     );
     expect(prompt).toContain("Hardening beyond the request");
     expect(prompt).toContain("`Verdict: needs changes` only when a blocking problem remains");
+  });
+
+  it("asks for standards and spec as two separate axes", () => {
+    const prompt = auditPrompt({ leadTitle: "T", files: ["a.ts"], request: null });
+    expect(prompt).toContain("two separate axes");
+    expect(prompt).toContain("standards (repo conventions, correctness, tests)");
+    expect(prompt).toContain("spec (does it do what the task asked)");
   });
 
   it("hands the auditor the thread's diff in a fence, and only when it fits", () => {
@@ -583,6 +644,20 @@ describe("auditPrompt", () => {
     const plan = planFollowUp({ current: { round: 0, fixes: 0 }, audits: ["x"], results: [] });
     expect(isCrewFollowUp(plan.prompt ?? "")).toBe(true);
     expect(isCrewFollowUp("Please fix the parser")).toBe(false);
+  });
+});
+
+describe("clipLeadReport", () => {
+  it("leaves a short report alone and caps a long one at 2500 characters", () => {
+    expect(clipLeadReport("short\nStatus: done")).toBe("short\nStatus: done");
+    expect(clipLeadReport("a".repeat(9_000)).length).toBeLessThanOrEqual(2_500);
+  });
+
+  it("keeps the Status line even when a long JSON block follows it", () => {
+    const report = `${"detail. ".repeat(800)}\nStatus: blocked\n${"j".repeat(4_000)}`;
+    const clipped = clipLeadReport(report);
+    expect(clipped.length).toBeLessThanOrEqual(2_500);
+    expect(crewReportStatus(clipped)).toBe("blocked");
   });
 });
 

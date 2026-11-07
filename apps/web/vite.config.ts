@@ -251,12 +251,14 @@ export default defineConfig(() => {
                 prefix,
                 {
                   target: devProxyTarget,
-                  // `/ws` keeps the browser's Host: the server's cookie-upgrade Origin check
+                  // `/ws` and `/_gw` (forwarded sockets) keep the browser's Host: the server's cookie-upgrade Origin check
                   // compares Origin to Host, and rewriting Host to the backend breaks LAN,
                   // phone and `--share` access (http-proxy's ws path sets no X-Forwarded-Host
                   // even with `xfwd`).
-                  changeOrigin: prefix !== "/ws",
-                  ...(prefix === "/ws" || prefix === "/api" ? { ws: true } : {}),
+                  changeOrigin: prefix !== "/ws" && prefix !== "/_gw",
+                  ...(prefix === "/ws" || prefix === "/api" || prefix === "/_gw"
+                    ? { ws: true }
+                    : {}),
                 },
               ]),
             ),

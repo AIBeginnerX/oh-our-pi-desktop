@@ -28,7 +28,29 @@ pub fn render_streaming(
     sym: &Symbols,
     streaming: bool,
 ) -> Vec<Line<'static>> {
+    render_marked(text, w, th, sym, streaming, None)
+}
+
+/// Where a reply's fenced blocks sit among those of the answer `/copy` reads: this text's first
+/// block is number `first` (from 1) of `total`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Mark {
+    pub first: usize,
+    pub total: usize,
+}
+
+/// `render_streaming`, with each code block's header carrying what `/copy` calls it: `[n]` when the
+/// answer has several blocks, a `/copy` hint when it has one.
+pub fn render_marked(
+    text: &str,
+    w: usize,
+    th: &Theme,
+    sym: &Symbols,
+    streaming: bool,
+    mark: Option<Mark>,
+) -> Vec<Line<'static>> {
     let w = w.max(8);
+    let mut number = mark.map_or(0, |m| m.first.saturating_sub(1));
     let ascii = sym.rule == "-";
     let text = sanitize(text);
     let lines: Vec<&str> = text.split('\n').collect();
@@ -48,6 +70,7 @@ pub fn render_streaming(
             }
             let closed = i < lines.len();
             i += 1; // the closing fence (or past the end for an open one)
+            number += 1;
             let word = lang.split_whitespace().next().unwrap_or("");
             if chart::is_visual(word) {
                 if !closed && streaming {
@@ -59,7 +82,14 @@ pub fn render_streaming(
                     continue;
                 }
             }
-            out.extend(code_block(&lang, &code, w, th));
+            let tag = mark.map(|m| {
+                if m.total > 1 {
+                    format!("[{number}]")
+                } else {
+                    "/copy".to_string()
+                }
+            });
+            out.extend(code_block(&lang, tag.as_deref(), &code, w, th));
             continue;
         }
         if is_table_row(trimmed) && i + 1 < lines.len() && is_table_rule(lines[i + 1].trim()) {
@@ -77,6 +107,65 @@ pub fn render_streaming(
         i += 1;
     }
     out
+}
+
+/// The text of every fenced block, exactly as written: no fence lines, no indent the fence itself
+/// had, no wrapping. An unclosed fence (a reply mid-stream) gives what it has so far. The count and
+/// order are those `render_marked` numbers.
+pub fn code_blocks(text: &str) -> Vec<String> {
+    scan(text).0
+}
+
+/// The `code` spans outside fenced blocks, as written between their backticks.
+pub fn inline_code(text: &str) -> Vec<String> {
+    let mut spans = Vec::new();
+    for line in scan(text).1 {
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] != '`' {
+                i += 1;
+                continue;
+            }
+            let ticks = chars[i..].iter().take_while(|x| **x == '`').count();
+            match find_run(&chars, i + ticks, '`', ticks) {
+                Some(end) => {
+                    let body: String = chars[i + ticks..end].iter().collect();
+                    if !body.trim().is_empty() {
+                        spans.push(body.trim().to_string());
+                    }
+                    i = end + ticks;
+                }
+                None => i += ticks,
+            }
+        }
+    }
+    spans
+}
+
+/// The fenced blocks, and the lines that are not in one.
+fn scan(text: &str) -> (Vec<String>, Vec<&str>) {
+    let lines: Vec<&str> = text.split('\n').map(|l| l.trim_end_matches('\r')).collect();
+    let (mut blocks, mut rest) = (Vec::new(), Vec::new());
+    let mut i = 0;
+    while i < lines.len() {
+        let trimmed = lines[i].trim_start();
+        if let Some(fence) = fence_of(trimmed) {
+            let indent = lines[i].len() - trimmed.len();
+            let mut code: Vec<&str> = Vec::new();
+            i += 1;
+            while i < lines.len() && !closes_fence(lines[i].trim_start(), fence) {
+                code.push(strip_indent(lines[i], indent));
+                i += 1;
+            }
+            i += 1;
+            blocks.push(code.join("\n"));
+        } else {
+            rest.push(lines[i]);
+            i += 1;
+        }
+    }
+    (blocks, rest)
 }
 
 fn fence_of(trimmed: &str) -> Option<&'static str> {
@@ -192,14 +281,28 @@ fn list_item(trimmed: &str, ascii: bool) -> Option<(String, &str)> {
     None
 }
 
-fn code_block(lang: &str, code: &[&str], w: usize, th: &Theme) -> Vec<Line<'static>> {
+fn code_block(
+    lang: &str,
+    tag: Option<&str>,
+    code: &[&str],
+    w: usize,
+    th: &Theme,
+) -> Vec<Line<'static>> {
     let plate = Style::new().bg(th.code_bg);
     let mut out = Vec::new();
-    if !lang.is_empty() {
-        let label = format!(" {lang}");
-        let fill = " ".repeat(w.saturating_sub(width(&label)));
+    if !lang.is_empty() || tag.is_some() {
+        let label = if lang.is_empty() {
+            String::new()
+        } else {
+            format!(" {lang}")
+        };
+        // The tag sits at the right edge, when there is room for it beside the language.
+        let tag = tag
+            .filter(|t| width(&label) + width(t) + 2 <= w)
+            .map_or(String::new(), |t| format!("{t} "));
+        let fill = " ".repeat(w.saturating_sub(width(&label) + width(&tag)));
         out.push(Line::from(Span::styled(
-            format!("{label}{fill}"),
+            format!("{label}{fill}{tag}"),
             plate.fg(th.dim).add_modifier(Modifier::ITALIC),
         )));
     }
@@ -760,6 +863,49 @@ mod tests {
         assert_eq!(keyword.style.fg, Some(LAVENDER.keyword));
         let open = render("```\nlet a = 1;", 30, &LAVENDER, &crate::theme::UNICODE);
         assert_eq!(plain(&open).len(), 1);
+    }
+
+    fn marked(text: &str, mark: Option<Mark>) -> Vec<String> {
+        plain(&render_marked(
+            text,
+            30,
+            &LAVENDER,
+            &crate::theme::UNICODE,
+            false,
+            mark,
+        ))
+    }
+
+    #[test]
+    fn block_numbers_show_only_when_the_answer_has_several_blocks() {
+        let text = "```sh\na\n```\n```\nb\n```";
+        // the second of three blocks of the answer, then the third
+        let rows = marked(text, Some(Mark { first: 2, total: 3 }));
+        assert!(
+            rows[0].starts_with(" sh") && rows[0].trim_end().ends_with("[2]"),
+            "{rows:?}"
+        );
+        assert!(rows[2].trim_end().ends_with("[3]"), "{rows:?}");
+        assert_eq!(rows[2].chars().count(), 30, "a header is a full plate row");
+        // one block: a quiet hint, not a number
+        let one = marked("```sh\na\n```", Some(Mark { first: 1, total: 1 }));
+        assert!(
+            one[0].trim_end().ends_with("/copy") && !one[0].contains('['),
+            "{one:?}"
+        );
+        // not the latest answer: the plain block, with no header when it names no language
+        assert_eq!(marked("```\na\n```", None).len(), 1);
+    }
+
+    #[test]
+    fn code_blocks_are_taken_as_written_in_the_order_they_are_numbered() {
+        let text =
+            "x `a` y\n  ```sh\n  one\n    two\n\n  ```\n~~~\nthree\r\n~~~\n``b`c`` `\n```\nopen";
+        assert_eq!(
+            code_blocks(text),
+            ["one\n  two\n", "three", "open"].map(String::from)
+        );
+        assert_eq!(inline_code(text), ["a", "b`c"].map(String::from));
     }
 
     #[test]

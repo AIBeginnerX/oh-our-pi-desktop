@@ -76,6 +76,7 @@ fn lookup(key: &str, ko: bool) -> &'static str {
         "header.noModel" => pick("no model", "모델 없음"),
         "header.mode" => pick("Mode  ", "모드  "),
         "list.projects" => pick("Threads", "스레드"),
+        "list.usage" => pick("Usage", "사용량"),
         "list.new" => pick("+ New thread", "+ 새 스레드"),
         "list.addFolder" => pick("+ Add this folder", "+ 이 폴더 추가"),
         "list.loading" => pick("loading…", "불러오는 중…"),
@@ -219,6 +220,20 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "마우스 휠 스크롤과 드래그 복사를 껐습니다. 터미널이 다시 글자를 직접 선택합니다.",
         ),
         "copy.done" => pick("Copied {count} characters.", "{count}자를 복사했습니다."),
+        "copy.doneWhat" => pick("Copied {what}.", "{what}을 복사했습니다."),
+        "copy.terminalWhat" => pick(
+            "Copied {what} through the terminal clipboard (OSC 52).",
+            "{what}을 터미널 클립보드(OSC 52)로 복사했습니다.",
+        ),
+        "copy.nothing" => pick(
+            "Nothing to copy: the last answer has no code block.",
+            "복사할 것이 없습니다. 마지막 답변에 코드 블록이 없습니다.",
+        ),
+        "copy.noBlock" => pick(
+            "No code block {n}: the answer has {total}.",
+            "{n}번 코드 블록이 없습니다. 답변에는 {total}개가 있습니다.",
+        ),
+        "copy.usage" => pick("Usage: /copy [N|all]", "사용법: /copy [N|all]"),
         "copy.terminal" => pick(
             "Copied {count} characters through the terminal clipboard (OSC 52).",
             "{count}자를 터미널 클립보드(OSC 52)로 복사했습니다.",
@@ -240,6 +255,9 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "이 터미널로는 보낼 방법이 없습니다",
         ),
         "notice.petUsage" => pick("Usage: /pet [on|off]", "사용법: /pet [on|off]"),
+        "notice.usageUsage" => pick("Usage: /usage [on|off]", "사용법: /usage [on|off]"),
+        "notice.usageOn" => pick("Provider usage is shown.", "Provider 사용량을 표시합니다."),
+        "notice.usageOff" => pick("Provider usage is hidden.", "Provider 사용량을 숨겼습니다."),
         "notice.petOn" => pick("Mocha is on.", "모카를 켰습니다."),
         "notice.petOff" => pick("Mocha is off.", "모카를 껐습니다."),
         "notice.sidebarUsage" => pick("Usage: /sidebar [on|off]", "사용법: /sidebar [on|off]"),
@@ -273,8 +291,8 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "새 스레드입니다. 메시지를 입력하면 시작합니다.",
         ),
         "notice.help" => pick(
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /new /threads /projects /stats /tasks /sidebar /panel /mouse /pet /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /new /threads /projects /stats /tasks /sidebar /panel /mouse /pet /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
         ),
         "notice.unsupported" => pick(
             "Not in oop-rs yet: use the TypeScript terminal for it.",

@@ -12,12 +12,15 @@ import {
   cargoReleaseArgs,
   findTerminalApp,
   defaultCacheRoot,
+  doctor,
   isolatedEnvironment,
+  localSignIdentityProblem,
   main,
   mountFilesystemType,
   packageDmg,
   packagingEnvironment,
   parseArgs,
+  resolveLocalSignIdentity,
   resolvePackageSigning,
   resolvePaths,
   RSYNC_EXCLUDES,
@@ -1187,3 +1190,89 @@ NodeTest.test(
     }
   },
 );
+
+NodeTest.test("local signing identity is opt-in and never combines with a signing mode", () => {
+  const env = { OOP_MAC_LOCAL_SIGN_IDENTITY: " OOP Local Signing " };
+  NodeAssert.equal(resolveLocalSignIdentity(undefined, {}), undefined);
+  NodeAssert.equal(
+    resolveLocalSignIdentity(undefined, { OOP_MAC_LOCAL_SIGN_IDENTITY: " " }),
+    undefined,
+  );
+  NodeAssert.equal(resolveLocalSignIdentity(undefined, env), "OOP Local Signing");
+  NodeAssert.throws(
+    () => resolveLocalSignIdentity("developer-id", env),
+    /OOP_MAC_LOCAL_SIGN_IDENTITY cannot be combined with --signing-mode developer-id/,
+  );
+  // The unset case ignores the mode, so the Developer ID path is unchanged.
+  NodeAssert.equal(resolveLocalSignIdentity("developer-id", {}), undefined);
+  NodeAssert.throws(
+    () => resolveLocalSignIdentity(undefined, { OOP_MAC_LOCAL_SIGN_IDENTITY: "-" }),
+    /not "-"/,
+  );
+});
+
+NodeTest.test("doctor tells a missing identity from an untrusted one", async () => {
+  const line = '  1) 0123456789ABCDEF0123456789ABCDEF01234567 "OOP Local Signing"';
+  const valid = `${line}\n     1 valid identities found`;
+  NodeAssert.equal(localSignIdentityProblem("OOP Local Signing", valid, valid), undefined);
+  NodeAssert.equal(
+    localSignIdentityProblem("0123456789abcdef0123456789abcdef01234567", valid, valid),
+    undefined,
+  );
+  const untrusted = localSignIdentityProblem(
+    "OOP Local Signing",
+    "     0 valid identities found",
+    `${line} (CSSMERR_TP_NOT_TRUSTED)`,
+  );
+  NodeAssert.match(untrusted, /not trusted for code signing.*항상 신뢰.*Always Trust/s);
+  const missing = localSignIdentityProblem("OOP Local Signing", "", "");
+  NodeAssert.match(missing, /was not found.*자체 서명 루트.*Self-Signed Root/s);
+  NodeAssert.ok(!untrusted.includes("0123456789"));
+
+  const paths = { cache: NodeOS.tmpdir() };
+  const calls = [];
+  const listIdentities = (valid) => {
+    calls.push(valid);
+    return valid ? "" : "";
+  };
+  await NodeAssert.rejects(
+    doctor(paths, "OOP Local Signing", listIdentities),
+    /was not found among the code-signing identities/,
+  );
+  NodeAssert.deepEqual(calls, [true, false]);
+});
+
+NodeTest.test("final DMG verifier checks the local identity only when configured", async () => {
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "macos-dmg-local-"));
+  try {
+    const dmg = NodePath.join(root, "OOP.dmg");
+    const digest = NodeCrypto.createHash("sha256").update("fixture").digest("hex");
+    await NodeFSP.writeFile(dmg, "fixture");
+    const runner = async (_command, args) => {
+      if (args[0] === "attach") await NodeFSP.mkdir(NodePath.join(args.at(-2), "OOP.app"));
+    };
+    const verified = [];
+    const verifyLocalIdentity = async ({ appPath, identity }) => {
+      verified.push({ name: NodePath.basename(appPath), identity });
+    };
+    await verifyMacDmgArtifact(dmg, digest, runner, undefined, undefined, verifyLocalIdentity);
+    NodeAssert.deepEqual(verified, []);
+    await verifyMacDmgArtifact(
+      dmg,
+      digest,
+      runner,
+      undefined,
+      "OOP Local Signing",
+      verifyLocalIdentity,
+    );
+    NodeAssert.deepEqual(verified, [{ name: "OOP.app", identity: "OOP Local Signing" }]);
+    await NodeAssert.rejects(
+      verifyMacDmgArtifact(dmg, digest, runner, undefined, "OOP Local Signing", async () => {
+        throw new Error("signed ad hoc");
+      }),
+      /signed ad hoc/,
+    );
+  } finally {
+    await NodeFSP.rm(root, { recursive: true, force: true });
+  }
+});

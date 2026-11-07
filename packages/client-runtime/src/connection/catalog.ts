@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 
 import {
   BearerConnectionTarget,
+  GatewayConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
@@ -62,6 +63,13 @@ export class PrimaryConnectionRegistration extends Schema.TaggedClass<PrimaryCon
   },
 ) {}
 
+export class GatewayConnectionRegistration extends Schema.TaggedClass<GatewayConnectionRegistration>()(
+  "GatewayConnectionRegistration",
+  {
+    target: GatewayConnectionTarget,
+  },
+) {}
+
 export class RelayConnectionRegistration extends Schema.TaggedClass<RelayConnectionRegistration>()(
   "RelayConnectionRegistration",
   {
@@ -100,19 +108,26 @@ export type ConnectionRegistration = typeof ConnectionRegistration.Type;
  * alongside it (e.g. a parallel WSL backend). The primary stays on same-origin
  * cookie auth (`PrimaryConnectionRegistration`); secondary local backends live
  * on a separate loopback origin and authenticate with a bearer token minted
- * from their bootstrap credential (`BearerConnectionRegistration`).
+ * from their bootstrap credential (`BearerConnectionRegistration`). Environments the
+ * host forwards through its gateway (`GatewayConnectionRegistration`) ride the primary's
+ * cookie as well.
  */
 export const PlatformConnectionRegistration = Schema.Union([
   PrimaryConnectionRegistration,
   BearerConnectionRegistration,
+  GatewayConnectionRegistration,
 ]);
 export type PlatformConnectionRegistration = typeof PlatformConnectionRegistration.Type;
 
 export function connectionRegistrationCatalogEntry(
-  registration: ConnectionRegistration | PrimaryConnectionRegistration,
+  registration:
+    | ConnectionRegistration
+    | PrimaryConnectionRegistration
+    | GatewayConnectionRegistration,
 ): ConnectionCatalogEntry {
   switch (registration._tag) {
     case "PrimaryConnectionRegistration":
+    case "GatewayConnectionRegistration":
     case "RelayConnectionRegistration":
       return {
         target: registration.target,

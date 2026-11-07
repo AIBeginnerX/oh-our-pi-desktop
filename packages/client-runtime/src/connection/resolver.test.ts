@@ -26,6 +26,7 @@ import * as ConnectionCredentialStore from "./credentialStore.ts";
 import {
   BearerConnectionTarget,
   ConnectionTransientError,
+  GatewayConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
@@ -81,6 +82,8 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   readonly primaryBearerToken?: string;
   readonly prepareSsh?: ClientCapabilities.SshEnvironmentGateway["Service"]["prepare"];
   readonly descriptorProtocolVersion?: number | null | undefined;
+  readonly descriptorEnvironmentId?: EnvironmentId;
+  readonly requestedUrls?: Array<string>;
 }) => {
   const profiles = new Map(
     (options?.profiles ?? []).map((profile) => [profile.connectionId, profile]),
@@ -146,10 +149,11 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
   });
 
   const dependencies = Layer.mergeAll(
-    remoteHttpClientLayer((() =>
-      Promise.resolve(
+    remoteHttpClientLayer(((input: Parameters<typeof fetch>[0]) => {
+      options?.requestedUrls?.push(input instanceof Request ? input.url : String(input));
+      return Promise.resolve(
         Response.json({
-          environmentId: ENVIRONMENT_ID,
+          environmentId: options?.descriptorEnvironmentId ?? ENVIRONMENT_ID,
           label: "Compatible environment",
           platform: { os: "linux", arch: "x64" },
           serverVersion: "0.0.0-test",
@@ -160,7 +164,8 @@ const makeDependencies = Effect.fn("TestConnectionResolver.makeDependencies")((o
               : { orchestrationProtocolVersion: options.descriptorProtocolVersion }),
           capabilities: { repositoryIdentity: true },
         }),
-      )) satisfies typeof fetch),
+      );
+    }) satisfies typeof fetch),
     Layer.succeed(
       ConnectionProfileStore.ConnectionProfileStore,
       options?.profileStore ?? profileStore,
@@ -227,6 +232,56 @@ describe("ConnectionResolver", () => {
         httpAuthorization: null,
         target,
       });
+    }),
+  );
+
+  it.effect("prepares a gateway environment under the host origin with cookie auth", () =>
+    Effect.gen(function* () {
+      const requestedUrls: Array<string> = [];
+      const environmentId = EnvironmentId.make("environment/1 a");
+      const brokerLayer = yield* makeDependencies({
+        requestedUrls,
+        descriptorEnvironmentId: environmentId,
+      });
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+      const target = new GatewayConnectionTarget({
+        environmentId,
+        label: "Linux box",
+        httpBaseUrl: "https://host.example.test/_gw/environment%2F1%20a",
+      });
+
+      const prepared = yield* broker.prepare(catalogEntry(target));
+
+      expect(prepared).toEqual({
+        environmentId,
+        label: "Linux box",
+        httpBaseUrl: "https://host.example.test/_gw/environment%2F1%20a",
+        socketUrl:
+          "wss://host.example.test/_gw/environment%2F1%20a/ws?clientSurface=web&clientDeviceType=desktop&connectionMethod=direct&orchestrationProtocol=1",
+        httpAuthorization: null,
+        target,
+      });
+      expect(requestedUrls).toEqual([
+        "https://host.example.test/_gw/environment%2F1%20a/.well-known/t3/environment",
+      ]);
+    }),
+  );
+
+  it.effect("blocks a gateway environment whose descriptor reports another environment", () =>
+    Effect.gen(function* () {
+      const brokerLayer = yield* makeDependencies({
+        descriptorEnvironmentId: EnvironmentId.make("someone-else"),
+      });
+      const broker = yield* ConnectionResolver.ConnectionResolver.pipe(Effect.provide(brokerLayer));
+      const target = new GatewayConnectionTarget({
+        environmentId: ENVIRONMENT_ID,
+        label: "Linux box",
+        httpBaseUrl: "http://host.example.test/_gw/environment-1",
+      });
+
+      const error = yield* Effect.flip(broker.prepare(catalogEntry(target)));
+
+      expect(error).toMatchObject({ _tag: "ConnectionBlockedError" });
     }),
   );
 

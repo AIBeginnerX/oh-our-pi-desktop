@@ -889,6 +889,11 @@ pub fn history(app: &mut App, argument: &str) {
     }
 }
 
+/// `/history` is still reading pages, so none may be let go.
+pub fn loading(app: &App) -> bool {
+    app.threadops.history.is_some()
+}
+
 /// A page of older turns arrived (or failed): `/history` asks for the next one until it has enough.
 pub fn on_older(app: &mut App, failure: Option<String>) {
     let Some(mut job) = app.threadops.history.take() else {

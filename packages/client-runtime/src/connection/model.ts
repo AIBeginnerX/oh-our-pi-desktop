@@ -38,11 +38,26 @@ export class SshConnectionTarget extends Schema.TaggedClass<SshConnectionTarget>
   },
 ) {}
 
+/**
+ * An environment the host server forwards under `GATEWAY_PATH_PREFIX/<environmentId>`.
+ * `httpBaseUrl` is the host origin plus that path, so every request still goes to the host
+ * origin and rides the primary's same-origin cookie; the host injects its stored upstream
+ * credential.
+ */
+export class GatewayConnectionTarget extends Schema.TaggedClass<GatewayConnectionTarget>()(
+  "GatewayConnectionTarget",
+  {
+    ...ConnectionTargetBase,
+    httpBaseUrl: Schema.String,
+  },
+) {}
+
 export const ConnectionTarget = Schema.Union([
   PrimaryConnectionTarget,
   BearerConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
+  GatewayConnectionTarget,
 ]);
 export type ConnectionTarget = typeof ConnectionTarget.Type;
 

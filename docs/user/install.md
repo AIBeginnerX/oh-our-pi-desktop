@@ -96,6 +96,19 @@ A phone opens the relay mobile web, not a native app: scan the QR code from the
 desktop's phone dialog and the phone browser opens the full web app. Follow
 [remote access](./remote-access.md) to link it through OOP Connect or a pairing URL.
 
+### Use other devices from your phone
+
+The phone can also open the other devices your desktop has added, such as a Linux
+server it reaches over SSH, and continue their threads. They appear next to the
+desktop in the thread list and the environment picker, marked "via" your desktop.
+The desktop forwards them, so the phone never needs to reach those machines itself.
+
+Each device must be shared from the desktop first: open **Settings → Connections**
+and switch on **Available on phone** for it. A device that is off, or whose saved sign-in
+no longer works, shows that state on the phone. Turn the switch off to stop sharing it.
+The phone checks the list when it opens or returns to the foreground, so reload
+the page after sharing a new device.
+
 The React Native app from the
 [App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
 [Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code) is

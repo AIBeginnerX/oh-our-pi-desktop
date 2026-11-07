@@ -211,16 +211,40 @@ export async function resetInstalledDependencies(checkout) {
 /**
  * A failed install may be a node_modules a past sync emptied (pnpm sees its own bookkeeping and
  * reuses the hollow virtual store), which would fail every attempt of this source: reinstall once
- * from a clean slate before reporting the failure.
+ * from a clean slate before reporting the failure. `verify` throws when an install that exited 0
+ * still left a hollow tree, so that case is repaired the same way.
  */
-export async function installWithRepair({ install, repair, log = console.log }) {
+export async function installWithRepair({ install, repair, verify = () => {}, log = console.log }) {
   try {
     install();
+    verify();
   } catch (error) {
     log(`pnpm install failed (${error.message}); reinstalling from empty node_modules.`);
     await repair();
     install();
+    verify();
   }
+}
+
+/** The binary the root `prepare` script and the build run first; absent in a hollow store. */
+export function assertInstalledDependencies(checkout) {
+  const vp = NodePath.join(checkout, "node_modules", "vite-plus", "bin", "vp");
+  if (!NodeFS.existsSync(vp)) throw new Error(`${vp} is missing after the install`);
+}
+
+/**
+ * The process that decides to build a new Drive source is still the previous runner's code, even
+ * though the runner folder was just refreshed from that source, so source fixes (a repaired
+ * install, new build steps) would only take effect one attempt later. When the source's script
+ * differs from the running one, the build is handed to a fresh process running the new copy.
+ */
+export async function buildWithFreshScript({ runningHash, freshHash, runFresh, build }) {
+  if (runningHash === freshHash) {
+    await build();
+    return "built";
+  }
+  await runFresh();
+  return "delegated";
 }
 
 /** Every few minutes while the user is signed in (their session holds the NAS login), no window. */
@@ -540,6 +564,7 @@ async function packageInstaller(
         { cwd: checkout, env },
       ),
     repair: () => resetInstalledDependencies(checkout),
+    verify: () => assertInstalledDependencies(checkout),
   });
   const version = await releaseVersion(sourceRoot);
   run(
@@ -854,6 +879,7 @@ async function autoBuild(sourceRoot, arch) {
     console.log(`  next attempt after ${new Date(failed.at + AUTO_BUILD_RETRY_MS).toISOString()}`);
   }
   let built = false;
+  let delegated = false;
   if (decision === "build") {
     doctor();
     try {
@@ -864,17 +890,33 @@ async function autoBuild(sourceRoot, arch) {
           return;
         }
         // The NAS keeps getting installers while devices still read it; see docs/user/install.md.
-        await buildDriveSource({
-          extracted,
-          cacheRoot,
-          build: (root) =>
-            packageInstaller(root, arch, {
-              releaseDirectories: [
-                publishedDirectory,
-                ...(nasRelease === null ? [] : [nasRelease]),
-              ],
-              nasReleaseDirectory: nasRelease,
-              requireShare: false,
+        const runnerScripts = NodePath.join(extracted, "scripts");
+        await buildWithFreshScript({
+          runningHash: scriptHash,
+          freshHash: await sha256File(NodePath.join(runnerScripts, "windows.mjs")),
+          runFresh: async () => {
+            delegated = true;
+            const runner = await copyRunnerScripts(runnerScripts, cacheRoot);
+            run(process.execPath, [
+              NodePath.join(runner, "scripts", "windows.mjs"),
+              "auto",
+              "--arch",
+              arch,
+            ]);
+          },
+          build: () =>
+            buildDriveSource({
+              extracted,
+              cacheRoot,
+              build: (root) =>
+                packageInstaller(root, arch, {
+                  releaseDirectories: [
+                    publishedDirectory,
+                    ...(nasRelease === null ? [] : [nasRelease]),
+                  ],
+                  nasReleaseDirectory: nasRelease,
+                  requireShare: false,
+                }),
             }),
         });
         await installRunner(NodePath.join(extracted, "scripts"), cacheRoot);
@@ -884,6 +926,8 @@ async function autoBuild(sourceRoot, arch) {
       }
       await NodeFSP.rm(statePath, { force: true });
     } catch (error) {
+      // The fresh process already recorded its own failure under its own script hash.
+      if (delegated) throw error;
       await NodeFSP.mkdir(NodePath.dirname(statePath), { recursive: true });
       const message = error instanceof Error ? error.message : String(error);
       await NodeFSP.writeFile(

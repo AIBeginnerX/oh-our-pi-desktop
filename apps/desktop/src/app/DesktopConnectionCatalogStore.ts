@@ -21,6 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import * as ElectronSafeStorage from "../electron/ElectronSafeStorage.ts";
 import * as DesktopSavedEnvironments from "../settings/DesktopSavedEnvironments.ts";
@@ -164,8 +165,25 @@ export class DesktopConnectionCatalogStore extends Context.Service<
       DesktopConnectionCatalogStoreWriteError | DesktopConnectionCatalogStoreProtectionError
     >;
     readonly clear: Effect.Effect<void>;
+    /**
+     * Saved environments the user marked "Available on phone". Absent or unreadable storage means
+     * none, so every environment (including ones migrated from older catalogs) starts off. Kept
+     * beside the catalog rather than inside it because the renderer caches and rewrites the whole
+     * catalog document, which would drop a flag the main process wrote.
+     */
+    readonly getPhoneShared: Effect.Effect<ReadonlyArray<string>>;
+    readonly setPhoneShared: (
+      environmentId: string,
+      shared: boolean,
+    ) => Effect.Effect<void, DesktopConnectionCatalogStoreWriteError>;
   }
 >()("@t3tools/desktop/app/DesktopConnectionCatalogStore") {}
+
+const PhoneSharedDocumentJson = Schema.fromJsonString(
+  Schema.Struct({ version: Schema.Literal(1), environmentIds: Schema.Array(Schema.String) }),
+);
+const decodePhoneSharedDocumentJson = Schema.decodeEffect(PhoneSharedDocumentJson);
+const encodePhoneSharedDocumentJson = Schema.encodeEffect(PhoneSharedDocumentJson);
 
 function decodeSecretBytes(
   catalogPath: string,
@@ -385,6 +403,46 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const savedEnvironments = yield* DesktopSavedEnvironments.DesktopSavedEnvironments;
   const catalogPath = path.join(environment.stateDir, "connection-catalog.json");
+  const phoneSharedPath = path.join(environment.stateDir, "phone-shared-environments.json");
+  const phoneSharedLock = yield* Semaphore.make(1);
+  const getPhoneShared = fileSystem.readFileString(phoneSharedPath).pipe(
+    Effect.flatMap(decodePhoneSharedDocumentJson),
+    Effect.map((document) => document.environmentIds),
+    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+  );
+  const setPhoneShared = (environmentId: string, shared: boolean) =>
+    phoneSharedLock.withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* getPhoneShared;
+        const without = current.filter((id) => id !== environmentId);
+        const next = shared ? [...without, environmentId] : without;
+        if (next.length === current.length && next.every((id, i) => id === current[i])) {
+          return;
+        }
+        const fail =
+          (operation: "encode-document" | "create-directory" | "write-temporary-file") =>
+          (cause: unknown) =>
+            new DesktopConnectionCatalogStoreWriteError({
+              operation,
+              path: phoneSharedPath,
+              cause,
+            });
+        const encoded = yield* encodePhoneSharedDocumentJson({
+          version: 1,
+          environmentIds: next,
+        }).pipe(Effect.mapError(fail("encode-document")));
+        yield* fileSystem
+          .makeDirectory(path.dirname(phoneSharedPath), { recursive: true })
+          .pipe(Effect.mapError(fail("create-directory")));
+        const tempPath = `${phoneSharedPath}.${process.pid}.tmp`;
+        yield* fileSystem
+          .writeFileString(tempPath, `${encoded}\n`)
+          .pipe(
+            Effect.andThen(fileSystem.rename(tempPath, phoneSharedPath)),
+            Effect.mapError(fail("write-temporary-file")),
+          );
+      }),
+    );
   const encryptionAvailable = safeStorage.isEncryptionAvailable.pipe(
     Effect.mapError(
       (cause) =>
@@ -514,6 +572,8 @@ export const make = Effect.gen(function* () {
       ),
       Effect.withSpan("desktop.connectionCatalogStore.clear"),
     ),
+    getPhoneShared,
+    setPhoneShared,
   });
 });
 

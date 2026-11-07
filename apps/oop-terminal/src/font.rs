@@ -99,6 +99,19 @@ impl Atlas {
         Some(pos)
     }
 
+    /// `alloc`, and when the atlas is full, start it over once (the glyphs drawn from it must then be
+    /// rasterized again). The flag says it was started over.
+    fn alloc_or_reset(&mut self, w: u32, h: u32) -> Option<((u32, u32), bool)> {
+        if let Some(pos) = self.alloc(w, h) {
+            return Some((pos, false));
+        }
+        if w + 2 > ATLAS_SIZE || h + 2 > ATLAS_SIZE {
+            return None;
+        }
+        self.reset();
+        self.alloc(w, h).map(|pos| (pos, true))
+    }
+
     fn reset(&mut self) {
         self.shelf = Shelf {
             x: 1,
@@ -324,7 +337,12 @@ impl Fonts {
     }
 
     fn place(&mut self, w: u32, h: u32, rgba: Vec<u8>) -> Option<(u32, u32)> {
-        let (x, y) = self.atlas.alloc(w, h)?;
+        let ((x, y), restarted) = self.atlas.alloc_or_reset(w, h)?;
+        if restarted {
+            // The cached positions pointed into what was dropped; the scene builds the frame again.
+            self.cache.clear();
+            self.masks.clear();
+        }
         self.atlas.uploads.push(Upload { x, y, w, h, rgba });
         Some((x, y))
     }
@@ -473,6 +491,24 @@ mod tests {
         assert!(a.alloc(500, 500).is_none());
         a.reset();
         assert!(a.alloc(500, 500).is_some());
+        assert_eq!(a.generation, 1);
+    }
+
+    #[test]
+    fn a_full_atlas_starts_over_instead_of_dropping_glyphs() {
+        let mut a = Atlas::new();
+        let mut restarted = false;
+        for _ in 0..100 {
+            let (_, again) = a.alloc_or_reset(500, 500).unwrap();
+            if again {
+                restarted = true;
+                break;
+            }
+        }
+        assert!(restarted);
+        assert_eq!(a.generation, 1);
+        // A glyph that could never fit stays refused and does not wipe the atlas.
+        assert!(a.alloc_or_reset(ATLAS_SIZE, 10).is_none());
         assert_eq!(a.generation, 1);
     }
 }

@@ -139,6 +139,7 @@ const encodeTestJson = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unk
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as ServerConfig from "./config.ts";
 import * as DeviceService from "./device/DeviceService.ts";
+import { upstreamsLayer as GatewayUpstreamsLayer } from "./gateway/Gateway.ts";
 import {
   HTTP_ROUTER_CONFIG,
   makeRoutesLayer,
@@ -1389,6 +1390,7 @@ const buildAppUnderTest = (options?: {
               sessionsForThread: () => Effect.succeed([]),
               ...options?.layers?.deviceService,
             }),
+            GatewayUpstreamsLayer.pipe(Layer.provide(FetchHttpClient.layer)),
           ),
         ),
         // The work analyser behind the memory routes also resolves text generation here.

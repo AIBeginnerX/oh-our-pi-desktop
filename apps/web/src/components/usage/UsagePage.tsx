@@ -1,5 +1,9 @@
 import { ChatGptUsageButton } from "../settings/ChatGptUsageButton";
-import { usesChatGptSharing } from "@t3tools/shared/usageLimits";
+import {
+  collectLimitAccounts,
+  collectLimitPools,
+  usesChatGptSharing,
+} from "@t3tools/shared/usageLimits";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -29,6 +33,7 @@ import {
 } from "@t3tools/shared/usageMerge";
 import { codexChildUsageNotice } from "@t3tools/shared/usageAttribution";
 
+import { useT } from "~/i18n";
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { environmentPresentations } from "../../state/presentation";
@@ -83,7 +88,13 @@ import { WorkspacePageHeader } from "../WorkspacePageHeader";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart } from "./UsageProviderChart";
-import { sortModelsByTokens } from "./usageBreakdown";
+import { ProviderLimitGauges } from "./UsageProviderGauges";
+import {
+  defaultBreakdownSort,
+  nextBreakdownSort,
+  sortModels,
+  type BreakdownSort,
+} from "./usageBreakdown";
 import {
   METRIC_OPTIONS,
   WINDOW_OPTIONS,
@@ -91,7 +102,12 @@ import {
   type UsageMetric,
 } from "./usageShortcuts";
 import { useEscapeToGoBack } from "../../hooks/useNavigateBack";
-import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
+import {
+  PROVIDER_ORDER,
+  PROVIDER_PRESENTATION,
+  isPlanProvider,
+  providersWithUsage,
+} from "./usageProviders";
 import {
   readUsagePagePreferences,
   saveUsagePagePreferences,
@@ -107,6 +123,7 @@ function isUsageWindowDays(value: number): value is UsagePagePreferences["window
 }
 
 export function UsagePage() {
+  const t = useT();
   const [preferences, setPreferences] = useState(readUsagePagePreferences);
   useEscapeToGoBack();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -183,14 +200,41 @@ export function UsagePage() {
     () => (isPast24Hours ? merged.hourly : merged.daily).toReversed(),
     [isPast24Hours, merged.daily, merged.hourly],
   );
+  const breakdownSort = preferences.breakdownSort ?? defaultBreakdownSort(metric);
   const breakdownModels = useMemo(
-    () =>
-      breakdown === "model" && metric === "tokens"
-        ? sortModelsByTokens(merged.models)
-        : merged.models,
-    [breakdown, merged.models, metric],
+    () => sortModels(merged.models, breakdownSort),
+    [merged.models, breakdownSort],
   );
+  const sortBreakdown = (key: BreakdownSort["key"]) => {
+    const nextPreferences = {
+      ...preferences,
+      breakdownSort: nextBreakdownSort(breakdownSort, key),
+    };
+    setPreferences(nextPreferences);
+    saveUsagePagePreferences(nextPreferences);
+  };
+  const limitPools = useMemo(() => {
+    const selected =
+      selectedEnvironmentIds === null
+        ? presentations
+        : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
+    return new Map(
+      collectLimitPools(collectLimitAccounts(selected), limitsNow).map((pool) => [
+        pool.driver === "claudeAgent" ? "claude" : String(pool.driver),
+        pool,
+      ]),
+    );
+  }, [presentations, selectedEnvironmentIds, limitsNow]);
   const activeProviders = useMemo(() => providersWithUsage(merged.providers), [merged.providers]);
+  // Priced means the provider has a dollar figure, even a partial one.
+  const pricedProviderCount = activeProviders.filter((provider) => {
+    const { status } = describeApiCost(
+      merged.providers.find((entry) => entry.provider === provider),
+    );
+    return status === "complete" || status === "partial";
+  }).length;
+  // Without a single rate the cost views would be empty, so they show tokens instead.
+  const costUnknown = metric === "cost" && apiCost.status === "unknown";
   const summaryRows: Array<
     | { readonly kind: "usage"; readonly provider: UsageProviderKind }
     | { readonly kind: "enable"; readonly environment: EnvironmentUsageStatus }
@@ -206,7 +250,7 @@ export function UsagePage() {
 
   const selectWindow = (days: number) => {
     if (!isUsageWindowDays(days)) return;
-    const nextPreferences = { metric, windowDays: days };
+    const nextPreferences = { ...preferences, windowDays: days };
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
     setWindowSelection({
@@ -216,7 +260,7 @@ export function UsagePage() {
   };
   const selectMetric = (nextMetric: UsageMetric) => {
     if (nextMetric === "limits") setLimitsNow(Date.now());
-    const nextPreferences = { metric: nextMetric, windowDays };
+    const nextPreferences = { ...preferences, metric: nextMetric };
     setPreferences(nextPreferences);
     saveUsagePagePreferences(nextPreferences);
   };
@@ -286,6 +330,7 @@ export function UsagePage() {
     ) {
       setWindowSelection({ days: windowDays, window: nextWindow });
     }
+    setLimitsNow(Date.now());
     refreshingRef.current = true;
     setIsRefreshing(true);
     void refresh(nextWindow).finally(() => {
@@ -497,12 +542,22 @@ export function UsagePage() {
                   <div className="flex min-w-0 flex-col gap-5">
                     <div className="flex flex-col gap-1">
                       <span className="text-4xl font-semibold text-foreground tabular-nums">
-                        {metric === "cost" ? apiCost.value : formatTokens(merged.totalTokens)}
+                        {metric === "cost" && !costUnknown
+                          ? apiCost.value
+                          : formatTokens(merged.totalTokens)}
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {formatCount(merged.sessions)} sessions
-                        {metric === "cost" ? ` · ${apiCost.detail}` : ""}
+                        {metric === "cost" && !costUnknown ? ` · ${apiCost.detail}` : ""}
                       </span>
+                      {pricedProviderCount < activeProviders.length ? (
+                        <span className="text-xs text-muted-foreground">
+                          {t("Costs known for {known} of {total} providers", {
+                            known: pricedProviderCount,
+                            total: activeProviders.length,
+                          })}
+                        </span>
+                      ) : null}
                     </div>
 
                     {[...presentations].some(
@@ -534,6 +589,8 @@ export function UsagePage() {
                       const provider = row.provider;
                       const totals = merged.providers.find((entry) => entry.provider === provider);
                       const providerCost = describeApiCost(totals);
+                      const costKnown = providerCost.status !== "unknown";
+                      const limitPool = limitPools.get(provider);
                       const providerSessions = totals?.sessions ?? 0;
                       const sessionLabel = `${formatCount(providerSessions)} ${
                         providerSessions === 1 ? "session" : "sessions"
@@ -560,14 +617,22 @@ export function UsagePage() {
                               </span>
                             </span>
                             <span className="shrink-0 text-sm font-medium text-foreground tabular-nums">
-                              {metric === "cost"
+                              {metric === "cost" && costKnown
                                 ? providerCost.value
                                 : formatTokens(totals?.totalTokens ?? 0)}
                             </span>
                           </div>
                           <span className="text-xs text-muted-foreground">
-                            {describeProviderLine(totals, merged, metric)}
+                            {costKnown
+                              ? describeProviderLine(totals, merged, metric)
+                              : `${t(isPlanProvider(provider) ? "Plan" : "No rate")} · ${t(
+                                  "{percent} of tokens",
+                                  { percent: formatPercent(totals?.tokenShare ?? 0) },
+                                )}`}
                           </span>
+                          {limitPool ? (
+                            <ProviderLimitGauges pool={limitPool} now={limitsNow} />
+                          ) : null}
                         </div>
                       );
                     })}
@@ -577,7 +642,7 @@ export function UsagePage() {
                     <div className="flex flex-col gap-1">
                       <h2 className="text-sm font-medium text-foreground">
                         {isPast24Hours ? "Hourly" : "Daily"}{" "}
-                        {metric === "tokens" ? "processed tokens" : "cost"}
+                        {metric === "tokens" || costUnknown ? "processed tokens" : "cost"}
                         {metric === "cost" && apiCost.status === "partial"
                           ? " (priced records only)"
                           : ""}
@@ -587,26 +652,23 @@ export function UsagePage() {
                           Unpriced usage is excluded; per-period valuation coverage isn't tracked.
                         </p>
                       ) : null}
-                    </div>
-                    {metric === "cost" && apiCost.status === "unknown" ? (
-                      <div className="flex h-56 items-center justify-center">
-                        <p className="text-sm text-muted-foreground">
-                          No known rates for this usage
+                      {costUnknown ? (
+                        <p className="text-xs text-muted-foreground">
+                          {t("Costs are unknown for this period; showing tokens.")}
                         </p>
-                      </div>
-                    ) : (
-                      <UsageProviderChart
-                        providers={activeProviders}
-                        days={days}
-                        daily={merged.daily}
-                        hours={hours}
-                        hourly={merged.hourly}
-                        metric={metric}
-                        referenceTime={window.untilTime}
-                        resolution={isPast24Hours ? "hour" : "day"}
-                        timeZone={window.timeZone}
-                      />
-                    )}
+                      ) : null}
+                    </div>
+                    <UsageProviderChart
+                      providers={activeProviders}
+                      days={days}
+                      daily={merged.daily}
+                      hours={hours}
+                      hourly={merged.hourly}
+                      metric={costUnknown ? "tokens" : metric}
+                      referenceTime={window.untilTime}
+                      resolution={isPast24Hours ? "hour" : "day"}
+                      timeZone={window.timeZone}
+                    />
                   </div>
                 </section>
 
@@ -669,10 +731,27 @@ export function UsagePage() {
                       </colgroup>
                       <thead>
                         <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                          <th className="py-2 font-normal">Model</th>
-                          <th className="py-2 text-right font-normal">Cost</th>
-                          <th className="py-2 text-right font-normal">Share</th>
-                          <th className="py-2 text-right font-normal">Tokens</th>
+                          <SortableHeader
+                            label={t("Model")}
+                            sortKey="name"
+                            sort={breakdownSort}
+                            onSort={sortBreakdown}
+                          />
+                          <SortableHeader
+                            label={t("Cost")}
+                            sortKey="cost"
+                            sort={breakdownSort}
+                            onSort={sortBreakdown}
+                            align="right"
+                          />
+                          <th className="py-2 text-right font-normal">{t("Share")}</th>
+                          <SortableHeader
+                            label={t("Tokens")}
+                            sortKey="tokens"
+                            sort={breakdownSort}
+                            onSort={sortBreakdown}
+                            align="right"
+                          />
                         </tr>
                       </thead>
                       <tbody>
@@ -696,13 +775,28 @@ export function UsagePage() {
                               </td>
                               <td className="py-2 text-right text-foreground tabular-nums">
                                 {isModelCostUnknown(model) ? (
-                                  <span className="text-muted-foreground">Unpriced</span>
+                                  <span className="text-muted-foreground">
+                                    {t(isPlanProvider(model.provider) ? "Plan" : "No rate")}
+                                  </span>
                                 ) : (
                                   formatUsd(model.costUsd)
                                 )}
                               </td>
                               <td className="py-2 text-right text-muted-foreground tabular-nums">
-                                {isModelCostUnknown(model) ? "—" : formatPercent(model.costShare)}
+                                {isModelCostUnknown(model) ? (
+                                  <Tooltip>
+                                    <TooltipTrigger render={<span />}>
+                                      {formatPercent(
+                                        merged.totalTokens === 0
+                                          ? 0
+                                          : model.totalTokens / merged.totalTokens,
+                                      )}
+                                    </TooltipTrigger>
+                                    <TooltipPopup side="top">{t("Share of tokens")}</TooltipPopup>
+                                  </Tooltip>
+                                ) : (
+                                  formatPercent(model.costShare)
+                                )}
                               </td>
                               <td className="py-2 text-right text-muted-foreground tabular-nums">
                                 {formatTokens(model.totalTokens)}
@@ -937,6 +1031,39 @@ function ProviderMark({
 }) {
   const Mark = PROVIDER_PRESENTATION[provider].mark;
   return <Mark className={cn("shrink-0", className)} aria-hidden />;
+}
+
+/** A breakdown column header that sorts by its column; the active one shows its direction. */
+function SortableHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = "left",
+}: {
+  readonly label: string;
+  readonly sortKey: BreakdownSort["key"];
+  readonly sort: BreakdownSort;
+  readonly onSort: (key: BreakdownSort["key"]) => void;
+  readonly align?: "left" | "right";
+}) {
+  const t = useT();
+  const active = sort.key === sortKey;
+  return (
+    <th
+      aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}
+      className={cn("py-2 font-normal", align === "right" && "text-right")}
+    >
+      <InlineButton
+        tone={active ? "default" : "muted"}
+        title={t("Sort by {column}", { column: label })}
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        {active ? <span aria-hidden>{sort.direction === "asc" ? "↑" : "↓"}</span> : null}
+      </InlineButton>
+    </th>
+  );
 }
 
 function Metric({

@@ -9,6 +9,10 @@ OOP renders two kinds of fenced blocks in your replies as animated visuals. When
 Use a few visuals where they make the point clearer, each introduced by a sentence that says what it shows.
 </visual_report>`;
 
+const PROJECT_MEMORY_INSTRUCTIONS = `<project_memory>
+When memory_recall is available: at the start of non-trivial work, call it once with 2-3 key terms. At the end, propose with memory_propose only durable decisions, conventions, or failed approaches worth reusing, never one-off details. If either call fails, continue without it.
+</project_memory>`;
+
 /**
  * Shared runtime context; omit model and effort when the harness manages them dynamically.
  * `modelName` is the display name users see in the model picker; `model` is the slug.
@@ -18,6 +22,8 @@ export function buildRuntimeInstructions(runtime: {
   readonly model?: string | undefined;
   readonly modelName?: string | undefined;
   readonly reasoningEffort?: string | undefined;
+  /** Adds the project memory pointer; only for harnesses that can reach the memory tools. */
+  readonly projectMemory?: boolean | undefined;
 }): string {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
@@ -27,7 +33,7 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in OOP through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${VISUAL_REPORT_INSTRUCTIONS}`;
+  return `<runtime_info>In case you're asked: you are running in OOP through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${VISUAL_REPORT_INSTRUCTIONS}${runtime.projectMemory ? `\n\n${PROJECT_MEMORY_INSTRUCTIONS}` : ""}`;
 }
 
 function toSingleLine(value: string): string {

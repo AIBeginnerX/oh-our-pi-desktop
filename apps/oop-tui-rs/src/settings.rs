@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// The keys of `settings.json`, in the order `oop config` lists them.
-pub const SETTING_KEYS: [&str; 10] = [
+pub const SETTING_KEYS: [&str; 11] = [
     "theme",
     "symbols",
     "animations",
@@ -20,6 +20,7 @@ pub const SETTING_KEYS: [&str; 10] = [
     "sidebar",
     "workflow",
     "pet",
+    "usage",
     "language",
 ];
 
@@ -45,6 +46,8 @@ pub struct Settings {
     pub workflow: bool,
     /// The pet in the pinned header.
     pub pet: bool,
+    /// The provider usage panel at the foot of the thread list.
+    pub usage: bool,
 }
 
 impl Default for Settings {
@@ -61,6 +64,7 @@ impl Default for Settings {
             sidebar: true,
             workflow: true,
             pet: true,
+            usage: true,
         }
     }
 }
@@ -139,6 +143,7 @@ pub fn read_file(path: &Path) -> SettingsFile {
     flag("sidebar", &mut settings.sidebar);
     flag("workflow", &mut settings.workflow);
     flag("pet", &mut settings.pet);
+    flag("usage", &mut settings.usage);
     match object.get("theme") {
         None => {}
         Some(Value::String(name)) if safe_name(name) => {
@@ -384,6 +389,18 @@ mod tests {
         assert!(!file.settings.notify);
         assert!(file.settings.pet);
         assert_eq!(file.settings.symbols, "unicode");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn usage_defaults_on_and_false_is_read() {
+        assert!(Settings::default().usage);
+        let path = temp("usage");
+        std::fs::write(&path, r#"{"usage": false}"#).unwrap();
+        assert!(!read_file(&path).settings.usage);
+        std::fs::write(&path, r#"{"usage": "no"}"#).unwrap();
+        let file = read_file(&path);
+        assert!(file.settings.usage && file.warnings.len() == 1);
         cleanup(&path);
     }
 

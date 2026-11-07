@@ -57,3 +57,4 @@ export * from "./projectSkillDraft.ts";
 export * from "./projectSkillObservation.ts";
 export * from "./projectSkillStore.ts";
 export * from "./ownedUsage.ts";
+export * from "./gateway.ts";

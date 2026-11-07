@@ -59,7 +59,8 @@ describe("fetchEnvironmentPullRequestDiff", () => {
       });
       expect(calls).toHaveLength(1);
       const [request, init] = calls[0]!;
-      expect(String(request)).toBe("https://environment.example.test/api/pull-requests/diff");
+      // The base path is kept so a gateway-forwarded environment stays under its prefix.
+      expect(String(request)).toBe("https://environment.example.test/base/api/pull-requests/diff");
       expect(init.method).toBe("POST");
       expect(init.credentials).toBe("include");
 

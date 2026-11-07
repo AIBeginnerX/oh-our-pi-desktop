@@ -97,6 +97,7 @@ import {
   refreshArchivedThreadsForEnvironment,
   useArchivedThreadSnapshots,
 } from "../lib/archivedThreadsState";
+import { useContinueInNewThread } from "../hooks/useContinueInNewThread";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -645,6 +646,7 @@ function OpenCommandPaletteDialog(props: {
     [archivedThreadShells],
   );
   const { unarchiveThread } = useThreadActions();
+  const continueInNewThread = useContinueInNewThread();
   const [browseGeneration, setBrowseGeneration] = useState(0);
   const browseNavigationRef = useRef<ReturnType<typeof createBrowseNavigationCoordinator> | null>(
     null,
@@ -1627,6 +1629,20 @@ function OpenCommandPaletteDialog(props: {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
+    });
+  }
+
+  if (activeThread !== null) {
+    const threadRef = scopeThreadRef(activeThread.environmentId, activeThread.id);
+    actionItems.push({
+      kind: "action",
+      value: "action:continue-in-new-thread",
+      searchTerms: ["continue", "handoff", "new thread", "context", "summary", "fresh"],
+      title: "Continue in new thread",
+      icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        await continueInNewThread(threadRef);
+      },
     });
   }
 

@@ -150,6 +150,13 @@ pub const COMMANDS: &[Command] = &[
         "마지막으로 끝난 작업을 단계별로 보기",
     ),
     cmd("new", &[], None, "Start a new thread", "새 스레드 시작"),
+    cmd(
+        "continue",
+        &[],
+        None,
+        "New thread from a short summary of this one",
+        "이 스레드 요약으로 새 스레드 시작",
+    ),
     cmd("threads", &["t"], None, "Pick a thread", "스레드 고르기"),
     cmd(
         "projects",
@@ -159,6 +166,13 @@ pub const COMMANDS: &[Command] = &[
         "프로젝트 고르기",
     ),
     cmd("stats", &[], None, "Usage statistics", "사용 통계"),
+    cmd(
+        "skills",
+        &[],
+        Some("[install <name>]"),
+        "List and install the skills OOP ships",
+        "OOP 기본 스킬 목록·설치",
+    ),
     cmd(
         "mobile",
         &[],
@@ -188,6 +202,13 @@ pub const COMMANDS: &[Command] = &[
         "오른쪽 패널 표시/숨김 (Ctrl-G)",
     ),
     cmd(
+        "copy",
+        &[],
+        Some("[N|all]"),
+        "Copy the answer's code block to the clipboard",
+        "답변의 코드 블록 복사",
+    ),
+    cmd(
         "mouse",
         &[],
         Some("[on|off]"),
@@ -200,6 +221,13 @@ pub const COMMANDS: &[Command] = &[
         Some("[on|off]"),
         "Show or hide the pet",
         "마스코트 표시/숨김",
+    ),
+    cmd(
+        "usage",
+        &[],
+        Some("[on|off]"),
+        "Show or hide provider usage in the left pane",
+        "왼쪽 창의 Provider 사용량 표시/숨김",
     ),
     cmd(
         "history",

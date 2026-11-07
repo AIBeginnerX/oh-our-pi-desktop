@@ -113,12 +113,30 @@ needs, then press Enter to send. When a provider command has the same name as on
 `oop` command is the one that runs. The list comes from the same place as in the desktop app; a
 project's own commands can take a moment to appear after you open a thread.
 
+### Skills OOP ships
+
+`/skills` lists the skills that come with OOP (`paper-analysis`, `deep-research`, and others) and
+whether each is installed for Claude Code and for Codex and Cursor. Pick a row, or run
+`/skills install <name>`, to install one into both. Nothing already there is replaced; a different
+skill with the same name is reported and left alone. Once a skill is installed, `/name` (or
+`$name`) followed by your request runs it, for example `/paper-analysis arxiv:1706.03762`.
+
 ## Pasting long text
 
 A long paste is kept whole but drawn in a window of at most ten rows; the rows above or below it
 are counted ("↑ N줄 더", "↓ N줄 더") and the window follows the cursor. A message can be at most
 120,000 characters, the limit of the server; a longer one is not sent, and `oop` says how many
 characters to cut.
+
+## Copying a command
+
+`/copy` puts the last code block of the agent's latest answer on the clipboard exactly as written,
+with no fences, indentation or line wrapping and no trailing newline, so a pasted command does not
+run until you press Enter. `/copy 2` copies block 2 and `/copy all` every block, one after another.
+When an answer has several blocks, each shows its number in its header; with one block the header
+says `/copy`. An answer with no block but exactly one `inline` code span copies that span. Over SSH
+and in most terminals the copy goes through the terminal (OSC 52); a terminal that ignores OSC 52
+does not receive it.
 
 ## Knowing when the agent needs you
 
@@ -145,6 +163,14 @@ the model with `/model` gives her a small hop and a colour wave. With few colour
 Turn her off and on with `/pet off` and `/pet on`, or `oop config set pet false`. She holds still
 when animations are off (`oop config set animations false`) and while the terminal window is not
 focused.
+
+## Provider usage
+
+The bottom of the left pane shows each provider's usage limit as a compact gauge: the filled part
+of the bar is what is used, with the percentage and, when there is room, the time until it resets.
+Claude and Codex update while you work; other providers
+refresh about every five minutes. Turn the panel off and on with `/usage off` and `/usage on`, or
+`oop config set usage false`. It is left out when the pane is short.
 
 ## Find and pin threads
 

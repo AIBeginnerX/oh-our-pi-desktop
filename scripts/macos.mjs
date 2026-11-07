@@ -145,6 +145,54 @@ export function resolvePackageSigning(signingMode, env) {
   return { mode: signingMode, identity, teamId, installerLeafPins };
 }
 
+// Opt-in stable signing identity (see docs/operations/macos-oop.md). It replaces ad hoc signing only
+// and never combines with the Developer ID candidate, whose flag selects a different signer.
+// The Windows runner copies this file without ./desktop-build (RUNNER_SCRIPTS in windows.mjs), so
+// the name and checks mirror desktop-build/mac-signature.ts here and its verifier loads lazily.
+const MAC_LOCAL_SIGN_IDENTITY_ENV = "OOP_MAC_LOCAL_SIGN_IDENTITY";
+
+export function resolveLocalSignIdentity(signingMode, env) {
+  const identity = env[MAC_LOCAL_SIGN_IDENTITY_ENV]?.trim() || undefined;
+  if (identity === undefined) return undefined;
+  if (signingMode !== undefined)
+    throw new Error(
+      `${MAC_LOCAL_SIGN_IDENTITY_ENV} cannot be combined with --signing-mode ${signingMode}`,
+    );
+  if (identity === "-" || /\p{Cc}/u.test(identity))
+    throw new Error(
+      `${MAC_LOCAL_SIGN_IDENTITY_ENV} must be a keychain identity name or SHA-1 hash, not "-" or text with control characters`,
+    );
+  return identity;
+}
+
+const IDENTITY_LINE = /^\s*\d+\)\s+([0-9A-Fa-f]{40})\s+"(.*)"/;
+
+function listsIdentity(findIdentityOutput, identity) {
+  return findIdentityOutput.split("\n").some((line) => {
+    const match = IDENTITY_LINE.exec(line);
+    return match && (match[2] === identity || match[1].toLowerCase() === identity.toLowerCase());
+  });
+}
+
+// `validOutput` is `security find-identity -v -p codesigning` (usable identities only) and
+// `allOutput` the same without -v. electron-builder and @electron/osx-sign only see the valid list,
+// so an identity that appears only in the full list is untrusted and would be skipped silently.
+export function localSignIdentityProblem(identity, validOutput, allOutput) {
+  if (listsIdentity(validOutput, identity)) return undefined;
+  if (listsIdentity(allOutput, identity))
+    return `${MAC_LOCAL_SIGN_IDENTITY_ENV} identity "${identity}" exists but is not trusted for code signing. 키체인 접근에서 해당 인증서를 열고 신뢰 > 코드 서명을 "항상 신뢰"로 바꾸세요. / In Keychain Access open the certificate, set Trust > Code Signing to "Always Trust".`;
+  return `${MAC_LOCAL_SIGN_IDENTITY_ENV} identity "${identity}" was not found among the code-signing identities. 키체인 접근 > 인증서 지원 > 인증서 생성에서 이름 "${identity}", 신원 유형 "자체 서명 루트", 인증서 유형 "코드 서명"으로 만드세요. / Create it in Keychain Access > Certificate Assistant > Create a Certificate (Self-Signed Root, Code Signing), or fix the name. See docs/operations/macos-oop.md.`;
+}
+
+function securityCodesigningIdentities(valid) {
+  const result = NodeChildProcess.spawnSync(
+    "/usr/bin/security",
+    ["find-identity", ...(valid ? ["-v"] : []), "-p", "codesigning"],
+    { encoding: "utf8" },
+  );
+  return result.status === 0 ? result.stdout : "";
+}
+
 // Evaluated by `codesign -R`: Apple-anchored chain, Developer ID Application
 // leaf (OID ...6.1.13) issued under the Developer ID CA (OID ...6.2.6), the
 // expected Team as certificate OU, and the product's bundle identifier.
@@ -385,7 +433,11 @@ async function nearestExistingDirectory(target) {
   }
 }
 
-export async function doctor(paths) {
+export async function doctor(
+  paths,
+  localIdentity = undefined,
+  listIdentities = securityCodesigningIdentities,
+) {
   const cacheMount = await nearestExistingDirectory(paths.cache);
   const type = NodeOS.platform() === "darwin" ? fsType(cacheMount) : undefined;
   const problems = validateHost({ pnpmVersion: toolVersion("pnpm") });
@@ -395,10 +447,19 @@ export async function doctor(paths) {
     problems.push(`Cache must be on local APFS (found ${type})`);
   if (type === undefined && NodeOS.platform() === "darwin")
     problems.push("Could not determine cache filesystem type");
+  if (localIdentity !== undefined) {
+    const problem = localSignIdentityProblem(
+      localIdentity,
+      listIdentities(true),
+      listIdentities(false),
+    );
+    if (problem) problems.push(problem);
+  }
   console.log(`Source: ${paths.source}`);
   console.log(`Local cache: ${paths.cache}`);
   if (type) console.log(`Cache filesystem: ${type}`);
   console.log(`Node: ${process.versions.node}; pnpm: ${toolVersion("pnpm") ?? "missing"}`);
+  if (localIdentity !== undefined) console.log(`Local signing identity: ${localIdentity}`);
   if (problems.length) throw new Error(problems.join("\n"));
   return { filesystem: type };
 }
@@ -701,6 +762,9 @@ export async function verifyMacDmgArtifact(
   expectedSha256,
   runner = runCommand,
   expectedSigner = undefined,
+  localIdentity = undefined,
+  verifyLocalIdentity = async (input) =>
+    (await import("./desktop-build/mac-signature.ts")).verifyMacLocalIdentitySignatures(input),
 ) {
   const actualSha256 = await sha256File(dmgPath);
   if (actualSha256 !== expectedSha256) throw new Error(`Copied DMG SHA-256 mismatch: ${dmgPath}`);
@@ -722,6 +786,8 @@ export async function verifyMacDmgArtifact(
     await runner("/usr/bin/codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath], {
       timeout: 120_000,
     });
+    if (localIdentity !== undefined)
+      await verifyLocalIdentity({ appPath, identity: localIdentity });
     if (expectedSigner) {
       await runner(
         "/usr/bin/codesign",
@@ -771,6 +837,7 @@ export async function packageDmg(
   baseEnv = process.env,
 ) {
   const candidate = signing !== undefined;
+  const localIdentity = candidate ? undefined : resolveLocalSignIdentity(undefined, baseEnv);
   if (candidate && isInside(paths.source, paths.artifactRoot))
     throw new Error(`Candidate output must stay outside the source tree: ${paths.artifactRoot}`);
   const stamp = `${Date.now()}-${process.pid}`;
@@ -831,7 +898,7 @@ export async function packageDmg(
   );
   try {
     await NodeFSP.copyFile(NodePath.join(out, fileName), temp);
-    await verifyMacDmgArtifact(temp, digest, runner, signing);
+    await verifyMacDmgArtifact(temp, digest, runner, signing, localIdentity);
     await NodeFSP.rename(temp, NodePath.join(destination, fileName));
   } finally {
     await NodeFSP.rm(temp, { force: true });
@@ -861,8 +928,11 @@ export async function packageDmg(
       }
     : {
         ...built,
+        ...(localIdentity === undefined ? {} : { signing: { requestedMode: "local-identity" } }),
         verification:
-          "final copied DMG SHA-256, image integrity, and internal OOP.app strict/deep signature passed; UI, integrations, and notarization not exercised",
+          localIdentity === undefined
+            ? "final copied DMG SHA-256, image integrity, and internal OOP.app strict/deep signature passed; UI, integrations, and notarization not exercised"
+            : "final copied DMG SHA-256, image integrity, internal OOP.app strict/deep signature, and a certificate-based signature of the configured local identity on every nested code object passed; UI, integrations, and notarization not exercised",
       };
   const metadataTempPrefix = NodePath.join(
     destination,
@@ -895,6 +965,7 @@ export async function main(
   const { command, cacheDir, signingMode } = parseArgs(argv);
   // Reject incomplete or conflicting signing inputs before any sync, install, or build.
   const signing = resolvePackageSigning(signingMode, process.env);
+  const localIdentity = resolveLocalSignIdentity(signingMode, process.env);
   const paths = await resolvePaths(sourceRoot, cacheDir);
   // The app bundles the release notes, so a version without user-facing highlights must stop
   // before the rsync, install, and desktop build. `package` builds too unless signing.
@@ -904,7 +975,7 @@ export async function main(
       version: await releaseVersion(paths.source),
     });
   }
-  await doctor(paths);
+  await doctor(paths, command === "doctor" || command === "package" ? localIdentity : undefined);
   if (command === "doctor") return;
   await withLock(paths, async () => {
     await syncSource(paths, runner);

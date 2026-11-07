@@ -12,6 +12,7 @@ import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
 import {
   DeleteProjectionThreadActivitiesInput,
   ListProjectionThreadActivitiesInput,
+  ListToolUpdatedCandidatesInput,
   GetLatestProjectionThreadTaskActivityInput,
   ProjectionThreadActivity,
   ProjectionThreadActivityRepository,
@@ -189,6 +190,36 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
       `,
   });
 
+  const listToolUpdatedCandidateRows = SqlSchema.findAll({
+    Request: ListToolUpdatedCandidatesInput,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: ({ threadId, turnId, toolCallId }) =>
+      sql`
+        SELECT
+          activity_id AS "activityId",
+          thread_id AS "threadId",
+          turn_id AS "turnId",
+          tone,
+          kind,
+          summary,
+          payload_json AS "payload",
+          sequence,
+          created_at AS "createdAt"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+          AND kind = 'tool.updated'
+          AND turn_id IS ${turnId}
+          ${
+            toolCallId === null
+              ? sql``
+              : sql`AND (
+                  trim(json_extract(payload_json, '$.toolCallId')) = ${toolCallId}
+                  OR trim(json_extract(payload_json, '$.data.toolCallId')) = ${toolCallId}
+                )`
+          }
+      `,
+  });
+
   const deleteProjectionThreadActivityRows = SqlSchema.void({
     Request: DeleteProjectionThreadActivitiesInput,
     execute: ({ threadId }) =>
@@ -244,6 +275,34 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
       Effect.map(Option.map(toProjectionThreadActivity)),
     );
 
+  const listToolUpdatedCandidates: ProjectionThreadActivityRepositoryShape["listToolUpdatedCandidates"] =
+    (input) =>
+      listToolUpdatedCandidateRows(input).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionThreadActivityRepository.listToolUpdatedCandidates:query",
+            "ProjectionThreadActivityRepository.listToolUpdatedCandidates:decodeRows",
+          ),
+        ),
+        Effect.map((rows) => rows.map(toProjectionThreadActivity)),
+      );
+
+  const deleteByActivityIds: ProjectionThreadActivityRepositoryShape["deleteByActivityIds"] = ({
+    threadId,
+    activityIds,
+  }) =>
+    activityIds.length === 0
+      ? Effect.void
+      : sql`
+          DELETE FROM projection_thread_activities
+          WHERE thread_id = ${threadId} AND ${sql.in("activity_id", activityIds)}
+        `.pipe(
+          Effect.asVoid,
+          Effect.mapError(
+            toPersistenceSqlError("ProjectionThreadActivityRepository.deleteByActivityIds:query"),
+          ),
+        );
+
   const deleteByThreadId: ProjectionThreadActivityRepositoryShape["deleteByThreadId"] = (input) =>
     deleteProjectionThreadActivityRows(input).pipe(
       Effect.mapError(
@@ -256,6 +315,8 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
     listByThreadId,
     listUserInputLifecycleByThreadId,
     getLatestTaskActivity,
+    listToolUpdatedCandidates,
+    deleteByActivityIds,
     deleteByThreadId,
   } satisfies ProjectionThreadActivityRepositoryShape;
 });

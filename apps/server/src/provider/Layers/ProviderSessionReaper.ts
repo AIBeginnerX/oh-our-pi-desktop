@@ -2,17 +2,15 @@ import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
 
-import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import {
   ProviderSessionReaper,
   type ProviderSessionReaperShape,
 } from "../Services/ProviderSessionReaper.ts";
 import { forkParked } from "../../serverActivation.ts";
-import { ProviderService } from "../Services/ProviderService.ts";
+import { makeIdleSessionStopper } from "./IdleSessionStopper.ts";
 
 // An idle provider process holds roughly 200-400 MB. Prompt caches live on the provider's servers,
 // so a resumed session sends the same prefix and keeping the process longer saves no tokens.
@@ -26,9 +24,8 @@ export interface ProviderSessionReaperLiveOptions {
 
 const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =>
   Effect.gen(function* () {
-    const providerService = yield* ProviderService;
     const directory = yield* ProviderSessionDirectory;
-    const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
+    const stopper = yield* makeIdleSessionStopper;
 
     const inactivityThresholdMs = Math.max(
       1,
@@ -44,8 +41,8 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
       let reapedCount = 0;
 
       for (const binding of bindings) {
-        const lastSeenMs = Date.parse(binding.lastSeenAt);
-        if (Number.isNaN(lastSeenMs)) {
+        const { block, idleMs } = yield* stopper.inspect(binding, now, inactivityThresholdMs);
+        if (block === "invalid-last-seen") {
           yield* Effect.logWarning("provider.session.reaper.invalid-last-seen", {
             threadId: binding.threadId,
             provider: binding.provider,
@@ -53,68 +50,23 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           });
           continue;
         }
-
-        if (now - lastSeenMs < inactivityThresholdMs) {
-          continue;
-        }
-
-        const thread = yield* projectionSnapshotQuery
-          .getThreadShellById(binding.threadId)
-          .pipe(Effect.map(Option.getOrUndefined));
-        // Ingestion updates this timestamp alongside activeTurnId when a turn
-        // settles. Long turns must get a full idle window after that transition,
-        // even though the binding was last touched when the turn was sent.
-        const lastActivityMs = Math.max(
-          lastSeenMs,
-          Date.parse(thread?.session?.updatedAt ?? binding.lastSeenAt),
-        );
-        const idleDurationMs = now - lastActivityMs;
-        if (idleDurationMs < inactivityThresholdMs) {
-          continue;
-        }
-        if (thread?.session?.activeTurnId != null) {
+        if (block === "active-turn") {
           yield* Effect.logDebug("provider.session.reaper.skipped-active-turn", {
             threadId: binding.threadId,
-            activeTurnId: thread.session.activeTurnId,
-            idleDurationMs,
+            idleDurationMs: idleMs,
           });
           continue;
         }
-
-        // The turn can settle while background work runs on (subagent
-        // fleets, workflow runs, Monitor watch loops). Those live inside the
-        // provider process, so stopping the session would kill them silently,
-        // and nothing bumps lastSeenAt between turns.
-        if (thread?.backgroundLiveness != null) {
+        if (block === "background-work") {
           yield* Effect.logDebug("provider.session.reaper.skipped-background-work", {
             threadId: binding.threadId,
-            backgroundLiveness: thread.backgroundLiveness,
-            idleDurationMs,
+            idleDurationMs: idleMs,
           });
           continue;
         }
+        if (block !== null) continue;
 
-        const reaped = yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
-          Effect.tap(() =>
-            Effect.logInfo("provider.session.reaped", {
-              threadId: binding.threadId,
-              provider: binding.provider,
-              idleDurationMs,
-              reason: "inactivity_threshold",
-            }),
-          ),
-          Effect.as(true),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("provider.session.reaper.stop-failed", {
-              threadId: binding.threadId,
-              provider: binding.provider,
-              idleDurationMs,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
-        );
-
-        if (reaped) {
+        if (yield* stopper.stop(binding.threadId, binding, idleMs, "inactivity_threshold")) {
           reapedCount += 1;
         }
       }

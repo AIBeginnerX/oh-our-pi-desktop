@@ -9,6 +9,7 @@ import { cn } from "../../lib/utils";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
+import { PhoneShareToggle } from "./ConnectionsSettings.phone";
 import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { Switch } from "../ui/switch";
@@ -26,6 +27,7 @@ import { hasCloudPublicConfig } from "~/cloud/publicConfig";
 import { useCloudLinkController } from "~/cloud/useCloudLinkController";
 import { type EnvironmentPresentation, useRelayEnvironmentDiscovery } from "~/state/environments";
 import { serverEnvironment } from "~/state/server";
+import { gatewayStatusText, useGatewayEnvironmentInfo } from "~/state/gateway";
 import { ServerUpdateAction, ServerUpdateProgress } from "../ServerUpdateAction";
 import { CloudEnvironmentConnectRows } from "../cloud/CloudEnvironmentConnectList";
 
@@ -121,7 +123,12 @@ export function SavedBackendListRow({
   const serverUpdateState = useAtomValue(serverEnvironment.updateStateAtom(environmentId));
   const resumingServerUpdate =
     serverUpdateState.status === "running" && serverUpdateState.stage === "resuming";
+  // A gateway environment belongs to the host's desktop: it is shared or unshared there, so
+  // this device can neither switch it off nor remove it.
+  const gatewayInfo = useGatewayEnvironmentInfo(environmentId);
+  const gatewayManaged = environment.entry.target._tag === "GatewayConnectionTarget";
   const status = savedBackendStatus(environment);
+  const gatewayStatus = gatewayManaged ? gatewayStatusText(gatewayInfo?.status) : null;
   const serverVersion = environment.serverConfig?.environment.serverVersion ?? null;
   // A saved T3 Connect machine this device has never reached (unsupported,
   // or not yet connected) still has a descriptor from relay discovery, so
@@ -141,8 +148,8 @@ export function SavedBackendListRow({
       (lastDescriptor === undefined ? null : { environment: lastDescriptor }),
   );
   const subtitleText = [
-    environmentTransportLabel(environment),
-    resumingServerUpdate ? "Restarting" : status.text,
+    environmentTransportLabel(environment, gatewayInfo),
+    resumingServerUpdate ? "Restarting" : (gatewayStatus ?? status.text),
     enabled && versionMismatch ? serverVersion : null,
   ]
     .filter((value): value is string => value !== null)
@@ -196,11 +203,18 @@ export function SavedBackendListRow({
         </Tooltip>
       }
       below={
-        serverUpdateState.status !== "idle" ? (
-          <div className="mt-1 max-w-md">
-            <ServerUpdateProgress state={serverUpdateState} />
-          </div>
-        ) : null
+        <>
+          {serverUpdateState.status !== "idle" ? (
+            <div className="mt-1 max-w-md">
+              <ServerUpdateProgress state={serverUpdateState} />
+            </div>
+          ) : null}
+          <PhoneShareToggle
+            environmentId={environmentId}
+            label={environment.label}
+            targetTag={environment.entry.target._tag}
+          />
+        </>
       }
     >
       {showUpdateAction ? (
@@ -215,22 +229,24 @@ export function SavedBackendListRow({
           appearance="icon"
         />
       ) : null}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Switch
-              size="sm"
-              checked={enabled}
-              disabled={isRemoving || unsupported}
-              aria-label={`${enabled ? "Switch off" : "Switch on"} ${environment.label}`}
-              onCheckedChange={(checked) => onSetEnabled(environmentId, checked)}
-            />
-          }
-        />
-        <TooltipPopup side="top">
-          {unsupported ? "Client not supported" : enabled ? "Switch off" : "Switch on"}
-        </TooltipPopup>
-      </Tooltip>
+      {gatewayManaged ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Switch
+                size="sm"
+                checked={enabled}
+                disabled={isRemoving || unsupported}
+                aria-label={`${enabled ? "Switch off" : "Switch on"} ${environment.label}`}
+                onCheckedChange={(checked) => onSetEnabled(environmentId, checked)}
+              />
+            }
+          />
+          <TooltipPopup side="top">
+            {unsupported ? "Client not supported" : enabled ? "Switch off" : "Switch on"}
+          </TooltipPopup>
+        </Tooltip>
+      )}
       <Menu>
         <MenuTrigger
           render={
@@ -253,10 +269,14 @@ export function SavedBackendListRow({
           {errorTraceId ? (
             <MenuItem onClick={() => copyTraceId(errorTraceId)}>Copy trace ID</MenuItem>
           ) : null}
-          <MenuSeparator />
-          <MenuItem variant="destructive" onClick={() => onRemove(environment)}>
-            {isRemoving ? "Removing…" : "Remove from this device…"}
-          </MenuItem>
+          {gatewayManaged ? null : (
+            <>
+              <MenuSeparator />
+              <MenuItem variant="destructive" onClick={() => onRemove(environment)}>
+                {isRemoving ? "Removing…" : "Remove from this device…"}
+              </MenuItem>
+            </>
+          )}
         </MenuPopup>
       </Menu>
     </EnvironmentRow>

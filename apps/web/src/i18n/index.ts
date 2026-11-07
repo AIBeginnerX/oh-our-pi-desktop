@@ -10,6 +10,7 @@ import { PROJECT_CONTEXT_MESSAGES } from "./messages/projectContext";
 import { SETTINGS_MESSAGES } from "./messages/settings";
 import { SETTINGS_DEFAULTS_MESSAGES } from "./messages/settingsDefaults";
 import { SIDEBAR_MESSAGES } from "./messages/sidebar";
+import { USAGE_MESSAGES } from "./messages/usage";
 import { WORKFLOWS_MESSAGES } from "./messages/workflows";
 import type { MessageCatalog } from "./messages/types";
 
@@ -28,6 +29,7 @@ export const MESSAGES: MessageCatalog = {
   ...DIFF_MESSAGES,
   ...PANELS_MESSAGES,
   ...PROJECT_CONTEXT_MESSAGES,
+  ...USAGE_MESSAGES,
 };
 
 export type TranslationValues = Readonly<Record<string, string | number>>;

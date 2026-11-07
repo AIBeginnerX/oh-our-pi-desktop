@@ -55,6 +55,8 @@ import * as DesktopSnapShot from "./snapShot/DesktopSnapShot.ts";
 import * as DesktopAppSettings from "./settings/DesktopAppSettings.ts";
 import * as DesktopPreReadyPlatform from "./app/DesktopPreReadyPlatform.ts";
 import * as DesktopShellEnvironment from "./shell/DesktopShellEnvironment.ts";
+import * as DesktopGatewayClients from "./gateway/DesktopGatewayClients.ts";
+import * as DesktopGatewayPublisher from "./gateway/DesktopGatewayPublisher.ts";
 import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
 import * as DesktopSshRuntimeArchives from "./ssh/DesktopSshRuntimeArchives.ts";
@@ -172,6 +174,14 @@ const desktopSshLayer = desktopSshEnvironmentLayer.pipe(
   Layer.provideMerge(DesktopSshPasswordPrompts.layer()),
 );
 
+// Publishes "Available on phone" environments to the local backend's gateway. The host client
+// needs the backend pool and local auth, which the application layer provides further out.
+const desktopGatewayLayer = DesktopGatewayPublisher.layer.pipe(
+  Layer.provideMerge(DesktopGatewayClients.hostLayer),
+  Layer.provideMerge(DesktopGatewayClients.upstreamLayer),
+  Layer.provideMerge(desktopSshLayer),
+);
+
 const desktopServerExposureLayer = DesktopRemoteRelay.layer.pipe(
   Layer.provideMerge(DesktopServerExposure.layer),
   Layer.provideMerge(DesktopNetworkInterfaces.layer),
@@ -230,7 +240,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   DesktopApplicationMenu.layer,
   DesktopLinuxUrlHandler.layer,
   DesktopShellEnvironment.layer,
-  desktopSshLayer,
+  desktopGatewayLayer,
 ).pipe(
   Layer.provideMerge(desktopSnapShotLayer),
   Layer.provideMerge(desktopFoundationLayer),

@@ -104,6 +104,110 @@ describe("BundledSkills", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect(
+    "ships handoff and retro as on-demand mattpocock skills, with the MIT license beside them",
+    () =>
+      Effect.gen(function* () {
+        const names = ["handoff", "retro"];
+        const home = yield* tempHome;
+        const listed = yield* listBundledSkills(hostAt(home));
+        for (const name of names) {
+          const entry = listed.skills.find((skill) => skill.name === name);
+          assert.isDefined(entry);
+          assert.isAbove(entry!.description.length, 0);
+          assert.isFalse(entry!.description.startsWith('"'));
+        }
+
+        for (const name of names) {
+          const markdown = BUNDLED_SKILLS.find((skill) => skill.name === name)!.markdown;
+          assert.isTrue(markdown.startsWith(`---\nname: ${name}\n`));
+          // On demand only: no always-on prompt cost.
+          assert.include(markdown, "\ndisable-model-invocation: true\n");
+          assert.include(markdown, "Adapted from mattpocock/skills by Matt Pocock (MIT)");
+          assert.notMatch(markdown, /writing-for-agents|claude-handoff/i);
+          for (const target of ["claude", "agents"] as const) {
+            yield* installBundledSkill(hostAt(home), { name, target });
+            const root = target === "claude" ? ".claude" : ".agents";
+            assert.equal(
+              yield* Effect.promise(() =>
+                NodeFSP.readFile(NodePath.join(home, root, "skills", name, "SKILL.md"), "utf8"),
+              ),
+              markdown,
+            );
+          }
+        }
+
+        const license = yield* Effect.promise(() =>
+          NodeFSP.readFile(
+            NodePath.join(import.meta.dirname, "bundled", "mattpocock-LICENSE"),
+            "utf8",
+          ),
+        );
+        assert.include(license, "MIT License");
+        assert.include(license, "Copyright (c) 2026 Matt Pocock");
+        assert.include(license, 'THE SOFTWARE IS PROVIDED "AS IS"');
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "ships paper-analysis and deep-research as on-demand skills with their upstream MIT licenses",
+    () =>
+      Effect.gen(function* () {
+        const cases = [
+          {
+            name: "paper-analysis",
+            credit: "Adapted from 917Dhj/DeepPaperNote by 917Dhj (MIT)",
+            licenses: [["deeppapernote-LICENSE", "Copyright (c) 2026 dingdingcar"]],
+          },
+          {
+            name: "deep-research",
+            credit: "Adapted from Weizhena/Deep-Research-skills by Weizhena (MIT)",
+            licenses: [
+              ["deep-research-skills-LICENSE", "Copyright (c) 2026 Lan Zheng"],
+              ["last30days-LICENSE", "Copyright (c) 2026 Matt Van Horn"],
+            ],
+          },
+        ] as const;
+        const home = yield* tempHome;
+        const listed = yield* listBundledSkills(hostAt(home));
+        for (const { name, credit, licenses } of cases) {
+          const entry = listed.skills.find((skill) => skill.name === name);
+          assert.isDefined(entry);
+          assert.isAbove(entry!.description.length, 0);
+          assert.isFalse(entry!.description.startsWith('"'));
+
+          const markdown = BUNDLED_SKILLS.find((skill) => skill.name === name)!.markdown;
+          assert.isTrue(markdown.startsWith(`---\nname: ${name}\n`));
+          assert.include(markdown, "\ndisable-model-invocation: true\n");
+          assert.include(markdown, credit);
+          for (const target of ["claude", "agents"] as const) {
+            yield* installBundledSkill(hostAt(home), { name, target });
+            const root = target === "claude" ? ".claude" : ".agents";
+            assert.equal(
+              yield* Effect.promise(() =>
+                NodeFSP.readFile(NodePath.join(home, root, "skills", name, "SKILL.md"), "utf8"),
+              ),
+              markdown,
+            );
+          }
+          for (const [file, copyright] of licenses) {
+            const license = yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(import.meta.dirname, "bundled", file), "utf8"),
+            );
+            assert.include(license, "MIT License");
+            assert.include(license, copyright);
+            assert.include(license, 'THE SOFTWARE IS PROVIDED "AS IS"');
+          }
+        }
+        const discovered = yield* discoverClaudeSkills({ homePath: "" }, undefined, {
+          CLAUDE_CONFIG_DIR: NodePath.join(home, ".claude"),
+        });
+        for (const { name } of cases) {
+          assert.isTrue(discovered.some((skill) => skill.name === name));
+        }
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("follows CLAUDE_CONFIG_DIR like Claude Code does", () =>
     Effect.gen(function* () {
       const home = yield* tempHome;

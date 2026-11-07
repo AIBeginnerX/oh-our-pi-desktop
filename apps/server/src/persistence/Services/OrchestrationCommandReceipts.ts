@@ -33,6 +33,16 @@ export const OrchestrationCommandReceipt = Schema.Struct({
 });
 export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type;
 
+export const PruneAcceptedInput = Schema.Struct({
+  /** Only receipts accepted strictly before this instant are eligible. */
+  acceptedBefore: IsoDateTime,
+  /** Only receipts at or below this projection checkpoint are eligible. */
+  throughSequence: NonNegativeInt,
+  /** Rows deleted per statement; defaults to 5,000. */
+  batchSize: Schema.optional(Schema.Int),
+});
+export type PruneAcceptedInput = typeof PruneAcceptedInput.Type;
+
 export const GetByCommandIdInput = Schema.Struct({
   commandId: CommandId,
 });
@@ -60,6 +70,16 @@ export interface OrchestrationCommandReceiptRepositoryShape {
     Option.Option<OrchestrationCommandReceipt>,
     OrchestrationCommandReceiptRepositoryError
   >;
+
+  /**
+   * Delete old accepted receipts that the projection checkpoint already covers.
+   *
+   * Rejected receipts are kept. Deletes in bounded batches so no single write
+   * holds the lock for long, and returns the number of rows removed.
+   */
+  readonly pruneAccepted: (
+    input: PruneAcceptedInput,
+  ) => Effect.Effect<number, OrchestrationCommandReceiptRepositoryError>;
 }
 
 /**

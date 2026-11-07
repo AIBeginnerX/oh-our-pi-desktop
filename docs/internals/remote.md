@@ -24,6 +24,17 @@ prove that a route works. In particular, a host's loopback address refers to a
 different machine when another device opens it. Endpoint selection must not
 silently fall back to loopback when a shareable endpoint is unavailable.
 
+## The gateway forwards other environments through the host
+
+A phone reaches one host server through the relay, but the desktop may have other
+environments registered whose route only the desktop can use, such as an SSH `-L`
+forward bound to the desktop's loopback. The host server therefore forwards each
+registered upstream under `/_gw/<environmentId>/` ([gateway](../../apps/server/src/gateway/Gateway.ts)),
+so the environment keeps its identity while the route to it changes. The desktop
+publishes upstreams on start and the host keeps them in memory only, because the
+forwarded ports change per connection. Clients authenticate to the host alone; the
+host injects the upstream bearer and never returns it.
+
 ## Hosted web is a client
 
 The hosted web app stores its connection catalog in the browser and connects

@@ -41,6 +41,7 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
 import { useProject, useProjects } from "../state/entities";
+import { gatewayEnvironmentHint, gatewayEnvironmentInfoAtom } from "../state/gateway";
 import { environmentShell } from "../state/shell";
 import { type EnvironmentOption, shouldShowEnvironmentIndicator } from "./BranchToolbar.logic";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
@@ -420,6 +421,7 @@ export function useChatViewProjectAndEnvironment({
     disconnectDelayElapsed &&
     activeEnvironment !== null &&
     activeEnvironment.entry.target._tag !== "PrimaryConnectionTarget" &&
+    activeEnvironment.entry.target._tag !== "GatewayConnectionTarget" &&
     !isDesktopLocalConnectionTarget(activeEnvironment.entry.target);
   const [disconnectingEnvironment, setDisconnectingEnvironment] = useState(false);
   const handleDisconnectActiveEnvironment = useCallback(
@@ -444,6 +446,7 @@ export function useChatViewProjectAndEnvironment({
     },
     [navigate, setEnvironmentEnabled],
   );
+  const gatewayInfo = useAtomValue(gatewayEnvironmentInfoAtom);
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
     const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
@@ -463,6 +466,9 @@ export function useChatViewProjectAndEnvironment({
         label: environment?.label ?? p.environmentId,
         isPrimary,
         machine: resolveEnvironmentMachineKind(environment?.serverConfig ?? null),
+        ...(environment?.entry.target._tag === "GatewayConnectionTarget"
+          ? { hint: gatewayEnvironmentHint(gatewayInfo.get(p.environmentId)) }
+          : {}),
       });
     }
     // Sort: primary first, then alphabetical
@@ -471,7 +477,14 @@ export function useChatViewProjectAndEnvironment({
       return a.label.localeCompare(b.label);
     });
     return envs;
-  }, [activeProject, allProjects, projectGroupingSettings, primaryEnvironmentId, environmentById]);
+  }, [
+    activeProject,
+    allProjects,
+    projectGroupingSettings,
+    primaryEnvironmentId,
+    environmentById,
+    gatewayInfo,
+  ]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
   const activeEnvironmentOption =
     logicalProjectEnvironments.find(

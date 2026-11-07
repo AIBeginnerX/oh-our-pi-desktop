@@ -1321,6 +1321,55 @@ describe("LocalPkgUpdates.pruneInstalledStages", () => {
       }),
     ),
   );
+
+  it.effect(
+    "removes a stage whose package is older even though install.log and install.sh remain",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const root = yield* tempDirectory;
+          const stagingRoot = NodePath.join(root, "oop-local-update");
+          yield* Effect.promise(async () => {
+            await NodeFSP.mkdir(NodePath.join(stagingRoot, "stage-installed"), { recursive: true });
+            for (const file of ["OOP-0.0.140-arm64-update.pkg", "install.log", "install.sh"]) {
+              await NodeFSP.writeFile(NodePath.join(stagingRoot, "stage-installed", file), file);
+            }
+          });
+
+          const removed = yield* LocalPkgUpdates.pruneInstalledStages({
+            stagingRoot,
+            currentVersion: "0.0.145",
+          });
+
+          assert.deepEqual(
+            removed.map((directory) => NodePath.basename(directory)),
+            ["stage-installed"],
+          );
+          assert.deepEqual(yield* listStaging(stagingRoot), []);
+        }),
+      ),
+  );
+
+  it.effect("keeps a stage holding a newer package next to install.log", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const root = yield* tempDirectory;
+        const stagingRoot = NodePath.join(root, "oop-local-update");
+        yield* Effect.promise(async () => {
+          await NodeFSP.mkdir(NodePath.join(stagingRoot, "stage-pending"), { recursive: true });
+          for (const file of ["OOP-0.0.146-arm64-update.pkg", "install.log"]) {
+            await NodeFSP.writeFile(NodePath.join(stagingRoot, "stage-pending", file), file);
+          }
+        });
+
+        assert.deepEqual(
+          yield* LocalPkgUpdates.pruneInstalledStages({ stagingRoot, currentVersion: "0.0.145" }),
+          [],
+        );
+        assert.deepEqual(yield* listStaging(stagingRoot), ["stage-pending"]);
+      }),
+    ),
+  );
 });
 
 describe("LocalPkgUpdates in-place swap", () => {

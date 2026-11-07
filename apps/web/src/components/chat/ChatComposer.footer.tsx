@@ -152,6 +152,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onCompactContext?: (() => void) | undefined;
+  onContinueInNewThread?: (() => void) | undefined;
   compactDisabled: boolean;
   compactDisabledReason: string | null;
 }) {
@@ -162,6 +163,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
           usage={props.activeContextWindow}
           modelDisplayName={props.activeThreadModelDisplayName}
           onCompact={props.onCompactContext}
+          onContinueInNewThread={props.onContinueInNewThread}
           compactDisabled={props.compactDisabled}
           compactDisabledReason={props.compactDisabledReason}
         />

@@ -171,7 +171,13 @@ const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
   const response = yield* httpClient.execute(upstreamRequest);
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(response.headers)) {
-    if (name === "content-encoding" || name === "transfer-encoding" || name === "connection") {
+    // fetch decodes the body, so the upstream's encoding and length no longer describe it.
+    if (
+      name === "content-encoding" ||
+      name === "content-length" ||
+      name === "transfer-encoding" ||
+      name === "connection"
+    ) {
       continue;
     }
     if (value !== undefined) headers[name] = value;

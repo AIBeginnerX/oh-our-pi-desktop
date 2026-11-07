@@ -48,6 +48,14 @@ export const GetLatestProjectionThreadTaskActivityInput = Schema.Struct({
 export type GetLatestProjectionThreadTaskActivityInput =
   typeof GetLatestProjectionThreadTaskActivityInput.Type;
 
+export const ListToolUpdatedCandidatesInput = Schema.Struct({
+  threadId: ThreadId,
+  turnId: Schema.NullOr(TurnId),
+  /** When set, only updates carrying this tool call id are returned. */
+  toolCallId: Schema.NullOr(Schema.String),
+});
+export type ListToolUpdatedCandidatesInput = typeof ListToolUpdatedCandidatesInput.Type;
+
 export const DeleteProjectionThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
 });
@@ -92,6 +100,24 @@ export interface ProjectionThreadActivityRepositoryShape {
   readonly getLatestTaskActivity: (
     input: GetLatestProjectionThreadTaskActivityInput,
   ) => Effect.Effect<Option.Option<ProjectionThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * List `tool.updated` rows of one turn that may belong to a tool call.
+   *
+   * Narrows by tool call id in SQLite when one is given; the caller applies
+   * the exact matching rule.
+   */
+  readonly listToolUpdatedCandidates: (
+    input: ListToolUpdatedCandidatesInput,
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>;
+
+  /**
+   * Delete projected thread activity rows by activity id.
+   */
+  readonly deleteByActivityIds: (input: {
+    readonly threadId: ThreadId;
+    readonly activityIds: ReadonlyArray<string>;
+  }) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
    * Delete projected thread activity rows by thread.

@@ -313,6 +313,47 @@ describe("DesktopConnectionCatalogStore", () => {
     ),
   );
 
+  it.effect("starts every migrated environment off the phone and persists the toggle", () =>
+    withStore(
+      Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+        yield* fileSystem.writeFileString(
+          environment.savedEnvironmentRegistryPath,
+          yield* encodeLegacySavedEnvironments({
+            version: 1,
+            records: [
+              {
+                environmentId: EnvironmentId.make("bearer-environment"),
+                label: "Bearer",
+                httpBaseUrl: "https://bearer.example.com/",
+                wsBaseUrl: "wss://bearer.example.com/",
+                createdAt: "2026-06-03T00:00:00.000Z",
+                lastConnectedAt: null,
+              },
+            ],
+          }),
+        );
+
+        assert.isTrue(Option.isSome(yield* store.get));
+        assert.deepStrictEqual(yield* store.getPhoneShared, []);
+
+        yield* store.setPhoneShared("bearer-environment", true);
+        yield* store.setPhoneShared("bearer-environment", true);
+        yield* store.setPhoneShared("other-environment", true);
+        assert.deepStrictEqual(yield* store.getPhoneShared, [
+          "bearer-environment",
+          "other-environment",
+        ]);
+
+        yield* store.setPhoneShared("bearer-environment", false);
+        assert.deepStrictEqual(yield* store.getPhoneShared, ["other-environment"]);
+      }),
+    ),
+  );
+
   it.effect("surfaces malformed catalog documents without deleting them", () =>
     withStore(
       Effect.gen(function* () {

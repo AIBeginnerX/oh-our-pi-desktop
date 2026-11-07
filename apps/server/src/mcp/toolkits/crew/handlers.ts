@@ -22,6 +22,7 @@ const make = Effect.gen(function* () {
             verify: input.verify,
             doneWhen: input.doneWhen,
             isolation: input.isolation,
+            size: input.size,
             differentFrom: input.differentFrom,
             todos: input.todos,
             why: input.why,

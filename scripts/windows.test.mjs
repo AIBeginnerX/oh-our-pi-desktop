@@ -8,8 +8,10 @@ import * as NodeURL from "node:url";
 import {
   AUTO_BUILD_TASK_NAME,
   autoBuildDecision,
+  assertInstalledDependencies,
   autoBuildSource,
   buildDriveSource,
+  buildWithFreshScript,
   buildRustClient,
   copyRunnerLog,
   driveRootCandidates,
@@ -453,4 +455,54 @@ NodeTest.test("reinstalls once from empty node_modules when the install fails", 
     }),
     /still broken/,
   );
+});
+
+NodeTest.test(
+  "an install that exits 0 but left no vite-plus is repaired like a failed one",
+  async () => {
+    const calls = [];
+    let hollow = true;
+    await installWithRepair({
+      install: () => calls.push("install"),
+      repair: async () => {
+        calls.push("repair");
+        hollow = false;
+      },
+      verify: () => {
+        if (hollow) throw new Error("vp is missing after the install");
+      },
+      log: () => {},
+    });
+    NodeAssert.deepEqual(calls, ["install", "repair", "install"]);
+  },
+);
+
+NodeTest.test("assertInstalledDependencies needs vite-plus's vp in the checkout", () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "oop-vp-"));
+  try {
+    NodeAssert.throws(() => assertInstalledDependencies(root), /vp/u);
+    const bin = NodePath.join(root, "node_modules", "vite-plus", "bin");
+    NodeFS.mkdirSync(bin, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(bin, "vp"), "");
+    assertInstalledDependencies(root);
+  } finally {
+    NodeFS.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+NodeTest.test("a source with a newer windows.mjs is built by a fresh process", async () => {
+  const calls = [];
+  const steps = {
+    runFresh: async () => calls.push("fresh"),
+    build: async () => calls.push("here"),
+  };
+  NodeAssert.equal(
+    await buildWithFreshScript({ runningHash: "old", freshHash: "new", ...steps }),
+    "delegated",
+  );
+  NodeAssert.equal(
+    await buildWithFreshScript({ runningHash: "same", freshHash: "same", ...steps }),
+    "built",
+  );
+  NodeAssert.deepEqual(calls, ["fresh", "here"]);
 });

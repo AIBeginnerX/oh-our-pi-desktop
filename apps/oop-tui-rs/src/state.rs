@@ -5,6 +5,7 @@
 
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashSet;
 
 pub use crate::thread::{LatestTurn, Session};
 use crate::thread::{Outcome, Thread};
@@ -137,6 +138,18 @@ pub struct PendingInput {
     pub questions: Vec<Question>,
 }
 
+/// Messages held before the oldest pages read by scrolling up are let go (see `Conversation::trim`).
+pub const HELD_MESSAGES: usize = 200;
+
+/// What one page of older turns added, and the cursor that reads it again.
+#[derive(Debug, Default, Clone)]
+struct Page {
+    cursor: String,
+    messages: HashSet<String>,
+    activities: HashSet<String>,
+    checkpoints: HashSet<String>,
+}
+
 /// The open thread, folded from its stream: a snapshot, then events (deduplicated by sequence).
 #[derive(Debug, Default)]
 pub struct Conversation {
@@ -152,6 +165,8 @@ pub struct Conversation {
     pub loading_older: bool,
     /// Counts changes, so a cache of rendered lines knows when it is stale.
     pub revision: u64,
+    /// The older pages read since the snapshot, newest first, so the oldest can be let go.
+    pages: Vec<Page>,
 }
 
 impl Conversation {
@@ -186,6 +201,7 @@ impl Conversation {
             return;
         };
         self.thread = thread;
+        self.pages.clear();
         self.loaded = true;
         self.deleted = false;
         self.sequence = snapshot["snapshotSequence"].as_u64();
@@ -214,7 +230,35 @@ impl Conversation {
     /// A page of older turns, read over HTTP, goes in front of what is held.
     pub fn apply_older(&mut self, snapshot: &Value) {
         if let Ok(page) = serde_json::from_value::<Thread>(snapshot["thread"].clone()) {
+            let held = |ids: HashSet<&str>, new: Vec<&str>| -> HashSet<String> {
+                new.into_iter()
+                    .filter(|id| !ids.contains(id))
+                    .map(str::to_string)
+                    .collect()
+            };
+            let t = &self.thread;
+            let added = Page {
+                cursor: self.older_cursor.clone().unwrap_or_default(),
+                messages: held(
+                    t.messages.iter().map(|m| m.id.as_str()).collect(),
+                    page.messages.iter().map(|m| m.id.as_str()).collect(),
+                ),
+                activities: held(
+                    t.activities.iter().map(|a| a.id.as_str()).collect(),
+                    page.activities.iter().map(|a| a.id.as_str()).collect(),
+                ),
+                checkpoints: held(
+                    t.checkpoints.iter().map(|c| c.turn_id.as_str()).collect(),
+                    page.checkpoints
+                        .iter()
+                        .map(|c| c.turn_id.as_str())
+                        .collect(),
+                ),
+            };
             self.thread.merge_older(page);
+            if !added.cursor.is_empty() {
+                self.pages.push(added);
+            }
         }
         self.has_more = snapshot["page"]["hasMore"].as_bool() == Some(true);
         self.older_cursor = snapshot["page"]["beforeCursor"]
@@ -222,6 +266,29 @@ impl Conversation {
             .map(str::to_string);
         self.loading_older = false;
         self.revision += 1;
+    }
+
+    /// Lets the oldest pages read by scrolling up go while more than `HELD_MESSAGES` are held,
+    /// and points the cursor back at them, so scrolling up reads them again. The snapshot's own
+    /// window stays: it has no cursor to be read back with. True when something was dropped.
+    pub fn trim(&mut self) -> bool {
+        let mut dropped = false;
+        while self.thread.messages.len() > HELD_MESSAGES
+            && let Some(page) = self.pages.pop()
+        {
+            let t = &mut self.thread;
+            t.messages.retain(|m| !page.messages.contains(&m.id));
+            t.activities.retain(|a| !page.activities.contains(&a.id));
+            t.checkpoints
+                .retain(|c| !page.checkpoints.contains(&c.turn_id));
+            self.older_cursor = Some(page.cursor);
+            self.has_more = true;
+            dropped = true;
+        }
+        if dropped {
+            self.revision += 1;
+        }
+        dropped
     }
 
     /// Approvals asked for and not yet answered, oldest first.
@@ -478,6 +545,45 @@ pub fn effort_of(config: &Value, selection: &Value) -> Option<String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// A snapshot or older page of `count` messages named `{prefix}0..`, whose next cursor is `next`.
+    fn page(prefix: &str, count: usize, next: Option<&str>) -> Value {
+        let messages: Vec<Value> = (0..count)
+            .map(|i| json!({"id": format!("{prefix}{i}"), "role": "user", "text": "x", "createdAt": "2026-01-01T00:00:00.000Z"}))
+            .collect();
+        json!({"snapshotSequence": 1, "page": {"hasMore": next.is_some(), "beforeCursor": next},
+            "thread": {"messages": messages, "activities": [], "checkpoints": []}})
+    }
+
+    #[test]
+    fn old_pages_are_let_go_oldest_first_and_read_again_from_their_cursor() {
+        let mut conv = Conversation::new("t");
+        conv.apply(&json!({"kind": "snapshot", "snapshot": page("s", 150, Some("c1"))}));
+        // Within the budget nothing goes, whatever was read.
+        conv.apply_older(&page("p1", 40, Some("c2")));
+        assert!(!conv.trim());
+        assert_eq!(conv.thread.messages.len(), 190);
+        conv.apply_older(&page("p2", 40, Some("c3")));
+        conv.apply_older(&page("p3", 40, None));
+        assert_eq!(conv.thread.messages.len(), 270);
+        assert!(!conv.has_more);
+        // Over it: pages go from the oldest until the budget holds, the snapshot's window stays.
+        assert!(conv.trim());
+        assert_eq!(conv.thread.messages.len(), 190);
+        assert!(conv.thread.messages.iter().any(|m| m.id == "p10"));
+        assert!(!conv.thread.messages.iter().any(|m| m.id.starts_with("p2")));
+        // Scrolling up asks for the page that was dropped, and gets it back in front.
+        assert!(conv.has_more);
+        assert_eq!(conv.older_cursor.as_deref(), Some("c2"));
+        conv.apply_older(&page("p2", 40, Some("c3")));
+        assert_eq!(conv.thread.messages.len(), 230);
+        assert_eq!(conv.thread.messages[0].id, "p20");
+        assert_eq!(conv.older_cursor.as_deref(), Some("c3"));
+        // A new snapshot forgets the pages: there is nothing left to give back.
+        conv.apply(&json!({"kind": "snapshot", "snapshot": page("s", 250, None)}));
+        assert!(!conv.trim());
+        assert_eq!(conv.thread.messages.len(), 250);
+    }
 
     fn event(sequence: u64, kind: &str, payload: Value) -> Value {
         json!({"kind": "event", "event": {"sequence": sequence, "type": kind, "occurredAt": "o", "payload": payload}})

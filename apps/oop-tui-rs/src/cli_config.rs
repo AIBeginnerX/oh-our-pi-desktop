@@ -50,6 +50,7 @@ fn show(key: &str, settings: &Settings) -> String {
         "sidebar" => flag(settings.sidebar),
         "workflow" => flag(settings.workflow),
         "pet" => flag(settings.pet),
+        "usage" => flag(settings.usage),
         _ => settings
             .language
             .clone()
@@ -60,7 +61,7 @@ fn show(key: &str, settings: &Settings) -> String {
 fn is_boolean(key: &str) -> bool {
     matches!(
         key,
-        "animations" | "banner" | "notify" | "sidebar" | "workflow" | "pet"
+        "animations" | "banner" | "notify" | "sidebar" | "workflow" | "pet" | "usage"
     )
 }
 
@@ -258,6 +259,7 @@ mod tests {
                 "sidebar = true",
                 "workflow = true",
                 "pet = true",
+                "usage = true",
                 "language = (default)",
             ]
         );
@@ -293,7 +295,7 @@ mod tests {
             assert_eq!(
                 ran.err,
                 [
-                    "Unknown setting: colour (theme, symbols, animations, banner, statusLine, notify, sidebar, workflow, pet, language)"
+                    "Unknown setting: colour (theme, symbols, animations, banner, statusLine, notify, sidebar, workflow, pet, usage, language)"
                 ]
             );
         }

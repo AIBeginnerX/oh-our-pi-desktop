@@ -136,7 +136,9 @@ import { CircleAlertIcon, PaperclipIcon, PlayIcon, ShieldIcon, XIcon } from "luc
 import { proposedPlanTitle } from "../../proposedPlan";
 import { isVideoAttachment } from "../../types";
 import { type ComposerPromptHistoryPosition } from "./composerPromptHistory";
+import { useContinueInNewThread } from "../../hooks/useContinueInNewThread";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
+import { shouldSuggestContextHandoff } from "../../lib/contextHandoff";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 // --------------------------------------------------------------------------
 // Component
@@ -1417,6 +1419,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const handleInterruptPrimaryAction = useCallback(() => {
     void onInterrupt();
   }, [onInterrupt]);
+  const continueInNewThread = useContinueInNewThread();
+  const offerContinueInNewThread =
+    routeKind === "server" &&
+    activeContextWindow !== null &&
+    shouldSuggestContextHandoff({
+      usedPercentage: activeContextWindow.usedPercentage,
+      driverKind: selectedProvider,
+      compactsAutomatically: activeContextWindow.compactsAutomatically,
+    });
+  const handleContinueInNewThread = useCallback(() => {
+    void continueInNewThread(routeThreadRef);
+  }, [continueInNewThread, routeThreadRef]);
+
   const handleImplementPlanInNewThreadPrimaryAction = useCallback(() => {
     void onImplementPlanInNewThread();
   }, [onImplementPlanInNewThread]);
@@ -2529,6 +2544,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     }
                     compactDisabledReason={resolvedCompactDisabledReason}
                     {...(compactCommandAvailable ? { onCompactContext: compactThreadContext } : {})}
+                    {...(offerContinueInNewThread
+                      ? { onContinueInNewThread: handleContinueInNewThread }
+                      : {})}
                   />
                 </div>
               </div>

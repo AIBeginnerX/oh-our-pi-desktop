@@ -3,6 +3,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as DesktopConnectionCatalogStore from "../../app/DesktopConnectionCatalogStore.ts";
+import * as DesktopGatewayPublisher from "../../gateway/DesktopGatewayPublisher.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 
@@ -22,7 +23,11 @@ export const setConnectionCatalog = DesktopIpc.makeIpcMethod({
   result: Schema.Boolean,
   handler: Effect.fn("desktop.ipc.connectionCatalog.set")(function* (catalog) {
     const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
-    return yield* store.set(catalog);
+    const stored = yield* store.set(catalog);
+    // A saved environment may have been added or removed; shared ones follow the catalog.
+    const publisher = yield* DesktopGatewayPublisher.DesktopGatewayPublisher;
+    yield* publisher.kick;
+    return stored;
   }),
 });
 
@@ -33,5 +38,7 @@ export const clearConnectionCatalog = DesktopIpc.makeIpcMethod({
   handler: Effect.fn("desktop.ipc.connectionCatalog.clear")(function* () {
     const store = yield* DesktopConnectionCatalogStore.DesktopConnectionCatalogStore;
     yield* store.clear;
+    const publisher = yield* DesktopGatewayPublisher.DesktopGatewayPublisher;
+    yield* publisher.kick;
   }),
 });

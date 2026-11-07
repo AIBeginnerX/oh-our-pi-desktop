@@ -5,7 +5,7 @@ import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
 import { describe, expect } from "vite-plus/test";
 
-import { ProviderInstanceId } from "@t3tools/contracts";
+import { ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
@@ -175,6 +175,147 @@ describe("TextGeneration.make", () => {
         expect(result.failure.operation).toBe("generateBranchName");
         expect(result.failure.detail).toContain("missing_instance");
       }
+    }),
+  );
+});
+
+describe("TextGeneration generation cache", () => {
+  const commitInput = (stagedPatch: string): TextGeneration.CommitMessageGenerationInput => ({
+    cwd: process.cwd(),
+    branch: "main",
+    stagedSummary: "M apps/server/src/git/GitManager.ts",
+    stagedPatch,
+    modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+  });
+
+  const prInput = (diffPatch: string): TextGeneration.PrContentGenerationInput => ({
+    cwd: process.cwd(),
+    baseBranch: "main",
+    headBranch: "feat/cache",
+    commitSummary: "Add generation cache",
+    diffSummary: "1 file changed",
+    diffPatch,
+    modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+  });
+
+  const makeGeneration = (
+    overrides: Partial<TextGeneration.TextGeneration["Service"]>,
+  ): Effect.Effect<TextGeneration.TextGeneration["Service"]> => {
+    const instanceId = ProviderInstanceId.make("codex");
+    return TextGeneration.make.pipe(
+      Effect.provideService(
+        ProviderInstanceRegistry.ProviderInstanceRegistry,
+        makeStubRegistry([makeStubInstance(instanceId, makeStubTextGeneration(overrides))]),
+      ),
+      Effect.provide(
+        Layer.mock(SourceControlProviderRegistry.SourceControlProviderRegistry)({
+          resolveLink: () => Effect.die("No link lookup expected"),
+        }),
+      ),
+    );
+  };
+
+  it.effect("serves two identical commit message requests from one model call", () =>
+    Effect.gen(function* () {
+      const calls: number[] = [];
+      const tg = yield* makeGeneration({
+        generateCommitMessage: () => {
+          calls.push(calls.length);
+          return Effect.succeed({ subject: "Add generation cache", body: "" });
+        },
+      });
+
+      const first = yield* tg.generateCommitMessage(commitInput("+ const a = 1;"));
+      const second = yield* tg.generateCommitMessage(commitInput("+ const a = 1;"));
+
+      expect(calls).toHaveLength(1);
+      expect(second).toEqual(first);
+    }),
+  );
+
+  it.effect("serves two identical change request requests from one model call", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const tg = yield* makeGeneration({
+        generatePrContent: () => {
+          calls += 1;
+          return Effect.succeed({ title: "Add generation cache", body: "## Summary" });
+        },
+      });
+
+      yield* tg.generatePrContent(prInput("+ const a = 1;"));
+      yield* tg.generatePrContent(prInput("+ const a = 1;"));
+
+      expect(calls).toBe(1);
+    }),
+  );
+
+  it.effect("calls the model again when the patch differs", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const tg = yield* makeGeneration({
+        generateCommitMessage: () => {
+          calls += 1;
+          return Effect.succeed({ subject: `Change ${calls}`, body: "" });
+        },
+      });
+
+      yield* tg.generateCommitMessage(commitInput("+ const a = 1;"));
+      const second = yield* tg.generateCommitMessage(commitInput("+ const b = 2;"));
+
+      expect(calls).toBe(2);
+      expect(second.subject).toBe("Change 2");
+    }),
+  );
+
+  it.effect("retries a failed generation instead of caching the failure", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const tg = yield* makeGeneration({
+        generateCommitMessage: () => {
+          calls += 1;
+          return calls === 1
+            ? Effect.fail(
+                new TextGenerationError({
+                  operation: "generateCommitMessage",
+                  detail: "CLI failed once.",
+                }),
+              )
+            : Effect.succeed({ subject: "Add generation cache", body: "" });
+        },
+      });
+
+      const failed = yield* tg
+        .generateCommitMessage(commitInput("+ const a = 1;"))
+        .pipe(Effect.result);
+      expect(Result.isFailure(failed)).toBe(true);
+
+      const retried = yield* tg.generateCommitMessage(commitInput("+ const a = 1;"));
+      expect(calls).toBe(2);
+      expect(retried.subject).toBe("Add generation cache");
+    }),
+  );
+
+  it.effect("does not cache thread titles because they differ from commit messages", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const tg = yield* makeGeneration({
+        generateThreadTitle: () => {
+          calls += 1;
+          return Effect.succeed({ title: "Review reset credit routing" });
+        },
+      });
+
+      const input: TextGeneration.ThreadTitleGenerationInput = {
+        cwd: process.cwd(),
+        message: "Review the reset change",
+        linkedContext: "Reset credits route through the hub.",
+        modelSelection: createModelSelection(ProviderInstanceId.make("codex"), "gpt-5"),
+      };
+      yield* tg.generateThreadTitle(input);
+      yield* tg.generateThreadTitle(input);
+
+      expect(calls).toBe(2);
     }),
   );
 });

@@ -27,6 +27,7 @@ import {
   BearerConnectionProfile,
   BearerConnectionRegistration,
   type ConnectionRegistration,
+  GatewayConnectionRegistration,
   PrimaryConnectionRegistration,
   RelayConnectionRegistration,
   SshConnectionProfile,
@@ -40,6 +41,7 @@ import {
   ConnectionTransientError,
   ConnectionBlockedError,
   BearerConnectionTarget,
+  GatewayConnectionTarget,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
   SshConnectionTarget,
@@ -1312,6 +1314,92 @@ describe("EnvironmentRegistry", () => {
         Effect.provideService(GitHubRoutingPermissions, permissions),
         Effect.scoped,
       );
+    }),
+  );
+
+  it.effect("keeps a directly registered environment over the host's gateway forward", () =>
+    Effect.gen(function* () {
+      const directTarget = new RelayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: "Direct relay environment",
+      });
+      const harness = yield* makeHarness([directTarget]);
+      const gatewayTarget = new GatewayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: "Forwarded",
+        httpBaseUrl: "https://host.example.test/_gw/forwarded",
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        yield* registry.reconcilePlatform([
+          new GatewayConnectionRegistration({ target: gatewayTarget }),
+        ]);
+
+        expect(
+          (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
+        ).toEqual(directTarget);
+        expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(true);
+        // Not platform-owned, so a later reconcile without it leaves the direct entry alone.
+        yield* registry.reconcilePlatform([]);
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(true);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
+  it.effect("drops a gateway environment when the host stops forwarding it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([]);
+      const gatewayTarget = new GatewayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: "Forwarded",
+        httpBaseUrl: "https://host.example.test/_gw/forwarded",
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.reconcilePlatform([
+          new GatewayConnectionRegistration({ target: gatewayTarget }),
+        ]);
+        expect(
+          (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
+        ).toEqual(gatewayTarget);
+        expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(false);
+
+        yield* registry.reconcilePlatform([]);
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(
+          false,
+        );
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
+  it.effect("lets a direct registration replace a gateway environment", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness([]);
+      const gatewayTarget = new GatewayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: "Forwarded",
+        httpBaseUrl: "https://host.example.test/_gw/forwarded",
+      });
+      const directTarget = new RelayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: "Direct relay environment",
+      });
+
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        const gateway = new GatewayConnectionRegistration({ target: gatewayTarget });
+        yield* registry.reconcilePlatform([gateway]);
+        yield* registry.register(new RelayConnectionRegistration({ target: directTarget }));
+        yield* registry.reconcilePlatform([gateway]);
+
+        expect(
+          (yield* SubscriptionRef.get(registry.entries)).get(TARGET.environmentId)?.target,
+        ).toEqual(directTarget);
+        expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(true);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
 

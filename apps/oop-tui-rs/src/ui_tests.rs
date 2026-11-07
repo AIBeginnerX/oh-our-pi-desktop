@@ -1887,3 +1887,56 @@ fn dag_agents_is_gone_from_the_commands_but_its_tab_is_still_there() {
     );
     assert_eq!(app.side_view, crate::app::Side::Agents);
 }
+
+fn with_usage(app: &mut App) {
+    let reset = crate::text::iso_now();
+    app.config["providers"] = json!([{"instanceId": "claude", "displayName": "Claude", "enabled": true,
+        "installed": true, "usageLimits": {"checkedAt": reset, "windows": [
+            {"id": "s", "kind": "session", "label": "Session", "usedPercent": 62.0},
+            {"id": "w", "kind": "weekly", "label": "Weekly", "usedPercent": 95.0}]}}]);
+}
+
+#[test]
+fn the_usage_panel_sits_under_the_list_in_a_narrow_left_pane() {
+    let mut app = open_conversation();
+    with_usage(&mut app);
+    let rows = screen(&app, 120, 30);
+    let list = app.list_hits.borrow().0;
+    let at = rows
+        .iter()
+        .position(|r| r.contains("Usage"))
+        .expect("title");
+    assert!(at > 10 && at as u16 >= list.bottom(), "{at} {list:?}");
+    assert!(rows[at + 1].contains("Claude"), "{}", rows[at + 1]);
+    assert!(
+        rows[at + 2].contains("Session █████████▉░░░░░░ 62%"),
+        "{}",
+        rows[at + 2]
+    );
+    assert!(
+        rows[at + 3].contains("Weekly  ███████████████▎ 95%"),
+        "{}",
+        rows[at + 3]
+    );
+    assert!(app.usage_drawn.borrow().is_some());
+    // The list rect is the top part only, so a click below it is not the list's.
+    assert_eq!(list.height, 30 - 1 - 4);
+    assert!(
+        !crate::usage_panel::changed(&app),
+        "nothing moved since the draw"
+    );
+}
+
+#[test]
+fn the_usage_panel_is_gone_when_off_or_the_pane_is_short() {
+    let mut app = open_conversation();
+    with_usage(&mut app);
+    app.settings.usage = false;
+    let rows = screen(&app, 120, 30);
+    assert!(!rows.iter().any(|r| r.contains("Claude")));
+    assert!(app.usage_drawn.borrow().is_none());
+    assert!(!crate::usage_panel::changed(&app));
+    app.settings.usage = true;
+    let rows = screen(&app, 120, 11);
+    assert!(!rows.iter().any(|r| r.contains("Claude")));
+}

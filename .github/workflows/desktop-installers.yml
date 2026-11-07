@@ -442,9 +442,11 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Visual Studio Installer failed with exit code $($process.ExitCode)." }
 
       # scripts/build-terminal-archive.ts imports build-cli-archive.ts, so the scripts package
-      # is part of the filter along with the server.
+      # is part of the filter along with the server. That chain reaches
+      # apps/desktop/src/updates/LocalPkgTrustPolicy.ts, which resolves `effect` from
+      # apps/desktop/node_modules, so the desktop package is installed too.
       - name: Install server dependencies
-        run: vp install --filter=t3... --filter=@t3tools/scripts...
+        run: vp install --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
 
       - name: Build the server
         run: vp run --filter t3 build

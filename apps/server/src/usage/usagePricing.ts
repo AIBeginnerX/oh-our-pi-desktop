@@ -176,11 +176,47 @@ const UNPRICEABLE_MODELS = new Set([
   "fable",
 ]);
 
+/** Gateway prefixes that only route to a model and never change its price. */
+const ROUTING_PREFIXES = new Set(["openai", "anthropic", "devin", "openrouter"]);
+
+/**
+ * Where a model family's first-party price lives in LiteLLM when the bare name
+ * is missing, because resellers list the same model at different rates.
+ */
+const FIRST_PARTY_HOSTS: ReadonlyArray<readonly [family: string, host: string]> = [
+  ["grok-", "xai/"],
+  ["glm-", "zai/"],
+  ["minimax-", "minimax/"],
+  ["kimi-", "moonshot/"],
+  ["gemini-", "gemini/"],
+  ["deepseek-", "deepseek/"],
+];
+
+/**
+ * Finds a model's rate. An exact key always wins; otherwise a known routing
+ * prefix is dropped, then the family's first-party host is tried. Unknown
+ * prefixes (`other/claude-fable-5`) never fall back, since they may be a
+ * reseller with its own price.
+ */
 export function lookupRate(table: RateTable, model: string): ModelRate | null {
   const key = stripVariantSuffix(normalizeRateKey(model));
   const bareName = bareModelName(key);
   if (bareName.length === 0 || UNPRICEABLE_MODELS.has(bareName)) return null;
-  return table.get(key) ?? null;
+
+  const exact = table.get(key);
+  if (exact !== undefined) return exact;
+
+  const slash = key.indexOf("/");
+  const routed = slash !== -1 && ROUTING_PREFIXES.has(key.slice(0, slash));
+  const unrouted = routed ? key.slice(slash + 1) : key;
+  if (routed) {
+    const stripped = table.get(unrouted);
+    if (stripped !== undefined) return stripped;
+  }
+  if (unrouted.includes("/")) return null;
+
+  const host = FIRST_PARTY_HOSTS.find(([family]) => unrouted.startsWith(family))?.[1];
+  return host === undefined ? null : (table.get(host + unrouted) ?? null);
 }
 
 /** The parts of a transcript record that decide its price. */

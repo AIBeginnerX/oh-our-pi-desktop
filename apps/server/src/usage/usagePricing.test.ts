@@ -174,7 +174,53 @@ describe("usage pricing", () => {
     expect(lookupRate(table, "claude-fable-5-1[1m]")).toEqual(
       lookupRate(table, "claude-fable-5-1"),
     );
-    expect(lookupRate(table, "anthropic/Claude-Fable-5-1[1m]")).toBeNull();
+    expect(lookupRate(table, "other/Claude-Fable-5-1[1m]")).toBeNull();
+  });
+
+  describe("routed and host-prefixed ids", () => {
+    const table = parseRateTable({
+      "gpt-6-astra": rate(1),
+      "claude-opus-5": rate(2),
+      "minimax/minimax-m3": rate(3),
+      "zai/glm-5": rate(4),
+      "zai/glm-5.1": rate(5),
+      "zai/glm-5.2": rate(6),
+      "zai/glm-4.7": rate(7),
+      "xai/grok-4.7": rate(8),
+      "moonshot/kimi-k3": rate(9),
+      "reseller/glm-5": rate(40),
+    });
+    const input = (model: string) => lookupRate(table, model)?.inputCostPerToken;
+
+    it("drops a routing prefix", () => {
+      expect(input("openai/gpt-6-astra")).toBe(1);
+      expect(input("devin/claude-opus-5")).toBe(2);
+      expect(input("anthropic/claude-opus-5")).toBe(2);
+    });
+
+    it("tries the family's first-party host, case-insensitively", () => {
+      expect(input("MiniMax-M3")).toBe(3);
+      expect(input("glm-5")).toBe(4);
+      expect(input("glm-5.1")).toBe(5);
+      expect(input("glm-5.2")).toBe(6);
+      expect(input("GLM-4.7")).toBe(7);
+      expect(input("grok-4.7")).toBe(8);
+      expect(input("kimi-k3")).toBe(9);
+    });
+
+    it("lets an exact key win over a fallback", () => {
+      expect(input("reseller/glm-5")).toBe(40);
+      const withBare = parseRateTable({ "glm-5": rate(1), "zai/glm-5": rate(4) });
+      expect(lookupRate(withBare, "glm-5")?.inputCostPerToken).toBe(1);
+    });
+
+    it("keeps unknown hosts and unpriceable names unpriced", () => {
+      expect(lookupRate(table, "other/glm-5.1")).toBeNull();
+      expect(lookupRate(table, "glm-9")).toBeNull();
+      expect(lookupRate(table, "openai/opus")).toBeNull();
+      expect(lookupRate(table, "<synthetic>")).toBeNull();
+      expect(lookupRate(parseRateTable({ "zai/opus": rate(1) }), "opus")).toBeNull();
+    });
   });
 
   it("adds a bare alias when every qualified entry has the same rate", () => {

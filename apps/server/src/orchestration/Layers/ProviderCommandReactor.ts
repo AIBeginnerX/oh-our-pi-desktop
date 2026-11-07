@@ -99,6 +99,7 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 export { providerErrorLabelFromInstanceHint } from "./ProviderCommandReactor.helpers.ts";
+import { ProviderCapacity } from "../../provider/Services/ProviderCapacity.ts";
 import { makeThreadTitleOperations } from "./ProviderCommandReactor.titles.ts";
 import {
   isProviderAdapterProcessError,
@@ -131,6 +132,8 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerAuthService = yield* ProviderAuthService;
   const providerService = yield* ProviderService;
+  // Optional so focused reactor tests need not build the capacity layer; production always has it.
+  const capacity = yield* Effect.serviceOption(ProviderCapacity);
   const providerRegistry = yield* ProviderRegistry;
   const memorySendGate = yield* ProjectMemorySendGate;
   const skillTrialDelivery = yield* ProjectSkillTrialDelivery;
@@ -970,18 +973,23 @@ const make = Effect.gen(function* () {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
     }) =>
-      providerService
-        .startSession(threadId, {
-          threadId,
-          ...(preferredProvider ? { provider: preferredProvider } : {}),
-          providerInstanceId: desiredInstanceId,
-          ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-          ...(sessionTitle ? { title: sessionTitle } : {}),
-          modelSelection: desiredModelSelection,
-          ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-          runtimeMode: desiredRuntimeMode,
-        })
-        .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
+      // A new process may push the machine past its live-session budget; stop idle ones first.
+      (Option.isSome(capacity) ? capacity.value.makeRoom(threadId) : Effect.void).pipe(
+        Effect.andThen(
+          providerService
+            .startSession(threadId, {
+              threadId,
+              ...(preferredProvider ? { provider: preferredProvider } : {}),
+              providerInstanceId: desiredInstanceId,
+              ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+              ...(sessionTitle ? { title: sessionTitle } : {}),
+              modelSelection: desiredModelSelection,
+              ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+              runtimeMode: desiredRuntimeMode,
+            })
+            .pipe(Effect.tap(() => refreshWorkspaceSnapshot)),
+        ),
+      );
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {
@@ -1214,7 +1222,7 @@ const make = Effect.gen(function* () {
     if (goalKey === null) sentGoalNotes.delete(input.threadId);
     else sentGoalNotes.set(input.threadId, goalKey);
     const normalizedInput = toNonEmptyProviderInput(
-      [freshGoalNote, freshBrief, crewOffNote, input.messageText]
+      [freshBrief, freshGoalNote, crewOffNote, input.messageText]
         .filter((part) => part !== null)
         .join("\n\n"),
     );

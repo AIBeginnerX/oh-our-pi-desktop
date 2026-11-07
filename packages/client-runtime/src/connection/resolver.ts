@@ -30,6 +30,7 @@ import {
 import type {
   BearerConnectionTarget,
   ConnectionTarget,
+  GatewayConnectionTarget,
   PreparedConnection,
   PrimaryConnectionTarget,
   RelayConnectionTarget,
@@ -100,6 +101,38 @@ const makePrimaryBroker = Effect.fn("clientRuntime.connection.broker.makePrimary
       target,
     } satisfies PreparedConnection;
   });
+});
+
+/**
+ * The WebSocket URL of a gateway-forwarded environment: the host origin's ws(s) scheme plus the
+ * gateway path plus `/ws`. The host forwards the upgrade with the upstream bearer, so no ticket
+ * is requested here; the same-origin cookie authenticates the hop to the host.
+ */
+export function gatewaySocketUrl(
+  target: GatewayConnectionTarget,
+  clientMetadata: AuthClientPresentationMetadata | undefined,
+): string {
+  const url = new URL(target.httpBaseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = url.pathname.replace(/\/+$/u, "") + "/ws";
+  url.search = "";
+  url.hash = "";
+  appendClientConnectionParams(url, clientMetadata, "direct");
+  return url.toString();
+}
+
+const makeGatewayBroker = Effect.fn("clientRuntime.connection.broker.makeGateway")(function* () {
+  const presentation = yield* ClientCapabilities.ClientPresentation;
+
+  return (target: GatewayConnectionTarget) =>
+    Effect.succeed({
+      environmentId: target.environmentId,
+      label: target.label,
+      httpBaseUrl: target.httpBaseUrl,
+      socketUrl: gatewaySocketUrl(target, presentation.metadata),
+      httpAuthorization: null,
+      target,
+    } satisfies PreparedConnection);
 });
 
 const makeBearerBroker = Effect.fn("clientRuntime.connection.broker.makeBearer")(function* () {
@@ -240,6 +273,7 @@ const makeSshBroker = Effect.fn("clientRuntime.connection.broker.makeSsh")(funct
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const primary = yield* makePrimaryBroker();
+  const gateway = yield* makeGatewayBroker();
   const bearer = yield* makeBearerBroker();
   const relay = yield* makeRelayBroker();
   const ssh = yield* makeSshBroker();
@@ -263,6 +297,8 @@ export const make = Effect.gen(function* () {
           return relay(target);
         case "SshConnectionTarget":
           return ssh({ ...entry, target });
+        case "GatewayConnectionTarget":
+          return gateway(target);
       }
     })();
     const descriptor = yield* fetchRemoteEnvironmentDescriptor({

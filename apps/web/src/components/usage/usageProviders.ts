@@ -70,3 +70,19 @@ export function providersWithUsage(
   );
   return PROVIDER_ORDER.filter((provider) => active.has(provider));
 }
+
+/**
+ * Providers billed by subscription or credits, where a per-token API price
+ * says nothing about the bill. Claude and Codex are left out: a transcript
+ * does not record whether it came from a subscription login or an API key.
+ */
+const PLAN_PROVIDERS: ReadonlySet<UsageProviderKind> = new Set([
+  "cursor",
+  "zcode",
+  "opencode",
+  "antigravity",
+]);
+
+export function isPlanProvider(provider: UsageProviderKind): boolean {
+  return PLAN_PROVIDERS.has(provider);
+}

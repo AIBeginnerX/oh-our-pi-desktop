@@ -124,6 +124,12 @@ const CrewDelegateInput = Schema.Struct({
         'shared (default) works in this same workspace. Use "worktree" for parallel tasks that edit code, so they cannot clobber each other: the member starts from the current tracked state (committed and uncommitted tracked changes, not untracked or ignored files such as node_modules) in its own git worktree, and its changes are applied back to this workspace when it finishes. A conflict keeps the worktree and says so in the report. "candidate" also works in its own worktree but is never applied: the patch and worktree are kept and named in the report so you can compare candidates and pick (see the Arena note in your crew brief).',
     }),
   ),
+  size: Schema.optional(
+    Schema.Literals(["small", "normal"]).annotate({
+      description:
+        "normal (default) uses the role's own model. \"small\" runs a mechanical one-file edit, lookup, or rename on the fast model instead, unless the user picked that role's model.",
+    }),
+  ),
   differentFrom: Schema.optional(
     Schema.Array(TrimmedNonEmptyString).check(Schema.isMaxLength(4)).annotate({
       description:

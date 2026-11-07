@@ -12,12 +12,15 @@ mod cli_text;
 mod cli_update;
 mod clipboard;
 mod cmd;
+mod cmd_continue;
+mod cmd_copy;
 mod cmd_crew;
 mod cmd_goal;
 mod cmd_history;
 mod cmd_implement;
 mod cmd_misc;
 mod cmd_provider;
+mod cmd_skills;
 mod cmd_stats;
 mod commands;
 mod composer;
@@ -73,6 +76,7 @@ mod thread;
 mod transcript;
 mod ui;
 mod update;
+mod usage_panel;
 mod wire;
 mod work_scope;
 mod workflow_panel;
@@ -575,6 +579,7 @@ fn copy(job: app::CopyJob, tx: tokio::sync::mpsc::UnboundedSender<Msg>) {
             osc52_sent: sent,
             tool,
             too_large: !sent,
+            what: job.what.clone(),
         }));
     });
 }
@@ -694,6 +699,15 @@ async fn status(home: Option<String>, address: Option<String>) -> Result<(), Str
     Ok(())
 }
 
+/// Shortest time between two drawn frames (about 30 per second): a stream of deltas is drawn at
+/// this pace, not once per delta.
+const FRAME: Duration = Duration::from_millis(33);
+
+/// How much longer to wait before a frame may be drawn, `None` when it may be drawn now.
+fn frame_wait(since_last_draw: Duration) -> Option<Duration> {
+    FRAME.checked_sub(since_last_draw).filter(|d| !d.is_zero())
+}
+
 async fn run(
     home_flag: Option<String>,
     address: Option<String>,
@@ -768,13 +782,17 @@ async fn run(
     let mut reveal = tokio::time::interval(Duration::from_millis(60));
     reveal.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut dirty = true;
+    let mut last_draw = std::time::Instant::now() - FRAME;
     let result = loop {
         chart::set_animations(app.settings.animations);
-        if dirty {
+        // A changed screen waits out the rest of the frame; nothing changed, nothing is armed.
+        let wait = dirty.then(|| frame_wait(last_draw.elapsed())).flatten();
+        if dirty && wait.is_none() {
             if let Err(error) = terminal.draw(|frame| ui::draw(frame, &app)) {
                 break Err(error.to_string());
             }
             dirty = false;
+            last_draw = std::time::Instant::now();
         }
         title.sync(app.window_title(), &mut std::io::stdout());
         tokio::select! {
@@ -813,7 +831,8 @@ async fn run(
                 }
                 dirty = true;
             }
-            _ = ticker.tick() => dirty = app.on_tick(),
+            _ = tokio::time::sleep(wait.unwrap_or_default()), if wait.is_some() => {}
+            _ = ticker.tick() => dirty |= app.on_tick(),
             // The conversation's lines are cached by revision; a reveal frame is a new revision.
             _ = reveal.tick(), if chart::animating() => {
                 app.conv.revision += 1;
@@ -867,6 +886,17 @@ mod tests {
             assert_eq!(version(), release["version"].as_str().unwrap());
         }
         assert!(version().split('.').count() == 3);
+    }
+
+    #[test]
+    fn a_frame_is_held_back_until_a_frame_has_passed() {
+        assert_eq!(frame_wait(Duration::ZERO), Some(FRAME));
+        assert_eq!(
+            frame_wait(Duration::from_millis(10)),
+            Some(Duration::from_millis(23))
+        );
+        assert_eq!(frame_wait(FRAME), None);
+        assert_eq!(frame_wait(Duration::from_secs(5)), None);
     }
 
     #[test]

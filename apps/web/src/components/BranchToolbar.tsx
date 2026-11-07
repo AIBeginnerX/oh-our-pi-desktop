@@ -264,6 +264,9 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
                     <span className="flex min-w-0 items-center gap-1.5">
                       <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                       <span className="min-w-0 truncate">{env.label}</span>
+                      {env.hint ? (
+                        <span className="shrink-0 text-muted-foreground text-xs">{env.hint}</span>
+                      ) : null}
                     </span>
                   </MenuRadioItem>
                 ))}

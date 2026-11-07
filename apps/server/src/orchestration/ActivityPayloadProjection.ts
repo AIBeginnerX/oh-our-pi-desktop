@@ -554,7 +554,9 @@ function dropStaleContextWindowActivities(
  * finally the itemType/title/detail triple. Rows without any identity remain
  * untouched.
  */
-function toolLifecycleIdentity(activity: OrchestrationThreadActivity): string | null {
+export function toolLifecycleIdentity(
+  activity: Pick<OrchestrationThreadActivity, "payload" | "summary">,
+): string | null {
   const payload = asRecord(activity.payload);
   if (!payload) {
     return null;
@@ -643,6 +645,55 @@ function dropSupersededToolUpdatedActivities(
     const indices = completionIndicesByKey.get(`${activity.turnId ?? ""}\u0000${identity}`);
     return !indices?.some((completionIndex) => completionIndex > index);
   });
+}
+
+/**
+ * Whether `completion` makes the stored `update` row redundant under the same
+ * rule `dropSupersededToolUpdatedActivities` applies on the read path: same
+ * turn, same lifecycle identity, completion after the update in thread order
+ * (rows without a sequence first, then sequence, createdAt, activityId).
+ */
+export function isSupersededToolUpdate(
+  update: {
+    readonly activityId: string;
+    readonly turnId: string | null;
+    readonly summary: string;
+    readonly payload: unknown;
+    readonly sequence?: number | undefined;
+    readonly createdAt: string;
+  },
+  completion: {
+    readonly activityId: string;
+    readonly turnId: string | null;
+    readonly summary: string;
+    readonly payload: unknown;
+    readonly sequence?: number | undefined;
+    readonly createdAt: string;
+  },
+): boolean {
+  if (update.turnId !== completion.turnId) {
+    return false;
+  }
+  const identity = toolLifecycleIdentity(update);
+  if (identity === null || identity !== toolLifecycleIdentity(completion)) {
+    return false;
+  }
+  const rank = (row: { readonly sequence?: number | undefined }) =>
+    row.sequence === undefined ? 0 : 1;
+  return (
+    (rank(completion) - rank(update) ||
+      (completion.sequence ?? 0) - (update.sequence ?? 0) ||
+      (completion.createdAt < update.createdAt
+        ? -1
+        : completion.createdAt > update.createdAt
+          ? 1
+          : 0) ||
+      (completion.activityId < update.activityId
+        ? -1
+        : completion.activityId > update.activityId
+          ? 1
+          : 0)) > 0
+  );
 }
 
 export function projectThreadDetailSnapshot(

@@ -39,6 +39,9 @@ pub const CONFIG_RPC: &str = "server.getConfig";
 
 /// Turns a thread opens with, and the size of each page of older ones.
 pub const TURN_WINDOW: u32 = 20;
+/// Threads viewed lately whose folded state is kept, so going back to one resumes from where it
+/// was left instead of reading its window again and laying it out from nothing.
+pub const RECENT_THREADS: usize = 4;
 /// Lines one wheel notch moves.
 const WHEEL_LINES: usize = 3;
 /// How long the header keeps a tip before the next one.
@@ -154,6 +157,8 @@ pub struct CopyJob {
     pub text: String,
     pub osc52: Option<String>,
     pub plan: clipboard::Plan,
+    /// What the text is, in words, for the notice ("1 command (2 lines)").
+    pub what: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -326,6 +331,8 @@ pub struct App {
     /// Mocha, the header pet: what she remembers, and the picture last drawn.
     pet_memory: pet::Memory,
     pub pet_shown: Cell<Option<(pet::PetState, usize)>>,
+    /// The usage panel as last drawn: its pane width and height, and its rows. `None` while hidden.
+    pub usage_drawn: RefCell<Option<(u16, u16, Vec<String>)>>,
     /// A fixed clock for the pet and the header's tips, in tests.
     pub pet_clock: Option<i64>,
     /// The tip last drawn; the app repaints for a tip only when the next one differs.
@@ -360,6 +367,10 @@ pub struct App {
     /// What `/undo`, `/diff` and `/history` are waiting for (see `cmd_history.rs`).
     pub(crate) threadops: crate::cmd_history::State,
     cache: RefCell<Option<Cached>>,
+    /// The laid-out blocks behind `cache`, so a new revision re-lays-out only what changed.
+    blocks: RefCell<crate::transcript::BlockCache>,
+    /// Threads left lately, least recently viewed first (see `RECENT_THREADS`).
+    recent: Vec<Conversation>,
     tx: UnboundedSender<Msg>,
     shell_task: Option<JoinHandle<()>>,
     thread_task: Option<JoinHandle<()>>,
@@ -460,6 +471,7 @@ impl App {
             panel_scroll: Cell::new(0),
             pet_memory: pet::Memory::new(now_ms()),
             pet_shown: Cell::new(None),
+            usage_drawn: RefCell::new(None),
             pet_clock: cfg!(test).then_some(0), // tests must not see the wall clock turn the tips
             tip_shown: Cell::new(None),
             in_oop_terminal: false,
@@ -481,6 +493,8 @@ impl App {
             sent: None,
             threadops: Default::default(),
             cache: RefCell::new(None),
+            blocks: RefCell::new(Default::default()),
+            recent: Vec::new(),
             tx,
             shell_task: None,
             thread_task: None,
@@ -650,11 +664,12 @@ impl App {
         {
             return c.lines.clone();
         }
-        let lines = Rc::new(crate::transcript::build(
+        let lines = Rc::new(crate::transcript::build_cached(
             &self.conv.thread,
             width,
             &self.theme,
             &self.sym,
+            &mut self.blocks.borrow_mut(),
         ));
         *cache = Some(Cached {
             thread_id: self.conv.thread_id.clone(),
@@ -746,6 +761,9 @@ impl App {
                 origin,
                 bearer,
             } => {
+                if self.server.as_ref() != Some(&server) {
+                    self.recent.clear();
+                }
                 self.rpc = Some(rpc);
                 self.config = config;
                 self.server = Some(server);
@@ -984,7 +1002,20 @@ impl App {
         self.question = QuestionState::default();
     }
 
+    /// Keeps the open thread's state for a quick return, and the last few only.
+    fn park_conversation(&mut self) {
+        let conv = std::mem::take(&mut self.conv);
+        if conv.loaded && !conv.deleted && !conv.thread_id.is_empty() {
+            self.recent.retain(|c| c.thread_id != conv.thread_id);
+            self.recent.push(conv);
+            if self.recent.len() > RECENT_THREADS {
+                self.recent.remove(0);
+            }
+        }
+    }
+
     pub(crate) fn start_draft(&mut self, project_id: &str) {
+        self.park_conversation();
         self.leave_thread();
         self.draft_id = None;
         self.draft_crew = None;
@@ -995,10 +1026,23 @@ impl App {
     }
 
     pub(crate) fn open_thread(&mut self, id: &str) {
+        self.park_conversation();
         self.leave_thread();
         self.visited.insert(id.to_string(), now_ms());
         self.switch_to(Active::Thread(id.to_string()));
-        self.conv = Conversation::new(id);
+        // A thread left lately comes back as it was and catches up from its last sequence; one the
+        // shell no longer lists is read afresh.
+        let known = self.shell.loaded && self.shell.threads.iter().any(|t| t.id == id);
+        let parked = self.recent.iter().position(|c| c.thread_id == id);
+        self.conv = match parked {
+            Some(at) if known => {
+                let mut conv = self.recent.remove(at);
+                conv.loading_older = false;
+                conv.revision += 1;
+                conv
+            }
+            _ => Conversation::new(id),
+        };
         self.focus = Focus::Composer;
         self.subscribe_thread(id);
     }
@@ -1607,11 +1651,17 @@ impl App {
 
     /// Queues `text` for the clipboard: OSC 52 and the platform's tool, as the main loop carries out.
     pub fn copy_text(&mut self, text: String) {
+        self.copy_named(text, None);
+    }
+
+    /// `copy_text`, with a name for the notice to give the text.
+    pub fn copy_named(&mut self, text: String, what: Option<String>) {
         let osc52 = clipboard::osc52(&text, self.clip_plan.tmux, clipboard::OSC52_MAX_BASE64);
         self.copy_job = Some(CopyJob {
             text,
             osc52,
             plan: self.clip_plan.clone(),
+            what,
         });
     }
 
@@ -2218,7 +2268,7 @@ impl App {
 
     pub(crate) fn submit(&mut self) {
         let text = self.input.text();
-        let trimmed = text.trim().to_string();
+        let mut trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
@@ -2227,10 +2277,15 @@ impl App {
             let argument = trimmed[word.len()..].trim().to_string();
             if self.run_slash(&word[1..].to_lowercase(), &argument) {
                 self.input.take(true);
-            } else {
-                self.notice = Some(tr("notice.unknownCommand").into());
+                return;
             }
-            return;
+            // Not ours: an installed provider skill goes out as the `$name` mention the composer
+            // inserts, which each provider turns into its own invocation.
+            let Some(name) = self.provider_skill(&word[1..]) else {
+                self.notice = Some(tr("notice.unknownCommand").into());
+                return;
+            };
+            trimmed = format!("${name} {argument}").trim_end().to_string();
         }
         match &self.active {
             Active::None => self.notice = Some(tr("notice.pickFirst").into()),
@@ -2245,6 +2300,19 @@ impl App {
                 }
             }
         }
+    }
+
+    /// The name of the provider skill a typed `/word` calls, if some provider lists it as enabled
+    /// and invocable by the user.
+    fn provider_skill(&self, word: &str) -> Option<String> {
+        self.config["providers"]
+            .as_array()?
+            .iter()
+            .flat_map(|p| p["skills"].as_array().into_iter().flatten())
+            .filter(|k| k["enabled"].as_bool().unwrap_or(true) && k["userInvocable"] != false)
+            .filter_map(|k| k["name"].as_str())
+            .find(|name| name.eq_ignore_ascii_case(word))
+            .map(str::to_string)
     }
 
     /// Runs a `/command`; false when it is not one.
@@ -2341,6 +2409,10 @@ impl App {
                     );
                 }
                 None => self.notice = Some(tr("notice.petUsage").into()),
+            },
+            "usage" => match flag_word(argument) {
+                Some(on) => crate::cmd_misc::set_usage(self, on),
+                None => self.notice = Some(tr("notice.usageUsage").into()),
             },
             "mouse" => match flag_word(argument) {
                 Some(on) => {
@@ -2460,7 +2532,17 @@ impl App {
             self.awaiting = None;
         }
         let replay_moved = crate::replay::tick(self);
-        pet_changed
+        // The usage panel moves the screen only when a countdown in it reads differently.
+        let usage_changed = crate::usage_panel::changed(self);
+        // Older pages are let go only from the bottom, with nothing selected or being read in.
+        let trimmed = self.scroll.get() == 0
+            && !self.selection.active()
+            && !self.conv.loading_older
+            && !crate::cmd_history::loading(self)
+            && self.conv.trim();
+        trimmed
+            || pet_changed
+            || usage_changed
             || tip_changed
             || replay_moved
             || self.settings.animations && (self.request_pending() || crate::side::is_live(self))
@@ -2523,7 +2605,7 @@ fn flag_word(argument: &str) -> Option<Option<bool>> {
 }
 
 /// What to tell the user about a finished copy, in the words of the TypeScript terminal.
-fn copy_notice(outcome: &clipboard::Outcome) -> String {
+pub(crate) fn copy_notice(outcome: &clipboard::Outcome) -> String {
     let count = outcome.chars.to_string();
     let why = |why: &Why| {
         tr(match why {
@@ -2533,7 +2615,15 @@ fn copy_notice(outcome: &clipboard::Outcome) -> String {
         })
     };
     let fill = |key: &str, extra: &[(&str, &str)]| {
-        let mut text = tr(key).replace("{count}", &count);
+        // A named copy ("1 command (2 lines)") says that instead of a character count.
+        let key = match (&outcome.what, key) {
+            (Some(_), "copy.done") => "copy.doneWhat",
+            (Some(_), "copy.terminal") => "copy.terminalWhat",
+            _ => key,
+        };
+        let mut text = tr(key)
+            .replace("{count}", &count)
+            .replace("{what}", outcome.what.as_deref().unwrap_or(""));
         for (name, value) in extra {
             text = text.replace(&format!("{{{name}}}"), value);
         }

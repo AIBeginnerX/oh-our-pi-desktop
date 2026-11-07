@@ -31,8 +31,10 @@ import {
   layer as sendLedgerLayer,
 } from "../persistence/ProjectMemorySendLedger.ts";
 
-// Driver allowlist injected per build. Production default is the empty set;
-// there is no settings or environment switch. Tests inject the real set
+// Driver allowlist injected per build. The Reference default is the empty
+// set for layer graphs that do not opt in; the production server provides
+// PROJECT_MEMORY_SEND_DRIVER_KINDS (claudeAgent, codex) in server.ts. There
+// is no settings or environment switch. Tests inject the real set
 // through this reference so commit paths exercise the real gate.
 export const ProjectMemorySendPolicy = Context.Reference<{
   readonly driverKinds: ReadonlySet<ProviderDriverKind>;

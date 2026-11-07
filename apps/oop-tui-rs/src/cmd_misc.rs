@@ -77,6 +77,23 @@ pub fn theme_picked(app: &mut App, pick: &Pick, index: usize) {
     }
 }
 
+/// `/usage`: shows or hides the provider usage panel (no argument toggles) and keeps the choice.
+pub fn set_usage(app: &mut App, on: Option<bool>) {
+    let on = on.unwrap_or(!app.settings.usage);
+    app.settings.usage = on;
+    let saved =
+        settings_write::write_setting(&config_dir(app).join("settings.json"), "usage", json!(on));
+    let said = crate::i18n::tr(if on {
+        "notice.usageOn"
+    } else {
+        "notice.usageOff"
+    });
+    app.notice = Some(match saved {
+        Ok(()) => said.to_string(),
+        Err(error) => format!("{said} ({error})"),
+    });
+}
+
 /// Failing, or saving with a caveat, is said as a notice; a plain success is the record in the
 /// conversation (`applyTheme`).
 fn apply_theme(app: &mut App, name: &str, env: &dyn Fn(&str) -> Option<String>) {

@@ -59,6 +59,7 @@ import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
+import { isSupersededToolUpdate, toolLifecycleIdentity } from "../ActivityPayloadProjection.ts";
 import {
   attachmentRelativePath,
   parseAttachmentIdFromRelativePath,
@@ -1350,6 +1351,33 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(sequence !== undefined ? { sequence } : {}),
             createdAt: event.payload.activity.createdAt,
           });
+          if (event.payload.activity.kind === "tool.completed") {
+            // The completion carries the final state; its in-flight updates
+            // are redundant, and the read path would filter them anyway.
+            const completion = {
+              activityId: event.payload.activity.id,
+              turnId: event.payload.activity.turnId,
+              summary: event.payload.activity.summary,
+              payload: event.payload.activity.payload,
+              sequence,
+              createdAt: event.payload.activity.createdAt,
+            };
+            const identity = toolLifecycleIdentity(completion);
+            if (identity !== null) {
+              const candidates =
+                yield* projectionThreadActivityRepository.listToolUpdatedCandidates({
+                  threadId: event.payload.threadId,
+                  turnId: completion.turnId,
+                  toolCallId: identity.startsWith("id:") ? identity.slice(3) : null,
+                });
+              yield* projectionThreadActivityRepository.deleteByActivityIds({
+                threadId: event.payload.threadId,
+                activityIds: candidates
+                  .filter((update) => isSupersededToolUpdate(update, completion))
+                  .map((update) => update.activityId),
+              });
+            }
+          }
           return;
         }
 

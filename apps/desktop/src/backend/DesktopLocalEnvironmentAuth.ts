@@ -46,16 +46,15 @@ export class DesktopLocalEnvironmentAuth extends Context.Service<
 export const make = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const httpClient = yield* HttpClient.HttpClient;
-  const tokenRef = yield* Ref.make(Option.none<string>());
+  // Cached per bootstrap credential: a backend restart issues a new one, which must not reuse the
+  // bearer minted for the previous run.
+  const tokenRef = yield* Ref.make(Option.none<{ credential: string; token: string }>());
   const mutex = yield* Semaphore.make(1);
 
   const getBearerToken = mutex
     .withPermits(1)(
       Effect.gen(function* () {
         const cached = yield* Ref.get(tokenRef);
-        if (Option.isSome(cached)) {
-          return cached.value;
-        }
 
         const instances = yield* pool.list;
         const primary = instances.find((instance) => instance.id === PRIMARY_LOCAL_ENVIRONMENT_ID);
@@ -67,6 +66,9 @@ export const make = Effect.gen(function* () {
         const credential = config.bootstrap.desktopBootstrapToken;
         if (!credential) {
           return yield* new DesktopLocalEnvironmentAuthBackendNotConfiguredError();
+        }
+        if (Option.isSome(cached) && cached.value.credential === credential) {
+          return cached.value.token;
         }
         const session = yield* bootstrapRemoteBearerSession({
           httpBaseUrl: config.httpBaseUrl.href,
@@ -84,7 +86,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         );
-        yield* Ref.set(tokenRef, Option.some(session.access_token));
+        yield* Ref.set(tokenRef, Option.some({ credential, token: session.access_token }));
         return session.access_token;
       }),
     )

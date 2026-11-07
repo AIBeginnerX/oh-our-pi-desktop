@@ -5,7 +5,7 @@ import {
   formatContextWindowCompactionMessage,
   resolveContextWindowSeverity,
 } from "./ContextWindowMeter.logic";
-import { Minimize2Icon } from "lucide-react";
+import { MessageSquarePlusIcon, Minimize2Icon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
@@ -25,8 +25,17 @@ export function ContextWindowMeter(props: {
   onCompact?: (() => void) | undefined;
   compactDisabled?: boolean | undefined;
   compactDisabledReason?: string | null | undefined;
+  /** Set when the provider cannot compact and the window is nearly full; offers a fresh start. */
+  onContinueInNewThread?: (() => void) | undefined;
 }) {
-  const { usage, modelDisplayName, onCompact, compactDisabled, compactDisabledReason } = props;
+  const {
+    usage,
+    modelDisplayName,
+    onCompact,
+    compactDisabled,
+    compactDisabledReason,
+    onContinueInNewThread,
+  } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -35,7 +44,8 @@ export function ContextWindowMeter(props: {
   const totalProcessedTokens = usage.totalProcessedTokens ?? null;
   const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
   const severity = resolveContextWindowSeverity(normalizedPercentage);
-  const showPercentageLabel = usage.maxTokens !== null && severity !== "normal";
+  const showPercentageLabel =
+    usage.maxTokens !== null && (severity !== "normal" || onContinueInNewThread !== undefined);
   const usageColor =
     severity === "critical"
       ? "var(--color-error)"
@@ -48,7 +58,7 @@ export function ContextWindowMeter(props: {
       <PopoverTrigger
         openOnHover
         delay={150}
-        closeDelay={onCompact ? 150 : 0}
+        closeDelay={onCompact || onContinueInNewThread ? 150 : 0}
         render={
           <Button
             size={showPercentageLabel ? "sm" : "icon-sm"}
@@ -155,6 +165,23 @@ export function ContextWindowMeter(props: {
             <div className="mt-1 text-pretty text-secondary-label text-2xs font-medium">
               {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}
             </div>
+          ) : null}
+          {onContinueInNewThread ? (
+            <>
+              <div className="mt-1 text-pretty text-secondary-label text-2xs">
+                Context is getting full and this provider does not compact it. A new thread can
+                start from a short summary of this one.
+              </div>
+              <Button
+                size="xs"
+                variant="outline"
+                className="w-full justify-center"
+                onClick={onContinueInNewThread}
+              >
+                <MessageSquarePlusIcon aria-hidden="true" />
+                Continue in new thread
+              </Button>
+            </>
           ) : null}
           {onCompact ? (
             <>

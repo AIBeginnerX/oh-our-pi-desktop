@@ -217,6 +217,9 @@ const estimateTokens = (title: string, body: string) =>
 const normalizeInstant = (value: string | null): string | null =>
   value === null ? null : new Date(value).toISOString();
 
+/** A work-log memory created without an explicit expiry lapses after this many days. */
+const WORK_LOG_DEFAULT_TTL_DAYS = 90;
+
 const PROJECT_MEMORY_THREAD_CHANGES_DEFAULT = 20;
 
 const PROPOSAL_TITLE_MAX_CODEPOINTS = 80;
@@ -337,7 +340,8 @@ export const make = Effect.gen(function* () {
         return yield* new ProjectMemoryRejectedError({ reason: "sensitive" });
       }
       const memoryId = ProjectMemoryId.make(yield* crypto.randomUUIDv4);
-      const now = DateTime.formatIso(yield* DateTime.now);
+      const nowTime = yield* DateTime.now;
+      const now = DateTime.formatIso(nowTime);
       const outcome = yield* repository.insert({
         memoryId,
         projectId: input.projectId,
@@ -345,7 +349,12 @@ export const make = Effect.gen(function* () {
         title,
         body,
         origin,
-        validUntil: input.validUntil === undefined ? null : normalizeInstant(input.validUntil),
+        validUntil:
+          input.validUntil !== undefined
+            ? normalizeInstant(input.validUntil)
+            : input.kind === "work-log"
+              ? DateTime.formatIso(DateTime.add(nowTime, { days: WORK_LOG_DEFAULT_TTL_DAYS }))
+              : null,
         estimatedTokens: estimateTokens(title, body),
         now,
       });

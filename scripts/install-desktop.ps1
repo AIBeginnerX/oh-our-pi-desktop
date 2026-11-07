@@ -92,7 +92,7 @@
                 "  exit /b 9009",
                 ")",
                 "set OOP_IN_DESKTOP_APP=1",
-                "`\"$rustClient`\" %*",
+                "`"$rustClient`" %*",
                 "exit /b %ERRORLEVEL%"
             )
             New-Item -ItemType Directory -Force -Path $binDir | Out-Null

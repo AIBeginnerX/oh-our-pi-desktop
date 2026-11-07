@@ -18,6 +18,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
+import { resolveEnvironmentUrl } from "../environment/endpoint.ts";
 import * as EnvironmentRegistry from "../connection/registry.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import { request } from "../rpc/client.ts";
@@ -56,7 +57,7 @@ export function parseAssetCollectionKey(
 
 export function resolveAssetUrl(httpBaseUrl: string, relativeUrl: string): string | null {
   try {
-    return new URL(relativeUrl, httpBaseUrl).toString();
+    return resolveEnvironmentUrl(httpBaseUrl, relativeUrl);
   } catch {
     return null;
   }
@@ -131,7 +132,7 @@ export function createAssetEnvironmentAtoms<R, E>(
       request(WS_METHODS.assetsCreateUrl, input),
     );
     // Callers resolve against the thread's server, so preserve the local server's origin.
-    return { ...asset, relativeUrl: new URL(asset.relativeUrl, local.httpBaseUrl).href };
+    return { ...asset, relativeUrl: resolveEnvironmentUrl(local.httpBaseUrl, asset.relativeUrl) };
   });
   const createUrl = createEnvironmentQueryAtomFamily(runtime, {
     label: "environment-data:assets:create-url",

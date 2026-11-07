@@ -442,11 +442,18 @@ export const make = Effect.gen(function* () {
     yield* withLeaseLock(
       environmentId,
       Effect.gen(function* () {
-        if ((yield* Ref.get(platformEnvironmentIds)).has(environmentId)) {
+        // A direct registration wins over the host's gateway forward of the same environment.
+        const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        if (previous?.target._tag === "GatewayConnectionTarget") {
+          yield* Ref.update(platformEnvironmentIds, (current) => {
+            const next = new Set(current);
+            next.delete(environmentId);
+            return next;
+          });
+        } else if ((yield* Ref.get(platformEnvironmentIds)).has(environmentId)) {
           return;
         }
         // Editing a saved environment must preserve its disabled state.
-        const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
         const entry: ConnectionCatalogEntry =
           previous === undefined
             ? registered
@@ -491,6 +498,15 @@ export const make = Effect.gen(function* () {
         target.environmentId,
         Effect.gen(function* () {
           const previous = (yield* SubscriptionRef.get(entries)).get(target.environmentId);
+          // The host's gateway forward never displaces an environment this client already
+          // reaches directly (saved, SSH, relay, or the primary itself).
+          if (
+            registration._tag === "GatewayConnectionRegistration" &&
+            previous !== undefined &&
+            previous.target._tag !== "GatewayConnectionTarget"
+          ) {
+            return;
+          }
           const entry: ConnectionCatalogEntry =
             previous?.unsupportedReason !== undefined &&
             gitHubRoutingConnectionKey(previous) === gitHubRoutingConnectionKey(registered)

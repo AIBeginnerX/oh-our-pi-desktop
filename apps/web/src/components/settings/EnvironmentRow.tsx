@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
 import type { EnvironmentPresentation } from "~/state/environments";
+import type { GatewayEnvironmentInfo } from "~/state/gateway";
 import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 
@@ -16,9 +17,15 @@ export function formatDesktopSshTarget(target: DesktopSshEnvironmentTarget): str
  * How this client reaches a machine, printed first in every environment row so
  * T3 Connect, SSH, WSL, and plain remote links are told apart without a legend.
  */
-export function environmentTransportLabel(environment: EnvironmentPresentation): string {
+export function environmentTransportLabel(
+  environment: EnvironmentPresentation,
+  gateway: GatewayEnvironmentInfo | null = null,
+): string {
   const { entry } = environment;
   if (entry.target._tag === "PrimaryConnectionTarget") return "This machine";
+  if (entry.target._tag === "GatewayConnectionTarget") {
+    return gateway ? `via ${gateway.hostLabel}` : "via host";
+  }
   if (environment.relayManaged) return "OOP Connect";
   if (isDesktopLocalConnectionTarget(entry.target)) return "WSL";
   if (

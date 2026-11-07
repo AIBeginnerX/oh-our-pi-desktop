@@ -28,6 +28,8 @@ import { EnvironmentRpcRequestObserver } from "@t3tools/client-runtime/rpc";
 import {
   AuthStandardClientScopes,
   type DesktopBridge,
+  type EnvironmentId,
+  type GatewayEnvironment,
   type DesktopEnvironmentBootstrap,
   type DesktopSshEnvironmentTarget,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
@@ -50,6 +52,8 @@ import {
   type PrimaryEnvironmentTarget,
 } from "../environments/primary/target";
 import { clearComposerDraftsEnvironment } from "../composerDraftStore";
+import { gatewayEnvironmentInfoAtom } from "../state/gateway";
+import { fetchGatewayEnvironments, gatewayRegistrations } from "./gateway";
 import { isHostedStaticApp } from "../hostedPairing";
 import { isLocalEnvironmentDisabled } from "../localEnvironment";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -462,6 +466,9 @@ export function secondaryRegistrationsToRetainAfterTopologyRead(
   );
 }
 
+// A failed gateway list fetch keeps the last list and is not retried before this elapses.
+const GATEWAY_RETRY_AFTER_MS = 30_000;
+
 const platformConnectionSourceLayer = Layer.effect(
   PlatformConnectionSource,
   Effect.gen(function* () {
@@ -471,6 +478,55 @@ const platformConnectionSourceLayer = Layer.effect(
       });
     }
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
+
+    // Environments the host forwards through its gateway. The list is fetched in the
+    // background on boot and again when the app regains focus or the network returns; the
+    // 3-second topology tick only reads what was last fetched. The desktop app registers
+    // those environments directly, so it never asks.
+    const gateway = {
+      environments: [] as ReadonlyArray<GatewayEnvironment>,
+      refreshRequested: window.desktopBridge === undefined,
+      inFlight: false,
+      retryAfterEpochMs: 0,
+    };
+    if (window.desktopBridge === undefined) {
+      const requestRefresh = () => {
+        gateway.refreshRequested = true;
+      };
+      window.addEventListener("online", requestRefresh);
+      window.addEventListener("focus", requestRefresh);
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") requestRefresh();
+      });
+    }
+    const refreshGatewayEnvironments = (hostOrigin: string, hostLabel: string) =>
+      Effect.gen(function* () {
+        const nowEpochMs = yield* Clock.currentTimeMillis;
+        if (gateway.inFlight || !gateway.refreshRequested || nowEpochMs < gateway.retryAfterEpochMs)
+          return;
+        gateway.inFlight = true;
+        gateway.refreshRequested = false;
+        const fetched = yield* fetchGatewayEnvironments(hostOrigin).pipe(
+          Effect.provide(primaryEnvironmentHttpLayer),
+          Effect.option,
+        );
+        gateway.inFlight = false;
+        if (Option.isNone(fetched)) {
+          gateway.retryAfterEpochMs = nowEpochMs + GATEWAY_RETRY_AFTER_MS;
+          gateway.refreshRequested = true;
+          return;
+        }
+        gateway.environments = fetched.value;
+        appAtomRegistry.set(
+          gatewayEnvironmentInfoAtom,
+          new Map<EnvironmentId, { status: GatewayEnvironment["status"]; hostLabel: string }>(
+            fetched.value.map((environment) => [
+              environment.environmentId,
+              { status: environment.status, hostLabel },
+            ]),
+          ),
+        );
+      }).pipe(Effect.forkDetach, Effect.asVoid);
 
     // Resolve the full set of platform-managed environments the host currently
     // reports: the primary (same-origin cookie auth) plus any desktop-local
@@ -568,6 +624,24 @@ const platformConnectionSourceLayer = Layer.effect(
             registrations.push(cached.registration);
           }
         }
+      }
+
+      const primaryRegistration = next.get(PRIMARY_LOCAL_ENVIRONMENT_ID)?.registration;
+      if (
+        window.desktopBridge === undefined &&
+        primaryRegistration?._tag === "PrimaryConnectionRegistration"
+      ) {
+        const hostOrigin = new URL(primaryRegistration.target.httpBaseUrl).origin;
+        yield* refreshGatewayEnvironments(hostOrigin, primaryRegistration.target.label);
+        registrations.push(
+          ...gatewayRegistrations({
+            environments: gateway.environments,
+            hostOrigin,
+            skipEnvironmentIds: new Set(
+              registrations.map((registration) => registration.target.environmentId),
+            ),
+          }),
+        );
       }
 
       yield* Ref.set(cacheRef, next);

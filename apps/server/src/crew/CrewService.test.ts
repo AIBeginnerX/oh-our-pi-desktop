@@ -697,6 +697,27 @@ describe("Crew service restart delivery", () => {
       }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 
+  it.effect("clips a long report for crew_wait but keeps the full text stored", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const full = `${"finding detail. ".repeat(300)}\nStatus: partial\n\`\`\`json\n${"x".repeat(3_000)}\n\`\`\``;
+      yield* harness.seedTask({
+        ...finishedTask,
+        report: { taskId: "task-1", role: "worker", status: "completed", result: full },
+      });
+      const service = yield* harness.start;
+      const [report] = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
+      assert.isAtMost(report!.result!.length, 2_500);
+      assert.include(report!.result!, "…[truncated]…");
+      assert.include(report!.result!, "Status: partial");
+      const states = yield* Effect.forEach(yield* harness.store.readTasks, (row) =>
+        decodeTaskRecovery(row.record_json),
+      );
+      assert.equal(states[0]!.report?.result, full);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
   it.effect("skips one corrupt checkpoint and still restores the others", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
@@ -962,6 +983,39 @@ describe("Crew service per-thread crew", () => {
       assert.equal(workerOf(own), "gpt-5.4-mini");
       assert.isTrue(other.enabled);
       assert.notEqual(workerOf(other), "gpt-5.4-mini");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("sends a small task to the fast model, unless the user pinned the role's model", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      const modelOfNextCreate = Effect.gen(function* () {
+        for (;;) {
+          const command = yield* Queue.take(harness.dispatched);
+          if (command.type === "thread.create") return command.modelSelection.model;
+        }
+      });
+      yield* service.crew.delegate({ threadId: LEAD, role: "expert", task: "normal" });
+      const normal = yield* modelOfNextCreate;
+      yield* service.crew.delegate({
+        threadId: LEAD,
+        role: "expert",
+        task: "rename",
+        size: "small",
+      });
+      const small = yield* modelOfNextCreate;
+      assert.notEqual(small, normal);
+      assert.include(["claude-haiku-5", "gpt-5.4-mini"], small);
+
+      yield* Ref.set(harness.leadCrew, { pinned: { expert: pin("gpt-5.4") } });
+      yield* service.crew.delegate({
+        threadId: LEAD,
+        role: "expert",
+        task: "pinned",
+        size: "small",
+      });
+      assert.equal(yield* modelOfNextCreate, "gpt-5.4");
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );

@@ -486,6 +486,27 @@ describe("ProjectMemoryService", () => {
       assert.equal(withBody.items[0]!.body, "Run migrations then restart the server");
     }));
 
+  test("expires a work-log memory after 90 days unless told otherwise", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+
+      const log = yield* service.create(createInput({ kind: "work-log" }));
+      assert.equal(
+        Date.parse(log.memory.validUntil!) - Date.parse(log.memory.createdAt),
+        90 * 86_400_000,
+      );
+
+      const explicit = yield* service.create(
+        createInput({ kind: "work-log", validUntil: "2030-01-01T00:00:00.000Z" }),
+      );
+      assert.equal(explicit.memory.validUntil, "2030-01-01T00:00:00.000Z");
+
+      const fact = yield* service.create(createInput({ kind: "fact" }));
+      assert.isNull(fact.memory.validUntil);
+    }));
+
   test("keeps memories isolated between projects", () =>
     Effect.gen(function* () {
       yield* runMigrations();

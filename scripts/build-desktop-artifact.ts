@@ -34,7 +34,13 @@ import {
 
 import { applyWebBrandAssets } from "./apply-web-brand-assets.ts";
 import { getDefaultBuildArch } from "./lib/build-target-arch.ts";
-import { verifyMacPackagedAppSignatures } from "./desktop-build/mac-signature.ts";
+import {
+  isUsableLocalSignIdentity,
+  MAC_LOCAL_SIGN_IDENTITY_ENV,
+  normalizeLocalSignIdentity,
+  verifyMacLocalIdentitySignatures,
+  verifyMacPackagedAppSignatures,
+} from "./desktop-build/mac-signature.ts";
 import {
   findInlinedExternalPackages,
   selectCliRuntimeExternalDependencies,
@@ -164,7 +170,9 @@ const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
 // Only the new mode is selectable by flag; `adhoc` is the default and
 // `developer-id-passkey` is the legacy meaning of `--signed`.
 const ExplicitBuildSigningMode = Schema.Literals(["developer-id"]);
-export type BuildSigningMode = "adhoc" | "developer-id-passkey" | "developer-id";
+// `local-identity` is chosen only by OOP_MAC_LOCAL_SIGN_IDENTITY and signs like
+// ad hoc, with a stable keychain identity instead of `-`.
+export type BuildSigningMode = "adhoc" | "developer-id-passkey" | "developer-id" | "local-identity";
 
 const WorkspaceConfig = Schema.Struct({
   catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -1204,9 +1212,11 @@ interface ResolvedBuildOptions {
   readonly outputDir: string;
   readonly skipBuild: boolean;
   readonly keepStage: boolean;
-  /** True for every mode that signs with a real identity (`signingMode !== "adhoc"`). */
+  /** True for every mode that signs for distribution; `adhoc` and `local-identity` are not. */
   readonly signed: boolean;
   readonly signingMode: BuildSigningMode;
+  /** The keychain identity of `local-identity` mode; absent in every other mode. */
+  readonly macLocalIdentity: string | undefined;
   readonly macDeveloperId: MacDeveloperIdSigning | undefined;
   /** The trust marker this run builds into `main.cjs` and expects to find again in the staged copy. */
   readonly localPkgTrustMarker: string;
@@ -1481,6 +1491,26 @@ export class InvalidBuildSigningError extends Schema.TaggedError<InvalidBuildSig
 ) {
   override get message(): string {
     return `Cannot use --signing-mode developer-id (${this.reason}).`;
+  }
+}
+
+export const InvalidMacLocalIdentityReason = Schema.Literals([
+  "conflicts-with-signed",
+  "conflicts-with-developer-id",
+  "requires-mac",
+  "invalid-identity",
+]);
+export type InvalidMacLocalIdentityReason = typeof InvalidMacLocalIdentityReason.Type;
+
+/** Rejects OOP_MAC_LOCAL_SIGN_IDENTITY. The message never echoes the identity. */
+export class InvalidMacLocalIdentityError extends Schema.TaggedError<InvalidMacLocalIdentityError>()(
+  "InvalidMacLocalIdentityError",
+  {
+    reason: InvalidMacLocalIdentityReason,
+  },
+) {
+  override get message(): string {
+    return `Cannot use ${MAC_LOCAL_SIGN_IDENTITY_ENV} (${this.reason}).`;
   }
 }
 
@@ -1804,6 +1834,7 @@ const BuildEnvConfig = Config.all({
   skipBuild: Config.Boolean("T3CODE_DESKTOP_SKIP_BUILD").pipe(Config.withDefault(false)),
   keepStage: Config.Boolean("T3CODE_DESKTOP_KEEP_STAGE").pipe(Config.withDefault(false)),
   signed: Config.Boolean("T3CODE_DESKTOP_SIGNED").pipe(Config.withDefault(false)),
+  macLocalIdentity: Config.String(MAC_LOCAL_SIGN_IDENTITY_ENV).pipe(Config.withDefault("")),
   verbose: Config.Boolean("T3CODE_DESKTOP_VERBOSE").pipe(Config.withDefault(false)),
   mockUpdates: Config.Boolean("T3CODE_DESKTOP_MOCK_UPDATES").pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.String("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(Config.option),
@@ -1890,6 +1921,23 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
   // The signing mode is resolved once, here. `developer-id` is chosen only by
   // its explicit flag; credentials or a missing passkey profile never select it.
   const requestedSigningMode = input.signingMode && Option.getOrUndefined(input.signingMode);
+  // Local-identity signing is opt-in by environment and exclusive: it never
+  // combines with the Developer ID or passkey modes, and only builds for macOS.
+  const macLocalIdentity = normalizeLocalSignIdentity(env.macLocalIdentity);
+  if (macLocalIdentity !== undefined) {
+    if (platform !== "mac") {
+      return yield* new InvalidMacLocalIdentityError({ reason: "requires-mac" });
+    }
+    if (Option.isSome(input.signed) || env.signed) {
+      return yield* new InvalidMacLocalIdentityError({ reason: "conflicts-with-signed" });
+    }
+    if (requestedSigningMode === "developer-id") {
+      return yield* new InvalidMacLocalIdentityError({ reason: "conflicts-with-developer-id" });
+    }
+    if (!isUsableLocalSignIdentity(macLocalIdentity)) {
+      return yield* new InvalidMacLocalIdentityError({ reason: "invalid-identity" });
+    }
+  }
   const macDeveloperId =
     requestedSigningMode === "developer-id"
       ? yield* resolveMacDeveloperIdSigning({
@@ -1910,8 +1958,10 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     ? "developer-id"
     : resolveBooleanFlag(input.signed, env.signed)
       ? "developer-id-passkey"
-      : "adhoc";
-  const signed = signingMode !== "adhoc";
+      : macLocalIdentity !== undefined
+        ? "local-identity"
+        : "adhoc";
+  const signed = signingMode === "developer-id" || signingMode === "developer-id-passkey";
   const verbose = resolveBooleanFlag(input.verbose, env.verbose);
 
   const mockUpdates = resolveBooleanFlag(input.mockUpdates, env.mockUpdates);
@@ -1939,6 +1989,7 @@ export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
     keepStage,
     signed,
     signingMode,
+    macLocalIdentity,
     macDeveloperId,
     localPkgTrustMarker,
     verbose,
@@ -2977,6 +3028,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   oopBrand = false,
   localUpdateConfigBundled = false,
   macDeveloperId?: MacDeveloperIdSigning,
+  macLocalIdentity?: string,
 ) {
   const bundleLocalUpdateConfig =
     (platform === "mac" || platform === "win") && oopBrand && localUpdateConfigBundled;
@@ -3061,7 +3113,17 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
           }
         : signed
           ? { sign: path.join(repoRoot, "scripts/sign-macos.ts") }
-          : { identity: "-", hardenedRuntime: false }),
+          : macLocalIdentity !== undefined
+            ? // Same options as ad hoc with a stable identity. A self-signed
+              // certificate gains nothing from a secure timestamp, so the build
+              // does not depend on Apple's timestamp server.
+              {
+                identity: macLocalIdentity,
+                hardenedRuntime: false,
+                notarize: false,
+                timestamp: "none",
+              }
+            : { identity: "-", hardenedRuntime: false }),
       ...(macPasskeySigning
         ? {
             entitlements: macPasskeySigning.entitlementsPath,
@@ -4150,6 +4212,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       oopBrand,
       localUpdateConfigBundled,
       options.macDeveloperId,
+      options.macLocalIdentity,
     ),
     dependencies: stageDependencies,
     devDependencies: {
@@ -4314,6 +4377,17 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         }),
       catch: (cause) => new MacBundleSignatureValidationError({ distPath: stageDistDir, cause }),
     });
+    // electron-builder only warns and leaves Electron's stock ad hoc signatures
+    // when the identity is missing or untrusted, so check every code object.
+    if (options.macLocalIdentity !== undefined) {
+      const macLocalIdentity = options.macLocalIdentity;
+      for (const appPath of verifiedAppPaths) {
+        yield* Effect.tryPromise({
+          try: () => verifyMacLocalIdentitySignatures({ appPath, identity: macLocalIdentity }),
+          catch: (cause) => new MacBundleSignatureValidationError({ distPath: appPath, cause }),
+        });
+      }
+    }
     if (options.macDeveloperId) {
       yield* verifyMacDeveloperIdRequirement(
         verifiedAppPaths,

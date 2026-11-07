@@ -60,6 +60,7 @@ import { checkpointRefForThreadTurn } from "../checkpointing/Utils.ts";
 import * as OrchestrationEngine from "../orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ProjectMemorySendGate from "../memory/ProjectMemorySendGate.ts";
+import { ProviderCapacity } from "../provider/Services/ProviderCapacity.ts";
 import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CrewRuntimeStateLive from "../persistence/Layers/CrewRuntimeState.ts";
@@ -108,6 +109,7 @@ import {
   auditPrompt,
   auditVerdict,
   clipCrewReport,
+  clipLeadReport,
   crewMemberOutcome,
   withTodoOutcome,
   followUpRound,
@@ -126,6 +128,7 @@ import {
   overlappingWriteScopes,
   reportExcerpt,
   latestAuditAsksChanges,
+  lightAuditPrompt,
   planTurnAudit,
   turnChangedLines,
   turnRanPassingTests,
@@ -239,6 +242,8 @@ export class CrewService extends Context.Service<
       readonly doneWhen?: string | undefined;
       /** "worktree" runs the task in its own git worktree and applies its changes back. */
       readonly isolation?: "shared" | "worktree" | "candidate" | undefined;
+      /** "small" runs the task on the fast model, unless the user pinned the role's model. */
+      readonly size?: "small" | "normal" | undefined;
       /** Task ids whose model family this task must not share, when another family is available. */
       readonly differentFrom?: ReadonlyArray<string> | undefined;
       /** The task's checklist; the server numbers the items and tracks them. */
@@ -312,6 +317,8 @@ export const make = Effect.gen(function* () {
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const providers = yield* ProviderRegistry.ProviderRegistry;
+  // Optional so focused crew tests need not build the capacity layer; production always has it.
+  const capacity = yield* Effect.serviceOption(ProviderCapacity);
   const memoryGate = yield* ProjectMemorySendGate.ProjectMemorySendGate;
   const settings = yield* ServerSettings.ServerSettingsService;
   const checkpointDiffs = yield* CheckpointDiffQuery.CheckpointDiffQuery;
@@ -1199,17 +1206,24 @@ export const make = Effect.gen(function* () {
    * The checklist's progress row on the lead's board. Its fixed id makes every call replace the
    * last one, so the board keeps one row per task however often items change.
    */
-  const emitProgress = (record: CrewTaskRecord, status: "running" | "stopped" = "running") =>
-    record.todos === undefined && status === "running"
+  const emitProgress = (
+    record: CrewTaskRecord,
+    status: "running" | "stopped" = "running",
+    /** Replaces the checklist line, e.g. "waiting for capacity" while the task is queued. */
+    note?: string,
+  ) =>
+    record.todos === undefined && status === "running" && note === undefined
       ? Effect.void
       : appendActivity({
           id: crewTaskProgressActivityId(record.taskId),
           threadId: record.leadThreadId,
           kind: "task.progress",
           summary:
-            status === "stopped"
-              ? `${CREW_ROLE_LABEL[record.role]} stopping: ${record.subject}`
-              : `${CREW_ROLE_LABEL[record.role]} checklist ${todoCounts(record.todos ?? []).verified} of ${record.todos?.length ?? 0} verified: ${record.subject}`,
+            note !== undefined
+              ? `${CREW_ROLE_LABEL[record.role]} ${note}: ${record.subject}`
+              : status === "stopped"
+                ? `${CREW_ROLE_LABEL[record.role]} stopping: ${record.subject}`
+                : `${CREW_ROLE_LABEL[record.role]} checklist ${todoCounts(record.todos ?? []).verified} of ${record.todos?.length ?? 0} verified: ${record.subject}`,
           turnId: record.leadTurnId,
           payload: {
             taskId: record.taskId,
@@ -2160,6 +2174,19 @@ export const make = Effect.gen(function* () {
         // Each switch message names only the skips since the attempt before it.
         skipped.length = 0;
         if (previous === undefined) yield* emitProgress(record);
+        // Every crew session is a provider process; wait for room under the live-session budget.
+        // The wait is capped, so a full house of leads waiting on crew_wait cannot deadlock.
+        if (Option.isSome(capacity)) {
+          let queued = false;
+          yield* capacity.value.admitCrew({
+            onWait: Effect.suspend(() => {
+              queued = true;
+              return emitProgress(record, "running", "waiting for capacity").pipe(Effect.ignore);
+            }),
+          });
+          // The queued row would otherwise stay until the next checklist change.
+          if (queued) yield* emitProgress(record, "running", "started").pipe(Effect.ignore);
+        }
         const launched = yield* Effect.exit(
           launchCrewThread({
             threadId: attempt.threadId,
@@ -2407,7 +2434,7 @@ export const make = Effect.gen(function* () {
     readonly avoid?: ReadonlyArray<AvoidedTask> | undefined;
     /** The checklist, numbered by the server; the task starts with every item pending. */
     readonly todos?: ReadonlyArray<TodoItem> | undefined;
-    /** Run the task on the cheapest model available instead of the role's own. */
+    /** Run the task on the cheapest model available instead of the role's own, unless the user pinned that role's model. */
     readonly preferFast?: boolean;
     /** The lead's selected project memories, passed on by id and version. */
     readonly memory?: ReadonlyArray<CrewMemoryRef> | undefined;
@@ -2416,7 +2443,7 @@ export const make = Effect.gen(function* () {
     const coolingState = yield* cooling;
     // Only the role's own model is tried while cooling; OOP's fast pick skips what is cooling.
     const fastest =
-      input.preferFast === true
+      input.preferFast === true && !input.resolved.pinned.has(input.role)
         ? (input.options.find(
             (option) =>
               option.tier === 1 &&
@@ -2642,6 +2669,7 @@ export const make = Effect.gen(function* () {
         fromLeadCall: true,
         writeScope,
         isolation: input.isolation,
+        preferFast: input.size === "small",
         avoid,
         todos,
         memory: memory.refs,
@@ -2933,7 +2961,10 @@ export const make = Effect.gen(function* () {
         }
         if (record.report !== null) {
           yield* markCollected(taskId, record);
-          return record.report;
+          const { result } = record.report;
+          return result === null
+            ? record.report
+            : { ...record.report, result: clipLeadReport(result) };
         }
         const current = record.attempts.at(-1);
         return {
@@ -3000,16 +3031,6 @@ export const make = Effect.gen(function* () {
         payload: { crewRole: "auditor", changedFiles: payload.files.length, stopped: true },
       });
     }
-    if (plan === "skipped") {
-      // A thread goal waits for this turn's audit, so a skipped one is recorded, not silent.
-      return yield* appendActivity({
-        threadId: payload.threadId,
-        kind: CREW_AUDIT_SKIPPED_ACTIVITY,
-        summary: "Audit skipped: a small change whose tests passed",
-        turnId: payload.turnId,
-        payload: { crewRole: "auditor", changedFiles: payload.files.length },
-      });
-    }
     const subject = `Review of ${lead.value.title}`;
     yield* Effect.gen(function* () {
       yield* startTask({
@@ -3018,7 +3039,7 @@ export const make = Effect.gen(function* () {
         resolved,
         options,
         subject,
-        prompt: auditPrompt({
+        prompt: (plan === "light" ? lightAuditPrompt : auditPrompt)({
           leadTitle: lead.value.title,
           files: payload.files.map((file) => file.path),
           request: yield* latestRequestText(payload.threadId),
@@ -3035,7 +3056,8 @@ export const make = Effect.gen(function* () {
               : null,
         }),
         leadTurnId: payload.turnId,
-        preferFast: plan === "fast",
+        // A light audit keeps the auditor's own model when the user pinned it (startTask checks).
+        preferFast: plan === "fast" || plan === "light",
       });
     }).pipe(
       // A thread goal waits for this turn's audit, so one that cannot start still has to end.

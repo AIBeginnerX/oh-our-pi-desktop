@@ -7,10 +7,13 @@ import { toPersistenceSqlError } from "../Errors.ts";
 
 import {
   GetByCommandIdInput,
+  type PruneAcceptedInput,
   OrchestrationCommandReceipt,
   OrchestrationCommandReceiptRepository,
   type OrchestrationCommandReceiptRepositoryShape,
 } from "../Services/OrchestrationCommandReceipts.ts";
+
+const PRUNE_BATCH_SIZE = 5_000;
 
 const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -66,6 +69,23 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       `,
   });
 
+  const deleteAcceptedBatch = (input: PruneAcceptedInput, batchSize: number) =>
+    sql<{ readonly commandId: string }>`
+      DELETE FROM orchestration_command_receipts
+      WHERE command_id IN (
+        SELECT command_id FROM orchestration_command_receipts
+        WHERE status = 'accepted'
+          AND accepted_at < ${input.acceptedBefore}
+          AND result_sequence <= ${input.throughSequence}
+          AND NOT EXISTS (
+            SELECT 1 FROM crew_followups
+            WHERE crew_followups.command_id = orchestration_command_receipts.command_id
+          )
+        LIMIT ${batchSize}
+      )
+      RETURNING command_id AS "commandId"
+    `;
+
   const upsert: OrchestrationCommandReceiptRepositoryShape["upsert"] = (receipt) =>
     upsertReceiptRow(receipt).pipe(
       Effect.mapError(toPersistenceSqlError("OrchestrationCommandReceiptRepository.upsert:query")),
@@ -78,9 +98,25 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       ),
     );
 
+  const pruneAccepted: OrchestrationCommandReceiptRepositoryShape["pruneAccepted"] = (input) =>
+    Effect.gen(function* () {
+      const batchSize = input.batchSize ?? PRUNE_BATCH_SIZE;
+      let total = 0;
+      while (true) {
+        const deleted = (yield* deleteAcceptedBatch(input, batchSize)).length;
+        total += deleted;
+        if (deleted < batchSize) return total;
+      }
+    }).pipe(
+      Effect.mapError(
+        toPersistenceSqlError("OrchestrationCommandReceiptRepository.pruneAccepted:query"),
+      ),
+    );
+
   return {
     upsert,
     getByCommandId,
+    pruneAccepted,
   } satisfies OrchestrationCommandReceiptRepositoryShape;
 });
 

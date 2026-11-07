@@ -12,6 +12,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 /// A command or path after a tool's name stops here, so one long command is not a wall of text.
 const DETAIL_COLUMNS: usize = 90;
@@ -45,13 +46,157 @@ pub struct Transcript {
     pub meta: Vec<RowMeta>,
 }
 
+/// Most finished blocks (one message or one tool line) kept laid out; past it the least recently
+/// used go first. Threads parked by the recent-thread cache keep theirs until then.
+const CACHED_BLOCKS: usize = 1500;
+
+/// One laid-out block and what it was made from.
+struct Block {
+    /// Hash of everything but the id that the lines depend on (the text, whether it still streams).
+    fingerprint: u64,
+    /// The build that last used it, for eviction.
+    used: u64,
+    lines: Vec<Line<'static>>,
+    rows: Vec<RowMeta>,
+}
+
+/// The laid-out lines of each message and tool line, by id, so a frame re-wraps and re-styles only
+/// the block whose content changed (the message still streaming) and joins the rest from memory.
+/// Another width, theme or symbol set empties it: those change every line.
+#[derive(Default)]
+pub struct BlockCache {
+    scope: Option<(usize, Theme, Symbols)>,
+    blocks: HashMap<String, Block>,
+    builds: u64,
+    pub hits: usize,
+    pub misses: usize,
+}
+
+impl BlockCache {
+    fn enter(&mut self, w: usize, th: &Theme, sym: &Symbols) {
+        if self.scope != Some((w, *th, *sym)) {
+            self.blocks.clear();
+            self.scope = Some((w, *th, *sym));
+        }
+        self.builds += 1;
+    }
+
+    fn block(
+        &mut self,
+        key: String,
+        fingerprint: u64,
+        make: impl FnOnce() -> (Vec<Line<'static>>, Vec<RowMeta>),
+    ) -> (Vec<Line<'static>>, Vec<RowMeta>) {
+        if let Some(b) = self.blocks.get_mut(&key)
+            && b.fingerprint == fingerprint
+        {
+            b.used = self.builds;
+            self.hits += 1;
+            return (b.lines.clone(), b.rows.clone());
+        }
+        self.misses += 1;
+        let (lines, rows) = make();
+        self.blocks.insert(
+            key,
+            Block {
+                fingerprint,
+                used: self.builds,
+                lines: lines.clone(),
+                rows: rows.clone(),
+            },
+        );
+        (lines, rows)
+    }
+
+    fn trim(&mut self) {
+        if self.blocks.len() <= CACHED_BLOCKS {
+            return;
+        }
+        let mut by_age: Vec<(u64, String)> = self
+            .blocks
+            .iter()
+            .map(|(key, b)| (b.used, key.clone()))
+            .collect();
+        by_age.sort_unstable();
+        for (_, key) in by_age.into_iter().take(self.blocks.len() - CACHED_BLOCKS) {
+            self.blocks.remove(&key);
+        }
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.blocks.len()
+    }
+}
+
+fn fingerprint(parts: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    parts.hash(&mut hasher);
+    hasher.finish()
+}
+
 #[cfg(test)]
 pub fn lines(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'static>> {
     build(thread, w, th, sym).lines
 }
 
+/// The latest answer, which `/copy` reads: the agent's messages (in time order) since the user last
+/// spoke before the last of them, so a closing "Done." after a command does not hide the command, and
+/// a question just sent does not hide the answer before it.
+pub fn answer(thread: &Thread) -> Vec<&crate::thread::Message> {
+    let mut messages: Vec<&crate::thread::Message> = thread.messages.iter().collect();
+    messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    let Some(last) = messages
+        .iter()
+        .rposition(|m| m.role == Role::Assistant && !m.text.trim().is_empty())
+    else {
+        return Vec::new();
+    };
+    let start = messages[..last]
+        .iter()
+        .rposition(|m| m.role == Role::User)
+        .map_or(0, |i| i + 1);
+    messages[start..=last]
+        .iter()
+        .filter(|m| m.role == Role::Assistant && !m.text.trim().is_empty())
+        .copied()
+        .collect()
+}
+
+/// Each message of the latest answer with where its code blocks sit among the answer's.
+fn marks(thread: &Thread) -> HashMap<&str, markdown::Mark> {
+    let answer = answer(thread);
+    let counts: Vec<usize> = answer
+        .iter()
+        .map(|m| markdown::code_blocks(&m.text).len())
+        .collect();
+    let total: usize = counts.iter().sum();
+    let mut first = 1;
+    let mut out = HashMap::new();
+    for (m, count) in answer.iter().zip(counts) {
+        if count > 0 {
+            out.insert(m.id.as_str(), markdown::Mark { first, total });
+        }
+        first += count;
+    }
+    out
+}
+
+#[cfg(test)]
 pub fn build(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Transcript {
+    build_cached(thread, w, th, sym, &mut BlockCache::default())
+}
+
+pub fn build_cached(
+    thread: &Thread,
+    w: usize,
+    th: &Theme,
+    sym: &Symbols,
+    cache: &mut BlockCache,
+) -> Transcript {
     let w = w.max(10);
+    cache.enter(w, th, sym);
+    let marks = marks(thread);
     enum Item<'a> {
         Message(&'a crate::thread::Message),
         Activity(&'a Activity),
@@ -87,7 +232,16 @@ pub fn build(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Transcript
     for (_, item) in items {
         let (block, rows, run): (Vec<Line<'static>>, Option<Vec<RowMeta>>, bool) = match item {
             Item::Message(message) => {
-                let (lines, rows) = message_lines(message, w, th, sym);
+                let mark = marks.get(message.id.as_str()).copied();
+                let print = fingerprint((
+                    &message.text,
+                    message.streaming,
+                    message.role as u8,
+                    mark.map(|m| (m.first, m.total)),
+                ));
+                let (lines, rows) = cache.block(format!("m{}", message.id), print, || {
+                    message_lines(message, mark, w, th, sym)
+                });
                 (lines, Some(rows), false)
             }
             Item::Plan(plan) => (plan_lines(&plan.plan_markdown, w, th, sym), None, false),
@@ -103,7 +257,19 @@ pub fn build(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Transcript
                     .and_then(|id| starts.remove(&id))
                     .zip(parse_iso_ms(&activity.created_at))
                     .map(|(start, end)| end - start);
-                (activity_lines(activity, elapsed, w, th, sym), None, true)
+                let print = fingerprint((
+                    &activity.kind,
+                    &activity.summary,
+                    &activity.tone,
+                    activity.sequence,
+                    elapsed,
+                ));
+                let (lines, rows) = cache.block(format!("a{}", activity.id), print, || {
+                    let lines = activity_lines(activity, elapsed, w, th, sym);
+                    let rows = vec![RowMeta::default(); lines.len()];
+                    (lines, rows)
+                });
+                (lines, Some(rows), true)
             }
         };
         if block.is_empty() {
@@ -117,11 +283,13 @@ pub fn build(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Transcript
         out.extend(block);
         in_run = run;
     }
+    cache.trim();
     Transcript { lines: out, meta }
 }
 
 fn message_lines(
     m: &crate::thread::Message,
+    mark: Option<markdown::Mark>,
     w: usize,
     th: &Theme,
     sym: &Symbols,
@@ -149,7 +317,7 @@ fn message_lines(
                 return (Vec::new(), Vec::new());
             }
             let lines =
-                markdown::render_streaming(&m.text, w.saturating_sub(2), th, sym, m.streaming)
+                markdown::render_marked(&m.text, w.saturating_sub(2), th, sym, m.streaming, mark)
                     .into_iter()
                     .enumerate()
                     .map(|(i, mut line)| {
@@ -554,7 +722,7 @@ fn tool_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::theme::{LAVENDER, UNICODE};
+    use crate::theme::{ASCII, LAVENDER, UNICODE};
     use serde_json::json;
 
     fn thread(messages: Value, activities: Value) -> Thread {
@@ -570,6 +738,93 @@ mod tests {
 
     fn tool(id: &str, at: &str, kind: &str, payload: Value) -> Value {
         json!({"id": id, "tone": "tool", "kind": kind, "summary": "Ran", "payload": payload, "createdAt": at})
+    }
+
+    /// A synthetic long thread: `n` finished exchanges (a user line, a markdown reply with a code
+    /// block, one tool call) and a streaming reply at the end.
+    fn long_thread(n: usize, streaming_text: &str) -> Thread {
+        let mut messages = Vec::new();
+        let mut activities = Vec::new();
+        for i in 0..n {
+            let at = |_: usize| format!("2026-01-01T00:{:02}:{:02}.000Z", i / 60, i % 60);
+            messages.push(json!({"id": format!("u{i}"), "role": "user", "text": format!("question {i} about the code"), "createdAt": at(0)}));
+            messages.push(json!({"id": format!("a{i}"), "role": "assistant",
+                "text": format!("## Answer {i}\n\nSome **bold** text and `code` that is long enough to wrap across a couple of rows of a normal terminal window, {}.\n\n- one\n- two\n\n```rust\nfn main() {{ println!(\"{i}\"); }}\n```\n", "word ".repeat(30)),
+                "createdAt": at(0)}));
+            activities.push(tool(
+                &format!("t{i}"),
+                &at(0),
+                "tool.completed",
+                json!({"toolCallId": format!("c{i}"), "detail": "ls -la"}),
+            ));
+        }
+        messages.push(json!({"id": "live", "role": "assistant", "streaming": true, "text": streaming_text, "createdAt": "2027-01-01T00:00:00.000Z"}));
+        thread(json!(messages), json!(activities))
+    }
+
+    #[test]
+    fn a_finished_block_is_laid_out_once_and_only_the_streaming_one_again() {
+        let (th, sym) = (LAVENDER, UNICODE);
+        let mut cache = BlockCache::default();
+        let mut t = long_thread(5, "first");
+        let first = build_cached(&t, 80, &th, &sym, &mut cache);
+        assert_eq!((cache.hits, cache.misses), (0, 16));
+        // The same thread again: every block is a hit and the picture is the same.
+        let again = build_cached(&t, 80, &th, &sym, &mut cache);
+        assert_eq!((cache.hits, cache.misses), (16, 16));
+        assert_eq!(plain(&first.lines), plain(&again.lines));
+        assert_eq!(first.meta, again.meta);
+        // A delta on the streaming message re-lays out that message alone.
+        t.messages.last_mut().unwrap().text.push_str(" more");
+        let grown = build_cached(&t, 80, &th, &sym, &mut cache);
+        assert_eq!((cache.hits, cache.misses), (31, 17));
+        assert_eq!(plain(&grown.lines), plain(&build(&t, 80, &th, &sym).lines));
+    }
+
+    #[test]
+    fn another_width_theme_or_symbol_set_lays_everything_out_again() {
+        let t = long_thread(3, "x");
+        let mut cache = BlockCache::default();
+        build_cached(&t, 80, &LAVENDER, &UNICODE, &mut cache);
+        let blocks = cache.misses;
+        build_cached(&t, 80, &LAVENDER, &UNICODE, &mut cache);
+        assert_eq!(cache.misses, blocks);
+        let narrow = build_cached(&t, 40, &LAVENDER, &UNICODE, &mut cache);
+        assert_eq!(cache.misses, 2 * blocks);
+        assert_eq!(
+            plain(&narrow.lines),
+            plain(&build(&t, 40, &LAVENDER, &UNICODE).lines)
+        );
+        build_cached(&t, 40, &LAVENDER, &ASCII, &mut cache);
+        assert_eq!(cache.misses, 3 * blocks);
+        let plain_theme = LAVENDER.for_level(0);
+        build_cached(&t, 40, &plain_theme, &ASCII, &mut cache);
+        assert_eq!(cache.misses, 4 * blocks);
+    }
+
+    #[test]
+    fn the_least_recently_used_blocks_go_first() {
+        let (th, sym) = (LAVENDER, UNICODE);
+        let mut cache = BlockCache::default();
+        // Two threads, each a little over half the cache; the second pushes the first out.
+        let per = CACHED_BLOCKS / 2 / 3 + 1;
+        let one = long_thread(per, "x");
+        let mut two = long_thread(per, "x");
+        for m in &mut two.messages {
+            m.id = format!("b{}", m.id);
+        }
+        for a in &mut two.activities {
+            a.id = format!("b{}", a.id);
+        }
+        build_cached(&one, 80, &th, &sym, &mut cache);
+        build_cached(&two, 80, &th, &sym, &mut cache);
+        assert!(cache.len() <= CACHED_BLOCKS);
+        // The second thread is whole in memory; the first lost its oldest blocks.
+        let misses = cache.misses;
+        build_cached(&two, 80, &th, &sym, &mut cache);
+        assert_eq!(cache.misses, misses);
+        build_cached(&one, 80, &th, &sym, &mut cache);
+        assert!(cache.misses > misses);
     }
 
     #[test]

@@ -34,4 +34,15 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("through the Cursor harness.");
     expect(instructions).not.toContain("reasoning effort");
   });
+
+  it("adds the short project memory pointer only when asked", () => {
+    const withMemory = buildRuntimeInstructions({ harness: "Codex", projectMemory: true });
+    expect(withMemory).toContain("<project_memory>");
+    expect(withMemory).toContain("memory_recall");
+    expect(withMemory).toContain("memory_propose");
+    expect(withMemory.endsWith("</project_memory>")).toBe(true);
+    expect(buildRuntimeInstructions({ harness: "Cursor" })).not.toContain("project_memory");
+    const added = withMemory.length - buildRuntimeInstructions({ harness: "Codex" }).length;
+    expect(added).toBeLessThan(400);
+  });
 });

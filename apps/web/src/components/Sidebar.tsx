@@ -84,6 +84,7 @@ import {
   useThreadSelectionStore,
 } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
+import { useContinueInNewThread } from "../hooks/useContinueInNewThread";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
@@ -935,6 +936,9 @@ export default function Sidebar() {
   // a ref keeps it out of attemptSettle's dependency array.
   const handleNewThreadRef = useRef(newThreadContext.handleNewThread);
   handleNewThreadRef.current = newThreadContext.handleNewThread;
+  const continueInNewThread = useContinueInNewThread();
+  const continueInNewThreadRef = useRef(continueInNewThread);
+  continueInNewThreadRef.current = continueInNewThread;
   const settledThreadKeys = useMemo(
     () =>
       new Set(
@@ -2253,6 +2257,9 @@ export default function Sidebar() {
             }
             return;
           }
+          case "continue-in-new-thread":
+            await continueInNewThreadRef.current(threadRef);
+            return;
           case "settle":
             attemptSettle(threadRef);
             return;

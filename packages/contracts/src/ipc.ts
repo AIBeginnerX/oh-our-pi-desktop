@@ -530,6 +530,22 @@ export const PersistedSavedEnvironmentRecordSchema = Schema.Struct({
 });
 export type PersistedSavedEnvironmentRecord = typeof PersistedSavedEnvironmentRecordSchema.Type;
 
+/**
+ * A saved environment the user marked "Available on phone". `published` means the host backend
+ * forwards it to phones; `error` carries a short reason and the publisher keeps retrying.
+ */
+export const DesktopPhoneSharedEnvironmentSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  state: Schema.Literals(["connecting", "published", "error"]),
+  message: Schema.NullOr(Schema.String),
+});
+export type DesktopPhoneSharedEnvironment = typeof DesktopPhoneSharedEnvironmentSchema.Type;
+
+export const DesktopSetPhoneSharedInputSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  shared: Schema.Boolean,
+});
+
 export type DesktopServerExposureMode = "local-only" | "network-accessible";
 
 export const DesktopServerExposureModeSchema = Schema.Literals([
@@ -1208,6 +1224,13 @@ export interface DesktopBridge {
   getConnectionCatalog?: () => Promise<string | null>;
   setConnectionCatalog?: (catalog: string) => Promise<boolean>;
   clearConnectionCatalog?: () => Promise<void>;
+  /** Saved environments currently shared to phones through this computer, with publish state. */
+  getPhoneSharedEnvironments?: () => Promise<readonly DesktopPhoneSharedEnvironment[]>;
+  /** Turns "Available on phone" on or off for one saved environment; resolves with the new list. */
+  setEnvironmentPhoneShared?: (
+    environmentId: EnvironmentId,
+    shared: boolean,
+  ) => Promise<readonly DesktopPhoneSharedEnvironment[]>;
   discoverSshHosts: () => Promise<readonly DesktopDiscoveredSshHost[]>;
   /** Resolves a suggested SSH alias before populating the connection form. */
   resolveSshHost: (alias: string) => Promise<DesktopSshEnvironmentTarget>;

@@ -250,7 +250,9 @@ const makeWorld = (
           crew: { ...DEFAULT_SERVER_SETTINGS.crew, enabled: true, ...crew },
         }),
       }),
-      Layer.mock(CheckpointDiffQuery)({}),
+      Layer.mock(CheckpointDiffQuery)({
+        getFullThreadDiff: () => Effect.succeed({ diff: "+const a = 1;\n" } as never),
+      }),
       Layer.mock(GitVcsDriver)({}),
       Layer.mock(ProcessRunner)({}),
       // Memory is allowed for every member, so a stopped task also carries the lead's memory refs.
@@ -465,7 +467,7 @@ const makeWorld = (
           yield* Queue.take(activitySignal);
         }
       });
-    const publishLeadDiff = (turnId: TurnId) =>
+    const publishLeadDiff = (turnId: TurnId, additions = 400) =>
       PubSub.publish(events, {
         type: "thread.turn-diff-completed",
         aggregateId: LEAD,
@@ -475,7 +477,7 @@ const makeWorld = (
           checkpointTurnCount: 0,
           checkpointRef: "ref",
           status: "ready",
-          files: [{ path: "a.ts", kind: "modified", additions: 400, deletions: 0 }],
+          files: [{ path: "a.ts", kind: "modified", additions, deletions: 0 }],
           assistantMessageId: null,
           completedAt: NOW,
         },
@@ -545,6 +547,23 @@ const makeWorld = (
       releaseIdle,
       awaitProgress,
       publishLeadDiff,
+      /** The lead's turn ended on a passing test run, so a small change counts as proven. */
+      recordPassingTests: (turnId: TurnId) =>
+        Ref.update(threadActivities, (all) =>
+          new Map(all).set(LEAD, [
+            ...(all.get(LEAD) ?? []),
+            {
+              id: "lead-tests",
+              kind: "tool.completed",
+              turnId,
+              payload: {
+                itemType: "command_execution",
+                status: "completed",
+                data: { item: { command: "vp test run foo.test.ts" } },
+              },
+            },
+          ]),
+        ),
       activityRows: Ref.get(activities),
     };
   });
@@ -1274,6 +1293,28 @@ describe("crew stop: nothing restarts", () => {
       const skipped = yield* world.awaitActivity(CREW_AUDIT_SKIPPED_ACTIVITY);
       assert.strictEqual(skipped.stopped, true);
       assert.isFalse((yield* world.issued).some((command) => command.type === "thread.create"));
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
+  it.effect("runs a light audit on the fast model for a small change whose tests passed", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld();
+      const service = yield* world.start;
+      const turnId = TurnId.make(`${LEAD}-turn`);
+      yield* world.recordPassingTests(turnId);
+      yield* world.publishLeadDiff(turnId, 5);
+
+      yield* world.awaitActivity("task.started");
+      const created = (yield* world.issued).find((command) => command.type === "thread.create");
+      assert.isTrue(created?.type === "thread.create" && created.title.startsWith("Crew Auditor"));
+      assert.strictEqual(
+        created?.type === "thread.create" ? created.modelSelection.model : null,
+        "claude-haiku-5",
+      );
+      assert.isFalse(
+        (yield* world.activityRows).some((entry) => entry.kind === CREW_AUDIT_SKIPPED_ACTIVITY),
+      );
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );

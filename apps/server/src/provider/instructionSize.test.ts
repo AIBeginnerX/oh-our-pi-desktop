@@ -15,7 +15,7 @@ import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
  * cost, read the measured size from the failure message, and set the constant
  * to that size plus about 5% in this file, in the same change that adds the text.
  */
-const RUNTIME_INSTRUCTIONS_MAX_BYTES = 2890;
+const RUNTIME_INSTRUCTIONS_MAX_BYTES = 3219;
 const CODEX_DEFAULT_MODE_INSTRUCTIONS_MAX_BYTES = 1015;
 const CODEX_PLAN_MODE_INSTRUCTIONS_MAX_BYTES = 9660;
 const CODEX_TOOL_CONTEXT_MAX_BYTES = 2054;
@@ -40,6 +40,7 @@ describe("instruction text size", () => {
       model: "gpt-5.4",
       modelName: "GPT-5.4",
       reasoningEffort: "high",
+      projectMemory: true,
     });
     expectWithinLimit(
       "buildRuntimeInstructions",

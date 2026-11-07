@@ -20,6 +20,8 @@ export interface EnvironmentOption {
   label: string;
   isPrimary: boolean;
   machine: EnvironmentMachineKind;
+  /** Small muted note after the label, e.g. "via Studio Mac · Offline" for gateway environments. */
+  hint?: string;
 }
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);

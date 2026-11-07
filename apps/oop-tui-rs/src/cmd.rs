@@ -7,6 +7,8 @@ use crate::app::{App, Pick};
 pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
     match name {
         "implement" => crate::cmd_implement::run(app),
+        "continue" => crate::cmd_continue::run(app),
+        "copy" => crate::cmd_copy::run(app, argument),
         "theme" => crate::cmd_misc::theme(app, argument),
         "update" => crate::cmd_misc::update(app),
         "threads" | "t" => crate::cmd_misc::threads(app),
@@ -20,6 +22,7 @@ pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
         "history" => crate::cmd_history::history(app, argument),
         "diff" => crate::cmd_history::diff(app, argument),
         "undo" => crate::cmd_history::undo(app),
+        "skills" => crate::cmd_skills::run(app, argument),
         "replay" => crate::replay::command(app),
         _ => return false,
     }
@@ -32,6 +35,7 @@ pub fn picked(app: &mut App, pick: &Pick, index: usize) {
         "theme" => crate::cmd_misc::theme_picked(app, pick, index),
         "undo" => crate::cmd_history::undo_picked(app, pick, index),
         "crew" => crate::cmd_crew::picked(app, pick, index),
+        "skills" => crate::cmd_skills::picked(app, pick, index),
         crate::folder::ID => crate::folder::picked(app, pick, index),
         _ => {}
     }

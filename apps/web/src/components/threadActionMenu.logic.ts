@@ -8,6 +8,7 @@ import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled"
  */
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
+  | "continue-in-new-thread"
   | "filter-by-project"
   | "project-settings"
   | "pin"
@@ -79,6 +80,11 @@ export function buildThreadActionMenuItems(
           },
         ]
       : []),
+    {
+      id: "continue-in-new-thread" as const,
+      label: "Continue in new thread",
+      icon: "message-square-plus",
+    },
     ...(state.supports.pinning
       ? [
           state.isPinned

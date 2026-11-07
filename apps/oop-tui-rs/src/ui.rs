@@ -85,6 +85,8 @@ fn header_for(app: &App, width: u16, rows: u16) -> (Header, u16) {
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     app.width.set(area.width);
+    // Only a drawn list draws the usage panel; anything else leaves nothing for the tick to watch.
+    *app.usage_drawn.borrow_mut() = None;
     app.term_size.set((area.width, area.height));
     let [columns, status] =
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(area);
@@ -843,6 +845,8 @@ fn section_title(section: Section) -> &'static str {
 }
 
 fn draw_list(frame: &mut Frame, area: Rect, app: &App) {
+    // The usage panel takes the foot; everything below (rows, scrolling, clicks) is the top part.
+    let area = crate::usage_panel::draw(frame, area, app);
     let t = &app.theme;
     let block = Block::default()
         .borders(Borders::RIGHT)
@@ -1444,6 +1448,8 @@ fn draw_status(frame: &mut Frame, area: Rect, app: &App) {
         tr("hint.list")
     } else if app.conv.busy() {
         tr("hint.working")
+    } else if let Some(hint) = crate::cmd_continue::hint(app) {
+        hint
     } else {
         tr("hint.composer")
     };

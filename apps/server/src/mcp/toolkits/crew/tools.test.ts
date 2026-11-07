@@ -16,3 +16,16 @@ describe("crew tool schemas: why", () => {
     }
   });
 });
+
+describe("crew tool schemas: size", () => {
+  const delegate = CrewToolkit.tools.crew_delegate.parametersSchema;
+  const input = { role: "worker", task: "Do it" };
+
+  it("accepts small and normal, defaults to neither, and rejects anything else", () => {
+    for (const size of ["small", "normal"]) {
+      assert.strictEqual(Schema.decodeUnknownSync(delegate)({ ...input, size }).size, size);
+    }
+    assert.isUndefined(Schema.decodeUnknownSync(delegate)(input).size);
+    assert.throws(() => Schema.decodeUnknownSync(delegate)({ ...input, size: "tiny" }));
+  });
+});

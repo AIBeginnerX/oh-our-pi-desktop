@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -34,6 +35,7 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
+  OrchestrationGetThreadHandoffSeedError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
@@ -108,6 +110,7 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { buildThreadHandoffSeed } from "./orchestration/threadHandoffSeed.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -803,6 +806,37 @@ const makeWsRpcLayer = (
                     message: "Failed to search threads",
                     cause,
                   }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.getThreadHandoffSeed]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.getThreadHandoffSeed,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery.getThreadDetailById(input.threadId, {
+                activityKinds: ["turn.plan.updated"],
+              });
+              if (Option.isNone(thread)) {
+                return yield* new OrchestrationGetThreadHandoffSeedError({
+                  message: "Thread not found",
+                });
+              }
+              const settings = yield* serverSettings.getSettings;
+              return {
+                seed: buildThreadHandoffSeed({
+                  thread: thread.value,
+                  goalText: settings.threadGoals[input.threadId]?.text ?? null,
+                }),
+              };
+            }).pipe(
+              Effect.mapError((cause) =>
+                Schema.is(OrchestrationGetThreadHandoffSeedError)(cause)
+                  ? cause
+                  : new OrchestrationGetThreadHandoffSeedError({
+                      message: "Failed to build handoff seed",
+                      cause,
+                    }),
               ),
             ),
             { "rpc.aggregate": "orchestration" },

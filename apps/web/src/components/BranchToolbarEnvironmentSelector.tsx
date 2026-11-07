@@ -152,6 +152,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
               <span className="inline-flex items-center gap-1.5">
                 <EnvironmentMachineIcon kind={env.machine} className="size-3" />
                 {env.label}
+                {env.hint ? (
+                  <span className="text-muted-foreground text-xs">{env.hint}</span>
+                ) : null}
               </span>
             </SelectItem>
           ))}

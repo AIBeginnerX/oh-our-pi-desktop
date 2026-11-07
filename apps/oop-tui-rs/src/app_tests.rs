@@ -946,3 +946,46 @@ async fn the_wheel_over_the_panel_moves_the_panel_and_elsewhere_the_conversation
     );
     assert_eq!(app.panel_scroll.get(), -(WHEEL_LINES as i32));
 }
+
+#[tokio::test]
+async fn going_back_to_a_recent_thread_keeps_what_was_folded_for_it() {
+    let mut app = open_thread();
+    assert_eq!(app.conv.thread.messages.len(), 1);
+    app.start_draft("p1");
+    assert!(app.conv.thread_id.is_empty());
+    assert_eq!(app.recent.len(), 1);
+    app.open_thread("t1");
+    // No second window to read: the thread is as it was, and resumes after its last sequence.
+    assert_eq!(app.conv.thread.messages.len(), 1);
+    assert_eq!(app.conv.sequence, Some(5));
+    assert_eq!(app.conv.older_cursor.as_deref(), Some("c1"));
+    assert!(app.recent.is_empty());
+}
+
+#[tokio::test]
+async fn a_thread_the_shell_no_longer_lists_is_read_afresh() {
+    let mut app = open_thread();
+    app.start_draft("p1");
+    app.shell.threads.clear();
+    app.open_thread("t1");
+    assert!(!app.conv.loaded);
+    assert_eq!(app.conv.thread_id, "t1");
+}
+
+#[tokio::test]
+async fn only_the_last_few_threads_are_kept() {
+    let mut app = app_with_project();
+    for i in 0..RECENT_THREADS + 2 {
+        app.conv = Conversation::new(&format!("t{i}"));
+        app.conv.loaded = true;
+        app.park_conversation();
+    }
+    let kept: Vec<&str> = app.recent.iter().map(|c| c.thread_id.as_str()).collect();
+    assert_eq!(kept, vec!["t2", "t3", "t4", "t5"]);
+    // Viewing one again makes it the newest.
+    app.conv = Conversation::new("t2");
+    app.conv.loaded = true;
+    app.park_conversation();
+    assert_eq!(app.recent.last().map(|c| c.thread_id.as_str()), Some("t2"));
+    assert_eq!(app.recent.len(), RECENT_THREADS);
+}

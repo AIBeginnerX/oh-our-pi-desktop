@@ -38,6 +38,7 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  getThreadHandoffSeed: "orchestration.getThreadHandoffSeed",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
@@ -2420,6 +2421,15 @@ export type OrchestrationGetFullThreadDiffInput = typeof OrchestrationGetFullThr
 export const OrchestrationGetFullThreadDiffResult = ThreadTurnDiff;
 export type OrchestrationGetFullThreadDiffResult = typeof OrchestrationGetFullThreadDiffResult.Type;
 
+/** The short note a continuation thread starts from, built by the server so every client shares it. */
+export const OrchestrationGetThreadHandoffSeedInput = Schema.Struct({ threadId: ThreadId });
+export type OrchestrationGetThreadHandoffSeedInput =
+  typeof OrchestrationGetThreadHandoffSeedInput.Type;
+
+export const OrchestrationGetThreadHandoffSeedResult = Schema.Struct({ seed: Schema.String });
+export type OrchestrationGetThreadHandoffSeedResult =
+  typeof OrchestrationGetThreadHandoffSeedResult.Type;
+
 export const OrchestrationThreadSearchSource = Schema.Literals(["user", "assistant"]);
 export type OrchestrationThreadSearchSource = typeof OrchestrationThreadSearchSource.Type;
 
@@ -2514,6 +2524,10 @@ export const OrchestrationRpcSchemas = {
     input: OrchestrationSearchThreadsInput,
     output: OrchestrationSearchThreadsResult,
   },
+  getThreadHandoffSeed: {
+    input: OrchestrationGetThreadHandoffSeedInput,
+    output: OrchestrationGetThreadHandoffSeedResult,
+  },
   getArchivedShellSnapshot: {
     input: Schema.Struct({}),
     output: OrchestrationShellSnapshot,
@@ -2555,6 +2569,14 @@ export class OrchestrationGetTurnDiffError extends Schema.TaggedError<Orchestrat
 
 export class OrchestrationGetFullThreadDiffError extends Schema.TaggedError<OrchestrationGetFullThreadDiffError>()(
   "OrchestrationGetFullThreadDiffError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {}
+
+export class OrchestrationGetThreadHandoffSeedError extends Schema.TaggedError<OrchestrationGetThreadHandoffSeedError>()(
+  "OrchestrationGetThreadHandoffSeedError",
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),

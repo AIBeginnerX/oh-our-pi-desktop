@@ -4,7 +4,9 @@ import {
   classifyHostedHttpsCompatibility,
   createAdvertisedEndpoint,
   deriveWsBaseUrl,
+  environmentEndpointUrl,
   normalizeHttpBaseUrl,
+  resolveEnvironmentUrl,
 } from "./endpoint.ts";
 
 const coreProvider = {
@@ -28,6 +30,29 @@ describe("advertised endpoint helpers", () => {
     );
     expect(classifyHostedHttpsCompatibility("https://desktop.example.com", "compatible")).toBe(
       "compatible",
+    );
+  });
+
+  it("keeps a gateway base path for endpoints and drops query and hash", () => {
+    const gateway = "https://host.example.test/_gw/env%2F1";
+    expect(environmentEndpointUrl(`${gateway}?x=1#h`, "/api/auth/session")).toBe(
+      "https://host.example.test/_gw/env%2F1/api/auth/session",
+    );
+    expect(environmentEndpointUrl("http://127.0.0.1:3773/", "/api/auth/session")).toBe(
+      "http://127.0.0.1:3773/api/auth/session",
+    );
+  });
+
+  it("resolves server-relative asset links under the base path", () => {
+    const gateway = "https://host.example.test/_gw/env%2F1";
+    expect(resolveEnvironmentUrl(gateway, "/api/assets/a.png?t=1")).toBe(
+      "https://host.example.test/_gw/env%2F1/api/assets/a.png?t=1",
+    );
+    expect(resolveEnvironmentUrl("http://127.0.0.1:3773", "/api/assets/a.png")).toBe(
+      "http://127.0.0.1:3773/api/assets/a.png",
+    );
+    expect(resolveEnvironmentUrl(gateway, "https://cdn.example.test/a.png")).toBe(
+      "https://cdn.example.test/a.png",
     );
   });
 

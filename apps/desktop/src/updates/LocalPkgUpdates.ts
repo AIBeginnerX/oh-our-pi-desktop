@@ -630,12 +630,16 @@ export const removeStagedPackage = (input: {
 };
 
 const STAGED_PACKAGE_VERSION = /-((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*))-/;
+/** The release package itself; a stage also holds `install.log` and `install.sh`. */
+const PACKAGE_EXTENSION = ".pkg";
 
 /**
- * Startup retention: removes `stage-*` directories whose every package is a version the running
- * app already is or has passed, since the install they were staged for has completed. A newer
- * package may still be open in the Installer or its setup, and an unrecognised file is not ours
- * to judge, so either keeps its directory. Returns the removed directories.
+ * Startup retention: removes `stage-*` directories whose packages are all versions the running
+ * app already is or has passed, since the install they were staged for has completed. Only `.pkg`
+ * files are judged; a stage also holds `install.log` and `install.sh`, which this module wrote and
+ * which say nothing about the version. A newer package may still be open in the Installer or its
+ * setup, and a directory with no recognisable package is not ours to judge, so either keeps its
+ * directory. Returns the removed directories.
  */
 export const pruneInstalledStages = Effect.fn("desktop.updates.localPkg.pruneInstalledStages")(
   function* (input: { readonly stagingRoot: string; readonly currentVersion: string }) {
@@ -651,9 +655,10 @@ export const pruneInstalledStages = Effect.fn("desktop.updates.localPkg.pruneIns
       if (!entry.isDirectory() || !entry.name.startsWith(STAGE_DIRECTORY_PREFIX)) continue;
       const directory = NodePath.join(stagingRoot, entry.name);
       const files = yield* Effect.promise(() => NodeFSP.readdir(directory).catch(() => []));
+      const packages = files.filter((name) => name.endsWith(PACKAGE_EXTENSION));
       const installed =
-        files.length > 0 &&
-        files.every((name) => {
+        packages.length > 0 &&
+        packages.every((name) => {
           const version = parseStableVersion(STAGED_PACKAGE_VERSION.exec(name)?.[1] ?? "");
           return Option.isSome(version) && !isNewerVersion(version.value, current.value);
         });

@@ -6,6 +6,13 @@ const STORAGE_KEY = "t3code:usage-page-preferences:v1";
 const UsagePagePreferencesSchema = Schema.Struct({
   metric: Schema.Literals(["cost", "tokens", "limits"]),
   windowDays: Schema.Literals([1, 7, 30, 90]),
+  // Optional so preferences saved before the sortable breakdown still decode.
+  breakdownSort: Schema.optionalKey(
+    Schema.Struct({
+      key: Schema.Literals(["cost", "tokens", "name"]),
+      direction: Schema.Literals(["asc", "desc"]),
+    }),
+  ),
 });
 export type UsagePagePreferences = typeof UsagePagePreferencesSchema.Type;
 

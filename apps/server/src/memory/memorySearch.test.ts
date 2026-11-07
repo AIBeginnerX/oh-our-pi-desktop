@@ -59,6 +59,26 @@ describe("makeSearchPlan", () => {
     expect(plan.likePatterns).toEqual(["%a!!%"]);
   });
 
+  it("keeps both Korean paths usable: 2 codepoints via LIKE, 3+ via trigram FTS", () => {
+    // 캐시 is 2 code points, under the trigram minimum, so it must take the
+    // escaped LIKE path and still produce a usable plan on its own.
+    const short = makeSearchPlan("캐시");
+    expect(short.ftsMatch).toBeNull();
+    expect(short.likePatterns).toEqual(["%캐시%"]);
+    expect(planHasTerms(short)).toBe(true);
+
+    // 디스크용량 is 5 code points, so the trigram index can answer it.
+    const long = makeSearchPlan("디스크용량");
+    expect(long.ftsMatch).toBe('"디스크용량"');
+    expect(long.likePatterns).toEqual([]);
+    expect(planHasTerms(long)).toBe(true);
+
+    // Together, each term keeps its own path rather than one swallowing the other.
+    const mixed = makeSearchPlan("캐시 디스크용량", { strict: true });
+    expect(mixed.ftsMatch).toBe('"디스크용량"');
+    expect(mixed.likePatterns).toEqual(["%캐시%"]);
+  });
+
   it("quotes FTS phrases so FTS syntax and column names are inert", () => {
     const plan = makeSearchPlan('body:foo "bar" AND');
     // Every term is individually quoted; nothing can break out as an operator.

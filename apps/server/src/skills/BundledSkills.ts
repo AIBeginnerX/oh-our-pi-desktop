@@ -24,8 +24,12 @@ import * as Path from "effect/Path";
 
 import { ARENA_SKILL_MARKDOWN } from "./bundled/arenaSkill.ts";
 import { CREATE_VERIFICATION_SKILL_MARKDOWN } from "./bundled/createVerificationSkill.ts";
+import { DEEP_RESEARCH_SKILL_MARKDOWN } from "./bundled/deepResearchSkill.ts";
+import { HANDOFF_SKILL_MARKDOWN } from "./bundled/handoffSkill.ts";
 import { MAINTAIN_VERIFICATION_SKILL_MARKDOWN } from "./bundled/maintainVerificationSkill.ts";
+import { PAPER_ANALYSIS_SKILL_MARKDOWN } from "./bundled/paperAnalysisSkill.ts";
 import { PIXELGUI_SKILL_MARKDOWN } from "./bundled/pixelguiSkill.ts";
+import { RETRO_SKILL_MARKDOWN } from "./bundled/retroSkill.ts";
 
 interface BundledSkill {
   readonly name: string;
@@ -37,6 +41,10 @@ export const BUNDLED_SKILLS: ReadonlyArray<BundledSkill> = [
   { name: "create-verification-skill", markdown: CREATE_VERIFICATION_SKILL_MARKDOWN },
   { name: "maintain-verification-skill", markdown: MAINTAIN_VERIFICATION_SKILL_MARKDOWN },
   { name: "arena", markdown: ARENA_SKILL_MARKDOWN },
+  { name: "handoff", markdown: HANDOFF_SKILL_MARKDOWN },
+  { name: "retro", markdown: RETRO_SKILL_MARKDOWN },
+  { name: "paper-analysis", markdown: PAPER_ANALYSIS_SKILL_MARKDOWN },
+  { name: "deep-research", markdown: DEEP_RESEARCH_SKILL_MARKDOWN },
 ];
 
 const TARGETS: ReadonlyArray<BundledSkillTarget> = ["claude", "agents"];

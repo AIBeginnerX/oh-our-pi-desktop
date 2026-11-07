@@ -35,6 +35,7 @@ import {
   TERMINAL_APP_EXTRA_RESOURCES,
   bundlesTerminalApp,
   InvalidBuildSigningError,
+  InvalidMacLocalIdentityError,
   InvalidOopLocalUpdateDirectoryError,
   InvalidOopLocalUpdateCandidatesError,
   InvalidMacPasskeyRpDomainError,
@@ -3007,6 +3008,119 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal((adhoc.mac as Record<string, unknown>).identity, "-");
       assert.notProperty(adhoc.mac as Record<string, unknown>, "notarize");
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("signs with the local identity like ad hoc, and only when the variable is set", () =>
+    Effect.gen(function* () {
+      const local = { OOP_MAC_LOCAL_SIGN_IDENTITY: " OOP Local Signing " };
+      const resolved = yield* resolveWithEnv(baseBuildInput, local);
+      assert.equal(resolved.signingMode, "local-identity");
+      assert.equal(resolved.macLocalIdentity, "OOP Local Signing");
+      // Not a distribution mode: no signed-build behavior and the legacy trust policy.
+      assert.isFalse(resolved.signed);
+      assert.isUndefined(resolved.macDeveloperId);
+      assert.equal(resolved.localPkgTrustMarker, legacyTrustMarker);
+
+      for (const unset of [{}, { OOP_MAC_LOCAL_SIGN_IDENTITY: "  " }]) {
+        const adhoc = yield* resolveWithEnv(baseBuildInput, unset);
+        assert.equal(adhoc.signingMode, "adhoc");
+        assert.isUndefined(adhoc.macLocalIdentity);
+      }
+
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+        false,
+        "arm64",
+        true,
+        true,
+        undefined,
+        resolved.macLocalIdentity,
+      );
+      assert.deepStrictEqual(
+        config.mac &&
+          (({ identity, hardenedRuntime, notarize, timestamp }) => ({
+            identity,
+            hardenedRuntime,
+            notarize,
+            timestamp,
+          }))(config.mac as Record<string, unknown>),
+        {
+          identity: "OOP Local Signing",
+          hardenedRuntime: false,
+          notarize: false,
+          timestamp: "none",
+        },
+      );
+      assert.notProperty(config.mac as Record<string, unknown>, "sign");
+      // The ad hoc configuration is untouched when the identity is not passed.
+      const adhoc = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+      assert.deepStrictEqual(
+        {
+          identity: (adhoc.mac as Record<string, unknown>).identity,
+          hardenedRuntime: (adhoc.mac as Record<string, unknown>).hardenedRuntime,
+        },
+        { identity: "-", hardenedRuntime: false },
+      );
+    }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("rejects the local identity beside other signing modes or off macOS", () =>
+    Effect.gen(function* () {
+      const identity = "OOP Local Signing";
+      const local = { OOP_MAC_LOCAL_SIGN_IDENTITY: identity };
+      const cases = [
+        {
+          reason: "conflicts-with-signed",
+          input: { ...baseBuildInput, signed: Option.some(true) },
+          env: local,
+        },
+        {
+          reason: "conflicts-with-signed",
+          input: baseBuildInput,
+          env: { ...local, T3CODE_DESKTOP_SIGNED: "true" },
+        },
+        {
+          reason: "conflicts-with-developer-id",
+          input: explicitDeveloperId,
+          env: { ...developerIdEnv, ...local },
+        },
+        {
+          reason: "requires-mac",
+          input: { ...baseBuildInput, platform: Option.some("linux" as const) },
+          env: local,
+        },
+        {
+          reason: "invalid-identity",
+          input: baseBuildInput,
+          env: { OOP_MAC_LOCAL_SIGN_IDENTITY: "-" },
+        },
+        {
+          reason: "invalid-identity",
+          input: baseBuildInput,
+          env: { OOP_MAC_LOCAL_SIGN_IDENTITY: "a\u0007b" },
+        },
+      ];
+      for (const { reason, input, env } of cases) {
+        const error = yield* Effect.flip(resolveWithEnv(input, env));
+        assert.instanceOf(error, InvalidMacLocalIdentityError);
+        assert.equal((error as InvalidMacLocalIdentityError).reason, reason);
+        assert.notInclude(error.message, identity);
+      }
+    }),
   );
 
   it("scrubs certificate import, notarization and upload credentials from candidate builds", () => {

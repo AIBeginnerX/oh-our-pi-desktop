@@ -38,6 +38,7 @@ import {
 import { buildPhysicalToLogicalProjectKeyMap } from "../sidebarProjectGrouping";
 import { useUiStateStore } from "../uiStateStore";
 import { useCopyToClipboard } from "./useCopyToClipboard";
+import { useContinueInNewThread } from "./useContinueInNewThread";
 import { useNewThreadHandler } from "./useHandleNewThread";
 import { useClientSettings } from "./useSettings";
 import { useThreadActions } from "./useThreadActions";
@@ -97,6 +98,7 @@ export function useThreadActionMenu(input: {
     reportFailure: false,
   });
   const handleNewThread = useNewThreadHandler();
+  const continueInNewThread = useContinueInNewThread();
   const markThreadUnread = useUiStateStore((s) => s.markThreadUnread);
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
@@ -213,6 +215,9 @@ export function useThreadActionMenu(input: {
             }
             return;
           }
+          case "continue-in-new-thread":
+            await continueInNewThread(threadRef);
+            return;
           case "settle":
             await reportFailure("Failed to settle thread", () => settleThread(threadRef));
             return;
@@ -330,6 +335,7 @@ export function useThreadActionMenu(input: {
       confirmThreadArchive,
       confirmThreadDelete,
       confirmAndUnpinThread,
+      continueInNewThread,
       copyBranchToClipboard,
       copyPathToClipboard,
       copyThreadIdToClipboard,

@@ -88,7 +88,6 @@ export const remoteHttpClientLayer = (
 
 const remoteApiBaseUrl = (httpBaseUrl: string): string => {
   const url = new URL(httpBaseUrl);
-  url.pathname = "/";
   url.search = "";
   url.hash = "";
   return url.toString();

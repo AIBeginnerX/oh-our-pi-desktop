@@ -261,9 +261,10 @@ export const make = Effect.gen(function* () {
       projectCloneTracking: true,
       // Send support derives from the same ProjectMemorySendPolicy the gate
       // reads: `send` is true and `sendDriverKinds` is emitted only while the
-      // allowlist is nonempty. The default allowlist is empty, so the
-      // descriptor is unchanged on this build and clients must not offer
-      // memory references in composer context.
+      // allowlist is nonempty. The production server supplies the allowlist
+      // from PROJECT_MEMORY_SEND_DRIVER_KINDS (claudeAgent and codex), so
+      // clients may offer memory references for those drivers only. Layer
+      // graphs that do not opt in keep the empty default and emit no list.
       projectMemory: {
         manage: true,
         send: memorySendDriverKinds.length > 0,

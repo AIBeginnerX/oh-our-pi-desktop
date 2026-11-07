@@ -286,6 +286,8 @@ pub struct Outcome {
     /// The tool tried last and how it went; `None` when none is used (SSH) or none exists here.
     pub tool: Option<(String, Result<(), Why>)>,
     pub too_large: bool,
+    /// What was copied, in words ("1 command (2 lines)"), when the copy has a name for it.
+    pub what: Option<String>,
 }
 
 /// Runs the plan's tools in order until one works. A tool that is not installed is passed over; the

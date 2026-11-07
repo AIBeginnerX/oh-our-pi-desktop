@@ -28,6 +28,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Metric from "effect/Metric";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
@@ -250,6 +251,8 @@ function commandToAggregateRef(command: OrchestrationCommand): {
       };
   }
 }
+
+const RECEIPT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 const makeOrchestrationEngine = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -1594,6 +1597,26 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 
   const worker = Effect.forever(Queue.take(commandQueue).pipe(Effect.flatMap(processEnvelope)));
   yield* Effect.forkScoped(worker);
+
+  // Accepted receipts the projection checkpoint already covers never feed
+  // catch-up again, so old ones are pruned at startup and then daily.
+  const pruneReceipts = Effect.gen(function* () {
+    const now = yield* Clock.currentTimeMillis;
+    const { snapshotSequence } = yield* projectionSnapshotQuery.getSnapshotSequence();
+    const removed = yield* commandReceiptRepository.pruneAccepted({
+      acceptedBefore: DateTime.formatIso(DateTime.makeUnsafe(now - RECEIPT_RETENTION_MS)),
+      throughSequence: snapshotSequence,
+    });
+    if (removed > 0) {
+      yield* Effect.logInfo("pruned old command receipts", { removed });
+    }
+  }).pipe(
+    Effect.catchCauseIf(
+      (cause) => !Cause.hasInterruptsOnly(cause),
+      (cause) => Effect.logWarning("command receipt pruning failed", { cause }),
+    ),
+  );
+  yield* Effect.forkScoped(pruneReceipts.pipe(Effect.repeat(Schedule.spaced("24 hours"))));
   yield* Effect.logDebug("orchestration engine started").pipe(
     Effect.annotateLogs({ sequence: commandReadModel.snapshotSequence }),
   );
