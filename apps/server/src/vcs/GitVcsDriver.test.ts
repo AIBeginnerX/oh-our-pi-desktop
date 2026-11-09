@@ -280,7 +280,11 @@ it.effect("checkpoint recovery refuses excessive candidates before probing", () 
     assert.strictEqual(nestedProbes, 0);
     assert.strictEqual(stageAttempts, 1);
     assert.strictEqual(result._tag, "Failure");
-    if (result._tag === "Failure") assert.strictEqual(result.failure, stageError);
+    if (result._tag === "Failure")
+      assert.deepEqual(
+        result.failure,
+        new VcsProcessExitError({ ...stageError!, detail: `stage: ${stageError!.detail}` }),
+      );
     assert.isFalse(yield* driver.checkpoints.hasCheckpointRef({ cwd, checkpointRef }));
     assert.deepEqual(yield* fs.readFile(path.join(cwd, ".git", "index")), originalIndex);
   }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
@@ -375,7 +379,11 @@ it.effect.each([
           return yield* Effect.die("Expected the recovery deadline to expire");
         const error = Cause.findErrorOption(result.cause);
         assert.isTrue(error._tag === "Some");
-        if (error._tag === "Some") assert.strictEqual(error.value, stageError);
+        if (error._tag === "Some")
+          assert.deepEqual(
+            error.value,
+            new VcsProcessExitError({ ...stageError!, detail: `stage: ${stageError!.detail}` }),
+          );
       } else assert.isTrue(Exit.isSuccess(result));
       assert.strictEqual(racedAttempts, expireRecovery ? 1 : 2);
       assert.strictEqual(discoveries, nestedRecovery ? 1 : 0);
@@ -469,7 +477,10 @@ for (const blockedPhase of ["discovery", "probe", "retry"] as const) {
       yield* Deferred.await(entered);
       yield* TestClock.adjust(blockedPhase === "probe" ? "2 seconds" : "5 seconds");
       const error = yield* Fiber.join(fiber);
-      assert.strictEqual(error, stageError);
+      assert.deepEqual(
+        error,
+        new VcsProcessExitError({ ...stageError!, detail: `stage: ${stageError!.detail}` }),
+      );
       assert.strictEqual(stagingAttempts, blockedPhase === "retry" ? 2 : 1);
       assert.isTrue(interrupted);
       assert.isDefined(privateIndex);
@@ -1187,7 +1198,7 @@ it.effect(
   },
 );
 
-it.effect("GitVcsDriver keeps flushing when a checkpoint write fails for another reason", () => {
+it.effect("GitVcsDriver names the failing stage in checkpoint errors and keeps flushing", () => {
   const observedArgs: ReadonlyArray<string>[] = [];
 
   return Effect.gen(function* () {
@@ -1200,6 +1211,7 @@ it.effect("GitVcsDriver keeps flushing when a checkpoint write fails for another
       .pipe(Effect.flip);
 
     assert.strictEqual(error._tag, "VcsProcessExitError");
+    assert.include(error.message, "stage");
     const adds = observedArgs.filter((args) => args.includes("add"));
     assert.strictEqual(adds.length, 1);
     assert.isTrue(adds[0]?.includes("core.fsyncMethod=fsync"));

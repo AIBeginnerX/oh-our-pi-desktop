@@ -87,6 +87,9 @@ export function threadGoalProgress(
 /** The crew records a turn it left unaudited, so a goal waiting on that audit stops waiting. */
 export const CREW_AUDIT_SKIPPED_ACTIVITY = "crew.audit-skipped";
 
+/** Crew activity kind the lead thread gets when the follow-up cap dropped unfinished crew results. */
+export const CREW_RESULTS_DROPPED_ACTIVITY = "crew.results-dropped";
+
 /** Crew and diff-capture activity kinds the goal reads from the lead thread. */
 export const THREAD_GOAL_CREW_ACTIVITY_KINDS = [
   "task.started",

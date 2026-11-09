@@ -1945,6 +1945,7 @@ pub struct CrewTask {
 pub enum CrewNoteKind {
     AuditSkipped,
     FollowUp,
+    ResultsDropped,
 }
 
 #[derive(Clone, Debug)]
@@ -2064,6 +2065,10 @@ pub fn crew_board(thread: &Thread, running: bool) -> Option<CrewBoard> {
             "crew.follow-up" => Some(CrewNote {
                 kind: CrewNoteKind::FollowUp,
                 detail: a.payload["reason"].clone(),
+            }),
+            "crew.results-dropped" => Some(CrewNote {
+                kind: CrewNoteKind::ResultsDropped,
+                detail: Value::from(a.payload["tasks"].as_array().map_or(0, Vec::len)),
             }),
             _ => None,
         })

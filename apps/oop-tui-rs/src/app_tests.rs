@@ -989,3 +989,16 @@ async fn only_the_last_few_threads_are_kept() {
     assert_eq!(app.recent.last().map(|c| c.thread_id.as_str()), Some("t2"));
     assert_eq!(app.recent.len(), RECENT_THREADS);
 }
+
+#[test]
+fn provider_skill_prefers_current_provider() {
+    let mut app = app_with_project();
+    app.config = json!({"providers": [
+        {"instanceId": "claude", "skills": [{"name": "Review", "enabled": true}, {"name": "foreign", "enabled": true}]},
+        {"instanceId": "codex", "skills": [{"name": "review", "enabled": true}]}
+    ]});
+    app.model_override = Some(json!({"instanceId": "codex", "model": "gpt"}));
+    assert_eq!(app.provider_skill("review"), Some("review".into()));
+    assert_eq!(app.provider_skill("foreign"), Some("foreign".into()));
+    assert_eq!(app.provider_skill("unknown"), None);
+}

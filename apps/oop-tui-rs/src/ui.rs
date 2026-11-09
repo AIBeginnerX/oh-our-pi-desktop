@@ -294,8 +294,7 @@ fn crew_roles(app: &App, words: bool) -> Vec<Span<'static>> {
     let brain = current
         .as_ref()
         .and_then(|m| Some((m["instanceId"].as_str()?, m["model"].as_str()?)));
-    let Some(roles) =
-        crate::crew::roles_of(&app.config, own.as_ref(), brain, app.active != Active::None)
+    let Some(roles) = crate::crew::roles_of(&app.config, own, brain, app.active != Active::None)
     else {
         return Vec::new();
     };
@@ -995,7 +994,12 @@ fn error_in_transcript(app: &App, error: &str) -> bool {
 fn live_lines(app: &App, w: usize) -> Vec<Line<'static>> {
     let t = &app.theme;
     let mut out = Vec::new();
-    if app.conv.session().is_some_and(|s| s.status == "error")
+    // An interrupted session (a server restart orphaned it) keeps a lastError that says how to
+    // continue, so it is worth showing even though the session is not a failure.
+    if app
+        .conv
+        .session()
+        .is_some_and(|s| matches!(s.status.as_str(), "error" | "interrupted"))
         && let Some(error) = app.conv.session().and_then(|s| s.last_error.as_deref())
         && !error_in_transcript(app, error)
     {
@@ -1045,7 +1049,6 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
     } else {
         app.transcript(w)
     };
-    let base = &transcript.lines;
     let mut tail: Vec<Line<'static>> = match placeholder(app) {
         // Notes (`/update`, `/theme`, ...) still show where there is no conversation to put them under.
         Some(key) => {
@@ -1070,10 +1073,10 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
         }
         tail.push(crate::replay::button_line(app));
     }
-    if !base.is_empty() && !tail.is_empty() {
+    if !transcript.is_empty() && !tail.is_empty() {
         tail.insert(0, Line::default());
     }
-    let total = base.len() + tail.len();
+    let total = transcript.len() + tail.len();
     let max = total.saturating_sub(h);
     // Keep what the reader is looking at where it is while lines are added above or below it.
     let (before, before_width) = app.total.get();
@@ -1089,10 +1092,10 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
     let end = total - scroll;
     let start = end.saturating_sub(h);
     let at = |i: usize| -> Line<'static> {
-        if i < base.len() {
-            base[i].clone()
+        if i < transcript.len() {
+            transcript.line(i).cloned().unwrap_or_default()
         } else {
-            tail[i - base.len()].clone()
+            tail[i - transcript.len()].clone()
         }
     };
     // Short conversations sit at the bottom, next to the composer, like a chat.
@@ -1105,7 +1108,7 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
         area,
         pad,
         start,
-        rows: base.len(),
+        rows: transcript.len(),
     });
     highlight_selection(frame, area, app, &transcript, pad, start, end);
 
@@ -1152,12 +1155,14 @@ fn highlight_selection(
         return;
     };
     let buffer = frame.buffer_mut();
-    for row in start.max(range.0.row)..end.min(range.1.row + 1).min(transcript.lines.len()) {
-        let meta = transcript.meta.get(row).copied().unwrap_or_default();
+    for row in start.max(range.0.row)..end.min(range.1.row + 1).min(transcript.len()) {
+        let meta = transcript.meta(row).unwrap_or_default();
         let Some((from, to)) = crate::selection::row_cells(range, row, &meta) else {
             continue;
         };
-        let line = &transcript.lines[row];
+        let Some(line) = transcript.line(row) else {
+            continue;
+        };
         let Some((from, to)) = crate::selection::snap(line, from, to.min(line.width())) else {
             continue;
         };

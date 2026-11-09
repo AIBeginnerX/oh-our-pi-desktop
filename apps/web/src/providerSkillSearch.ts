@@ -106,3 +106,19 @@ export function searchProviderSkills(
 
   return ranked.map((entry) => entry.item);
 }
+
+/** Selected-provider entries win collisions; foreign descriptions identify their origin. */
+export function includeForeignProviderSkills(
+  native: ReadonlyArray<ServerProviderSkill>,
+  foreign: ReadonlyArray<{ provider: string; skills: ReadonlyArray<ServerProviderSkill> }>,
+): ServerProviderSkill[] {
+  return dedupeProviderSkillsByName([
+    ...native,
+    ...foreign.flatMap(({ provider, skills }) =>
+      skills.filter(isProviderSkillUserInvocable).map((skill) => ({
+        ...skill,
+        shortDescription: `${provider} skill${skill.shortDescription || skill.description ? ` · ${skill.shortDescription ?? skill.description}` : ""}`,
+      })),
+    ),
+  ]);
+}

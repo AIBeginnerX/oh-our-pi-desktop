@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 
 import {
+  VcsProcessExitError,
   VcsProcessTimeoutError,
   VcsProcessSpawnError,
   ProviderDriverKind,
@@ -38,6 +39,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
@@ -294,6 +297,7 @@ describe("CheckpointReactor", () => {
   });
 
   async function createHarness(options?: {
+    readonly checkpointCaptureFailure?: VcsProcessExitError;
     readonly checkpointLookupFailure?: (
       cwd: string,
     ) => VcsProcessTimeoutError | VcsProcessSpawnError | undefined;
@@ -385,6 +389,10 @@ describe("CheckpointReactor", () => {
           CheckpointStore.make.pipe(
             Effect.map((store) => ({
               ...store,
+              captureCheckpoint: (input) =>
+                options?.checkpointCaptureFailure
+                  ? Effect.fail(options.checkpointCaptureFailure)
+                  : store.captureCheckpoint(input),
               hasCheckpointRef: (input) => {
                 const failure = options?.checkpointLookupFailure?.(input.cwd);
                 return failure ? Effect.fail(failure) : store.hasCheckpointRef(input);
@@ -1802,6 +1810,77 @@ describe("CheckpointReactor", () => {
     expect(thread?.checkpoints.some((checkpoint) => checkpoint.checkpointTurnCount === 3)).toBe(
       false,
     );
+  });
+
+  it("includes the failing git stage in capture failure activity", async () => {
+    const failure = await Effect.runPromise(
+      Effect.gen(function* () {
+        const driver = yield* GitVcsDriver.makeVcsDriverShape();
+        return yield* driver.checkpoints
+          .captureCheckpoint({
+            cwd: "/repo",
+            checkpointRef: CheckpointRef.make("refs/t3/checkpoints/test"),
+          })
+          .pipe(Effect.flip);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            NodeServices.layer,
+            Layer.mock(VcsProcess.VcsProcess)({
+              run: (input) =>
+                input.args.includes("add")
+                  ? Effect.fail(
+                      VcsProcessExitError.fromProcessExit(
+                        {
+                          operation: VcsProcess.CHECKPOINT_CAPTURE_OPERATION,
+                          command: "git",
+                          cwd: "/repo",
+                        },
+                        { exitCode: 128, stderr: "fatal", stderrTruncated: false },
+                        "command-failed",
+                      ),
+                    )
+                  : Effect.succeed({
+                      exitCode: ChildProcessSpawner.ExitCode(0),
+                      stdout: input.args.includes("--git-common-dir") ? ".git\n" : "",
+                      stderr: "",
+                      stdoutTruncated: false,
+                      stderrTruncated: false,
+                    }),
+            }),
+          ),
+        ),
+      ),
+    );
+    if (failure._tag !== "VcsProcessExitError") throw new Error(`unexpected ${failure._tag}`);
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      checkpointCaptureFailure: failure,
+    });
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-stage-failure"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:00.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("stage-failure"),
+    });
+    await harness.drain();
+    harness.provider.emit({
+      type: "turn.completed",
+      eventId: EventId.make("evt-stage-completed"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      threadId: ThreadId.make("thread-1"),
+      turnId: asTurnId("stage-failure"),
+      payload: { state: "completed" },
+    });
+    await harness.drain();
+    const model = await harness.readModel();
+    const activity = model.threads
+      .find((t) => t.id === "thread-1")
+      ?.activities.find((a) => a.kind === "checkpoint.capture.failed");
+    expect(activity?.payload).toMatchObject({ detail: expect.stringContaining("stage:") });
   });
 
   it("continues processing runtime events after a single checkpoint runtime failure", async () => {

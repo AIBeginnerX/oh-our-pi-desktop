@@ -206,7 +206,10 @@ provider. On mobile, both are also available before starting a thread on
 **New task**.
 
 The slash menu also includes skills unless you turn off **Settings → General →
-Show skills in slash menu**. Only skills enabled for the provider are listed.
+Show skills in slash menu**. Enabled skills from other providers in the same environment also appear, marked with their primary provider (for example, “Claude skill”).
+When the selected provider does not have a skill, OOP includes its SKILL.md instructions (up to 64 KB) with your arguments and asks the model to use equivalent tools, work sequentially, or ask you directly when tools are unavailable.
+Skills installed for the selected provider keep their native invocation and take precedence when names collide.
+The terminal app’s `/name` commands use the same fallback.
 
 Provider commands must start the message to run. OOP commands such as
 `/model` and `/plan`, and skill mentions, work on any line.

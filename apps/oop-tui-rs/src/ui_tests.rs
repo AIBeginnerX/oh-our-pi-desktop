@@ -304,7 +304,7 @@ fn settings_choose_the_header_and_the_symbols() {
 #[test]
 fn wide_characters_never_overflow_a_narrow_pane() {
     let app = open_conversation();
-    for line in app.transcript(12).lines.iter() {
+    for line in app.transcript(12).iter() {
         let cells: usize = line.spans.iter().map(|s| width(&s.content)).sum();
         assert!(cells <= 12, "{cells} cells: {line:?}");
     }
@@ -339,6 +339,22 @@ fn a_failed_session_shows_its_error_in_the_conversation() {
             .any(|r| r.contains("✗  Provider is not signed in"))
     );
     assert!(rows[4].contains(tr("state.error")), "{:#?}", &rows[..6]);
+}
+
+#[test]
+fn an_interrupted_session_shows_the_hint_that_says_how_to_continue() {
+    let mut app = open_conversation();
+    app.conv.apply(
+        &json!({"kind": "event", "event": {"sequence": 3, "type": "thread.session-set",
+        "payload": {"session": {"status": "interrupted",
+        "lastError": "Provider session did not survive a server restart. Send a new message to continue."}}}}),
+    );
+    let rows = screen(&app, 140, 40);
+    assert!(
+        rows.iter()
+            .any(|r| r.contains("Provider session did not survive")),
+        "{rows:#?}"
+    );
 }
 
 #[test]

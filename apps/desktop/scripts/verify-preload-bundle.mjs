@@ -9,6 +9,7 @@ import { parse } from "acorn";
 const expectedDesktopBridgeApis = [
   "getClientPlatform",
   "getLocalEnvironmentBootstraps",
+  "onLocalEnvironmentBootstrapsChange",
   "getPathForFile",
   "pickFolder",
 ];

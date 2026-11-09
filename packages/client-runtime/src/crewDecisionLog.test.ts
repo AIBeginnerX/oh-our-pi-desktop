@@ -126,6 +126,34 @@ describe("buildCrewDecisionLog", () => {
     expect(buildCrewDecisionLog([activity("tool.completed", T(1), {})])).toEqual([]);
   });
 
+  it("shows the unfinished results the follow-up cap dropped", () => {
+    const rows = buildCrewDecisionLog([
+      // No crewRole at top level, like crew.follow-up, so it must still reach the log.
+      activity("crew.results-dropped", T(1), {
+        tasks: [
+          { taskId: "w2", crewRole: "worker", subject: "Fix the parser", status: "partial" },
+          { taskId: "w3", crewRole: "worker", subject: "Add tests", status: "blocked" },
+        ],
+      }),
+      activity("crew.results-dropped", T(2), {
+        tasks: [{ taskId: "w4", crewRole: "worker", subject: "Docs", status: "failed" }],
+      }),
+    ]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      phase: "follow-up",
+      decision: "2 unfinished results dropped (follow-up limit)",
+      why: "",
+      evidence: "tasks:w2,w3",
+      result: "dropped",
+    });
+    expect(rows[1]).toMatchObject({
+      decision: "1 unfinished result dropped (follow-up limit)",
+      evidence: "tasks:w4",
+      result: "dropped",
+    });
+  });
+
   it("leaves out a provider-native task that carries no crew role", () => {
     const rows = buildCrewDecisionLog([
       // The plan's own step: the provider emits task.started without a crewRole.

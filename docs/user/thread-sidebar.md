@@ -29,6 +29,10 @@ and worktree while you stay in the new thread composer. This requires a Git proj
 
 Pin a thread from its menu to keep it above your active work.
 
+Threads that are working or waiting for your approval or input move to the top of the active
+list, and return to their place when they finish. Turn this off in **Settings → General →
+Running threads first** to keep the active list in your own order.
+
 On web and desktop, unpinning, settling, snoozing, and archiving a thread each show
 a notification with **Undo** for five seconds. Undo restores the thread's previous
 state, including its pinned position, and reopens an archived thread you were

@@ -106,6 +106,8 @@ import {
   resolveAdjacentThreadId,
   orderItemsByPreferredIds,
   shouldClearThreadSelectionOnMouseDown,
+  isSidebarThreadInProgress,
+  liftInProgressThreads,
   sortProjectsForSidebar,
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
@@ -144,7 +146,7 @@ import {
 function LocalSecondaryStatus() {
   const { environments } = useEnvironments();
   // The desktop reports which local secondary backends (e.g. the WSL backend)
-  // exist; the hook polls because the bridge has no change event. A backend that
+  // exist; the hook re-reads when the desktop pushes a change. A backend that
   // is still cold-booting has no httpBaseUrl yet and isn't in the catalog, so we
   // surface "Connecting" straight from the bootstrap list and clear it once the
   // matching environment reports a connected phase.
@@ -632,6 +634,7 @@ export default function LegacySidebar() {
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const navigate = useNavigate();
   const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
+  const sidebarRunningThreadsFirst = useClientSettings((s) => s.sidebarRunningThreadsFirst);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount);
@@ -947,12 +950,15 @@ export default function LegacySidebar() {
   const visibleSidebarThreadKeys = useMemo(
     () =>
       sortedProjects.flatMap((project) => {
-        const projectThreads = sortThreads(
+        const sortedProjectThreads = sortThreads(
           (threadsByProjectKey.get(project.projectKey) ?? []).filter(
             (thread) => thread.archivedAt === null,
           ),
           sidebarThreadSortOrder,
         );
+        const projectThreads = sidebarRunningThreadsFirst
+          ? liftInProgressThreads(sortedProjectThreads, isSidebarThreadInProgress)
+          : sortedProjectThreads;
         const projectExpanded = resolveProjectExpanded(
           projectExpandedById,
           projectExpansionPreferenceKeys(project),
@@ -983,6 +989,7 @@ export default function LegacySidebar() {
       }),
     [
       sidebarThreadSortOrder,
+      sidebarRunningThreadsFirst,
       sidebarThreadPreviewCount,
       expandedThreadListsByProject,
       projectExpandedById,

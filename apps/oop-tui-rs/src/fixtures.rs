@@ -68,8 +68,14 @@ fn a_conversation_takes_every_event_fixture_without_losing_its_place() {
     for path in files("events") {
         let event = json(&path);
         let mut conversation = Conversation::new("thread-1");
-        conversation.apply(&serde_json::json!({"kind": "event", "event": event}));
-        assert!(conversation.revision > 0, "{path:?}");
+        conversation.apply(&serde_json::json!({"kind": "event", "event": event.clone()}));
+        // The revision moves exactly when the reducer changed something: an Unchanged event
+        // must not invalidate the rendered-lines cache.
+        let changed = matches!(
+            Thread::default().apply_event(&event),
+            Outcome::Updated | Outcome::Deleted
+        );
+        assert_eq!(conversation.revision > 0, changed, "{path:?}");
     }
 }
 

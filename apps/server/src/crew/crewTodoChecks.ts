@@ -11,10 +11,13 @@
  * @module crewTodoChecks
  */
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as NodeCrypto from "node:crypto";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Stream from "effect/Stream";
 
 import { ProcessRunner } from "../processRunner.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -45,6 +48,7 @@ export function outputTail(text: string): string {
 export const makeCrewTodoChecks = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const runner = yield* ProcessRunner;
   const platform = yield* HostProcessPlatform;
 
@@ -147,7 +151,48 @@ export const makeCrewTodoChecks = Effect.gen(function* () {
     Effect.orElseSucceed(() => null),
   );
 
-  return { runCommand, snapshot, changedSince };
+  // Only explicit file paths are read. Null means absent; "unknown" is never a digest.
+  const hashFiles = (cwd: string, files: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const entries = yield* Effect.forEach([...new Set(files)], (file) =>
+        Effect.gen(function* () {
+          const target = path.resolve(cwd, file);
+          const info = yield* fs.stat(target);
+          if (info.type !== "File") return "unknown";
+          // Streamed so a large build artifact is hashed without loading it into memory.
+          const hash = NodeCrypto.createHash("sha256");
+          yield* Stream.runForEach(fs.stream(target), (chunk) =>
+            Effect.sync(() => hash.update(chunk)),
+          );
+          return hash.digest("hex");
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.succeed(error.reason._tag === "NotFound" ? null : "unknown"),
+          ),
+          Effect.map((hash) => [file, hash] as const),
+        ),
+      );
+      return Object.fromEntries(entries);
+    });
+
+  const changedHashes = (
+    cwd: string,
+    hashes: Readonly<Record<string, string | null>>,
+    files: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const current = yield* hashFiles(cwd, files);
+      if (
+        files.some(
+          (file) =>
+            hashes[file] === undefined || hashes[file] === "unknown" || current[file] === "unknown",
+        )
+      )
+        return null;
+      return files.filter((file) => hashes[file] !== current[file]);
+    });
+
+  return { runCommand, snapshot, changedSince, hashFiles, changedHashes };
 });
 
 export type CrewTodoChecks = Effect.Success<typeof makeCrewTodoChecks>;

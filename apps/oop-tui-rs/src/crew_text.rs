@@ -232,6 +232,10 @@ pub fn text(key: &str) -> &'static str {
         "render.crew.phase.running" => s("In progress", "진행 중"),
         "render.crew.phase.stopped" => s("Stopped", "중단됨"),
         "render.crew.prevTurn" => s("Earlier turn", "이전 턴"),
+        "render.crew.resultsDropped" => s(
+            "Crew left {count} unfinished result(s) behind: the follow-up limit was reached",
+            "후속 한도에 걸려 미완 결과 {count}건을 전달하지 못함",
+        ),
         "render.crew.running" => s("{count} running", "진행 {count}"),
         "render.crew.settled" => s("{count} finished", "끝남 {count}"),
         "render.crew.stoppedUnreported" => s("Stopped · no report", "중단됨 · 보고 없음"),

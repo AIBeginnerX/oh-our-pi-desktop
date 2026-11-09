@@ -23,6 +23,7 @@ import {
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
+  liftInProgressThreads,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
   resolveSidebarRowAccessibility,
@@ -844,6 +845,30 @@ describe("resolveSidebarThreadStatus", () => {
 
   it("defaults to ready with no session", () => {
     expect(resolveSidebarThreadStatus({ ...idle, session: null })).toBe("ready");
+  });
+});
+
+describe("liftInProgressThreads", () => {
+  it("moves in-progress rows to the top while keeping both groups' relative order", () => {
+    expect(liftInProgressThreads(["a", "b", "c", "d"], (t) => t === "c" || t === "a")).toEqual([
+      "a",
+      "c",
+      "b",
+      "d",
+    ]);
+  });
+
+  it("is a no-op when nothing is in progress", () => {
+    const threads = ["a", "b", "c"];
+    expect(liftInProgressThreads(threads, () => false)).toEqual(threads);
+    expect(liftInProgressThreads([], () => true)).toEqual([]);
+  });
+
+  it("keeps every in-progress status (working, approval, input) above ready/failed/monitoring", () => {
+    const inProgress = new Set(["working", "approval", "input"]);
+    const statuses = ["ready", "failed", "working", "monitoring", "approval", "input"] as const;
+    const lifted = liftInProgressThreads(statuses, (status) => inProgress.has(status));
+    expect(lifted).toEqual(["working", "approval", "input", "ready", "failed", "monitoring"]);
   });
 });
 

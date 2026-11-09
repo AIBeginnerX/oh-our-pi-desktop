@@ -19,6 +19,7 @@ import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
+  LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANGED_CHANNEL,
   MENU_ACTION_CHANNEL,
   QUIT_SHORTCUT_CHANNEL,
   SNAP_SHOT_EVENT_CHANNEL,
@@ -129,6 +130,13 @@ export class DesktopWindow extends Context.Service<
     readonly dispatchSnapShotEvent: (
       event: DesktopSnapShotEvent,
     ) => Effect.Effect<void, DesktopWindowError>;
+    /**
+     * Signal the renderer that the set of local environment bootstraps changed
+     * (backend registered/unregistered or a backend's resolved config advanced).
+     * The renderer re-reads `getLocalEnvironmentBootstraps` on receipt; never
+     * reveals or focuses the window.
+     */
+    readonly dispatchLocalEnvironmentBootstrapsChanged: Effect.Effect<void, DesktopWindowError>;
     // Zooms the main window's own webContents. The Electron `zoomIn`/`zoomOut`
     // menu roles act on whichever webContents has keyboard focus, so with an
     // embedded preview WebContentsView (or DevTools) focused they zoom the
@@ -1004,6 +1012,11 @@ export const make = Effect.gen(function* () {
         reveal: event.type === "started",
       });
     }),
+    dispatchLocalEnvironmentBootstrapsChanged: dispatchRendererEvent(
+      LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANGED_CHANNEL,
+      undefined,
+      { reveal: false },
+    ).pipe(Effect.withSpan("desktop.window.dispatchLocalEnvironmentBootstrapsChanged")),
     zoomMain: Effect.fn("desktop.window.zoomMain")(function* (direction) {
       yield* Effect.annotateCurrentSpan({ direction });
       const window = yield* focusedMainWindow;

@@ -365,7 +365,7 @@ it.effect(
       }).pipe(Effect.provide(startupLayer));
 
       assert.deepStrictEqual(result, {
-        sessionStatus: "error",
+        sessionStatus: "interrupted",
         activeTurnId: null,
         latestTurn: null,
         pendingTurnCount: 0,
@@ -375,7 +375,7 @@ it.effect(
         bindingStatus: "stopped",
         resumeCursor,
         runtimePayload: { activeTurnId: null, unrelated: "preserve-me" },
-        stoppedBindingSessionStatus: "error",
+        stoppedBindingSessionStatus: "interrupted",
         stoppedBindingStatus: "stopped",
         stoppedBindingResumeCursor,
         stoppedBindingRuntimePayload: {
@@ -689,7 +689,10 @@ it.effect("refuses commands until a failed recovery write is committed by a late
         return OrchestrationEngine.OrchestrationEngineService.of({
           ...engine,
           dispatch: (command, options) => {
-            if (command.type === "thread.session.set" && command.session.status === "error") {
+            if (
+              command.type === "thread.session.set" &&
+              (command.session.status === "error" || command.session.status === "interrupted")
+            ) {
               settleWriteAttempts += 1;
               return Effect.fail(
                 new OrchestrationCommandInvariantError({
@@ -826,17 +829,17 @@ it.effect("refuses commands until a failed recovery write is committed by a late
     );
 
     assert.isTrue(Exit.isSuccess(recovered.turnExit));
-    assert.equal(recovered.sessionStatus, "error");
+    assert.equal(recovered.sessionStatus, "interrupted");
     assert.equal(recovered.sessionLastError, ORPHANED_PROVIDER_SESSION_ERROR);
     assert.equal(recovered.activeTurnId, null);
-    assert.equal(recovered.latestTurnState, "error");
+    assert.equal(recovered.latestTurnState, "interrupted");
     assert.equal(recovered.savedStatus, "error");
     assert.equal(recovered.savedLastError, SAVED_ANSWER_ERROR);
     assert.equal(recovered.savedActiveTurnId, null);
     assert.equal(recovered.settledStatus, "error");
     assert.equal(recovered.settledLastError, KEPT_SESSION_ERROR);
     assert.equal(recovered.settledUpdatedAt, createdAt);
-    assert.deepStrictEqual(recovered.turnRows, [{ state: "error" }]);
+    assert.deepStrictEqual(recovered.turnRows, [{ state: "interrupted" }]);
   }).pipe(
     Effect.provide(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-recovery-gate-settle-" }).pipe(
@@ -970,9 +973,9 @@ it.effect("refuses commands when recovery inspection cannot read the projection"
     );
 
     assert.isTrue(Exit.isSuccess(recovered.turnExit));
-    assert.equal(recovered.sessionStatus, "error");
+    assert.equal(recovered.sessionStatus, "interrupted");
     assert.equal(recovered.sessionLastError, ORPHANED_PROVIDER_SESSION_ERROR);
-    assert.deepStrictEqual(recovered.turnRows, [{ state: "error" }]);
+    assert.deepStrictEqual(recovered.turnRows, [{ state: "interrupted" }]);
   }).pipe(
     Effect.provide(
       ServerConfig.layerTest(process.cwd(), { prefix: "t3-recovery-gate-inspect-" }).pipe(

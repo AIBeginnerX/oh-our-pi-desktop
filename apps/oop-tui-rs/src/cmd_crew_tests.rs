@@ -1466,7 +1466,7 @@ async fn on_a_conversation_not_started_the_crew_is_kept_in_the_draft_not_in_the_
         app.draft_crew,
         Some(json!({"preset": "budget", "pinned": {}}))
     );
-    assert_eq!(app.own_crew(), app.draft_crew);
+    assert_eq!(app.own_crew(), app.draft_crew.as_ref());
     assert!(
         notes(&app).contains("Crew preset Budget"),
         "{}",
@@ -1511,7 +1511,7 @@ async fn a_settings_update_from_the_stream_refreshes_what_the_crew_line_reads() 
     on_lead(&mut app, vec![], false);
     let line = |app: &App| {
         let model = app.current_model();
-        crew::roles_of(&app.config, app.own_crew().as_ref(), brain_of(&model), true)
+        crew::roles_of(&app.config, app.own_crew(), brain_of(&model), true)
     };
     // The stream's snapshot arrives first; the crew is off.
     fake::pump(&mut app, &mut rx, |a| {
@@ -1547,7 +1547,7 @@ async fn my_own_change_is_sent_to_the_thread_and_shows_when_the_thread_comes_bac
     assert_eq!(sent["crew"], json!({"enabled": true, "pinned": {}}));
     let model = app.current_model();
     assert!(
-        crew::roles_of(&app.config, app.own_crew().as_ref(), brain_of(&model), true).is_none(),
+        crew::roles_of(&app.config, app.own_crew(), brain_of(&model), true).is_none(),
         "nothing changes before the server stores it"
     );
     app.shell
@@ -1556,7 +1556,7 @@ async fn my_own_change_is_sent_to_the_thread_and_shows_when_the_thread_comes_bac
         .find(|t| t.id == "lead")
         .unwrap()
         .crew = Some(sent["crew"].clone());
-    assert!(crew::roles_of(&app.config, app.own_crew().as_ref(), brain_of(&model), true).is_some());
+    assert!(crew::roles_of(&app.config, app.own_crew(), brain_of(&model), true).is_some());
 }
 
 #[tokio::test]

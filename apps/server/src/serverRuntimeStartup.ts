@@ -70,6 +70,7 @@ import {
   isWildcardHost,
   issueHeadlessServeAccessInfo,
 } from "./startupAccess.ts";
+import { ORPHANED_PROVIDER_SESSION_ERROR } from "./orphanedProviderSession.ts";
 
 export class ServerRuntimeStartupError extends Schema.TaggedError<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
@@ -355,8 +356,6 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
     Effect.withSpan(`server.startup.${phase}`),
   );
 
-const ORPHANED_PROVIDER_SESSION_ERROR =
-  "Provider session did not survive a server restart. Send a new message to continue.";
 const INTERRUPTED_WORK_ERROR =
   "The server restarted while a tool was running or waiting for you, so its result is unknown. Check the workspace, then send a message to continue.";
 const SERVER_UPDATE_CONTINUATION_KEY = "continueAfterServerUpdate";
@@ -715,7 +714,10 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
       Option.isSome(binding) &&
       binding.value.status === "running" &&
       binding.value.resumeCursor != null;
-    const settleAsError = (lastError: string) =>
+    // The status is explicit: only the plain orphaned settle (the session
+    // simply ended) is "interrupted"; uncertain or unverified settles keep
+    // "error" so the user looks.
+    const settle = (lastError: string, status: "interrupted" | "error") =>
       Effect.gen(function* () {
         yield* Effect.gen(function* () {
           if (Option.isSome(binding)) {
@@ -753,7 +755,7 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
             threadId: thread.id,
             session: {
               ...session,
-              status: "error",
+              status,
               activeTurnId: null,
               lastError,
               updatedAt: reconciledAt,
@@ -799,9 +801,12 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
         ),
       );
       if (turnSafety !== "safe") {
+        // Uncertain or unverified, the check could not prove no tool was
+        // running, so the settle keeps "error".
         if (
-          !(yield* settleAsError(
+          !(yield* settle(
             turnSafety === "uncertain" ? INTERRUPTED_WORK_ERROR : ORPHANED_PROVIDER_SESSION_ERROR,
+            "error",
           ))
         ) {
           unresolved.push(thread.id);
@@ -817,8 +822,9 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
       const memorySendHold = yield* memorySendGate.threadHold(thread.id);
       if (Option.isSome(memorySendHold)) {
         if (
-          !(yield* settleAsError(
+          !(yield* settle(
             ProjectMemorySendGate.MEMORY_SEND_HOLD_DETAIL[memorySendHold.value],
+            "error",
           ))
         ) {
           unresolved.push(thread.id);
@@ -832,7 +838,7 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
       // failures take instead of a fabricated instance id.
       const providerInstanceId = binding.value.providerInstanceId;
       if (providerInstanceId === undefined) {
-        if (!(yield* settleAsError(ORPHANED_PROVIDER_SESSION_ERROR))) {
+        if (!(yield* settle(ORPHANED_PROVIDER_SESSION_ERROR, "interrupted"))) {
           unresolved.push(thread.id);
         }
         continue;
@@ -886,7 +892,7 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
           threadId: thread.id,
           cause: prepared.cause,
         });
-        if (!(yield* settleAsError(ORPHANED_PROVIDER_SESSION_ERROR))) {
+        if (!(yield* settle(ORPHANED_PROVIDER_SESSION_ERROR, "interrupted"))) {
           unresolved.push(thread.id);
         }
         continue;
@@ -1083,10 +1089,11 @@ const settleOrphanedProviderSessions = Effect.fnUntraced(function* (unresolved: 
     }
 
     if (
-      !(yield* settleAsError(
+      !(yield* settle(
         session.status === "error" && session.lastError !== null
           ? session.lastError
           : ORPHANED_PROVIDER_SESSION_ERROR,
+        session.status === "error" && session.lastError !== null ? "error" : "interrupted",
       ))
     ) {
       unresolved.push(thread.id);

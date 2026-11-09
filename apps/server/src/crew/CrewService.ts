@@ -38,7 +38,10 @@ import {
   type ResolvedCrew,
 } from "@t3tools/shared/crew";
 import { resolveProjectMemoryReferences } from "@t3tools/shared/composerContextReferences";
-import { CREW_AUDIT_SKIPPED_ACTIVITY } from "@t3tools/shared/threadGoal";
+import {
+  CREW_AUDIT_SKIPPED_ACTIVITY,
+  CREW_RESULTS_DROPPED_ACTIVITY,
+} from "@t3tools/shared/threadGoal";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Clock from "effect/Clock";
@@ -71,6 +74,7 @@ import { OrchestrationCommandReceiptRepository } from "../persistence/Services/O
 import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionTurnRepository } from "../persistence/Services/ProjectionTurns.ts";
 import * as ProcessRunner from "../processRunner.ts";
+import { ORPHANED_PROVIDER_SESSION_ERROR } from "../orphanedProviderSession.ts";
 import { CrewFollowUpRecoveryJson } from "./crewRecoveryState.ts";
 import {
   makeCrewTodoChecks,
@@ -126,6 +130,9 @@ import {
   isCrewThreadTitle,
   isSettledCrewStatus,
   overlappingWriteScopes,
+  previousAttemptOf,
+  type PriorCrewTask,
+  repeatTaskWarning,
   reportExcerpt,
   latestAuditAsksChanges,
   lightAuditPrompt,
@@ -142,16 +149,17 @@ import {
 } from "./crewLogic.ts";
 import {
   MAX_WAIT_SECONDS,
+  WAIT_COLLECT_SECONDS,
   RESULT_TEXT_LIMIT,
   NUDGE_IDLE_WAIT_SECONDS,
   CREW_LEAD_REFUSAL,
-  ISOLATION_FALLBACK_WARNING,
   STOP_WAIT_SECONDS,
   STOPPED_WITH_LEAD,
   STOPPED_ON_REQUEST,
   DELETED_LEAD,
   FAILED_PROVIDER_COOLDOWN_MS,
   LIMIT_COOLDOWN_MS,
+  REPEAT_REFUSAL_BLOCK_MS,
   type AvoidedTask,
   type CrewAttempt,
   type CrewTaskRecord,
@@ -376,7 +384,8 @@ export const make = Effect.gen(function* () {
   >();
   // A provider that refused one model, or whose window for that one model is full, works fine for
   // its others: only that model is blocked. A refusal lasts until the provider's status is checked
-  // again, like a billing or sign-in failure; a full model window, until it resets.
+  // again, like a billing or sign-in failure, and a second one for a day; a full model window,
+  // until it resets.
   const blockedModels = new Map<
     string,
     Map<
@@ -390,6 +399,9 @@ export const make = Effect.gen(function* () {
       }
     >
   >();
+
+  /** Refusals per model (`modelKey`) since it last worked; a second one blocks it for a day. */
+  const refusals = new Map<string, number>();
 
   /** A provider (or one model on it) that new tasks skip for now. */
   interface Cooling {
@@ -590,7 +602,18 @@ export const make = Effect.gen(function* () {
         blockedModels.set(selection.instanceId, models);
       };
       if (kind === "model") {
-        blockModel({ reason: "model refused" });
+        const key = modelKey(selection);
+        // Refusals before the provider's next status check are one refusal: parallel tasks often
+        // meet the same one at once.
+        const held = blockedModels.get(selection.instanceId)?.get(selection.model);
+        const sameCheck = held !== undefined && held.checkedAt === (provider?.checkedAt ?? "");
+        const count = (refusals.get(key) ?? 0) + (sameCheck ? 0 : 1);
+        refusals.set(key, count);
+        blockModel(
+          count === 1
+            ? { reason: "model refused" }
+            : { reason: "model refused again", until: now + REPEAT_REFUSAL_BLOCK_MS },
+        );
         return;
       }
       if (kind === "limit") {
@@ -634,6 +657,7 @@ export const make = Effect.gen(function* () {
     failedProviders.delete(selection.instanceId);
     limitedProviders.delete(selection.instanceId);
     blockedProviders.delete(selection.instanceId);
+    refusals.delete(modelKey(selection));
     const models = blockedModels.get(selection.instanceId);
     models?.delete(selection.model);
     if (models?.size === 0) blockedModels.delete(selection.instanceId);
@@ -1283,6 +1307,22 @@ export const make = Effect.gen(function* () {
     | { readonly kind: "unavailable"; readonly detail: string };
 
   /**
+   * Of the files a failed check lists, those that never existed in the workspace at all: absent
+   * when the task started (hash null) and absent again now. Only hash-fallback mode can tell,
+   * which is why git mode keeps the "have not changed" wording: there the paths resolve against
+   * the repo root, which may differ from the cwd this message would name.
+   */
+  const neverCreatedFiles = (
+    cwd: string,
+    hashes: Readonly<Record<string, string | null>>,
+    files: ReadonlyArray<string>,
+  ) =>
+    Effect.gen(function* () {
+      const still = yield* todoChecks.hashFiles(cwd, files);
+      return files.filter((file) => hashes[file] === null && still[file] === null);
+    });
+
+  /**
    * Runs an item's check. `outside` is every file changed outside writeScope as far as it could
    * be read (null: unknown, so the last answer stands).
    *
@@ -1309,8 +1349,15 @@ export const make = Effect.gen(function* () {
       }
       const wantsChanged = check.files !== undefined || (record.writeScope?.length ?? 0) > 0;
       const changed =
-        wantsChanged && base.tree !== null ? yield* run.changed(base.cwd, base.tree) : null;
-      const outside = changed === null ? null : filesOutsideScope(changed, record.writeScope);
+        wantsChanged && base.tree !== null
+          ? yield* run.changed(base.cwd, base.tree)
+          : check.files !== undefined && base.hashes !== undefined
+            ? yield* todoChecks.changedHashes(base.cwd, base.hashes, check.files)
+            : null;
+      const outside =
+        changed === null || base.tree === null
+          ? null
+          : filesOutsideScope(changed, record.writeScope);
       const answer = (evaluation: Evaluation) => ({ evaluation, outside });
       let outOfScopeOnly: ReadonlyArray<string> = [];
       if (check.files !== undefined) {
@@ -1327,9 +1374,26 @@ export const make = Effect.gen(function* () {
           writeScope: record.writeScope,
         });
         if (verdict.kind === "failed") {
+          // In hash-fallback mode a path absent at the start and still absent hashes null both
+          // times, which reads as "unchanged" and misleads the member into editing again when the
+          // real problem is the path. Name those as missing; keep the unchanged wording for files
+          // that exist but were not touched.
+          const hashes = base.tree === null ? base.hashes : undefined;
+          const absent =
+            hashes === undefined ? [] : yield* neverCreatedFiles(base.cwd, hashes, verdict.missing);
+          const unchanged = verdict.missing.filter((file) => !absent.includes(file));
           return answer({
             kind: "failed",
-            detail: `These files have not changed since the task started: ${verdict.missing.join(", ")}.`,
+            detail: [
+              ...(absent.length > 0
+                ? [
+                    `These files do not exist in ${base.cwd}: ${absent.join(", ")}. Check paths are resolved against that directory; fix the path in the check.`,
+                  ]
+                : []),
+              ...(unchanged.length > 0
+                ? [`These files have not changed since the task started: ${unchanged.join(", ")}.`]
+                : []),
+            ].join(" "),
           });
         }
         outOfScopeOnly = verdict.outOfScopeOnly;
@@ -1795,6 +1859,12 @@ export const make = Effect.gen(function* () {
    * Hands the lead what the crew finished after it answered (audit fixes, uncollected reports)
    * as one follow-up turn, once the lead is idle and no audit of its last turn is running.
    */
+  /** A task still at work: no report yet, and its run has neither ended nor broken off. */
+  const stillRunning = (record: CrewTaskRecord) =>
+    record.report === null
+      ? Effect.map(Deferred.isDone(record.over), (done) => !done)
+      : Effect.succeed(false);
+
   const flushLead = (leadId: ThreadId) =>
     followUpLock
       .withPermits(1)(
@@ -1849,6 +1919,19 @@ export const make = Effect.gen(function* () {
               record.role !== "auditor" && record.report !== null && !record.collected,
           );
           if (audits.length === 0 && late.length === 0) return;
+          // Tasks handed out in one lead turn come back as one follow-up: the last of them to end
+          // flushes again, so the lead wakes once for the batch instead of once per task.
+          if (audits.length === 0) {
+            for (const [, record] of records) {
+              if (
+                record.role !== "auditor" &&
+                record.leadTurnId !== null &&
+                late.some(([, done]) => done.leadTurnId === record.leadTurnId) &&
+                (yield* stillRunning(record))
+              )
+                return;
+            }
+          }
           const plan = planFollowUp({
             current: followUpRound(yield* latestUserText(leadId)),
             audits: crewOff ? [] : audits,
@@ -1862,6 +1945,13 @@ export const make = Effect.gen(function* () {
             })),
           });
           if (plan.prompt === null) {
+            // The follow-up cap swallowed these reports; the lead still hears that work came
+            // back unfinished (crew off means the user ended the loop deliberately).
+            const droppedUnfinished = crewOff
+              ? []
+              : late.filter(([, record]) =>
+                  ["partial", "blocked", "failed"].includes(record.report?.status ?? "completed"),
+                );
             for (const [taskId, record] of late) {
               yield* markCollected(taskId, record, { dropped: true });
             }
@@ -1869,6 +1959,24 @@ export const make = Effect.gen(function* () {
               for (const [, record] of auditRecords) {
                 yield* updateTask(record, { auditState: "skipped" });
               }
+            }
+            if (droppedUnfinished.length > 0) {
+              yield* appendActivity({
+                threadId: leadId,
+                kind: CREW_RESULTS_DROPPED_ACTIVITY,
+                summary: `Crew left work unfinished: ${reportExcerpt(
+                  droppedUnfinished.map(([, record]) => record.subject).join(", "),
+                )}`,
+                turnId: droppedUnfinished.at(-1)?.[1].leadTurnId ?? null,
+                payload: {
+                  tasks: droppedUnfinished.map(([taskId, record]) => ({
+                    taskId,
+                    crewRole: record.role,
+                    subject: record.subject,
+                    status: record.report?.status ?? "completed",
+                  })),
+                },
+              });
             }
             return;
           }
@@ -1923,6 +2031,18 @@ export const make = Effect.gen(function* () {
   /** Only a thread that leads a crew task can have a delivery waiting, so no other one takes the lock. */
   const flushFollowUps = (leadId: ThreadId): Effect.Effect<void> =>
     leadIds.has(leadId) ? flushLead(leadId) : Effect.void;
+  /**
+   * Ends a task's run: `over` resolves, and a run that broke off without a report flushes its
+   * lead, since a report of the same lead turn may be held for it.
+   */
+  const endRun = (record: CrewTaskRecord) =>
+    Deferred.succeed(record.over, undefined).pipe(
+      Effect.andThen(
+        Effect.suspend(() =>
+          record.report === null ? flushFollowUps(record.leadThreadId) : Effect.void,
+        ),
+      ),
+    );
 
   /** The directory the lead works in, which a shared task works in too. */
   const workspaceCwd = (lead: OrchestrationThreadShell) =>
@@ -2493,10 +2613,13 @@ export const make = Effect.gen(function* () {
       input.isolation === "worktree" || input.isolation === "candidate"
         ? yield* isolate(input.lead, taskId)
         : undefined;
-    // A candidate that fell back to the shared workspace would write straight into the lead's files.
-    if (input.isolation === "candidate" && worktree === undefined) {
+    // Explicit isolation must never write straight into the lead's shared workspace.
+    if (
+      (input.isolation === "candidate" || input.isolation === "worktree") &&
+      worktree === undefined
+    ) {
       return yield* fail(
-        "A candidate needs its own git worktree, but one could not be created (the workspace is not a git repository with a commit, or git failed). Do not start it in the shared workspace.",
+        `${input.isolation === "candidate" ? "A candidate" : "Worktree isolation"} needs its own git worktree, but one could not be created (the workspace is not a git repository with a commit, or git failed). Do not start it in the shared workspace.`,
       );
     }
     const todos = input.todos === undefined || input.todos.length === 0 ? undefined : input.todos;
@@ -2509,6 +2632,14 @@ export const make = Effect.gen(function* () {
     const comparesFiles =
       todos?.some((todo) => todo.check?.files !== undefined) === true ||
       (input.writeScope?.length ?? 0) > 0;
+    const tree = todoCwd !== null && comparesFiles ? yield* todoChecks.snapshot(todoCwd) : null;
+    const hashes =
+      todoCwd !== null && comparesFiles && tree === null
+        ? yield* todoChecks.hashFiles(
+            todoCwd,
+            todos?.flatMap((todo) => todo.check?.files ?? []) ?? [],
+          )
+        : undefined;
     const record: CrewTaskRecord = {
       taskId,
       leadThreadId: input.lead.id,
@@ -2523,7 +2654,7 @@ export const make = Effect.gen(function* () {
       todoBase:
         todoCwd === null
           ? undefined
-          : { cwd: todoCwd, tree: comparesFiles ? yield* todoChecks.snapshot(todoCwd) : null },
+          : { cwd: todoCwd, tree, ...(hashes === undefined ? {} : { hashes }) },
       attempts: [],
       // Set when a stop of the whole lead came while this task was being set up, or when the
       // lead turn that hands it over was already stopped (a late tool call from that turn).
@@ -2573,7 +2704,7 @@ export const make = Effect.gen(function* () {
           });
         }),
       ),
-      Effect.ensuring(Deferred.succeed(record.over, undefined)),
+      Effect.ensuring(endRun(record)),
       Effect.forkIn(watcherScope),
     );
     return {
@@ -2645,6 +2776,26 @@ export const make = Effect.gen(function* () {
       const todos = assignTodos(input.todos);
       const memory = yield* leadMemory(lead);
       const avoid = yield* avoidedTasks(lead, options, input.differentFrom ?? []);
+      const subject = input.title?.trim() || task;
+      // What this lead's earlier tasks made of the same work, so the prompt can hand it on; read
+      // before startTask, so the list holds only the tasks that came before this one. A task meant
+      // to judge independently (differentFrom, an arena candidate) is not told the earlier result.
+      const independent = (input.differentFrom?.length ?? 0) > 0 || input.isolation === "candidate";
+      const prior: PriorCrewTask[] = [];
+      for (const record of tasks.values()) {
+        if (independent || record.leadThreadId !== lead.id || record.role === "auditor") continue;
+        prior.push({
+          taskId: record.taskId,
+          subject: record.subject,
+          // A run that broke off without a report is over, not running.
+          report:
+            record.report ??
+            ((yield* stillRunning(record)) ? null : { status: "failed", result: null }),
+          lastError: record.attempts.at(-1)?.error,
+          stopped: record.stopped,
+        });
+      }
+      const repeat = previousAttemptOf(subject, prior);
       const {
         isolated,
         memoryBlocked: memoryNotSent,
@@ -2655,11 +2806,12 @@ export const make = Effect.gen(function* () {
         role: input.role,
         resolved,
         options,
-        subject: input.title?.trim() || task,
+        subject,
         prompt: delegatePrompt({
           role: input.role,
           leadTitle: lead.title,
           task,
+          previous: repeat !== null && repeat.kind === "unfinished" ? repeat.previous : undefined,
           writeScope,
           verify: input.verify,
           doneWhen: input.doneWhen,
@@ -2698,7 +2850,9 @@ export const make = Effect.gen(function* () {
             ),
           );
       const warning = [
-        input.isolation === "worktree" && !isolated ? ISOLATION_FALLBACK_WARNING : null,
+        todos.some((todo) => todo.check !== undefined)
+          ? null
+          : "No todo has a check; OOP will not be able to verify this task.",
         memoryNotSent
           ? `Project memory you selected this turn was not sent to ${started.model}: its provider does not support project memory yet. Do not copy project memory content into the task; use a member whose provider supports project memory, or ask the user.`
           : null,
@@ -2712,6 +2866,7 @@ export const make = Effect.gen(function* () {
           ? `No model from another family is available; this task shares a family with ${sharesFamilyWith.join(", ")}, so treat its judgment as not independent.`
           : null,
         overlap,
+        repeat === null ? null : repeatTaskWarning(repeat),
       ]
         .filter((line) => line !== null)
         .join("\n");
@@ -2936,6 +3091,13 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  const unknownTaskReport = (taskId: string): CrewTaskReport => ({
+    taskId,
+    role: null,
+    status: "failed",
+    result: "Unknown task id; it may be from before the server restarted.",
+  });
+
   const wait: CrewService["Service"]["wait"] = Effect.fn("CrewService.wait")(function* (input) {
     const seconds = Math.min(Math.max(input.timeoutSeconds ?? 40, 1), MAX_WAIT_SECONDS);
     const records = input.taskIds.map((taskId) => [taskId, tasks.get(taskId)] as const);
@@ -2952,12 +3114,7 @@ export const make = Effect.gen(function* () {
     return yield* Effect.forEach(records, ([taskId, record]) =>
       Effect.gen(function* () {
         if (record === undefined) {
-          return {
-            taskId,
-            role: null,
-            status: "failed",
-            result: "Unknown task id; it may be from before the server restarted.",
-          } satisfies CrewTaskReport;
+          return unknownTaskReport(taskId);
         }
         if (record.report !== null) {
           yield* markCollected(taskId, record);
@@ -2973,6 +3130,32 @@ export const make = Effect.gen(function* () {
           status: current?.threadId === undefined ? "starting" : yield* statusOf(current.threadId),
           result: current === undefined ? null : `Working on ${current.model}.`,
         } satisfies CrewTaskReport;
+      }),
+    ).pipe(
+      // A slow status lookup must not push the call past the MCP client's tool timeout;
+      // an unreturned report stays uncollected for the next call.
+      Effect.timeoutOrElse({
+        duration: Duration.seconds(WAIT_COLLECT_SECONDS),
+        orElse: () =>
+          Effect.succeed(
+            records.map(([taskId, record]): CrewTaskReport => {
+              // A finish markCollected persisted just before the timeout must not read
+              // back as running: a collected task gets no late-report follow-up either.
+              if (record === undefined) return unknownTaskReport(taskId);
+              if (record.report !== null) {
+                const { result } = record.report;
+                return result === null
+                  ? record.report
+                  : { ...record.report, result: clipLeadReport(result) };
+              }
+              return {
+                taskId,
+                role: record.role,
+                status: "running",
+                result: `Working on ${record.attempts.at(-1)?.model ?? "the task"}.`,
+              };
+            }),
+          ),
       }),
     );
   });
@@ -3109,7 +3292,12 @@ export const make = Effect.gen(function* () {
           ? "completed"
           : turn.state === "error"
             ? "failed"
-            : "interrupted";
+            : record.stopped === undefined &&
+                (yield* lastErrorOf(attempt.threadId)) === ORPHANED_PROVIDER_SESSION_ERROR
+              ? // The restart orphaned the member's session: not a user stop, so its
+                // half-done worktree is treated like the pre-restart error case.
+                "failed"
+              : "interrupted";
       const { status: outcome, report } = crewMemberOutcome(record.role, status, reply);
       return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
         status: outcome,
@@ -3307,7 +3495,7 @@ export const make = Effect.gen(function* () {
       } else {
         yield* recoverTask(record).pipe(
           Effect.catchCause((cause) => Effect.logWarning("crew recovery paused", { cause })),
-          Effect.ensuring(Deferred.succeed(record.over, undefined)),
+          Effect.ensuring(endRun(record)),
           Effect.forkIn(watcherScope),
         );
       }

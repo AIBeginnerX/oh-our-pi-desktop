@@ -829,6 +829,22 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        <SettingsRow
+          {...searchableSetting("running-threads-first")}
+          title={t(searchableSetting("running-threads-first").title)}
+          description={t(
+            "Threads with work in progress, approval or input requests stay at the top of the active list.",
+          )}
+          control={
+            <Switch
+              checked={settings.sidebarRunningThreadsFirst}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarRunningThreadsFirst: Boolean(checked) })
+              }
+              aria-label={t("Running threads first")}
+            />
+          }
+        />
 
         {supportsAutoSettlement ? (
           <>

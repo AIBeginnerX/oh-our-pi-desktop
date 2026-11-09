@@ -248,12 +248,15 @@ it("shows in-app alerts without adding a badge while focused", async () => {
   expect(state.badge.mock.calls.every(([count]) => count === 0)).toBe(true);
 });
 
-it("badges background failures with in-app notifications enabled", async () => {
+it("badges background failures and queues the toast with in-app notifications enabled", async () => {
   state.inApp = true;
   await render();
   state.shells.set("one", shell({ latestTurn: { ...thread.latestTurn, state: "error" } }));
   await render();
   expect(TestNotification.sent[0]?.title).toBe("Thread failed");
   expect(state.badge).toHaveBeenLastCalledWith(1);
-  expect(state.toast).not.toHaveBeenCalled();
+  expect(state.toast).toHaveBeenCalledOnce();
+  expect(state.toast).toHaveBeenLastCalledWith(
+    expect.objectContaining({ title: "Thread failed", description: "Test thread" }),
+  );
 });

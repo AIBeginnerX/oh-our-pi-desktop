@@ -13,6 +13,7 @@ use ratatui::text::{Line, Span};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 /// A command or path after a tool's name stops here, so one long command is not a wall of text.
 const DETAIL_COLUMNS: usize = 90;
@@ -39,11 +40,83 @@ impl Default for RowMeta {
     }
 }
 
-/// The conversation's rows and, for each, what a selection may take of it.
+/// The conversation's rows and, for each, what a selection may take of it. The rows stay in the
+/// segments the block cache laid out, so a rebuild joins the unchanged ones by a reference-count
+/// bump instead of copying every line again.
 #[derive(Default)]
 pub struct Transcript {
-    pub lines: Vec<Line<'static>>,
-    pub meta: Vec<RowMeta>,
+    segs: Vec<Seg>,
+    /// The line index each segment starts at, parallel to `segs`.
+    starts: Vec<usize>,
+    total: usize,
+}
+
+/// One laid-out block as the transcript holds it, shared with the block cache.
+struct Seg {
+    lines: Rc<[Line<'static>]>,
+    meta: Rc<[RowMeta]>,
+}
+
+impl Transcript {
+    pub fn len(&self) -> usize {
+        self.total
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.total == 0
+    }
+
+    /// The segment `row` falls in, with where its lines start among them.
+    fn seg_of(&self, row: usize) -> Option<(usize, usize)> {
+        let seg = match self.starts.binary_search(&row) {
+            Ok(at) => at,
+            Err(at) => at.checked_sub(1)?,
+        };
+        Some((seg, row - *self.starts.get(seg)?))
+    }
+
+    pub fn line(&self, row: usize) -> Option<&Line<'static>> {
+        let (seg, at) = self.seg_of(row)?;
+        self.segs.get(seg)?.lines.get(at)
+    }
+
+    /// What a selection may take of `row`.
+    pub fn meta(&self, row: usize) -> Option<RowMeta> {
+        let (seg, at) = self.seg_of(row)?;
+        self.segs.get(seg)?.meta.get(at).copied()
+    }
+
+    /// Walks the rows; the tests read the picture as a whole.
+    #[cfg(test)]
+    pub fn iter(&self) -> impl Iterator<Item = &Line<'static>> {
+        self.segs.iter().flat_map(|seg| seg.lines.iter())
+    }
+
+    /// The rows as flat slices, for the clipboard and the tests, which take whole blocks at once.
+    pub fn rows(&self) -> (Vec<Line<'static>>, Vec<RowMeta>) {
+        let mut lines = Vec::with_capacity(self.total);
+        let mut meta = Vec::with_capacity(self.total);
+        for seg in &self.segs {
+            lines.extend(seg.lines.iter().cloned());
+            meta.extend(seg.meta.iter().copied());
+        }
+        (lines, meta)
+    }
+
+    /// Lays the joined segments end to end, so a row keeps its number.
+    fn stacked(segs: Vec<Seg>) -> Self {
+        let mut starts = Vec::with_capacity(segs.len());
+        let mut total = 0;
+        for seg in &segs {
+            starts.push(total);
+            total += seg.lines.len();
+        }
+        Transcript {
+            segs,
+            starts,
+            total,
+        }
+    }
 }
 
 /// Most finished blocks (one message or one tool line) kept laid out; past it the least recently
@@ -56,8 +129,8 @@ struct Block {
     fingerprint: u64,
     /// The build that last used it, for eviction.
     used: u64,
-    lines: Vec<Line<'static>>,
-    rows: Vec<RowMeta>,
+    lines: Rc<[Line<'static>]>,
+    rows: Rc<[RowMeta]>,
 }
 
 /// The laid-out lines of each message and tool line, by id, so a frame re-wraps and re-styles only
@@ -86,7 +159,7 @@ impl BlockCache {
         key: String,
         fingerprint: u64,
         make: impl FnOnce() -> (Vec<Line<'static>>, Vec<RowMeta>),
-    ) -> (Vec<Line<'static>>, Vec<RowMeta>) {
+    ) -> (Rc<[Line<'static>]>, Rc<[RowMeta]>) {
         if let Some(b) = self.blocks.get_mut(&key)
             && b.fingerprint == fingerprint
         {
@@ -96,6 +169,7 @@ impl BlockCache {
         }
         self.misses += 1;
         let (lines, rows) = make();
+        let (lines, rows): (Rc<[Line<'static>]>, Rc<[RowMeta]>) = (Rc::from(lines), Rc::from(rows));
         self.blocks.insert(
             key,
             Block {
@@ -137,7 +211,7 @@ fn fingerprint(parts: impl Hash) -> u64 {
 
 #[cfg(test)]
 pub fn lines(thread: &Thread, w: usize, th: &Theme, sym: &Symbols) -> Vec<Line<'static>> {
-    build(thread, w, th, sym).lines
+    build(thread, w, th, sym).rows().0
 }
 
 /// The latest answer, which `/copy` reads: the agent's messages (in time order) since the user last
@@ -224,13 +298,12 @@ pub fn build_cached(
     // ISO stamps order as text; the sort is stable, so ties keep messages before activities.
     items.sort_by(|a, b| a.0.cmp(b.0));
 
-    let mut out: Vec<Line<'static>> = Vec::new();
-    let mut meta: Vec<RowMeta> = Vec::new();
+    let mut segs: Vec<Seg> = Vec::new();
     let mut starts: HashMap<String, i64> = HashMap::new();
     // A run of tool lines and notices stays together; everything else is a block with a gap after.
     let mut in_run = false;
     for (_, item) in items {
-        let (block, rows, run): (Vec<Line<'static>>, Option<Vec<RowMeta>>, bool) = match item {
+        let (lines, rows, run) = match item {
             Item::Message(message) => {
                 let mark = marks.get(message.id.as_str()).copied();
                 let print = fingerprint((
@@ -244,7 +317,11 @@ pub fn build_cached(
                 });
                 (lines, Some(rows), false)
             }
-            Item::Plan(plan) => (plan_lines(&plan.plan_markdown, w, th, sym), None, false),
+            Item::Plan(plan) => {
+                let lines: Rc<[Line<'static>]> =
+                    Rc::from(plan_lines(&plan.plan_markdown, w, th, sym));
+                (lines, None, false)
+            }
             Item::Activity(activity) => {
                 let id = activity.payload["toolCallId"].as_str().map(str::to_string);
                 if activity.kind == "tool.started" {
@@ -272,19 +349,21 @@ pub fn build_cached(
                 (lines, Some(rows), true)
             }
         };
-        if block.is_empty() {
+        if lines.is_empty() {
             continue;
         }
-        if !out.is_empty() && !(run && in_run) {
-            out.push(Line::default());
-            meta.push(RowMeta::default());
+        if !segs.is_empty() && !(run && in_run) {
+            segs.push(Seg {
+                lines: Rc::from(vec![Line::default()]),
+                meta: Rc::from(vec![RowMeta::default()]),
+            });
         }
-        meta.extend(rows.unwrap_or_else(|| vec![RowMeta::default(); block.len()]));
-        out.extend(block);
+        let meta = rows.unwrap_or_else(|| Rc::from(vec![RowMeta::default(); lines.len()]));
+        segs.push(Seg { lines, meta });
         in_run = run;
     }
     cache.trim();
-    Transcript { lines: out, meta }
+    Transcript::stacked(segs)
 }
 
 fn message_lines(
@@ -736,6 +815,11 @@ mod tests {
             .collect()
     }
 
+    /// A whole transcript as text, without styling.
+    fn text_of(t: &Transcript) -> Vec<String> {
+        plain(&t.rows().0)
+    }
+
     fn tool(id: &str, at: &str, kind: &str, payload: Value) -> Value {
         json!({"id": id, "tone": "tool", "kind": kind, "summary": "Ran", "payload": payload, "createdAt": at})
     }
@@ -772,13 +856,13 @@ mod tests {
         // The same thread again: every block is a hit and the picture is the same.
         let again = build_cached(&t, 80, &th, &sym, &mut cache);
         assert_eq!((cache.hits, cache.misses), (16, 16));
-        assert_eq!(plain(&first.lines), plain(&again.lines));
-        assert_eq!(first.meta, again.meta);
+        assert_eq!(text_of(&first), text_of(&again));
+        assert_eq!(first.rows().1, again.rows().1);
         // A delta on the streaming message re-lays out that message alone.
         t.messages.last_mut().unwrap().text.push_str(" more");
         let grown = build_cached(&t, 80, &th, &sym, &mut cache);
         assert_eq!((cache.hits, cache.misses), (31, 17));
-        assert_eq!(plain(&grown.lines), plain(&build(&t, 80, &th, &sym).lines));
+        assert_eq!(text_of(&grown), plain(&lines(&t, 80, &th, &sym)));
     }
 
     #[test]
@@ -791,10 +875,7 @@ mod tests {
         assert_eq!(cache.misses, blocks);
         let narrow = build_cached(&t, 40, &LAVENDER, &UNICODE, &mut cache);
         assert_eq!(cache.misses, 2 * blocks);
-        assert_eq!(
-            plain(&narrow.lines),
-            plain(&build(&t, 40, &LAVENDER, &UNICODE).lines)
-        );
+        assert_eq!(text_of(&narrow), plain(&lines(&t, 40, &LAVENDER, &UNICODE)));
         build_cached(&t, 40, &LAVENDER, &ASCII, &mut cache);
         assert_eq!(cache.misses, 3 * blocks);
         let plain_theme = LAVENDER.for_level(0);
@@ -949,27 +1030,27 @@ mod tests {
         };
         let done = reply(&format!("look\n{chart}\nok"), false);
         let first = build(&done, 70, &LAVENDER, &UNICODE);
-        assert_eq!(first.meta.len(), first.lines.len());
+        let (first_lines, first_meta) = first.rows();
+        assert_eq!(first_meta.len(), first_lines.len());
         // Every later frame of the reveal (and the settled one) has the same number of rows.
         for _ in 0..3 {
             std::thread::sleep(std::time::Duration::from_millis(30));
             let again = build(&done, 70, &LAVENDER, &UNICODE);
-            assert_eq!(again.lines.len(), first.lines.len());
-            assert_eq!(again.meta.len(), again.lines.len());
+            assert_eq!(again.len(), first.len());
+            assert_eq!(again.rows().1.len(), again.len());
         }
-        let rows = plain(&first.lines).join("\n");
+        let rows = plain(&first_lines).join("\n");
         assert!(rows.contains("look") && rows.contains("ok") && !rows.contains("\"type\""));
         // A narrower terminal re-renders at its own width.
         let narrow = build(&done, 40, &LAVENDER, &UNICODE);
         assert!(
             narrow
-                .lines
                 .iter()
                 .all(|l| crate::text::width(&plain(std::slice::from_ref(l))[0]) <= 40)
         );
         // Still streaming with the fence open: one placeholder row, not a half-drawn chart.
         let open = reply("look\n```chart\n{\"type\":\"ba", true);
-        let rows = plain(&build(&open, 70, &LAVENDER, &UNICODE).lines);
+        let rows = plain(&build(&open, 70, &LAVENDER, &UNICODE).rows().0);
         assert_eq!(
             rows.iter().filter(|r| r.contains("chart")).count(),
             1,

@@ -1372,10 +1372,10 @@ mod tests {
         let before = app.transcript(w);
         let _ = rows(&app, 100, 30);
         let with_button = app.transcript(w);
-        assert_eq!(before.lines.len(), with_button.lines.len());
+        assert_eq!(before.len(), with_button.len());
         assert_eq!(
             app.geo.get().rows,
-            before.lines.len(),
+            before.len(),
             "the button row is not a selectable row"
         );
         open(&mut app);
@@ -1387,8 +1387,8 @@ mod tests {
         );
         close(&mut app);
         let _ = rows(&app, 100, 30);
-        assert_eq!(app.geo.get().rows, before.lines.len());
-        assert_eq!(app.transcript(w).lines.len(), before.lines.len());
+        assert_eq!(app.geo.get().rows, before.len());
+        assert_eq!(app.transcript(w).len(), before.len());
         assert!(app.log.is_empty());
     }
 

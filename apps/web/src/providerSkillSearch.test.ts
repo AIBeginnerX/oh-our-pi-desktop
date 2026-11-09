@@ -104,3 +104,19 @@ describe("searchProviderSkills", () => {
     ]);
   });
 });
+
+it("lists foreign skills with their provider marker and keeps native collisions", async () => {
+  const { includeForeignProviderSkills } = await import("./providerSkillSearch");
+  const native = makeSkill({ name: "shared", description: "native" });
+  const merged = includeForeignProviderSkills(
+    [native],
+    [
+      {
+        provider: "Claude",
+        skills: [makeSkill({ name: "shared" }), makeSkill({ name: "foreign" })],
+      },
+    ],
+  );
+  expect(searchProviderSkills(merged, "foreign")[0]?.shortDescription).toBe("Claude skill");
+  expect(searchProviderSkills(merged, "shared")).toEqual([native]);
+});

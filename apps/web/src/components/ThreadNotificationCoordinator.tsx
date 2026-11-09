@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useRef } from "react";
 
 import { getClientSettings, useClientSettings } from "../hooks/useSettings";
+import { t } from "../i18n";
 import { useEnvironments } from "../state/environments";
 import { environmentShell } from "../state/shell";
 import {
@@ -137,25 +138,28 @@ function EnvironmentNotifications({
             ? "completion"
             : null;
       if (!kind) continue;
-      const title =
+      const title = t(
         kind === "completion"
           ? "Thread completed"
           : status === "approval"
             ? "Approval needed"
             : status === "failed"
               ? "Thread failed"
-              : "Input needed";
+              : "Input needed",
+      );
       if (hasNotificationSound(mode)) {
         void playNotificationSound(kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),
         );
       }
-      if (
-        inAppNotificationsEnabled &&
-        document.visibilityState === "visible" &&
-        document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
-      ) {
+      const windowInView = document.visibilityState === "visible" && document.hasFocus();
+      // A toast is only redundant when the user is already looking at the thread that raised
+      // the event. While the window is unfocused or hidden the toast is queued and shown when
+      // the user returns (Base UI pauses toast timers while out of focus), and the desktop
+      // notification below still fires, so background work is not missed either way.
+      const openThreadIsInView =
+        windowInView && activeEnvironmentId === environmentId && activeThreadId === thread.id;
+      if (inAppNotificationsEnabled && !openThreadIsInView) {
         const toastId = toastManager.add({
           type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
           title,
@@ -174,7 +178,7 @@ function EnvironmentNotifications({
               ),
           },
           actionProps: {
-            children: "Open thread",
+            children: t("Open thread"),
             onClick: () => {
               toastManager.close(toastId);
               void navigate({
@@ -184,11 +188,10 @@ function EnvironmentNotifications({
             },
           },
         });
-        continue;
       }
       if (
         !hasDesktopNotifications(mode) ||
-        (document.visibilityState === "visible" && document.hasFocus()) ||
+        windowInView ||
         typeof Notification === "undefined" ||
         Notification.permission !== "granted"
       )

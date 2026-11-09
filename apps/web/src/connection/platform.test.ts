@@ -6,11 +6,22 @@ import {
   type DesktopSshEnvironmentTarget,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
+import * as Option from "effect/Option";
+import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 
 import {
   canRetainCachedPlatformRegistrationAfterRefreshFailure,
   canReuseCachedPlatformRegistration,
+  type CachedPlatformRegistration,
+  earliestRefreshAtEpochMs,
+  platformRegistrationRefreshes,
   primaryRegistrationToRetainAfterTopologyRead,
   provisionDesktopSshEnvironment,
   readPrimaryEnvironmentTargetResult,
@@ -222,4 +233,302 @@ describe("primary topology cache", () => {
       }),
     ).toBeUndefined();
   });
+});
+
+describe("earliest cached refresh deadline", () => {
+  const entry = (refreshAtEpochMs?: number): CachedPlatformRegistration =>
+    refreshAtEpochMs === undefined
+      ? { signature: "signature", registration: {} as never }
+      : { signature: "signature", registration: {} as never, refreshAtEpochMs };
+
+  it("is undefined while nothing cached schedules a refresh", () => {
+    expect(earliestRefreshAtEpochMs(new Map())).toBeUndefined();
+    expect(earliestRefreshAtEpochMs(new Map([["primary", entry()]]))).toBeUndefined();
+  });
+
+  it("is the earliest bearer refresh deadline", () => {
+    const cache = new Map<string, CachedPlatformRegistration>([
+      ["primary", entry()],
+      ["wsl:b", entry(20_000)],
+      ["wsl:a", entry(10_000)],
+    ]);
+
+    expect(earliestRefreshAtEpochMs(cache)).toBe(10_000);
+  });
+});
+
+describe("platform registration refresh", () => {
+  // Timer callbacks and stream elements resume on the fiber scheduler after
+  // TestClock.adjust returns; drain the queue before asserting on counters.
+  const settle = Effect.gen(function* () {
+    for (let iteration = 0; iteration < 20; iteration += 1) {
+      yield* Effect.yieldNow;
+    }
+  });
+
+  const countingRebuild = (rebuilds: Ref.Ref<number>) =>
+    Ref.update(rebuilds, (count) => count + 1).pipe(Effect.as([] as ReadonlyArray<never>));
+
+  // No cached credential is pending a re-issue.
+  const noRefreshDeadline: Effect.Effect<Option.Option<number>> = Effect.succeedNone;
+
+  const runCollecting = <A>(stream: Stream.Stream<A>) =>
+    Effect.gen(function* () {
+      const received = yield* Ref.make<ReadonlyArray<A>>([]);
+      const fiber = yield* Stream.runForEach(stream, (value) =>
+        Ref.update(received, (values) => [...values, value]),
+      ).pipe(Effect.forkChild);
+      return { received, fiber } as const;
+    });
+
+  it.effect("rebuilds when a bootstraps change event arrives", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const events = yield* Queue.unbounded<void>();
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.fromQueue(events),
+        rebuild: countingRebuild(rebuilds),
+        nextRefreshAtEpochMs: noRefreshDeadline,
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      Queue.offerUnsafe(events, undefined);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(2);
+      expect(yield* Ref.get(consumer.received)).toHaveLength(2);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("does not rebuild between events, even across the old poll window", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const events = yield* Queue.unbounded<void>();
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.fromQueue(events),
+        rebuild: countingRebuild(rebuilds),
+        nextRefreshAtEpochMs: noRefreshDeadline,
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      yield* TestClock.adjust("3 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+      expect(yield* Ref.get(consumer.received)).toHaveLength(1);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("re-issues bearer credentials at the earliest cached refresh deadline", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const cache = yield* Ref.make(new Map<string, CachedPlatformRegistration>());
+      const rebuild = Effect.gen(function* () {
+        yield* Ref.update(rebuilds, (count) => count + 1);
+        // A fresh secondary bearer: expires in 60 minutes, refresh 5s early.
+        const issuedAtEpochMs = yield* Clock.currentTimeMillis;
+        const entry: CachedPlatformRegistration = {
+          signature: "wsl:ubuntu",
+          registration: {} as never,
+          expiresAtEpochMs: issuedAtEpochMs + 3_600_000,
+          refreshAtEpochMs: issuedAtEpochMs + 3_600_000 - 5_000,
+        };
+        yield* Ref.set(cache, new Map([["wsl:ubuntu", entry]]));
+        return [entry.registration];
+      });
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.never,
+        rebuild,
+        nextRefreshAtEpochMs: Effect.map(Ref.get(cache), (entries) =>
+          Option.fromNullishOr(earliestRefreshAtEpochMs(entries)),
+        ),
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      const firstDeadline = (yield* Effect.map(Ref.get(cache), earliestRefreshAtEpochMs))!;
+      const beforeDeadline = yield* Clock.currentTimeMillis;
+      yield* TestClock.adjust(Duration.millis(firstDeadline - beforeDeadline - 1_000));
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      const atDeadline = yield* Clock.currentTimeMillis;
+      yield* TestClock.adjust(Duration.millis(firstDeadline - atDeadline));
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(2);
+
+      const rearmedDeadline = (yield* Effect.map(Ref.get(cache), earliestRefreshAtEpochMs))!;
+      const afterReissue = yield* Clock.currentTimeMillis;
+      yield* TestClock.adjust(Duration.millis(rearmedDeadline - afterReissue));
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(3);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("retries an overdue refresh no faster than the old poll cadence", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const cache = yield* Ref.make(
+        new Map<string, CachedPlatformRegistration>([
+          [
+            "wsl:ubuntu",
+            {
+              signature: "wsl:ubuntu",
+              registration: {} as never,
+              expiresAtEpochMs: 60_000,
+              refreshAtEpochMs: 0,
+            },
+          ],
+        ]),
+      );
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.never,
+        rebuild: countingRebuild(rebuilds),
+        nextRefreshAtEpochMs: Effect.map(Ref.get(cache), (entries) =>
+          Option.fromNullishOr(earliestRefreshAtEpochMs(entries)),
+        ),
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      // The overdue deadline is clamped to the retry floor, so no rebuild
+      // happens before it elapses.
+      yield* TestClock.adjust("2 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      yield* TestClock.adjust("1 second");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(2);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("re-runs a failed rebuild after the retry floor without an event", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const rebuildFailed = yield* Ref.make(false);
+      const rebuild = Effect.gen(function* () {
+        const count = yield* Ref.updateAndGet(rebuilds, (value) => value + 1);
+        // Only the first rebuild loses an entry, as a transient load would.
+        yield* Ref.set(rebuildFailed, count < 2);
+        return [] as ReadonlyArray<never>;
+      });
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.never,
+        rebuild,
+        nextRefreshAtEpochMs: noRefreshDeadline,
+        rebuildFailed: Ref.get(rebuildFailed),
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      // The failure wake is armed at the retry floor, not earlier.
+      yield* TestClock.adjust("2 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      yield* TestClock.adjust("1 second");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(2);
+
+      // The successful rebuild clears the retry wake.
+      yield* TestClock.adjust("30 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(2);
+      expect(yield* Ref.get(consumer.received)).toHaveLength(2);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("a successful rebuild arms no failure retry", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.never,
+        rebuild: countingRebuild(rebuilds),
+        nextRefreshAtEpochMs: noRefreshDeadline,
+        rebuildFailed: Effect.succeed(false),
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      yield* TestClock.adjust("30 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("backs off consecutive failed rebuilds up to the retry cap", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const stream = platformRegistrationRefreshes({
+        changeEvents: Stream.never,
+        rebuild: countingRebuild(rebuilds),
+        nextRefreshAtEpochMs: noRefreshDeadline,
+        rebuildFailed: Effect.succeed(true),
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      // 3s, 6s, 12s, 24s, then capped at 30s: the final two 30-second steps
+      // would miss a still-doubling backoff (48s, 60s).
+      const cadence = [
+        "3 seconds",
+        "6 seconds",
+        "12 seconds",
+        "24 seconds",
+        "30 seconds",
+        "30 seconds",
+      ] as const;
+      for (const [index, step] of cadence.entries()) {
+        yield* TestClock.adjust(step);
+        yield* settle;
+        expect(yield* Ref.get(rebuilds)).toBe(index + 2);
+      }
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
+
+  it.effect("keeps the 3-second tick when the bridge lacks the change event", () =>
+    Effect.gen(function* () {
+      const rebuilds = yield* Ref.make(0);
+      const stream = platformRegistrationRefreshes({
+        rebuild: countingRebuild(rebuilds),
+        nextRefreshAtEpochMs: noRefreshDeadline,
+      });
+      const consumer = yield* runCollecting(stream);
+      yield* settle;
+      // The tick's own semantics: build immediately, then once per interval.
+      expect(yield* Ref.get(rebuilds)).toBe(1);
+
+      yield* TestClock.adjust("3 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(2);
+
+      yield* TestClock.adjust("3 seconds");
+      yield* settle;
+      expect(yield* Ref.get(rebuilds)).toBe(3);
+
+      yield* Fiber.interrupt(consumer.fiber);
+    }),
+  );
 });

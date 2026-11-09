@@ -41,13 +41,13 @@ import {
 import type { CrewTaskReport } from "./CrewService.ts";
 
 export const MAX_WAIT_SECONDS = 50;
+/** Budget for collecting statuses after a crew_wait; keeps the whole call under a minute. */
+export const WAIT_COLLECT_SECONDS = 5;
 export const RESULT_TEXT_LIMIT = 6_000;
 export const NUDGE_IDLE_WAIT_SECONDS = 30;
 
 export const CREW_LEAD_REFUSAL =
   "OOP Crew can only be led from a Claude or Codex model, and this chat runs on another provider. Do the work yourself and do not call the crew tools.";
-export const ISOLATION_FALLBACK_WARNING =
-  "The task started in the shared workspace: an isolated worktree could not be created (the workspace is not a git repository with a commit, or git failed).";
 /** How long a stop waits for the members it interrupted to wind down before it reports. */
 export const STOP_WAIT_SECONDS = 20;
 export const STOPPED_WITH_LEAD = "Stopped with the lead turn.";
@@ -58,6 +58,8 @@ export const DELETED_LEAD = "Stopped because the lead thread was deleted.";
 export const FAILED_PROVIDER_COOLDOWN_MS = 10 * 60_000;
 // How long a provider that hit a usage limit cools down when no snapshot window reports a reset.
 export const LIMIT_COOLDOWN_MS = 15 * 60_000;
+// A model its provider refused again after a status check: the refusal is not a passing glitch.
+export const REPEAT_REFUSAL_BLOCK_MS = 24 * 60 * 60_000;
 
 export interface AvoidedTask {
   readonly taskId: string;
@@ -92,7 +94,13 @@ export interface CrewTaskRecord {
   /** The task's checklist, owned by the server; absent when the lead gave none. */
   todos?: ReadonlyArray<TodoItem> | undefined;
   /** Where the checks run and what file checks compare against. */
-  readonly todoBase?: { readonly cwd: string; readonly tree: string | null } | undefined;
+  readonly todoBase?:
+    | {
+        readonly cwd: string;
+        readonly tree: string | null;
+        readonly hashes?: Readonly<Record<string, string | null>> | undefined;
+      }
+    | undefined;
   /** Changes outside writeScope the latest check saw. */
   outOfScope?: OutOfScope | undefined;
   /**

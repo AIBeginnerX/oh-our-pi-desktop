@@ -214,6 +214,14 @@ export const layer = Layer.effect(
     const desktopWindow = yield* DesktopWindow.DesktopWindow;
     const electronDialog = yield* ElectronDialog.ElectronDialog;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
+    // The renderer tracks secondary local backends via the sync
+    // getLocalEnvironmentBootstraps IPC (a main-process-blocking sendSync per
+    // read), so the pool pushes one event per real topology change instead of
+    // leaving the renderer to poll. Best effort: an absent or mid-load window
+    // must never fail a pool operation.
+    const notifyBootstrapsChanged = desktopWindow.dispatchLocalEnvironmentBootstrapsChanged.pipe(
+      Effect.ignore,
+    );
     // Anchor the pool's lifetime to its layer scope so registered
     // instance scopes can be forked off it. Without this, instance
     // scopes are orphaned: they only close via explicit unregister()
@@ -340,10 +348,15 @@ export const layer = Layer.effect(
               // Provide the captured factory services first, then the child scope
               // last so instance finalizers are owned by the unregisterable scope.
               const instanceScope = yield* Scope.fork(layerScope, "sequential");
-              const instance = yield* DesktopBackendManager.makeBackendInstance(spec).pipe(
-                Effect.provide(factoryContext),
-                Scope.provide(instanceScope),
-              );
+              const instance = yield* DesktopBackendManager.makeBackendInstance({
+                ...spec,
+                // Forward the instance's config transitions (pending <-> full
+                // bootstrap entry) into the renderer change event.
+                onConfigResolved: () =>
+                  (spec.onConfigResolved?.() ?? Effect.void).pipe(
+                    Effect.andThen(notifyBootstrapsChanged),
+                  ),
+              }).pipe(Effect.provide(factoryContext), Scope.provide(instanceScope));
               const next = new Map(current);
               next.set(spec.id, {
                 _tag: "Active",
@@ -359,7 +372,9 @@ export const layer = Layer.effect(
         ).pipe(
           Effect.flatMap((result) =>
             result._tag === "Registered"
-              ? Effect.succeed(result.instance)
+              ? // The new instance is visible to pool.list immediately; tell the
+                // renderer before callers start it.
+                notifyBootstrapsChanged.pipe(Effect.as(result.instance))
               : Deferred.await(result.done).pipe(Effect.andThen(register(spec))),
           ),
         ),
@@ -402,6 +417,9 @@ export const layer = Layer.effect(
           yield* Deferred.await(action.done);
           return;
         }
+        // The Closing entry already vanished from pool.list; notify before the
+        // scope close so the renderer observes the removal promptly.
+        yield* notifyBootstrapsChanged;
 
         const finish = SynchronizedRef.modifyEffect(instancesRef, (current) => {
           const closing = current.get(id);

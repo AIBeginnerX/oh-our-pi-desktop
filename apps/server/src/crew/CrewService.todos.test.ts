@@ -430,6 +430,7 @@ const makeWorldIn = (
       commands,
       workerTurns,
       shells,
+      replies,
       publish: (event: object) => PubSub.publish(events, event as never),
     };
   });
@@ -848,6 +849,49 @@ describe("crew todos: command checks", () => {
 });
 
 describe("crew todos: files checks", () => {
+  it.effect("verifies changed listed files outside git and fails unchanged files", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld;
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.remove(world.repo + "/.git", { recursive: true });
+      const { service, turn, crew } = yield* delegateTask(world, {
+        todos: [
+          { text: "edit a", check: { files: ["src/a.ts"] } },
+          { text: "add b", check: { files: ["src/b.ts"] } },
+        ],
+      });
+      assert.strictEqual((yield* check(crew, turn.threadId, "t1", "done")).status, "failed");
+      assert.strictEqual((yield* check(crew, turn.threadId, "t2", "done")).status, "failed");
+      yield* world.write(world.repo, "src/a.ts", "changed");
+      yield* world.write(world.repo, "src/b.ts", "created");
+      assert.strictEqual((yield* check(crew, turn.threadId, "t1", "done")).status, "verified");
+      assert.strictEqual((yield* check(crew, turn.threadId, "t2", "done")).status, "verified");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
+  it.effect("names a never-existing check path as missing, not unchanged, outside git", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld;
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.remove(world.repo + "/.git", { recursive: true });
+      const { service, turn, crew } = yield* delegateTask(world, {
+        todos: [
+          { text: "edit a", check: { files: ["wrong/root/src/a.ts"] } },
+          { text: "edit a", check: { files: ["src/a.ts"] } },
+        ],
+      });
+      const wrongPath = yield* check(crew, turn.threadId, "t1", "done");
+      assert.strictEqual(wrongPath.status, "failed");
+      assert.include(wrongPath.message ?? "", "do not exist");
+      assert.include(wrongPath.message ?? "", world.repo);
+      const untouched = yield* check(crew, turn.threadId, "t2", "done");
+      assert.strictEqual(untouched.status, "failed");
+      assert.include(untouched.message ?? "", "have not changed");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
   it.effect("verifies a file the member changed and fails one it did not touch", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld;
@@ -1692,8 +1736,20 @@ describe("crew: candidate isolation", () => {
         updated_at: NOW,
       });
       yield* Ref.update(world.shells, (all) =>
-        new Map(all).set(workerId, { ...world.lead, id: workerId, latestTurn: null }),
+        new Map(all).set(workerId, {
+          ...world.lead,
+          id: workerId,
+          latestTurn: {
+            turnId: TurnId.make("worker-turn"),
+            state: "completed",
+            requestedAt: NOW,
+            startedAt: NOW,
+            completedAt: NOW,
+            assistantMessageId: MessageId.make(`reply-${workerId}`),
+          },
+        }),
       );
+      yield* Ref.update(world.replies, (all) => new Map(all).set(workerId, DONE));
       yield* Ref.set(world.workerTurns, [
         {
           threadId: workerId,
@@ -1701,7 +1757,7 @@ describe("crew: candidate isolation", () => {
           pendingMessageId: MessageId.make("worker-request"),
           sourceProposedPlanThreadId: null,
           sourceProposedPlanId: null,
-          assistantMessageId: null,
+          assistantMessageId: MessageId.make(`reply-${workerId}`),
           state: "completed",
           requestedAt: NOW,
           startedAt: NOW,
@@ -1746,7 +1802,7 @@ describe("crew: differentFrom", () => {
       yield* world.nextMemberTurn;
       assert.include(first.model, "claude");
       assert.include(second.model, "gpt");
-      assert.isUndefined(second.warning);
+      assert.include(second.warning ?? "", "OOP will not be able to verify");
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
   );

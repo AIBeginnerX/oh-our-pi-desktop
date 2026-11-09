@@ -14,10 +14,13 @@ import {
   type CrewThreadOverride,
   type OrchestrationCommand,
   ComposerContextId,
+  type OrchestrationSession,
   type OrchestrationThread,
   type OrchestrationThreadShell,
   type ServerProvider,
 } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
+import * as TestClock from "effect/testing/TestClock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -54,6 +57,8 @@ import {
   CrewTaskRecoveryJson,
   CrewTaskRecoveryState,
 } from "./crewRecoveryState.ts";
+import { ORPHANED_PROVIDER_SESSION_ERROR } from "../orphanedProviderSession.ts";
+import { STOPPED_ON_REQUEST } from "./crewTaskRecord.ts";
 
 const NOW = IsoDateTime.make("2026-10-24T00:00:00.000Z");
 const LEAD = ThreadId.make("lead-1");
@@ -151,9 +156,13 @@ const makeHarness = Effect.gen(function* () {
   const leadMemoryHold = yield* Ref.make(false);
   const dispatched = yield* Queue.unbounded<OrchestrationCommand>();
   const workerTurns = yield* Ref.make<ReadonlyArray<ProjectionTurn>>([]);
+  const keepRunning = { current: false };
+  const slowCollection = yield* Ref.make(false);
   const commands = yield* Ref.make<ReadonlyArray<OrchestrationCommand>>([]);
   // Snapshots of crew member threads by id, for tests that need what a member's thread showed.
   const workerDetails = new Map<ThreadId, OrchestrationThread>();
+  // Member thread sessions by id, for tests that need what reconcile settled a member to.
+  const workerSessions = new Map<ThreadId, OrchestrationSession>();
   const dependencies = Layer.mergeAll(
     Layer.succeed(CrewRuntimeState, store),
     OrchestrationCommandReceiptRepositoryLive,
@@ -198,13 +207,29 @@ const makeHarness = Effect.gen(function* () {
     Layer.mock(ProcessRunner)({}),
     serverConfigLayerTest(process.cwd(), { prefix: "t3-crew-service-test-" }),
     Layer.mock(ProjectionSnapshotQuery)({
+      getProjectShellById: () => Effect.succeed(Option.none()),
       getThreadShellById: (threadId) =>
         Effect.all([Ref.get(busy), Ref.get(leadCrew)]).pipe(
+          Effect.tap(() =>
+            threadId !== LEAD
+              ? Ref.get(slowCollection).pipe(
+                  Effect.flatMap((slow) => (slow ? Effect.sleep("60 seconds") : Effect.void)),
+                )
+              : Effect.void,
+          ),
           Effect.map(([running, crew]) =>
             threadId === OTHER_LEAD
               ? Option.some({ ...lead, id: OTHER_LEAD })
               : threadId !== LEAD
-                ? Option.none()
+                ? keepRunning.current
+                  ? Option.some({
+                      ...lead,
+                      id: threadId,
+                      latestTurn: { ...lead.latestTurn!, state: "running" as const },
+                    })
+                  : workerSessions.has(threadId)
+                    ? Option.some({ ...lead, id: threadId, session: workerSessions.get(threadId)! })
+                    : Option.none()
                 : Option.some(
                     running
                       ? {
@@ -321,6 +346,8 @@ const makeHarness = Effect.gen(function* () {
       return delivery;
     });
   return {
+    keepRunning,
+    slowCollection,
     store,
     pendingReads,
     receipts,
@@ -337,6 +364,7 @@ const makeHarness = Effect.gen(function* () {
     dispatched,
     workerTurns,
     workerDetails,
+    workerSessions,
     commands,
     start,
     seed,
@@ -574,6 +602,95 @@ describe("Crew service restart delivery", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 
+  it.effect("says once when the follow-up cap drops unfinished results", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      // The lead already burned its follow-up budget, so these late reports can only be dropped.
+      yield* Ref.set(harness.crewOn, true);
+      yield* Ref.set(harness.leadMessage, {
+        id: MessageId.make("lead-follow-up"),
+        role: "user",
+        text: '<oop_crew_follow_up round="4" fixes="0">last follow-up</oop_crew_follow_up>',
+        turnId: TurnId.make("lead-turn"),
+        streaming: false,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      yield* harness.seedTask({
+        ...finishedTask,
+        report: { taskId: "task-1", role: "worker", status: "partial", result: "half done" },
+      });
+      yield* harness.seedTask({
+        ...finishedTask,
+        taskId: "task-2",
+        subject: "expert task",
+        role: "expert",
+        report: { taskId: "task-2", role: "expert", status: "blocked", result: "needs a decision" },
+      });
+      const service = yield* harness.start;
+      assert.equal(
+        (yield* Ref.get(harness.commands)).filter((command) => command.type === "thread.turn.start")
+          .length,
+        0,
+      );
+      const dropped = (yield* Ref.get(harness.commands)).find(
+        (command) =>
+          command.type === "thread.activity.append" &&
+          command.activity.kind === "crew.results-dropped",
+      );
+      if (dropped?.type !== "thread.activity.append") {
+        assert.fail("expected a crew.results-dropped activity");
+      }
+      assert.include(
+        dropped.activity.summary,
+        "Crew left work unfinished: worker task, expert task",
+      );
+      assert.equal(dropped.activity.turnId, TurnId.make("lead-turn"));
+      const payload = dropped.activity.payload as {
+        tasks?: ReadonlyArray<{ crewRole?: string; subject?: string; status?: string }>;
+      };
+      assert.deepEqual(
+        payload.tasks?.map((task) => [task.crewRole, task.subject, task.status]),
+        [
+          ["worker", "worker task", "partial"],
+          ["expert", "expert task", "blocked"],
+        ],
+      );
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("stays quiet about cap-dropped results once the crew is off", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Ref.set(harness.leadMessage, {
+        id: MessageId.make("lead-follow-up"),
+        role: "user",
+        text: '<oop_crew_follow_up round="4" fixes="0">last follow-up</oop_crew_follow_up>',
+        turnId: TurnId.make("lead-turn"),
+        streaming: false,
+        createdAt: NOW,
+        updatedAt: NOW,
+      });
+      yield* harness.seedTask({
+        ...finishedTask,
+        report: { taskId: "task-1", role: "worker", status: "partial", result: "half done" },
+      });
+      const service = yield* harness.start;
+      const dropped = (yield* Ref.get(harness.commands)).filter(
+        (command) =>
+          command.type === "thread.activity.append" &&
+          command.activity.kind === "crew.results-dropped",
+      );
+      assert.equal(dropped.length, 0);
+      const states = yield* Effect.forEach(yield* harness.store.readTasks, (row) =>
+        decodeTaskRecovery(row.record_json),
+      );
+      assert.isTrue(states.every((state) => state.collected));
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
   it.effect("does not queue a fix when an audit finishes with the crew off", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
@@ -649,7 +766,8 @@ describe("Crew service restart delivery", () => {
       ]);
       const service = yield* harness.start;
       const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
-      assert.equal(result[0]!.status, "completed");
+      // The recovered thread detail has no readable reply, so nothing says the task finished.
+      assert.equal(result[0]!.status, "partial");
       assert.isFalse(
         (yield* Ref.get(harness.commands)).some(
           (command) =>
@@ -658,6 +776,207 @@ describe("Crew service restart delivery", () => {
             (command.type === "thread.turn.start" && command.threadId === workerId),
         ),
       );
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("recovers a member orphaned by the restart as failed, not stopped", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const workerId = ThreadId.make("worker-orphan");
+      yield* harness.seedTask({
+        ...finishedTask,
+        report: null,
+        ended: false,
+        attempts: [
+          {
+            model: "worker-model",
+            threadId: workerId,
+            messageId: MessageId.make("orphan-request"),
+          },
+        ],
+      });
+      yield* Ref.set(harness.workerTurns, [
+        {
+          threadId: workerId,
+          turnId: TurnId.make("orphan-turn"),
+          pendingMessageId: MessageId.make("orphan-request"),
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          assistantMessageId: null,
+          state: "interrupted",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        },
+      ]);
+      // The startup reconcile settled the member's session with the restart-orphan error.
+      harness.workerSessions.set(workerId, {
+        threadId: workerId,
+        status: "interrupted",
+        providerName: null,
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+        updatedAt: NOW,
+      });
+      const service = yield* harness.start;
+      const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
+      assert.equal(result[0]!.status, "failed");
+      // Recovery is forked and `done` resolves before the board row, so poll on the clock.
+      let completed;
+      // completionEvidence waits on a 1-second stream timeout the recovery needs clock for.
+      for (let i = 0; i < 60 && completed === undefined; i += 1) {
+        yield* TestClock.adjust("50 millis");
+        completed = (yield* Ref.get(harness.commands)).find(
+          (command) =>
+            command.type === "thread.activity.append" && command.activity.kind === "task.completed",
+        );
+      }
+      assert.exists(completed);
+      if (completed?.type === "thread.activity.append") {
+        const payload = completed.activity.payload as { status?: string };
+        assert.equal(payload.status, "failed");
+      }
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("still ends a member the user stopped as stopped", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const workerId = ThreadId.make("worker-stopped");
+      yield* harness.seedTask({
+        ...finishedTask,
+        report: null,
+        ended: false,
+        stopped: STOPPED_ON_REQUEST,
+        attempts: [
+          {
+            model: "worker-model",
+            threadId: workerId,
+            messageId: MessageId.make("stopped-request"),
+          },
+        ],
+      });
+      yield* Ref.set(harness.workerTurns, [
+        {
+          threadId: workerId,
+          turnId: TurnId.make("stopped-turn"),
+          pendingMessageId: MessageId.make("stopped-request"),
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          assistantMessageId: null,
+          state: "interrupted",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        },
+      ]);
+      harness.workerSessions.set(workerId, {
+        threadId: workerId,
+        status: "interrupted",
+        providerName: null,
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+        updatedAt: NOW,
+      });
+      const service = yield* harness.start;
+      const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
+      assert.equal(result[0]!.status, "interrupted");
+      let completed;
+      // completionEvidence waits on a 1-second stream timeout the recovery needs clock for.
+      for (let i = 0; i < 60 && completed === undefined; i += 1) {
+        yield* TestClock.adjust("50 millis");
+        completed = (yield* Ref.get(harness.commands)).find(
+          (command) =>
+            command.type === "thread.activity.append" && command.activity.kind === "task.completed",
+        );
+      }
+      assert.exists(completed);
+      if (completed?.type === "thread.activity.append") {
+        const payload = completed.activity.payload as { status?: string };
+        assert.equal(payload.status, "stopped");
+      }
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("keeps a finished report when post-wait collection times out", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      // Collected before the restart: the lead's late-report follow-up already skips this
+      // task, so a collection timeout must not lose its report behind a "running" row.
+      yield* harness.seedTask({
+        ...finishedTask,
+        taskId: "task-a",
+        collected: true,
+        report: {
+          taskId: "task-a",
+          role: "worker",
+          status: "completed",
+          result: "a finished result that must not be lost",
+        },
+      });
+      const workerId = ThreadId.make("worker-collect-slow");
+      yield* harness.seedTask({
+        ...finishedTask,
+        taskId: "task-b",
+        report: null,
+        ended: false,
+        attempts: [
+          { model: "worker-model", threadId: workerId, messageId: MessageId.make("b-request") },
+        ],
+      });
+      yield* Ref.set(harness.workerTurns, [
+        {
+          threadId: workerId,
+          turnId: TurnId.make("b-turn"),
+          pendingMessageId: MessageId.make("b-request"),
+          sourceProposedPlanThreadId: null,
+          sourceProposedPlanId: null,
+          assistantMessageId: null,
+          state: "running",
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: null,
+          checkpointTurnCount: null,
+          checkpointRef: null,
+          checkpointStatus: null,
+          checkpointFiles: [],
+        },
+      ]);
+      const service = yield* harness.start;
+      yield* Ref.set(harness.slowCollection, true);
+      const reports = yield* Deferred.make<ReadonlyArray<CrewService.CrewTaskReport>>();
+      yield* service.crew
+        .wait({ threadId: LEAD, taskIds: ["task-a", "task-b"], timeoutSeconds: 1 })
+        .pipe(
+          Effect.flatMap((value) => Deferred.succeed(reports, value)),
+          Effect.forkChild,
+        );
+      // One second for the still-running member, then the five-second collect budget.
+      yield* TestClock.adjust("6 seconds");
+      const result = yield* Deferred.await(reports);
+      assert.deepEqual(
+        result.find((report) => report.taskId === "task-a"),
+        {
+          taskId: "task-a",
+          role: "worker",
+          status: "completed",
+          result: "a finished result that must not be lost",
+        },
+      );
+      assert.equal(result.find((report) => report.taskId === "task-b")?.status, "running");
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
@@ -775,7 +1094,7 @@ describe("Crew service restart delivery", () => {
           pendingMessageId: MessageId.make("proof-request"),
           sourceProposedPlanThreadId: null,
           sourceProposedPlanId: null,
-          assistantMessageId: null,
+          assistantMessageId: MessageId.make("proof-reply"),
           state: "completed",
           requestedAt: NOW,
           startedAt: NOW,
@@ -790,6 +1109,18 @@ describe("Crew service restart delivery", () => {
         ...detail,
         id: workerId,
         latestTurn: { ...lead.latestTurn!, turnId },
+        messages: [
+          ...detail.messages,
+          {
+            id: MessageId.make("proof-reply"),
+            role: "assistant",
+            text: "Fixed it.\nStatus: done",
+            turnId,
+            streaming: false,
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        ],
         activities: [
           {
             id: EventId.make("proof-activity"),
@@ -931,6 +1262,116 @@ describe("Crew service per-thread crew", () => {
   const workerOf = (roster: {
     readonly roles: ReadonlyArray<{ role: string; model: string | null }>;
   }) => roster.roles.find((entry) => entry.role === "worker")?.model;
+
+  it.effect("bounds slow post-wait collection so the call ends before the tool timeout", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      harness.keepRunning.current = true;
+      const task = yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "work" });
+      for (;;) {
+        if ((yield* Queue.take(harness.dispatched)).type === "thread.turn.start") break;
+      }
+      yield* Ref.set(harness.slowCollection, true);
+      const completed = yield* Ref.make(false);
+      yield* service.crew.wait({ threadId: LEAD, taskIds: [task.taskId], timeoutSeconds: 50 }).pipe(
+        Effect.tap(() => Ref.set(completed, true)),
+        Effect.forkChild,
+      );
+      yield* TestClock.adjust("54 seconds");
+      assert.isFalse(yield* Ref.get(completed));
+      yield* TestClock.adjust("1 second");
+      assert.isTrue(yield* Ref.get(completed));
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("rejects unavailable worktree isolation before creating a member", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      const result = yield* service.crew
+        .delegate({
+          threadId: LEAD,
+          role: "worker",
+          task: "isolated",
+          isolation: "worktree",
+        })
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(result));
+      assert.isFalse(
+        (yield* Ref.get(harness.commands)).some((command) => command.type === "thread.create"),
+      );
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("warns when delegated todos have no verification check", () =>
+    Effect.gen(function* () {
+      const { service } = yield* started;
+      for (const todos of [undefined, [{ id: "t1", text: "change it" }]]) {
+        const result = yield* service.crew.delegate({
+          threadId: LEAD,
+          role: "worker",
+          task: "change it",
+          todos,
+        });
+        assert.include(result.warning ?? "", "OOP will not be able to verify");
+      }
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("warns a repeated delegation and hands the earlier outcome to the member", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      const input = {
+        threadId: LEAD,
+        role: "worker" as const,
+        task: "Port the parser",
+        title: "Port the parser",
+      };
+      const first = yield* service.crew.delegate(input);
+      // The harness holds no member thread, so the task ends interrupted; its usage wait needs clock.
+      let status: string | null = null;
+      for (let i = 0; i < 30 && status === null; i += 1) {
+        yield* TestClock.adjust("1 second");
+        const row = (yield* harness.store.readTasks).find(
+          (entry) => entry.task_id === first.taskId,
+        );
+        if (row === undefined) continue;
+        const state = yield* decodeTaskRecovery(row.record_json);
+        if (state.report !== null) status = state.report.status;
+      }
+      assert.equal(status, "interrupted");
+      const second = yield* service.crew.delegate(input);
+      assert.notEqual(second.taskId, first.taskId);
+      assert.include(
+        second.warning ?? "",
+        `This repeats task ${first.taskId} (interrupted); its outcome was passed to the member.`,
+      );
+      // The second member's prompt carries the previous attempt; the first member's does not.
+      // delegate returns before its member fiber dispatches the turn, so poll for it on the clock.
+      let memberPrompts: ReadonlyArray<string> = [];
+      for (let i = 0; i < 40 && memberPrompts.length < 2; i += 1) {
+        yield* TestClock.adjust("100 millis");
+        memberPrompts = (yield* Ref.get(harness.commands))
+          .filter(
+            (command) =>
+              command.type === "thread.turn.start" &&
+              command.message.text.startsWith("You are the worker"),
+          )
+          .map((command) => (command.type === "thread.turn.start" ? command.message.text : ""));
+      }
+      assert.equal(memberPrompts.length, 2);
+      assert.isFalse(memberPrompts[0]!.includes("PREVIOUS ATTEMPT"));
+      assert.include(memberPrompts[1]!, `PREVIOUS ATTEMPT (task ${first.taskId}, interrupted):`);
+      assert.include(memberPrompts[1]!, "Start from what it left; do not redo finished parts.");
+      // A task meant to judge independently is neither warned nor told the earlier result.
+      const independent = yield* service.crew.delegate({ ...input, differentFrom: [first.taskId] });
+      assert.notInclude(independent.warning ?? "", "repeats");
+      assert.notInclude(independent.warning ?? "", "same title");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
 
   it.effect("resolves the crew from the thread first, then the default", () =>
     Effect.gen(function* () {
@@ -1158,7 +1599,10 @@ describe("Crew service project memory", () => {
       assert.include(message.text, "t3-context://v1/memory/crew_memory_2");
       assert.notInclude(message.text, SECRET_BODY);
       assert.isTrue(message.text.startsWith("You are the worker"));
-      assert.isUndefined((result as { warning?: string }).warning);
+      assert.include(
+        (result as { warning?: string }).warning ?? "",
+        "OOP will not be able to verify",
+      );
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 
@@ -1224,7 +1668,10 @@ describe("Crew service project memory", () => {
         message: null,
       });
       assert.isUndefined(message.context);
-      assert.isUndefined((result as { warning?: string }).warning);
+      assert.include(
+        (result as { warning?: string }).warning ?? "",
+        "OOP will not be able to verify",
+      );
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 });

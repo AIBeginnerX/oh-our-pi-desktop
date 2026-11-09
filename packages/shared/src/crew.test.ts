@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyCrewChange,
+  applyDefaultCrewChange,
   canLeadCrew,
   crewAsDefault,
   crewFallbackChain,
@@ -183,6 +184,49 @@ describe("applyCrewChange", () => {
     const current = { enabled: true, pinned: {} };
     applyCrewChange(current, { enabled: false, preset: "budget" });
     expect(current).toEqual({ enabled: true, pinned: {} });
+  });
+});
+
+describe("applyDefaultCrewChange", () => {
+  const codex = { instanceId: "codex", model: "gpt-5.4" } as never;
+  const mini = { instanceId: "codex", model: "gpt-5.4-mini" } as never;
+  const haiku = { instanceId: "claude", model: "claude-haiku-5" } as never;
+
+  it("sets enabled and preset", () => {
+    const next = applyDefaultCrewChange(settings({ enabled: false }), {
+      enabled: true,
+      preset: "speed",
+    });
+    expect(next).toEqual(settings({ enabled: true, preset: "speed" }));
+  });
+
+  it("pins a role and removes the pin again on a null one", () => {
+    const pinned = applyDefaultCrewChange(settings(), { pins: { worker: codex } });
+    expect(pinned.pinned).toEqual({ worker: codex });
+    expect(applyDefaultCrewChange(pinned, { pins: { worker: null } }).pinned).toEqual({});
+  });
+
+  it("replaces a role's fallback list and removes the key on an empty one", () => {
+    const next = applyDefaultCrewChange(settings({ fallbacks: { worker: [mini] } }), {
+      fallbacks: { worker: [haiku], expert: [] },
+    });
+    expect(next.fallbacks).toEqual({ worker: [haiku] });
+  });
+
+  it("keeps the roles the change does not name", () => {
+    const current = settings({
+      preset: "budget",
+      pinned: { expert: codex },
+      fallbacks: { auditor: [haiku] },
+    });
+    const next = applyDefaultCrewChange(current, { pins: { worker: mini } });
+    expect(next).toEqual(
+      settings({
+        preset: "budget",
+        pinned: { expert: codex, worker: mini },
+        fallbacks: { auditor: [haiku] },
+      }),
+    );
   });
 });
 

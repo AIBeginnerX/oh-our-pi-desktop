@@ -279,17 +279,30 @@ const makeWorld = (
                     messages:
                       threadId === LEAD
                         ? [leadWithMemory]
-                        : sent
-                            .filter(
-                              (command) =>
-                                command.type === "thread.turn.start" &&
-                                command.threadId === threadId,
-                            )
-                            .map((command) => ({
-                              id: (command as { message: { messageId: string } }).message.messageId,
-                              role: "user",
-                              text: (command as { message: { text: string } }).message.text,
-                            })),
+                        : [
+                            ...sent
+                              .filter(
+                                (command) =>
+                                  command.type === "thread.turn.start" &&
+                                  command.threadId === threadId,
+                              )
+                              .map((command) => ({
+                                id: (command as { message: { messageId: string } }).message
+                                  .messageId,
+                                role: "user",
+                                text: (command as { message: { text: string } }).message.text,
+                              })),
+                            // A finished member turn ends with its report marker, as a real reply does.
+                            ...(shell?.latestTurn?.state === "completed"
+                              ? [
+                                  {
+                                    id: `member-reply-${threadId}`,
+                                    role: "assistant",
+                                    text: "Did the work.\nStatus: done",
+                                  },
+                                ]
+                              : []),
+                          ],
                     proposedPlans: [],
                     // The usage a finished turn records, so the board's evidence is read at once.
                     activities: [usageObservation, ...(extra.get(threadId) ?? [])],
@@ -1035,6 +1048,44 @@ describe("crew stop: a stopped lead is not restarted", () => {
   }
 });
 
+describe("crew follow-up: one wake-up per lead turn", () => {
+  const drain = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, {
+    discard: true,
+  });
+  const leadStarts = (all: ReadonlyArray<OrchestrationCommand>) =>
+    all.flatMap((command) =>
+      command.type === "thread.turn.start" && command.threadId === LEAD ? [command] : [],
+    );
+
+  it.effect("holds a finished report until the other tasks of its lead turn end", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld();
+      const { service, task } = yield* delegateTasks(world);
+      const first = yield* task(LEAD, "First");
+      const second = yield* task(LEAD, "Second");
+      yield* world.setShell(LEAD, {
+        latestTurn: { ...leadShell(LEAD).latestTurn!, state: "completed", completedAt: NOW },
+      });
+
+      yield* world.completeMember(first.memberId, true);
+      yield* world.awaitTaskActivity("task.completed", first.taskId);
+      yield* world.sessionReady(LEAD);
+      yield* drain;
+      assert.strictEqual(leadStarts(yield* world.issued).length, 0);
+
+      yield* world.completeMember(second.memberId, true);
+      yield* world.awaitTaskActivity("task.completed", second.taskId);
+      yield* world.sessionReady(LEAD);
+      yield* drain;
+      const starts = leadStarts(yield* world.issued);
+      assert.strictEqual(starts.length, 1);
+      assert.include(starts[0]!.message.text, "First");
+      assert.include(starts[0]!.message.text, "Second");
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+});
+
 describe("crew stop: races around a stop", () => {
   const drain = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, {
     discard: true,
@@ -1254,6 +1305,7 @@ describe("crew: lead memory the ledger did not show as sent", () => {
         threadId: LEAD,
         role: "worker",
         task: "Do it",
+        todos: [{ text: "Do it", check: { command: "true" } }],
       });
 
       assert.isUndefined(delegated.warning);
@@ -1592,6 +1644,58 @@ describe("crew: cooling after a failure", () => {
         world.providers,
         withSonnet.map((entry) => ({ ...entry, checkedAt: NOW }) as ServerProvider),
       );
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("counts refusals before the provider's next status check as one", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1, 3]), false, {
+        pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CLAUDE, model: "claude-sonnet-5" }] },
+      });
+      yield* Ref.set(world.providers, withSonnet);
+      const service = yield* world.start;
+      const refusal = "The agent could not switch to model claude-haiku-5.";
+      yield* failFirstThenFinish(world, service.crew, refusal);
+      yield* failFirstThenFinish(world, service.crew, refusal);
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, [
+        { provider: "claude", model: "claude-haiku-5", reason: "model refused" },
+      ]);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("blocks a model refused again for a day, past the provider's status checks", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1, 3]), false, {
+        pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CLAUDE, model: "claude-sonnet-5" }] },
+      });
+      yield* Ref.set(world.providers, withSonnet);
+      const service = yield* world.start;
+      const refusal = "The agent could not switch to model claude-haiku-5.";
+      yield* failFirstThenFinish(world, service.crew, refusal);
+      yield* Ref.set(
+        world.providers,
+        withSonnet.map((entry) => ({ ...entry, checkedAt: NOW }) as ServerProvider),
+      );
+      yield* failFirstThenFinish(world, service.crew, refusal);
+      const later = IsoDateTime.make("2026-11-04T00:00:00.000Z");
+      yield* Ref.set(
+        world.providers,
+        withSonnet.map((entry) => ({ ...entry, checkedAt: later }) as ServerProvider),
+      );
+      assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, [
+        {
+          provider: "claude",
+          model: "claude-haiku-5",
+          until: IsoDateTime.make("1970-01-02T00:00:00.000Z"),
+          reason: "model refused again",
+        },
+      ]);
+      yield* TestClock.adjust("24 hours");
       assert.deepStrictEqual((yield* service.crew.roster(LEAD)).cooling, []);
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),

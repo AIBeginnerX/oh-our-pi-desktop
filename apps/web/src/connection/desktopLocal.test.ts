@@ -12,6 +12,7 @@ import {
   isDesktopLocalConnectionTarget,
   isWslConnectionTarget,
 } from "./desktopLocal";
+import { resolveDesktopBootstrapsRefresh } from "./useDesktopLocalBootstraps";
 
 describe("desktop local connection identity", () => {
   it("preserves the desktop backend instance id", () => {
@@ -116,5 +117,46 @@ describe("desktop local topology reads", () => {
       throw new Error("IPC unavailable again");
     };
     expect(reader.readSnapshot()).toBe(removedSnapshot);
+  });
+});
+
+describe("desktop local topology refresh mode", () => {
+  it("subscribes to the bootstraps-changed event when the bridge exposes it", () => {
+    const listeners: Array<() => void> = [];
+    let unsubscribed = false;
+    const bridge = {
+      onLocalEnvironmentBootstrapsChange: (listener: () => void) => {
+        listeners.push(listener);
+        return () => {
+          unsubscribed = true;
+        };
+      },
+    };
+
+    const refresh = resolveDesktopBootstrapsRefresh(bridge);
+
+    expect(refresh._tag).toBe("Subscribe");
+    if (refresh._tag !== "Subscribe") return;
+    const listener = () => {};
+    expect(listeners).toEqual([]);
+    const unsubscribe = refresh.subscribe(listener);
+    expect(listeners).toEqual([listener]);
+    expect(unsubscribed).toBe(false);
+    unsubscribe();
+    expect(unsubscribed).toBe(true);
+  });
+
+  it("falls back to the interval poll on an older bridge without the event", () => {
+    expect(resolveDesktopBootstrapsRefresh({})).toEqual({
+      _tag: "Poll",
+      intervalMs: 2_000,
+    });
+  });
+
+  it("falls back to the interval poll outside the desktop shell", () => {
+    expect(resolveDesktopBootstrapsRefresh(undefined)).toEqual({
+      _tag: "Poll",
+      intervalMs: 2_000,
+    });
   });
 });

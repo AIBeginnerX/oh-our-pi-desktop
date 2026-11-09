@@ -212,7 +212,6 @@ mod tests {
         let sym = &crate::theme::UNICODE;
         let shown = |app: &App| -> String {
             crate::transcript::build(&app.conv.thread, 60, th, sym)
-                .lines
                 .iter()
                 .map(|l| {
                     l.spans

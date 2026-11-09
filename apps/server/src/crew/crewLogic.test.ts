@@ -34,11 +34,15 @@ import {
   reportExcerpt,
   isTestCommand,
   latestAuditAsksChanges,
+  normalizeCrewSubject,
   planTurnAudit,
+  previousAttemptOf,
+  repeatTaskWarning,
   turnChangedLines,
   turnRanPassingTests,
   writeScopeWarning,
 } from "./crewLogic.ts";
+import type { PriorCrewTask } from "./crewLogic.ts";
 import { assignTodos } from "./crewTodos.ts";
 
 const turn = (state: "running" | "completed" | "interrupted" | "error") =>
@@ -459,14 +463,23 @@ describe("crew follow-ups", () => {
 });
 
 describe("crew failure handling", () => {
-  it("reads the report's last status line, treating a report without one as done", () => {
+  it("reads the report's last status line, treating a report without one as partial", () => {
     expect(crewReportStatus("Changed a.ts.\nStatus: done")).toBe("done");
     expect(crewReportStatus("Wrote the parser; tests left.\n**Status:** partial")).toBe("partial");
     expect(crewReportStatus("Status: partial\nFinished after all.\nStatus: `blocked`")).toBe(
       "blocked",
     );
-    expect(crewReportStatus("All good.")).toBe("done");
-    expect(crewReportStatus(null)).toBe("done");
+    expect(crewReportStatus("All good.")).toBe("partial");
+    expect(crewReportStatus(null)).toBe("partial");
+  });
+
+  it("counts only an explicit done marker or json status as done", () => {
+    // A reply with no marker at all (e.g. a context-truncated turn) never said it finished.
+    expect(crewReportStatus("Wrote the parser and the tests pass.")).toBe("partial");
+    expect(crewReportStatus("Changed a.ts.\nStatus: done")).toBe("done");
+    expect(
+      crewReportStatus('Changed a.ts.\n```json\n{"status":"done","summary":"All done."}\n```'),
+    ).toBe("done");
   });
 
   it("separates failures that need the provider fixed from ones a retry may clear", () => {
@@ -647,6 +660,166 @@ describe("auditPrompt", () => {
   });
 });
 
+describe("delegation with a previous attempt", () => {
+  const base = { role: "worker", leadTitle: "Fix login", task: "Add tests" } as const;
+
+  it("renders PREVIOUS ATTEMPT between TASK and SCOPE, and omits it without one", () => {
+    const prompt = delegatePrompt({
+      ...base,
+      previous: { taskId: "t3", status: "partial", note: "Login tests left." },
+      writeScope: ["src/auth/"],
+    });
+    expect(prompt).toContain(
+      "TASK:\nAdd tests\n\nPREVIOUS ATTEMPT (task t3, partial): Login tests left.\nStart from what it left; do not redo finished parts.\n\nSCOPE",
+    );
+    const bare = delegatePrompt(base);
+    expect(bare).not.toContain("PREVIOUS ATTEMPT");
+    expect(delegatePrompt({ ...base, previous: undefined })).toBe(bare);
+  });
+});
+
+describe("repeating an earlier task", () => {
+  const prior = (
+    over: Partial<PriorCrewTask> & Pick<PriorCrewTask, "taskId" | "subject">,
+  ): PriorCrewTask => ({ report: null, ...over });
+  const noticeOf = (tasks: ReadonlyArray<PriorCrewTask>, subject = "same") =>
+    previousAttemptOf(subject, tasks);
+  const noteOf = (over: Partial<PriorCrewTask>) => {
+    const notice = noticeOf([prior({ taskId: "t1", subject: "Same", ...over })]);
+    return notice?.kind === "unfinished" ? notice.previous.note : null;
+  };
+
+  it("normalizes a subject to lowercase words", () => {
+    expect(normalizeCrewSubject("  Fix   the LOGIN! ")).toBe("fix the login");
+    expect(normalizeCrewSubject("Fix-the-LOGIN.")).toBe("fix the login");
+    expect(normalizeCrewSubject("Fix\tthe\nlogin?")).toBe("fix the login");
+    expect(normalizeCrewSubject("로그인 수정!")).toBe("로그인 수정");
+  });
+
+  it("tells non-English subjects apart and never matches a subject without words", () => {
+    const tasks = [prior({ taskId: "t1", subject: "로그인 수정" })];
+    expect(previousAttemptOf("결제 수정", tasks)).toBeNull();
+    expect(previousAttemptOf("로그인  수정.", tasks)).toEqual({ kind: "running", taskId: "t1" });
+    expect(previousAttemptOf("!!", [prior({ taskId: "t2", subject: "??" })])).toBeNull();
+  });
+
+  it("matches the most recent task whose subject normalizes the same", () => {
+    const tasks = [
+      prior({ taskId: "t1", subject: "Port the parser" }),
+      prior({
+        taskId: "t2",
+        subject: "Rename exports",
+        report: { status: "completed", result: "done" },
+      }),
+      prior({
+        taskId: "t3",
+        subject: "Port  the parser!",
+        report: { status: "failed", result: null },
+      }),
+    ];
+    expect(noticeOf(tasks, "port THE parser.")).toMatchObject({
+      kind: "unfinished",
+      previous: { taskId: "t3", status: "failed" },
+    });
+    expect(noticeOf(tasks, "rename exports")).toMatchObject({
+      kind: "unfinished",
+      previous: { taskId: "t2" },
+    });
+    expect(noticeOf(tasks, "something else")).toBeNull();
+    expect(noticeOf([], "port the parser")).toBeNull();
+  });
+
+  it("tells the lead to wait for or stop a task with the same title that is still running", () => {
+    const notice = noticeOf([prior({ taskId: "t5", subject: "Work" })], "work");
+    expect(notice).toEqual({ kind: "running", taskId: "t5" });
+    expect(repeatTaskWarning(notice!)).toBe(
+      "Task t5 with the same title is still running; wait for it with crew_wait or stop it before handing the same work out again.",
+    );
+  });
+
+  it("only warns, with no prompt block, when the earlier task finished verified", () => {
+    const notice = noticeOf(
+      [
+        prior({
+          taskId: "t7",
+          subject: "Work",
+          report: { status: "completed", result: "done", proof: { verdict: "verified" } },
+        }),
+      ],
+      "work",
+    );
+    expect(notice).toEqual({ kind: "verified", taskId: "t7" });
+    expect(repeatTaskWarning(notice!)).toBe(
+      "This repeats task t7, which already finished verified.",
+    );
+    // Completed without verified proof is unfinished, not verified.
+    expect(
+      noticeOf(
+        [prior({ taskId: "t8", subject: "Work", report: { status: "completed", result: "done" } })],
+        "work",
+      ),
+    ).toMatchObject({ kind: "unfinished" });
+    expect(
+      noticeOf(
+        [
+          prior({
+            taskId: "t9",
+            subject: "Work",
+            report: { status: "completed", result: "done", proof: { verdict: "inconclusive" } },
+          }),
+        ],
+        "work",
+      ),
+    ).toMatchObject({ kind: "unfinished" });
+  });
+
+  it("warns the lead about a repeat whose outcome moved to the member", () => {
+    const notice = noticeOf(
+      [prior({ taskId: "t4", subject: "Work", report: { status: "partial", result: null } })],
+      "work",
+    );
+    expect(repeatTaskWarning(notice!)).toBe(
+      "This repeats task t4 (partial); its outcome was passed to the member.",
+    );
+  });
+
+  it("summarizes the earlier attempt from the first source that says anything", () => {
+    const base = {
+      report: {
+        status: "failed",
+        result: "first line wins\nsecond line",
+        report: { summary: "the member summary" },
+      },
+    };
+    expect(noteOf({ ...base, lastError: "Insufficient balance" })).toBe("Insufficient balance");
+    expect(noteOf({ ...base, stopped: "Stopped on request." })).toBe("Stopped on request.");
+    expect(noteOf(base)).toBe("the member summary");
+    expect(noteOf({ report: { status: "failed", result: "first line wins\nsecond line" } })).toBe(
+      "first line wins",
+    );
+    expect(noteOf({ report: { status: "blocked", result: null } })).toBe("no report");
+  });
+
+  it("cuts the note to one collapsed line of about 200 characters", () => {
+    const notice = noticeOf([
+      prior({
+        taskId: "t1",
+        subject: "Same",
+        report: { status: "partial", result: `${"word ".repeat(80)}\nrest` },
+      }),
+    ]);
+    const note = notice?.kind === "unfinished" ? notice.previous.note : "";
+    expect(note.length).toBe(200);
+    expect(note.endsWith("...")).toBe(true);
+    expect(note.startsWith("word")).toBe(true);
+    expect(note).not.toContain("\n");
+    const short = noticeOf([
+      prior({ taskId: "t2", subject: "Same", report: { status: "partial", result: "short line" } }),
+    ]);
+    expect(short?.kind === "unfinished" ? short.previous.note : "").toBe("short line");
+  });
+});
+
 describe("clipLeadReport", () => {
   it("leaves a short report alone and caps a long one at 2500 characters", () => {
     expect(clipLeadReport("short\nStatus: done")).toBe("short\nStatus: done");
@@ -678,8 +851,8 @@ describe("clipCrewReport", () => {
     expect(clipped.startsWith("finding detail.")).toBe(true);
     expect(crewReportStatus(clipped)).toBe("partial");
     expect(auditVerdict(clipped)).toBe("needs-changes");
-    // The head-only cut this replaces lost both lines.
-    expect(crewReportStatus(report.slice(0, LIMIT))).toBe("done");
+    // The head-only cut this replaces lost both lines, and the marker-less tail now reads as partial.
+    expect(crewReportStatus(report.slice(0, LIMIT))).toBe("partial");
     expect(auditVerdict(report.slice(0, LIMIT))).toBeNull();
   });
 });
@@ -882,6 +1055,10 @@ describe("structured reports", () => {
     expect(parseCrewReport(null)).toBeNull();
     expect(crewReportStatus("Changed a.ts.\nStatus: blocked")).toBe("blocked");
     expect(crewMemberOutcome("worker", "completed", "All good.")).toEqual({
+      status: "partial",
+      report: null,
+    });
+    expect(crewMemberOutcome("worker", "completed", "All good.\nStatus: done")).toEqual({
       status: "completed",
       report: null,
     });

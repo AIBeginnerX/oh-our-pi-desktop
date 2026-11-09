@@ -299,6 +299,13 @@ export interface BackendInstanceSpec {
   // retries. Returns true when the callback changed configuration and the
   // manager should resolve once more; false stops the failed instance.
   readonly onPreflightFailed?: (failure: PreflightFailure) => Effect.Effect<boolean>;
+  // Fired after a freshly resolved config is stored in instance state — every
+  // successful start attempt, including preflight retries. The bootstrap entry
+  // consumers derive from the instance (e.g. the sync
+  // getLocalEnvironmentBootstraps handler) changes shape exactly here
+  // (pending <-> full, distro/endpoints refresh), so the pool forwards this as
+  // a bootstraps-changed push to the renderer.
+  readonly onConfigResolved?: () => Effect.Effect<void>;
 }
 
 interface ActiveBackendRun {
@@ -736,6 +743,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           config: Option.some(config.value),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
         }));
+        yield* spec.onConfigResolved?.() ?? Effect.void;
 
         const preflightFailure = config.value.preflightFailure;
         if (Option.isSome(preflightFailure)) {

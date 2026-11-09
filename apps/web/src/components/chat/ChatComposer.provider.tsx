@@ -1,3 +1,4 @@
+import { includeForeignProviderSkills } from "../../providerSkillSearch";
 import type { ChatComposerProps } from "./ChatComposer.types";
 import { isQueuedBehindBackgroundAgents } from "./stopBackgroundAgents.logic";
 import type { EnvironmentId, ModelSelection, ServerProvider } from "@t3tools/contracts";
@@ -543,9 +544,15 @@ export function useComposerProviderSelection(args: {
     [selectedProviderEntry],
   );
   const compactCommandAvailable = providerSupportsManualCompaction(selectedProviderEntry);
-  const selectedProviderSkills = selectedProviderStatus
-    ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd)
-    : [];
+  const selectedProviderSkills = includeForeignProviderSkills(
+    selectedProviderStatus ? resolveProviderSkillsForCwd(selectedProviderStatus, gitCwd) : [],
+    providerStatuses
+      .filter((provider) => provider.enabled && provider.instanceId !== selectedInstanceId)
+      .map((provider) => ({
+        provider: provider.driver === "claude-code" ? "Claude" : provider.driver,
+        skills: resolveProviderSkillsForCwd(provider, gitCwd),
+      })),
+  );
   const selectedProviderSlashCommands = selectedProviderStatus
     ? resolveProviderSlashCommandsForCwd(selectedProviderStatus, gitCwd)
     : [];

@@ -352,7 +352,7 @@ describe("config-option model selection (MiniMax Code, ZCode)", () => {
 
   const makeOptionRuntime = (
     options: ReturnType<typeof flatOptions> | ReturnType<typeof groupedOptions>,
-    behaviour: (model: string) => Effect.Effect<unknown, never, never>,
+    behaviour: (model: string) => Effect.Effect<unknown, EffectAcpErrors.AcpError, never>,
   ) => {
     const selected: Array<string> = [];
     const runtime = {
@@ -365,6 +365,59 @@ describe("config-option model selection (MiniMax Code, ZCode)", () => {
     };
     return { runtime, selected };
   };
+
+  it.effect("falls back on typed model refusal", () =>
+    Effect.gen(function* () {
+      const { runtime, selected } = makeOptionRuntime(flatOptions(OTHER_LISTED), (model) =>
+        model === REQUESTED
+          ? Effect.fail(EffectAcpErrors.AcpRequestError.invalidParams("Invalid model reasoning"))
+          : Effect.void,
+      );
+      const result = yield* applyAcpConfigOptionModelSelection({
+        runtime,
+        requestedModelId: REQUESTED,
+        mapError: (cause) => cause.message,
+      });
+      expect(selected).toEqual([REQUESTED, THINKING_SIBLING]);
+      expect(result).toBe(THINKING_SIBLING);
+    }),
+  );
+
+  it.effect("keeps typed refusal reason and model when no sibling is listed", () =>
+    Effect.gen(function* () {
+      const requested = "builtin:zai-coding-plan\\GLM-5.3-Flash";
+      const { runtime, selected } = makeOptionRuntime(flatOptions(OTHER_LISTED), () =>
+        Effect.fail(EffectAcpErrors.AcpRequestError.invalidParams("Invalid model reasoning")),
+      );
+      const error = yield* Effect.flip(
+        applyAcpConfigOptionModelSelection({
+          runtime,
+          requestedModelId: requested,
+          mapError: (cause) => cause.message,
+        }),
+      );
+      expect(selected).toEqual([requested]);
+      expect(error).toContain(`could not switch to model '${requested}'`);
+      expect(error).toContain("Invalid model reasoning");
+    }),
+  );
+
+  it.effect("passes a transport failure through instead of treating it as a refusal", () =>
+    Effect.gen(function* () {
+      const { runtime, selected } = makeOptionRuntime(flatOptions(OTHER_LISTED), () =>
+        Effect.fail(new EffectAcpErrors.AcpTransportError({ detail: "pipe closed", cause: null })),
+      );
+      const error = yield* Effect.flip(
+        applyAcpConfigOptionModelSelection({
+          runtime,
+          requestedModelId: REQUESTED,
+          mapError: (cause) => cause._tag,
+        }),
+      );
+      expect(selected).toEqual([REQUESTED]);
+      expect(error).toBe("AcpTransportError");
+    }),
+  );
 
   it.effect(
     "falls back to the listed :v:thinking sibling when the :v: model is refused (flat options)",

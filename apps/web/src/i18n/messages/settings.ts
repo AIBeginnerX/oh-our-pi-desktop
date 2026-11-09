@@ -141,6 +141,42 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "应用内通知",
     es: "Notificaciones en la app",
   },
+  "Thread completed": {
+    ko: "작업 완료",
+    ja: "スレッドが完了しました",
+    "zh-CN": "会话已完成",
+    es: "Hilo completado",
+  },
+  "Thread failed": {
+    ko: "작업 실패",
+    ja: "スレッドが失敗しました",
+    "zh-CN": "会话失败",
+    es: "El hilo falló",
+  },
+  "Approval needed": {
+    ko: "승인 필요",
+    ja: "承認が必要です",
+    "zh-CN": "需要批准",
+    es: "Se necesita aprobación",
+  },
+  "Input needed": {
+    ko: "입력 필요",
+    ja: "入力が必要です",
+    "zh-CN": "需要输入",
+    es: "Se necesita una respuesta",
+  },
+  "Running threads first": {
+    ko: "진행 중인 스레드 맨 위로",
+    ja: "進行中のスレッドを先頭に",
+    "zh-CN": "进行中的会话置顶",
+    es: "Hilos en curso primero",
+  },
+  "Threads with work in progress, approval or input requests stay at the top of the active list.": {
+    ko: "작업 중이거나 승인·입력을 기다리는 스레드를 활성 목록 맨 위에 둡니다.",
+    ja: "作業中、または承認・入力を待っているスレッドをアクティブ一覧の先頭に表示します。",
+    "zh-CN": "正在工作或等待批准、输入的会话会显示在活动列表顶部。",
+    es: "Los hilos con trabajo en curso o que esperan aprobación o una respuesta se quedan arriba en la lista activa.",
+  },
   "Setup notifications": {
     ko: "설정 알림",
     ja: "セットアップ通知",

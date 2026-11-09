@@ -542,7 +542,33 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       ...(input.appendTruncationMarker !== undefined
         ? { appendTruncationMarker: input.appendTruncationMarker }
         : {}),
-    });
+    }).pipe(
+      Effect.mapError((error) => {
+        if (
+          input.operation !== VcsProcess.CHECKPOINT_CAPTURE_OPERATION ||
+          error._tag !== "VcsProcessExitError"
+        )
+          return error;
+        const step = input.args.find((arg) =>
+          [
+            "read-tree",
+            "add",
+            "write-tree",
+            "commit-tree",
+            "update-ref",
+            "rev-parse",
+            "config",
+            "ls-files",
+          ].includes(arg),
+        );
+        return step === undefined
+          ? error
+          : new VcsProcessExitError({
+              ...error,
+              detail: `${step === "add" ? "stage" : step}: ${error.detail}`,
+            });
+      }),
+    );
 
   const detectRepository: VcsDriver.VcsDriver["Service"]["detectRepository"] = Effect.fn(
     "detectRepository",

@@ -901,6 +901,28 @@ export function resolveSidebarThreadStatus(thread: SidebarThreadStatusInput): Si
   return "ready";
 }
 
+/** Stable partition for the sidebar's active list: rows whose predicate holds
+    (work in progress) move to the top; every other row keeps its relative
+    order below them. */
+export function liftInProgressThreads<T>(
+  threads: readonly T[],
+  isInProgress: (thread: T) => boolean,
+): T[] {
+  const running: T[] = [];
+  const rest: T[] = [];
+  for (const thread of threads) {
+    (isInProgress(thread) ? running : rest).push(thread);
+  }
+  return [...running, ...rest];
+}
+
+/** Threads the user is actively waiting on: working, an approval request, or
+    an input request. Failed/monitoring/ready rows keep their place. */
+export function isSidebarThreadInProgress(thread: SidebarThreadStatusInput): boolean {
+  const status = resolveSidebarThreadStatus(thread);
+  return status === "working" || status === "approval" || status === "input";
+}
+
 /** First VALID timestamp wins: `a ?? b` falls through on null, but a present-
     yet-malformed string must also fall through to the next candidate rather
     than sink the row to the epoch. */

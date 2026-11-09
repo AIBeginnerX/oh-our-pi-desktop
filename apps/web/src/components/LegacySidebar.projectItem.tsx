@@ -83,7 +83,9 @@ import {
   deleteSelectedThreadEntries,
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
+  isSidebarThreadInProgress,
   isTrailingDoubleClick,
+  liftInProgressThreads,
   resolveProjectStatusIndicator,
   resolveThreadStatusPill,
 } from "./Sidebar.logic";
@@ -136,6 +138,9 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
       : "cloud";
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
+  );
+  const sidebarRunningThreadsFirst = useClientSettings(
+    (settings) => settings.sidebarRunningThreadsFirst,
   );
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
@@ -299,10 +304,13 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
         },
       });
     };
-    const visibleProjectThreads = sortThreads(
+    const sortedProjectThreads = sortThreads(
       projectThreads.filter((thread) => thread.archivedAt === null),
       threadSortOrder,
     );
+    const visibleProjectThreads = sidebarRunningThreadsFirst
+      ? liftInProgressThreads(sortedProjectThreads, isSidebarThreadInProgress)
+      : sortedProjectThreads;
     const projectStatus = resolveProjectStatusIndicator(
       visibleProjectThreads.map((thread) => resolveProjectThreadStatus(thread)),
     );
@@ -313,7 +321,7 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
       projectStatus,
       visibleProjectThreads,
     };
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder]);
+  }, [projectThreads, threadLastVisitedAts, threadSortOrder, sidebarRunningThreadsFirst]);
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
     if (!activeThreadKey || projectExpanded) {

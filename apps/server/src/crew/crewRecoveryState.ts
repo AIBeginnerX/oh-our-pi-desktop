@@ -68,7 +68,11 @@ export const CrewTaskRecoveryState = Schema.Struct({
   queued: Schema.optional(Schema.Array(Schema.String)),
   /** Where file checks compare from: the workspace tree when the task started (null: unreadable). */
   todoBase: Schema.optional(
-    Schema.Struct({ cwd: Schema.String, tree: Schema.NullOr(Schema.String) }),
+    Schema.Struct({
+      cwd: Schema.String,
+      tree: Schema.NullOr(Schema.String),
+      hashes: Schema.optional(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+    }),
   ),
   /** Changes outside writeScope seen by the latest check. */
   outOfScope: Schema.optional(

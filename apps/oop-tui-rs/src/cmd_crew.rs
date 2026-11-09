@@ -235,7 +235,7 @@ fn context(app: &App, now: i64) -> Context {
         pinned,
         listed,
         own,
-    } = crew::resolve(&app.config, app.own_crew().as_ref(), brain);
+    } = crew::resolve(&app.config, app.own_crew(), brain);
     let loaded = thread.is_some_and(|id| app.conv.loaded && app.conv.thread_id == id);
     let board = loaded
         .then(|| crew_board(&app.conv.thread, app.conv.busy()))
@@ -411,7 +411,7 @@ fn set_own(app: &mut App, next: Option<Value>, label: String, value: String) {
 fn save(app: &mut App, change: Save, label: String, value: String) {
     match change {
         Save::Change(change) => {
-            let next = apply_change(app.own_crew().as_ref(), &change);
+            let next = apply_change(app.own_crew(), &change);
             set_own(app, Some(next), label, value);
         }
         Save::Reset => set_own(app, None, label, value),
@@ -422,7 +422,7 @@ fn save(app: &mut App, change: Save, label: String, value: String) {
 /// Makes what the thread runs with the default for new threads: the one write to the settings,
 /// made over the settings read just now.
 fn save_default(app: &mut App, label: String, value: String) {
-    let own = app.own_crew();
+    let own = app.own_crew().cloned();
     let providers = app.config["providers"].clone();
     let brain: Option<(String, String)> = app.current_model().and_then(|m| {
         Some((
@@ -821,6 +821,10 @@ fn note_text(kind: CrewNoteKind, detail: &Value) -> String {
             "render.crew.followUp"
         })
         .into(),
+        CrewNoteKind::ResultsDropped => text_with(
+            "render.crew.resultsDropped",
+            &[("count", detail.as_u64().unwrap_or(0).to_string())],
+        ),
     }
 }
 

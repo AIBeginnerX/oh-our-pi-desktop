@@ -43,6 +43,7 @@ function makeStubInstance(
 
 function makePoolLayer(
   labelRef: Ref.Ref<string>,
+  bootstrapsChangedCount?: Ref.Ref<number>,
 ): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
@@ -98,6 +99,9 @@ function makePoolLayer(
           prepareCaptureReveal: Effect.void,
           dispatchMenuAction: () => Effect.die("unexpected menu action"),
           dispatchSnapShotEvent: () => Effect.void,
+          dispatchLocalEnvironmentBootstrapsChanged: bootstrapsChangedCount
+            ? Ref.update(bootstrapsChangedCount, (count) => count + 1)
+            : Effect.void,
           zoomMain: () => Effect.die("unexpected zoom"),
           syncAppearance: Effect.void,
         } satisfies DesktopWindow.DesktopWindow["Service"]),
@@ -151,6 +155,30 @@ describe("DesktopBackendPool", () => {
         yield* Ref.set(labelRef, "WSL (Ubuntu)");
 
         assert.equal(yield* primary.label, "WSL (Ubuntu)");
+      }),
+    ),
+  );
+
+  it.effect("pushes a bootstraps-changed event when the pool membership changes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const labelRef = yield* Ref.make("Windows");
+        const dispatchCount = yield* Ref.make(0);
+        const pool = yield* DesktopBackendPool.DesktopBackendPool.pipe(
+          Effect.provide(makePoolLayer(labelRef, dispatchCount)),
+        );
+        const wslId = DesktopBackendPool.BackendInstanceId("wsl:ubuntu");
+
+        const instance = yield* pool.register({
+          id: wslId,
+          label: Effect.succeed("WSL (Ubuntu)"),
+          configResolve: Effect.die("unexpected config resolve"),
+        });
+        assert.equal(instance.id, wslId);
+        assert.equal(yield* Ref.get(dispatchCount), 1);
+
+        yield* pool.unregister(wslId);
+        assert.equal(yield* Ref.get(dispatchCount), 2);
       }),
     ),
   );

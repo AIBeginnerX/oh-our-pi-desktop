@@ -147,19 +147,49 @@ describe("thread notifications", () => {
     expect(state.notification).not.toHaveBeenCalled();
   });
 
-  it.each(["active", "blurred", "hidden", "archived", "disabled"])(
+  it.each(["archived", "disabled"])(
     "does not show a completion toast for %s threads",
     async (condition) => {
       await render();
-      if (condition === "active") state.active.threadId = "thread-1";
-      if (condition === "blurred") state.focused = false;
-      if (condition === "hidden") state.visible = "hidden";
       if (condition === "archived") state.archivedAt = "2026-09-13T09:00:00.000Z";
       if (condition === "disabled") state.inApp = false;
       await complete();
       expect(state.add).not.toHaveBeenCalled();
     },
   );
+
+  it("shows a completion toast for another thread while the window is unfocused", async () => {
+    state.focused = false;
+    await render();
+    await complete();
+    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.add).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Thread completed", description: "Fix the login form" }),
+    );
+  });
+
+  it("shows a completion toast for the open thread while the window is unfocused", async () => {
+    state.active = { environmentId: "env-1", threadId: "thread-1" };
+    state.focused = false;
+    await render();
+    await complete();
+    expect(state.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a completion toast for the open thread while the window is hidden", async () => {
+    state.active = { environmentId: "env-1", threadId: "thread-1" };
+    state.visible = "hidden";
+    await render();
+    await complete();
+    expect(state.add).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show a completion toast for the open thread while focused", async () => {
+    state.active = { environmentId: "env-1", threadId: "thread-1" };
+    await render();
+    await complete();
+    expect(state.add).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["input", "Input needed"],
@@ -183,7 +213,7 @@ describe("thread notifications", () => {
     state[event] = true;
     await render();
     await render();
-    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.add).toHaveBeenCalledTimes(2);
     expect(state.notification).toHaveBeenCalledTimes(1);
     expect(state.notification).toHaveBeenCalledWith(title, {
       body: "Fix the login form",
@@ -244,7 +274,24 @@ describe("thread notifications", () => {
     state.focused = false;
     await render();
     await complete();
-    expect(state.add).not.toHaveBeenCalled();
+    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.notification).toHaveBeenCalledWith("Thread completed", {
+      body: "Fix the login form",
+      tag: "env-1:thread-1",
+      silent: true,
+    });
+  });
+
+  it("creates the toast and the desktop alert when notification modes overlap", async () => {
+    state.mode = "notifications-and-sound";
+    state.focused = false;
+    await render();
+    await complete();
+    expect(state.add).toHaveBeenCalledTimes(1);
+    expect(state.add).toHaveBeenLastCalledWith(
+      expect.objectContaining({ title: "Thread completed", description: "Fix the login form" }),
+    );
+    expect(state.notification).toHaveBeenCalledTimes(1);
     expect(state.notification).toHaveBeenCalledWith("Thread completed", {
       body: "Fix the login form",
       tag: "env-1:thread-1",

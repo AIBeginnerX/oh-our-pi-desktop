@@ -177,6 +177,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "default-crew",
+    title: "Crew",
+    to: "/settings/general",
+    scope: "environment-defaults",
+    searchTerms: ["oop crew team worker expert auditor preset fallback delegate auto pin"],
+  },
+  {
     id: "color-scheme",
     title: "Color scheme",
     to: "/settings/appearance",
@@ -287,6 +294,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Project grouping",
     to: "/settings/general",
     searchTerms: ["combine matching repositories environments sidebar"],
+  },
+  {
+    id: "running-threads-first",
+    title: "Running threads first",
+    to: "/settings/general",
+    searchTerms: ["sidebar active list work in progress approval input top running threads"],
   },
   {
     id: "auto-settle-inactive-threads",

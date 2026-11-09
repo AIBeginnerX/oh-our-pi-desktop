@@ -249,9 +249,9 @@ describe("ClaudeSettings auto-compaction", () => {
 });
 
 describe("ClientSettings notifications", () => {
-  it("requires opt-in when existing settings omit notification preferences", () => {
+  it("defaults in-app notifications on and notification mode off when settings omit them", () => {
     expect(decodeClientSettings({}).notificationMode).toBe("off");
-    expect(decodeClientSettings({}).inAppNotificationsEnabled).toBe(false);
+    expect(decodeClientSettings({}).inAppNotificationsEnabled).toBe(true);
     expect(decodeClientSettingsPatch({})).not.toHaveProperty("inAppNotificationsEnabled");
     expect(decodeClientSettingsPatch({})).not.toHaveProperty("notificationMode");
   });
@@ -639,6 +639,18 @@ describe("ClientSettings sidebar", () => {
     expect(decodeClientSettingsPatch({ legacySidebarEnabled: true }).legacySidebarEnabled).toBe(
       true,
     );
+  });
+
+  it("defaults to lifting running threads and keeps the toggle patchable", () => {
+    expect(decodeClientSettings({}).sidebarRunningThreadsFirst).toBe(true);
+    expect(decodeClientSettingsPatch({})).not.toHaveProperty("sidebarRunningThreadsFirst");
+    expect(
+      decodeClientSettings({ sidebarRunningThreadsFirst: false }).sidebarRunningThreadsFirst,
+    ).toBe(false);
+    expect(
+      decodeClientSettingsPatch({ sidebarRunningThreadsFirst: false }).sidebarRunningThreadsFirst,
+    ).toBe(false);
+    expect(() => decodeClientSettingsPatch({ sidebarRunningThreadsFirst: "yes" })).toThrow();
   });
 
   it("keeps unpin confirmation opt-in and patchable", () => {

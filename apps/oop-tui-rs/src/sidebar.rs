@@ -9,7 +9,7 @@
 
 use crate::state::{ProjectShell, ThreadShell};
 use crate::text::parse_iso_ms;
-use std::cmp::Ordering;
+use std::cmp::{Ordering, Reverse};
 use std::collections::HashMap;
 
 /// The settled shelf shows this many rows when opened, and this many more each time it is asked.
@@ -249,9 +249,11 @@ fn settled_stamp(thread: &ThreadShell) -> Option<String> {
 }
 
 fn sort_settled(threads: &mut [&ThreadShell]) {
-    threads.sort_by(|a, b| {
-        let key = |t: &ThreadShell| settled_stamp(t).and_then(|s| ms(&s)).unwrap_or(0);
-        key(b).cmp(&key(a)).then_with(|| a.id.cmp(&b.id))
+    threads.sort_by_cached_key(|t| {
+        (
+            Reverse(settled_stamp(t).and_then(|s| ms(&s)).unwrap_or(0)),
+            t.id.clone(),
+        )
     });
 }
 
@@ -284,6 +286,25 @@ fn sort_active(threads: &mut [&ThreadShell]) {
         };
         order.then_with(|| a.id.cmp(&b.id))
     });
+}
+
+/// Threads the user is actively waiting on: working, an approval request, or an
+/// input request. Same set the web sidebar lifts; failed/monitoring stay put.
+fn is_in_progress(thread: &ThreadShell) -> bool {
+    thread.has_pending_approvals
+        || thread.has_pending_user_input
+        || matches!(
+            thread.session.as_ref().map(|s| s.status.as_str()),
+            Some("running" | "starting")
+        )
+        || thread.background_liveness.as_deref() == Some("working")
+}
+
+/// Stable partition: in-progress threads lead the active list and everyone
+/// else keeps the `sort_active` order below them. `sort_by_key` is stable, so
+/// rows only rise past idle rows — never shuffled within a group.
+fn lift_in_progress(threads: &mut [&ThreadShell]) {
+    threads.sort_by_key(|t| !is_in_progress(t));
 }
 
 fn is_crew_title(title: &str) -> bool {
@@ -420,6 +441,7 @@ pub fn build(input: &Input) -> Vec<Nav> {
     }];
     sort_pinned(&mut pinned);
     sort_active(&mut active);
+    lift_in_progress(&mut active);
     if !pinned.is_empty() {
         items.push(Nav::Header(Section::Pinned));
         items.extend(pinned.iter().map(|t| row(t, Section::Pinned)));
@@ -473,6 +495,7 @@ pub fn build(input: &Input) -> Vec<Nav> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::thread::Session;
 
     const NOW: i64 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
 
@@ -522,6 +545,28 @@ mod tests {
             visited: &visited,
             view,
         })
+    }
+
+    #[test]
+    fn settled_rows_sort_newest_stamp_first_then_id_for_ties() {
+        let threads = [
+            thread("b-tie", |t| {
+                t.settled_at = Some("2025-12-30T08:00:00.000Z".into());
+            }),
+            thread("old", |t| {
+                t.settled_at = Some("2025-12-28T00:00:00.000Z".into());
+            }),
+            thread("a-tie", |t| {
+                t.settled_at = Some("2025-12-30T08:00:00.000Z".into());
+            }),
+            thread("new", |t| {
+                t.settled_at = Some("2025-12-31T00:00:00.000Z".into());
+            }),
+        ];
+        let mut refs: Vec<&ThreadShell> = threads.iter().collect();
+        sort_settled(&mut refs);
+        let got: Vec<&str> = refs.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(got, ["new", "a-tie", "b-tie", "old"]);
     }
 
     #[test]
@@ -602,17 +647,65 @@ mod tests {
             }),
         ];
         let items = build_for(&threads, &View::default(), None);
-        assert_eq!(ids(&items), vec!["new", "lead", "w2"]);
-        let Nav::Thread(lead) = &items[1] else {
+        // The waiting worker surfaces as its own row and, being in progress,
+        // rises above the idle lead.
+        assert_eq!(ids(&items), vec!["new", "w2", "lead"]);
+        let Nav::Thread(lead) = &items[2] else {
             panic!()
         };
         assert_eq!(lead.crew, 1);
-        let Nav::Thread(waiting) = &items[2] else {
+        let Nav::Thread(waiting) = &items[1] else {
             panic!()
         };
         assert_eq!(
             (waiting.title.as_str(), waiting.status),
             ("crew Worker · ask", Status::Approval)
+        );
+    }
+
+    #[test]
+    fn the_active_list_lifts_in_progress_threads_and_keeps_the_rest_in_place() {
+        let threads = vec![
+            thread("ready-new", |t| {
+                t.created_at = "2025-12-31T12:00:00.000Z".into()
+            }),
+            thread("working", |t| {
+                t.session = Some(Session {
+                    status: "running".into(),
+                    ..Default::default()
+                });
+            }),
+            thread("ready-old", |_| {}),
+            thread("input", |t| t.has_pending_user_input = true),
+            thread("approval", |t| t.has_pending_approvals = true),
+            thread("failed", |t| {
+                t.session = Some(Session {
+                    status: "error".into(),
+                    last_error: Some("boom".into()),
+                    ..Default::default()
+                });
+            }),
+            thread("monitoring", |t| {
+                t.background_liveness = Some("monitoring".into())
+            }),
+        ];
+        let items = build_for(&threads, &View::default(), None);
+        // sort_active order is ready-new, approval, failed, input, monitoring,
+        // ready-old, working (newest anchor first, then id). The lift moves
+        // only the working/approval/input rows to the top; the rest keeps
+        // that order.
+        assert_eq!(
+            ids(&items),
+            vec![
+                "new",
+                "approval",
+                "input",
+                "working",
+                "ready-new",
+                "failed",
+                "monitoring",
+                "ready-old",
+            ]
         );
     }
 

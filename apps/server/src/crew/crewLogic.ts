@@ -83,6 +83,8 @@ export function delegatePrompt(input: {
   readonly role: CrewRole;
   readonly leadTitle: string;
   readonly task: string;
+  /** What an earlier task with the same subject left behind, when the lead repeats one. */
+  readonly previous?: CrewPreviousAttempt | undefined;
   /** Repo-relative files or directories the task may change. */
   readonly writeScope?: ReadonlyArray<string> | undefined;
   /** The literal command(s) that prove the task is done. */
@@ -105,6 +107,13 @@ export function delegatePrompt(input: {
     "",
     "TASK:",
     input.task.trim(),
+    ...(input.previous === undefined
+      ? []
+      : [
+          "",
+          `PREVIOUS ATTEMPT (task ${input.previous.taskId}, ${input.previous.status}): ${input.previous.note}`,
+          "Start from what it left; do not redo finished parts.",
+        ]),
     ...(input.writeScope === undefined || input.writeScope.length === 0
       ? []
       : [
@@ -238,6 +247,91 @@ export function writeScopeWarning(overlaps: ReadonlyArray<WriteScopeOverlap>): s
 
 /** The longest diff an audit prompt carries; the auditor reads a bigger change itself. */
 export const AUDIT_DIFF_MAX_CHARS = 40_000;
+
+/** What a lead's earlier task with the same subject left behind, for the member that repeats it. */
+export interface CrewPreviousAttempt {
+  readonly taskId: string;
+  readonly status: string;
+  /** One short line on how it ended, from its error, stop, report, or result. */
+  readonly note: string;
+}
+
+/** What a repeat delegation of an earlier task is, so the lead gets the matching warning. */
+export type CrewRepeatNotice =
+  | { readonly kind: "running"; readonly taskId: string }
+  | { readonly kind: "verified"; readonly taskId: string }
+  | { readonly kind: "unfinished"; readonly previous: CrewPreviousAttempt };
+
+/** One of the lead's earlier tasks, as the repeat check reads it. */
+export interface PriorCrewTask {
+  readonly taskId: string;
+  readonly subject: string;
+  /** How it ended, or null while it still runs. */
+  readonly report: {
+    readonly status: string;
+    readonly result?: string | null | undefined;
+    readonly report?: { readonly summary: string } | undefined;
+    readonly proof?: { readonly verdict: string } | undefined;
+  } | null;
+  readonly lastError?: string | undefined;
+  readonly stopped?: string | undefined;
+}
+
+/** Lowercase words in any script: punctuation and runs of whitespace collapse to single spaces. */
+export const normalizeCrewSubject = (subject: string) =>
+  subject
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+
+const PREVIOUS_NOTE_CHARS = 200;
+
+const firstLineOf = (text: string | null | undefined) => (text ?? "").split("\n")[0] ?? "";
+
+/**
+ * The lead's earlier task this one repeats: the most recent one whose subject normalizes the same,
+ * last in the list. The caller filters the list to the same lead thread, and computes it before the
+ * new task joins, so it never holds the task being started.
+ */
+export function previousAttemptOf(
+  subject: string,
+  prior: ReadonlyArray<PriorCrewTask>,
+): CrewRepeatNotice | null {
+  const key = normalizeCrewSubject(subject);
+  // A subject of only punctuation names no work, so it repeats nothing.
+  if (key === "") return null;
+  const match = prior.findLast((task) => normalizeCrewSubject(task.subject) === key);
+  if (match === undefined) return null;
+  if (match.report === null) return { kind: "running", taskId: match.taskId };
+  if (match.report.status === "completed" && match.report.proof?.verdict === "verified") {
+    return { kind: "verified", taskId: match.taskId };
+  }
+  const source =
+    match.lastError?.trim() ||
+    match.stopped?.trim() ||
+    match.report.report?.summary.trim() ||
+    firstLineOf(match.report.result).trim();
+  return {
+    kind: "unfinished",
+    previous: {
+      taskId: match.taskId,
+      status: match.report.status,
+      note: reportExcerpt(source === "" ? "no report" : source, PREVIOUS_NOTE_CHARS),
+    },
+  };
+}
+
+/** What crew_delegate tells the brain when the task repeats one of its own earlier tasks. */
+export function repeatTaskWarning(notice: CrewRepeatNotice): string {
+  switch (notice.kind) {
+    case "running":
+      return `Task ${notice.taskId} with the same title is still running; wait for it with crew_wait or stop it before handing the same work out again.`;
+    case "verified":
+      return `This repeats task ${notice.taskId}, which already finished verified.`;
+    case "unfinished":
+      return `This repeats task ${notice.previous.taskId} (${notice.previous.status}); its outcome was passed to the member.`;
+  }
+}
 
 /** A thread diff fit for the audit prompt, or null when it is empty or too long to hand over. */
 export function auditDiff(diff: string): string | null {
@@ -831,7 +925,7 @@ export function planFollowUp(input: {
 
 /**
  * How a crew member says its task ended: the status of its JSON report, else the last `Status:`
- * line; a report with neither counts as done.
+ * line; a report with neither (e.g. one a context limit truncated) counts as partial.
  */
 export function crewReportStatus(report: string | null): "done" | "partial" | "blocked" {
   const structured = parseCrewReport(report);
@@ -839,7 +933,9 @@ export function crewReportStatus(report: string | null): "done" | "partial" | "b
   const last = [...withoutJsonBlocks(report).matchAll(/status\W{0,4}\s*(done|partial|blocked)\b/gi)]
     .at(-1)?.[1]
     ?.toLowerCase();
-  return last === "partial" || last === "blocked" ? last : "done";
+  if (last === "partial" || last === "blocked") return last;
+  // A reply with no marker at all never said it finished: only an explicit done counts as done.
+  return last === "done" ? "done" : "partial";
 }
 
 /**

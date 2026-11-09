@@ -933,7 +933,7 @@ describe("ProviderCommandReactor preparation cancellation", () => {
   );
 
   effectIt.live.each(["stop", "interrupt"] as const)(
-    "no persisted binding: %s joins both parked preparations before the real ProviderService stop, settles to the fixed error, and a later message sends once",
+    "no persisted binding: %s joins both parked preparations before the real ProviderService stop, settles to stopped, and a later message sends once",
     (control) =>
       Effect.gen(function* () {
         const startParked = yield* Deferred.make<void>();
@@ -970,8 +970,8 @@ describe("ProviderCommandReactor preparation cancellation", () => {
             harness.setAfterCommand((command) =>
               command.type === "thread.session.set" &&
               command.threadId === THREAD_ID &&
-              command.session.status === "error" &&
-              command.session.lastError === PREPARATION_STOP_UNVERIFIED_DETAIL
+              command.session.status === "stopped" &&
+              command.session.lastError === null
                 ? Deferred.succeed(terminalWritten, undefined).pipe(Effect.asVoid)
                 : undefined,
             );
@@ -1040,9 +1040,9 @@ describe("ProviderCommandReactor preparation cancellation", () => {
 
             const thread = yield* threadOf(harness);
             expect(thread?.session).toMatchObject({
-              status: "error",
+              status: "stopped",
               activeTurnId: null,
-              lastError: PREPARATION_STOP_UNVERIFIED_DETAIL,
+              lastError: null,
             });
             // Once per canceled message — the queued waiter is reported too.
             // Reverse-order joins report the waiter first, so match unordered
@@ -1274,15 +1274,15 @@ describe("ProviderCommandReactor preparation cancellation", () => {
             // Both waiters were interrupted before either ensure could run —
             // the only provider-side session read remains message one's.
             expect(harness.codexA.adapter.listSessions.mock.calls.length).toBe(1);
-            // No persisted binding was ever written (the adapter start was
-            // parked), so the settle fails at routing and lands the fixed
-            // unverified detail — never "starting".
+            // No persisted binding was ever written and no adapter holds a
+            // session (the adapter start was parked), so there is nothing to
+            // stop and the settle lands "stopped" — never "starting".
             expect(harness.codexA.adapter.stopSession).not.toHaveBeenCalled();
             const thread = yield* threadOf(harness);
             expect(thread?.session).toMatchObject({
-              status: "error",
+              status: "stopped",
               activeTurnId: null,
-              lastError: PREPARATION_STOP_UNVERIFIED_DETAIL,
+              lastError: null,
             });
             // Session-kind entries are excluded from message reports: only
             // the send-kind "not sent" activity is recorded.

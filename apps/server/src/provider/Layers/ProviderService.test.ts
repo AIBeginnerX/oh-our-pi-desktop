@@ -6172,6 +6172,38 @@ describe("ProviderServiceLive restart continuation fencing", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("stops an unbound thread idempotently and revokes its continuation", () => {
+    const { codex, layer } = makeContinuationHarness();
+    return Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const continuations = yield* RestartContinuations.RestartContinuations;
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const threadId = asThreadId("unbound-stop");
+      const token = continuations.reserve(threadId, codexInstanceId);
+      yield* provider.stopSession({ threadId });
+      yield* provider.stopSession({ threadId });
+      assert.equal(token.revoked, true);
+      assert.equal(codex.stopSession.mock.calls.length, 0);
+      assert.equal(Option.isNone(yield* directory.getBinding(threadId)), true);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect(
+    "keeps the stop failure when an unbound thread still has a live adapter session",
+    () => {
+      const { codex, layer } = makeContinuationHarness();
+      return Effect.gen(function* () {
+        const provider = yield* ProviderService.ProviderService;
+        codex.hasSession.mockReturnValueOnce(Effect.succeed(true));
+        const exit = yield* Effect.exit(
+          provider.stopSession({ threadId: asThreadId("unbound-live") }),
+        );
+        assert.equal(Exit.isFailure(exit), true);
+        assert.equal(codex.stopSession.mock.calls.length, 0);
+      }).pipe(Effect.provide(layer));
+    },
+  );
+
   it.effect("evidence keeps interrupt ordinary while stop still revokes the token", () => {
     const { codex, layer } = makeContinuationHarness();
     return Effect.gen(function* () {

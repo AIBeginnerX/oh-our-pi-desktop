@@ -136,6 +136,27 @@ function rowOf(activity: OrchestrationThreadActivity): CrewDecisionRow | undefin
         evidence: "",
         result: "queued",
       };
+    case "crew.results-dropped": {
+      const ids = Array.isArray(payload.tasks)
+        ? payload.tasks
+            .map((task) =>
+              typeof task === "object" && task !== null
+                ? str((task as Record<string, unknown>).taskId)
+                : "",
+            )
+            .filter(Boolean)
+        : [];
+      const n = ids.length;
+      return {
+        id,
+        ts,
+        phase: "follow-up",
+        decision: `${n} unfinished ${n === 1 ? "result" : "results"} dropped (follow-up limit)`,
+        why: "",
+        evidence: n === 0 ? "" : `tasks:${ids.join(",")}`,
+        result: "dropped",
+      };
+    }
     case "crew.stopped":
     case "crew.stopping": {
       const ids = Array.isArray(payload.taskIds) ? payload.taskIds.map(str).filter(Boolean) : [];

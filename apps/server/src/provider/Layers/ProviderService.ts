@@ -47,6 +47,8 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
+import { FOREIGN_SKILL_MENTION, inlineForeignSkills } from "../foreignSkills.ts";
+import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { appendUserInputAttachmentPaths } from "../userInputAttachments.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import * as ServerConfig from "../../config.ts";
@@ -189,6 +191,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   // no-op.
   const canonicalEventLogger = options?.canonicalEventLogger ?? eventLoggers.canonical;
 
+  const snapshots = yield* Effect.serviceOption(ProviderRegistry);
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const rawDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   // Local view over the one injected directory: reads and
@@ -1234,13 +1237,14 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     readonly threadId: ThreadId;
     readonly operation: string;
     readonly allowRecovery: boolean;
+    readonly binding?: ProviderSessionDirectory.ProviderRuntimeBinding | undefined;
     readonly continuation?: ContinuationRun | undefined;
     readonly memory?: ProviderService.ProviderMemoryHandoff | undefined;
     readonly skillTrial?: ProviderService.ProviderSkillTrialHandoff | undefined;
     readonly expectedAdapter?: ProviderAdapterShape<ProviderAdapterError> | undefined;
   }) {
-    const bindingOption = yield* directory.getBinding(input.threadId);
-    const binding = Option.getOrUndefined(bindingOption);
+    const binding =
+      input.binding ?? Option.getOrUndefined(yield* directory.getBinding(input.threadId));
     if (!binding) {
       return yield* toValidationError(
         input.operation,
@@ -1742,6 +1746,32 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
             // that same object, never a replacement.
             expectedAdapter: skillTrial === undefined ? undefined : routed.adapter,
           });
+        }
+        // Only a plain send that mentions a `$skill` can need another provider's skill; managed
+        // skill-trial sends keep their exact input.
+        if (
+          input.input &&
+          skillTrial === undefined &&
+          FOREIGN_SKILL_MENTION.test(input.input) &&
+          Option.isSome(snapshots)
+        ) {
+          const text = input.input;
+          const instanceId = routed.instanceId;
+          const adapter = routed.adapter;
+          const registry = snapshots.value;
+          const expanded = yield* Effect.gen(function* () {
+            const providers = yield* registry.getProviders;
+            const sessions = yield* adapter.listSessions();
+            const cwd = sessions.find((session) => session.threadId === input.threadId)?.cwd;
+            return yield* Effect.promise(() =>
+              inlineForeignSkills({ text, instanceId, providers, ...(cwd ? { cwd } : {}) }),
+            );
+          }).pipe(
+            // A skill lookup must never hold up the turn itself.
+            Effect.timeoutOption("2 seconds"),
+            Effect.map(Option.getOrElse(() => text)),
+          );
+          if (expanded.length <= PROVIDER_SEND_TURN_MAX_INPUT_CHARS) input.input = expanded;
         }
         metricProvider = routed.adapter.provider;
         metricModel = input.modelSelection?.model;
@@ -2589,10 +2619,28 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       yield* Effect.sync(() => continuations.revokeAnyHeld(input.threadId));
       let metricProvider = "unknown";
       return yield* Effect.gen(function* () {
+        const binding = yield* directory.getBinding(input.threadId);
+        // Nothing to stop only when no adapter holds a live session; an unbound live
+        // session keeps the routing error so the stop is never reported as clean.
+        const unboundLive =
+          Option.isNone(binding) &&
+          (yield* Effect.forEach(yield* getAdapterEntries, ([, adapter]) =>
+            adapter.hasSession(input.threadId),
+          )).some(Boolean);
+        if (Option.isNone(binding) && !unboundLive) {
+          const pendingCompaction = pendingCompactions.get(input.threadId);
+          if (pendingCompaction !== undefined) {
+            yield* settleCompaction(input.threadId, pendingCompaction, "turn.aborted");
+          }
+          timedOutNativeCompactions.delete(input.threadId);
+          yield* clearMcpSession(input.threadId);
+          return;
+        }
         const routed = yield* resolveRoutableSession({
           threadId: input.threadId,
           operation: "ProviderService.stopSession",
           allowRecovery: false,
+          binding: Option.getOrUndefined(binding),
         });
         metricProvider = routed.adapter.provider;
         yield* Effect.annotateCurrentSpan({

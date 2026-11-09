@@ -117,7 +117,9 @@ import {
   filterSidebarProjectScopeItems,
   firstValidTimestampMs,
   isSidebarNestedLinkClick,
+  isSidebarThreadInProgress,
   isTrailingDoubleClick,
+  liftInProgressThreads,
   orderItemsByPreferredIds,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
@@ -182,6 +184,7 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarRunningThreadsFirst = useClientSettings((s) => s.sidebarRunningThreadsFirst);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -635,7 +638,12 @@ export default function Sidebar() {
     // sort, or mixed-version fleets would render different pinned orders on
     // web and mobile from the same data.
     const sortedPinned = sortPinnedThreadsForSidebar(pinned);
-    const sortedActive = sortThreadsForSidebar(active);
+    // With sidebarRunningThreadsFirst, working/approval/input rows rise to the
+    // top of the active list; an in-flight drop with an explicit order (below)
+    // still wins until it settles.
+    const sortedActive = sidebarRunningThreadsFirst
+      ? liftInProgressThreads(sortThreadsForSidebar(active), isSidebarThreadInProgress)
+      : sortThreadsForSidebar(active);
     return {
       pinnedThreads:
         optimisticDrop?.section !== "pinned" || optimisticDrop.order === null
@@ -666,7 +674,15 @@ export default function Sidebar() {
       earlierCrewTasks: sortSettledThreads(crew.earlierCrewTasks),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, optimisticDrop, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    nowMinute,
+    optimisticDrop,
+    scopedProjectKeys,
+    serverConfigs,
+    sidebarRunningThreadsFirst,
+    snoozeWakeTick,
+    threads,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");

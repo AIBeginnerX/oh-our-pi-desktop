@@ -557,8 +557,8 @@ it.effect("does not continue archived or deleted marked sessions", () => {
               : null,
           ),
           [
-            { threadId: archived.id, status: "error" },
-            { threadId: deleted.id, status: "error" },
+            { threadId: archived.id, status: "interrupted" },
+            { threadId: deleted.id, status: "interrupted" },
           ],
         );
       }),
@@ -616,7 +616,7 @@ it.effect("retries continuation preparation before settling a persistent failure
           dispatched.map(
             (command) => command.type === "thread.session.set" && command.session.status,
           ),
-          ["starting", "starting", "error"],
+          ["starting", "starting", "interrupted"],
         ),
       ),
     ),
@@ -694,7 +694,7 @@ it.effect("reconciles multiple active and archived orphans but skips live sessio
                 }
               : null,
           ),
-          orphanIds.map(() => ({ status: "error" as const, activeTurnId: null })),
+          orphanIds.map(() => ({ status: "interrupted" as const, activeTurnId: null })),
         );
         assert.equal(upserts.length, orphanIds.length);
         for (const binding of upserts) {
@@ -956,7 +956,7 @@ for (const scenario of [
             dispatched.map(
               (command) => command.type === "thread.session.set" && command.session.status,
             ),
-            ["error"],
+            ["interrupted"],
           );
           assert.deepStrictEqual(
             upserts.map((binding) => binding.status),
@@ -1365,11 +1365,21 @@ const sessionSets = (dispatched: ReadonlyArray<OrchestrationCommand>) =>
 
 type InterruptedRun = Effect.Success<ReturnType<typeof runInterruptedThread>>;
 
-const assertSettledWithoutContinuing = (run: InterruptedRun, lastError: string) => {
+const assertSettledWithoutContinuing = (
+  run: InterruptedRun,
+  lastError: string,
+  status: "interrupted" | "error",
+) => {
   assert.isTrue(Exit.isSuccess(run.exit));
   assert.deepStrictEqual(run.sends, []);
   assert.deepStrictEqual(sessionSets(run.dispatched), [
-    { status: "error", activeTurnId: null, lastError },
+    // The uncertain and unverified settles keep "error" so the user looks;
+    // only the plain orphaned settle is "interrupted".
+    {
+      status,
+      activeTurnId: null,
+      lastError,
+    },
   ]);
   assert.deepStrictEqual(
     run.upserts.map((binding) => ({
@@ -1478,7 +1488,7 @@ it.effect.each(
       recovery,
       reads: activityReads(unfinishedWork[scenario]),
     });
-    assertSettledWithoutContinuing(run, INTERRUPTED_WORK_ERROR);
+    assertSettledWithoutContinuing(run, INTERRUPTED_WORK_ERROR, "error");
   }),
 );
 
@@ -1503,7 +1513,7 @@ it.effect.each(
           } as never),
       },
     });
-    assertSettledWithoutContinuing(run, INTERRUPTED_WORK_ERROR);
+    assertSettledWithoutContinuing(run, INTERRUPTED_WORK_ERROR, "error");
   }),
 );
 
@@ -1540,7 +1550,7 @@ it.effect.each(
 )("does not continue $recovery with $scenario", ({ recovery, scenario }) =>
   Effect.gen(function* () {
     const run = yield* runInterruptedThread({ recovery, reads: unverifiableHistory[scenario] });
-    assertSettledWithoutContinuing(run, ORPHANED_PROVIDER_SESSION_ERROR);
+    assertSettledWithoutContinuing(run, ORPHANED_PROVIDER_SESSION_ERROR, "error");
   }),
 );
 
@@ -1556,7 +1566,7 @@ it.effect.each(recoveries.map((recovery) => ({ recovery })))(
           started("open-2"),
         ]),
       });
-      assertSettledWithoutContinuing(run, INTERRUPTED_WORK_ERROR);
+      assertSettledWithoutContinuing(run, INTERRUPTED_WORK_ERROR, "error");
     }),
 );
 
@@ -1613,7 +1623,7 @@ it.effect("settles Claude as unverified when the safety observation query fails"
       }),
     });
     assert.deepStrictEqual(queried, [{ threadId: run.thread.id, turnId: interruptedTurnId }]);
-    assertSettledWithoutContinuing(run, ORPHANED_PROVIDER_SESSION_ERROR);
+    assertSettledWithoutContinuing(run, ORPHANED_PROVIDER_SESSION_ERROR, "error");
   }),
 );
 
@@ -1717,7 +1727,11 @@ for (const scenario of ["disabled", "stopped binding", "missing cursor"] as cons
         Effect.sync(() => {
           assert.equal(reads, 0);
           assert.deepStrictEqual(sessionSets(dispatched), [
-            { status: "error", activeTurnId: null, lastError: ORPHANED_PROVIDER_SESSION_ERROR },
+            {
+              status: "interrupted",
+              activeTurnId: null,
+              lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+            },
           ]);
         }),
       ),
@@ -1974,7 +1988,13 @@ it.effect("settles conservatively when the pending turn start read fails", () =>
     assert.deepStrictEqual(pendingReads, [{ threadId: thread.id }]);
     assert.deepStrictEqual(sends, []);
     assert.deepStrictEqual(sessionSets(dispatched), [
-      { status: "error", activeTurnId: null, lastError: ORPHANED_PROVIDER_SESSION_ERROR },
+      // The failed pending read lands on the unverified path, which settles
+      // "error" even though the message is the plain orphaned one.
+      {
+        status: "error",
+        activeTurnId: null,
+        lastError: ORPHANED_PROVIDER_SESSION_ERROR,
+      },
     ]);
     assert.equal(continuations.current(thread.id), undefined);
   }),
@@ -2034,7 +2054,7 @@ it.effect(
         dispatched.map(
           (command) => command.type === "thread.session.set" && command.session.status,
         ),
-        ["error"],
+        ["interrupted"],
       );
       assert.deepStrictEqual(
         upserts.map((binding) => binding.status),
@@ -2528,7 +2548,7 @@ it.effect("fails startup when a failed continuation preparation cannot be settle
       },
     }).pipe(Effect.exit);
 
-    assert.deepStrictEqual(attempted, ["starting", "starting", "error", "error"]);
+    assert.deepStrictEqual(attempted, ["starting", "starting", "interrupted", "interrupted"]);
     assert.isTrue(Exit.isFailure(exit));
     if (Exit.isFailure(exit)) {
       const error = Cause.squash(exit.cause);

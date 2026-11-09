@@ -1,6 +1,56 @@
 {
   "versions": [
     {
+      "version": "0.0.154",
+      "date": "2026-11-09",
+      "highlights": [
+        {
+          "en": "Threads that are working or waiting for your approval or input now lead the sidebar. Turn this off in Settings → General → Running threads first.",
+          "ko": "작업 중이거나 승인·입력을 기다리는 스레드가 사이드바 맨 위로 올라옵니다. 설정 → 일반 → 진행 중인 스레드 맨 위로에서 끌 수 있습니다."
+        },
+        {
+          "en": "A small popup in the top-right corner tells you when a thread finishes, fails, or needs you, even while you were in another app. Turn it on in Settings → Notifications → In-app notifications if it was off.",
+          "ko": "스레드가 끝나거나 실패하거나 확인이 필요하면 오른쪽 위에 작은 팝업이 뜹니다. 다른 앱을 보고 있었어도 돌아오면 보입니다. 꺼져 있었다면 설정 → 알림 → 앱 내 알림에서 켜세요."
+        },
+        {
+          "en": "Crew reports are more honest: an answer without a status counts as unfinished, dropped results show in the decision log, and a check with a wrong path says the file does not exist.",
+          "ko": "crew 보고가 더 정확해졌습니다. 상태 표시가 없는 응답은 미완료로 보고, 버려진 결과는 결정 로그에 남으며, 경로가 틀린 확인은 파일이 없다고 알려 줍니다."
+        },
+        {
+          "en": "Desktop and the terminal app do less background work: settings and connections update on change instead of polling, and long chats redraw with less copying.",
+          "ko": "데스크톱과 터미널 앱의 백그라운드 작업이 줄었습니다. 설정과 연결은 주기적으로 확인하지 않고 바뀔 때만 갱신하며, 긴 대화를 다시 그릴 때 복사가 줄었습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.153",
+      "date": "2026-11-08",
+      "highlights": [
+        {
+          "en": "Settings → General → Crew sets the crew and fallback models every new chat starts with.",
+          "ko": "설정 → 일반 → Crew에서 새 대화가 기본으로 쓸 crew와 fallback 모델을 정할 수 있습니다."
+        },
+        {
+          "en": "Crew works with less repetition: a repeated task gets the earlier attempt’s outcome, a model refused twice sits out for a day, and results from tasks handed out together arrive in one follow-up.",
+          "ko": "crew가 같은 일을 덜 반복합니다. 다시 맡긴 작업에는 이전 결과가 전달되고, 두 번 거부된 모델은 하루 쉬며, 함께 맡긴 작업의 결과는 한 번에 도착합니다."
+        },
+        {
+          "en": "A chat cut off by a server restart now reads as interrupted with a hint to continue, not as an error.",
+          "ko": "서버 재시작으로 끊긴 대화가 오류가 아니라 \"중단됨\"으로 표시되고, 이어서 진행하는 방법을 안내합니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.152",
+      "date": "2026-11-07",
+      "highlights": [
+        {
+          "en": "Skills from another provider now run on the selected model: OOP sends the skill along with its primary model and a note on substituting tools, and the composer lists those skills with where they come from.",
+          "ko": "다른 모델용 스킬도 지금 선택한 모델에서 실행됩니다. OOP가 스킬 내용과 주 모델, 도구 대체 안내를 함께 보내고, 입력창 목록에는 어느 모델의 스킬인지 함께 표시합니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.151",
       "date": "2026-11-07",
       "highlights": [

@@ -244,10 +244,16 @@ export function applyAcpConfigOptionModelSelection<E>(input: {
     const requested = asked === undefined ? undefined : releasedAcpModelId(asked, advertised);
     if (requested === undefined || requested === current) return current;
 
+    let refusalReason: string | undefined;
     const trySetModel = (modelId: string) =>
       input.runtime.setModel(modelId).pipe(
-        Effect.mapError(input.mapError),
         Effect.as("accepted" as const),
+        // Only the agent's own JSON-RPC refusal is a refusal; transport/exit errors stay typed.
+        Effect.catchTag("AcpRequestError", (cause) => {
+          refusalReason ??= cause.message;
+          return Effect.succeed("refused" as const);
+        }),
+        Effect.mapError(input.mapError),
         Effect.catchDefect(() => Effect.succeed("refused" as const)),
       );
 
@@ -266,7 +272,7 @@ export function applyAcpConfigOptionModelSelection<E>(input: {
     return yield* Effect.fail(
       new EffectAcpErrors.AcpRequestError({
         code: -32603,
-        errorMessage: `The agent could not switch to model '${requested}'. Pick another model.`,
+        errorMessage: `The agent could not switch to model '${requested}'. Pick another model.${refusalReason ? ` Reason: ${refusalReason}` : ""}`,
       }),
     ).pipe(Effect.mapError(input.mapError));
   });

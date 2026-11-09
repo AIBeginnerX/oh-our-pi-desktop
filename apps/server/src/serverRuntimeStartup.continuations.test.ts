@@ -1229,6 +1229,8 @@ it.effect("takes the conservative settle when the pending read fails (S2)", () =
       assert.equal(continuations.current(threadId), undefined);
 
       const thread = yield* readModelThread(query, threadId);
+      // The failed pending read lands on the unverified path, which settles
+      // "error" even though the message is the plain orphaned one.
       assert.strictEqual(thread?.session?.status, "error");
       assert.strictEqual(thread?.session?.lastError, ORPHANED_PROVIDER_SESSION_ERROR);
       const binding = yield* directory.getBinding(threadId);

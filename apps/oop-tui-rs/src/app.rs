@@ -589,13 +589,13 @@ impl App {
 
     /// The crew the thread on screen has of its own, `None` when it runs the default crew: the one
     /// the server holds with the thread, or (before the thread exists) the one picked in the draft.
-    pub fn own_crew(&self) -> Option<Value> {
+    pub fn own_crew(&self) -> Option<&Value> {
         match &self.active {
             Active::Thread(id) => match self.thread_shell(id) {
-                Some(shell) => shell.crew.clone(),
-                None => self.draft_crew.clone(),
+                Some(shell) => shell.crew.as_ref(),
+                None => self.draft_crew.as_ref(),
             },
-            Active::Draft(_) => self.draft_crew.clone(),
+            Active::Draft(_) => self.draft_crew.as_ref(),
             Active::None => None,
         }
     }
@@ -1671,8 +1671,8 @@ impl App {
             return;
         };
         let width = usize::from(self.geo.get().area.width);
-        let transcript = self.transcript(width);
-        let text = selection::text(&transcript.lines, &transcript.meta, range);
+        let (lines, meta) = self.transcript(width).rows();
+        let text = selection::text(&lines, &meta, range);
         if text.is_empty() {
             self.selection.clear();
             return;
@@ -2305,9 +2305,17 @@ impl App {
     /// The name of the provider skill a typed `/word` calls, if some provider lists it as enabled
     /// and invocable by the user.
     fn provider_skill(&self, word: &str) -> Option<String> {
-        self.config["providers"]
-            .as_array()?
+        let model = self.current_model();
+        let current = model.as_ref().and_then(|m| m["instanceId"].as_str());
+        let providers = self.config["providers"].as_array()?;
+        providers
             .iter()
+            .filter(|p| p["instanceId"].as_str() == current)
+            .chain(
+                providers
+                    .iter()
+                    .filter(|p| p["instanceId"].as_str() != current),
+            )
             .flat_map(|p| p["skills"].as_array().into_iter().flatten())
             .filter(|k| k["enabled"].as_bool().unwrap_or(true) && k["userInvocable"] != false)
             .filter_map(|k| k["name"].as_str())

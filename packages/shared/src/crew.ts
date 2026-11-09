@@ -282,9 +282,39 @@ export function applyCrewChange(
 }
 
 /**
+ * The settings' next default crew after `change`, which the client sends as the
+ * complete value. Unlike a thread's own crew, a null pin removes the role's pin
+ * (the defaults have no Auto-over-default to remember) and an empty fallback
+ * list removes the role's key. Roles the change does not name stay as they are.
+ */
+export function applyDefaultCrewChange(current: CrewSettings, change: CrewChange): CrewSettings {
+  const pinned = { ...current.pinned };
+  const fallbacks = { ...current.fallbacks };
+  for (const role of CREW_ROLES) {
+    const pin = change.pins?.[role];
+    if (pin === undefined) continue;
+    if (pin === null) delete pinned[role];
+    else pinned[role] = pin;
+  }
+  for (const role of CREW_ROLES) {
+    const listed = change.fallbacks?.[role];
+    if (listed === undefined) continue;
+    if (listed.length === 0) delete fallbacks[role];
+    else fallbacks[role] = listed;
+  }
+  return {
+    ...current,
+    ...(change.enabled === undefined ? {} : { enabled: change.enabled }),
+    ...(change.preset === undefined ? {} : { preset: change.preset }),
+    pinned,
+    fallbacks,
+  };
+}
+
+/**
  * "Use this crew for new chats": what the thread runs with (on or off, preset, and the roles
- * pinned by hand) becomes the default. It is the only way a client edits the default crew, and no
- * thread's own crew changes with it.
+ * pinned by hand) becomes the default (Settings edits it directly with `applyDefaultCrewChange`),
+ * and no thread's own crew changes with it.
  */
 export function crewAsDefault(settings: CrewSettings, crew: ResolvedCrew): CrewSettings {
   let pinned: CrewSettings["pinned"] = {};

@@ -9369,6 +9369,7 @@ describe("ProviderCommandReactor", () => {
             const thread = yield* Effect.promise(() => threadOf(harness));
             expect(failureActivitiesOf(thread)).toEqual([
               expect.objectContaining({
+                tone: "info",
                 summary: "Message interrupted",
                 turnId: null,
                 payload: {

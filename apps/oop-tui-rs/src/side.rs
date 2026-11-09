@@ -65,7 +65,7 @@ fn with_input<R>(app: &App, f: impl FnOnce(&FlowInput) -> R) -> R {
         .and_then(|m| Some((m["instanceId"].as_str()?, m["model"].as_str()?)));
     let crew: Option<Vec<CrewRoleModel>> = crate::crew::roles_of(
         &app.config,
-        app.own_crew().as_ref(),
+        app.own_crew(),
         brain,
         app.active != Active::None,
     );

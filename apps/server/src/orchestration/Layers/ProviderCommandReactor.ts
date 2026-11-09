@@ -7,6 +7,7 @@ import {
   type CrewThreadOverride,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThreadActivityTone,
   PROJECT_SKILL_CONTEXT_KIND,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderDriverKind,
@@ -332,6 +333,7 @@ const make = Effect.gen(function* () {
       | "provider.approval.respond.failed"
       | "provider.user-input.respond.failed"
       | "provider.session.stop.failed";
+    readonly tone?: OrchestrationThreadActivityTone;
     readonly summary: string;
     readonly detail: string;
     readonly turnId: TurnId | null;
@@ -349,7 +351,7 @@ const make = Effect.gen(function* () {
           threadId: input.threadId,
           activity: {
             id: eventId,
-            tone: "error",
+            tone: input.tone ?? "error",
             kind: input.kind,
             summary: input.summary,
             payload: {
@@ -443,6 +445,7 @@ const make = Effect.gen(function* () {
       const compaction = entry.kind === "compaction";
       yield* appendProviderFailureActivity({
         threadId,
+        tone: "info",
         kind: "provider.turn.start.failed",
         summary: compaction
           ? entry.progress.providerCalled

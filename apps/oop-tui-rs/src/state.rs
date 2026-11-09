@@ -188,12 +188,16 @@ impl Conversation {
 
     pub fn apply(&mut self, item: &Value) {
         match item["kind"].as_str() {
+            // The flag nothing reads does not change the picture; a snapshot replaces the thread.
             Some("synchronized") => self.synchronized = true,
-            Some("snapshot") => self.apply_snapshot(&item["snapshot"]),
-            Some("event") => self.apply_event(&item["event"]),
-            _ => return,
+            Some("snapshot") => {
+                self.apply_snapshot(&item["snapshot"]);
+                self.revision += 1;
+            }
+            // Only what the reducer changed (Updated or Deleted) invalidates the rendered lines.
+            Some("event") if self.apply_event(&item["event"]) => self.revision += 1,
+            _ => {}
         }
-        self.revision += 1;
     }
 
     fn apply_snapshot(&mut self, snapshot: &Value) {
@@ -212,19 +216,23 @@ impl Conversation {
         self.loading_older = false;
     }
 
-    fn apply_event(&mut self, event: &Value) {
+    /// Folds one stream event in; true when the reducer changed what the thread shows (Updated or
+    /// Deleted), so the caller knows to bump the revision the transcript cache is keyed on.
+    fn apply_event(&mut self, event: &Value) -> bool {
         let sequence = event["sequence"].as_u64();
         if let (Some(have), Some(new)) = (self.sequence, sequence)
             && new <= have
         {
-            return;
+            return false;
         }
-        if self.thread.apply_event(event) == Outcome::Deleted {
+        let outcome = self.thread.apply_event(event);
+        if outcome == Outcome::Deleted {
             self.deleted = true;
         }
         if sequence.is_some() {
             self.sequence = sequence;
         }
+        matches!(outcome, Outcome::Updated | Outcome::Deleted)
     }
 
     /// A page of older turns, read over HTTP, goes in front of what is held.
@@ -587,6 +595,28 @@ mod tests {
 
     fn event(sequence: u64, kind: &str, payload: Value) -> Value {
         json!({"kind": "event", "event": {"sequence": sequence, "type": kind, "occurredAt": "o", "payload": payload}})
+    }
+
+    #[test]
+    fn only_events_that_change_the_thread_bump_the_revision() {
+        let mut conv = Conversation::new("t");
+        conv.apply(&json!({"kind": "snapshot", "snapshot": page("s", 1, None)}));
+        let after_snapshot = conv.revision;
+        assert!(after_snapshot > 0);
+        // A known event that changes nothing keeps the rendered-lines cache valid.
+        conv.apply(&event(
+            2,
+            "project.created",
+            json!({"project": {"id": "p"}}),
+        ));
+        assert_eq!(conv.revision, after_snapshot);
+        // So does an event this build has no arm for, and a replayed one.
+        conv.apply(&event(3, "thread.event-from-a-newer-server", json!({})));
+        conv.apply(&event(2, "thread.pinned", json!({"pinnedAt": "x"})));
+        assert_eq!(conv.revision, after_snapshot);
+        // A changed one invalidates it again.
+        conv.apply(&event(4, "thread.pinned", json!({"pinnedAt": "x"})));
+        assert_eq!(conv.revision, after_snapshot + 1);
     }
 
     fn delta(sequence: u64, id: &str, text: &str, streaming: bool) -> Value {
