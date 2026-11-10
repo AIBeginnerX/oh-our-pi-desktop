@@ -27,7 +27,7 @@ const run = (command, args, env = process.env) =>
 // its "oop-rs" one for the Rust client: "works" prints the version for `--version` (what the
 // installer runs once) and otherwise shows how the launcher started it. The real node, oop-rs and
 // server are the release job's business.
-async function makeArchive(root, { version, rust = "works" }) {
+async function makeArchive(root, { version, rust = "works", doctorExit = 0 }) {
   const stage = path.join(root, "archive-stage", "oop-terminal");
   await fs.rm(path.join(root, "archive-stage"), { recursive: true, force: true });
   await fs.mkdir(path.join(stage, "apps", "server", "dist"), { recursive: true });
@@ -35,6 +35,9 @@ async function makeArchive(root, { version, rust = "works" }) {
   if (rust !== "none") {
     const body = {
       works: `case "$1" in --version) echo ${version}; exit 0;; esac\nprintf 'rust daemon=%s install=%s ts=%s tui=%s path0=%s\\n' "$OOP_DAEMON_ENTRY" "$OOP_TERMINAL_INSTALL" "\${OOP_TS_ENTRY-unset}" "\${OOP_TUI-unset}" "\${PATH%%:*}"\nfor a in "$@"; do printf '[%s]\\n' "$a"; done\n`,
+      // Like "works", but appends the arguments of every run other than the installer's own
+      // --version probe to $HOME/doctor-args.txt, and answers "doctor" with $doctorExit.
+      recording: `case "$1" in --version) echo ${version}; exit 0;; esac\nfor a in "$@"; do printf '%s\\n' "$a" >> "$HOME/doctor-args.txt"; done\nif [ "$1" = doctor ]; then echo 'doctor: claude code ready, codex is missing'; exit ${doctorExit}; fi\nexit 0\n`,
       broken: "echo 'dyld: Library not loaded' >&2\nexit 3\n",
       "wrong-version": "echo 9.9.9\n",
     }[rust];
@@ -107,6 +110,8 @@ async function fixture(
     OOP_SCRIPT_URL: `http://127.0.0.1:${address.port}/install-terminal.sh`,
     OOP_INSTALL_DIR: path.join(home, "install dir"),
     OOP_BIN_DIR: path.join(home, "bin dir"),
+    // The setup check runs the just-installed command; tests that are not about it turn it off.
+    OOP_INSTALL_SKIP_DOCTOR: "1",
   };
   delete env.OOP_DAEMON_ENTRY;
   return {
@@ -307,4 +312,24 @@ test("an archive without a working Rust client is refused, never installed as Ty
     assert.equal(await exists(setup.installDir), false);
     assert.equal(await exists(path.join(setup.binDir, "oop")), false);
   }
+});
+
+test("the setup check runs the installed doctor once and a failing doctor does not fail the install", { timeout: 60_000 }, async (t) => {
+  const argsFile = (setup) => path.join(setup.home, "doctor-args.txt");
+  // doctorExit 1: a provider that is missing must not turn a good install into an error.
+  const setup = await fixture(t, { archive: { rust: "recording", doctorExit: 1 } });
+  const result = await setup.install({ OOP_INSTALL_SKIP_DOCTOR: "" });
+  assert.equal(result.code, 0, result.output);
+  assert.equal(await fs.readFile(argsFile(setup), "utf8"), "doctor\n");
+  assert.match(result.output, /Checking your setup \(oop doctor\):/);
+  assert.match(result.output, /codex is missing/);
+  assert.match(result.output, /After signing in, run: oop doctor/);
+  assert.equal(await exists(path.join(setup.installDir, "oop-rs")), true);
+
+  // The switch tests and CI use leaves the command alone.
+  const skipped = await fixture(t, { archive: { rust: "recording" } });
+  const skippedResult = await skipped.install();
+  assert.equal(skippedResult.code, 0, skippedResult.output);
+  assert.equal(await exists(argsFile(skipped)), false);
+  assert.doesNotMatch(skippedResult.output, /Checking your setup/);
 });

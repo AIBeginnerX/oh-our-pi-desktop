@@ -117,9 +117,7 @@ import {
   filterSidebarProjectScopeItems,
   firstValidTimestampMs,
   isSidebarNestedLinkClick,
-  isSidebarThreadInProgress,
   isTrailingDoubleClick,
-  liftInProgressThreads,
   orderItemsByPreferredIds,
   planSidebarThreadDrop,
   reduceSidebarProjectScopeMenuState,
@@ -134,6 +132,7 @@ import {
   sidebarListItemId,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
+  sortActiveThreadsRunningFirst,
   sortThreadsForSidebar,
   useThreadJumpHintVisibility,
   type SidebarListItem,
@@ -639,10 +638,11 @@ export default function Sidebar() {
     // web and mobile from the same data.
     const sortedPinned = sortPinnedThreadsForSidebar(pinned);
     // With sidebarRunningThreadsFirst, working/approval/input rows rise to the
-    // top of the active list; an in-flight drop with an explicit order (below)
-    // still wins until it settles.
+    // top and the rest follow their latest work, so a finished row stays up.
+    // Otherwise saved drag keys arrange the list. An in-flight drop with an
+    // explicit order (below) still wins until it settles.
     const sortedActive = sidebarRunningThreadsFirst
-      ? liftInProgressThreads(sortThreadsForSidebar(active), isSidebarThreadInProgress)
+      ? sortActiveThreadsRunningFirst(active)
       : sortThreadsForSidebar(active);
     return {
       pinnedThreads:
@@ -1603,11 +1603,23 @@ export default function Sidebar() {
       applySidebarThreadDrop(thread, "settled", dragState.occurredAt),
     ]).map(key);
   }, [dragState, settledThreads, threadByKey]);
+  // Running threads first places rows dropped into Active; preview that slot.
+  const draggedActiveOrder = useMemo(() => {
+    const thread = dragState === null ? undefined : threadByKey.get(dragState.activeKey);
+    if (!sidebarRunningThreadsFirst || dragState === null || thread === undefined) return undefined;
+    const key = (candidate: EnvironmentThreadShell) =>
+      scopedThreadKey(scopeThreadRef(candidate.environmentId, candidate.id));
+    return sortActiveThreadsRunningFirst([
+      ...activeThreads.filter((candidate) => key(candidate) !== dragState.activeKey),
+      applySidebarThreadDrop(thread, "active", dragState.occurredAt),
+    ]).map(key);
+  }, [activeThreads, dragState, sidebarRunningThreadsFirst, threadByKey]);
   const sidebarSortingStrategy = useMemo(
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
         boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
+        activeOrder: draggedActiveOrder,
         settledOrder: draggedSettledOrder,
         settledExpanded: settledShelfExpanded,
         settledVisibleCount,
@@ -1615,6 +1627,7 @@ export default function Sidebar() {
         snoozedThreadCount: snoozedThreads.length,
       }),
     [
+      draggedActiveOrder,
       draggedSettledOrder,
       routeThreadKey,
       settledShelfExpanded,
@@ -1670,6 +1683,7 @@ export default function Sidebar() {
             activeOrder: activeKeys,
             activeKeysById,
             activeReorderableKeys: activeReorderableThreadKeys,
+            activeOrderAutomatic: sidebarRunningThreadsFirst,
           }).kind !== "none"
         );
       },
@@ -1690,6 +1704,7 @@ export default function Sidebar() {
     draggableThreadKeys,
     pinnedKeys,
     sidebarListItems,
+    sidebarRunningThreadsFirst,
     threadByKey,
   ]);
   const handleThreadDragEnd = useCallback(
@@ -1718,6 +1733,7 @@ export default function Sidebar() {
         activeOrder: activeKeys,
         activeKeysById,
         activeReorderableKeys: activeReorderableThreadKeys,
+        activeOrderAutomatic: sidebarRunningThreadsFirst,
       });
       if (plan.kind === "none") return;
       if (plan.kind === "settle" && settlingThreadKeysRef.current.has(activeKey)) return;
@@ -1847,6 +1863,7 @@ export default function Sidebar() {
       sectionByThreadKey,
       settleThread,
       sidebarListItems,
+      sidebarRunningThreadsFirst,
       threadByKey,
       unpinThread,
       unsettleThread,

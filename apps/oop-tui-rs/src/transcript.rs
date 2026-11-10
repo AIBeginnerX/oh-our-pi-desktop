@@ -718,7 +718,8 @@ fn changed_files(data: &Value) -> Vec<String> {
 }
 
 /// `◇  name  command  2.3s` (`✗` in the mark's place when it failed), then a dim row with what the
-/// tool reported, when the activity carries any.
+/// tool reported, when the activity carries any. A quiet exit (`exit 1` dim after the line) is a
+/// query's "no", never a failure.
 fn tool_lines(
     a: &Activity,
     elapsed_ms: Option<i64>,
@@ -730,15 +731,24 @@ fn tool_lines(
     let title = tool_title(a);
     let detail = shell_command(&first_line(&a.payload["detail"]));
     let failed = tool_failed(a);
+    let quiet = crate::flow::is_quiet_command_exit(&a.payload);
     let reported = data["item"]["durationMs"].as_f64();
     let duration = format_duration(reported.or(elapsed_ms.map(|e| e as f64)).unwrap_or(0.0));
 
-    let (mark, name_color) = if failed {
+    let (mark, name_color) = if quiet {
+        (sym.idle, th.muted)
+    } else if failed {
         (sym.cross, th.error)
     } else {
         (sym.done, th.tool)
     };
-    let mark_color = if failed { th.error } else { th.success };
+    let mark_color = if quiet {
+        th.muted
+    } else if failed {
+        th.error
+    } else {
+        th.success
+    };
     let mut spans = vec![
         Span::styled(
             format!("{mark}  "),
@@ -753,10 +763,13 @@ fn tool_lines(
             Style::new().fg(name_color).add_modifier(Modifier::BOLD),
         ),
     ];
-    let tail = duration
+    let mut tail = duration
         .as_ref()
         .map(|d| format!("  {d}"))
         .unwrap_or_default();
+    if quiet {
+        tail.push_str(" · exit 1");
+    }
     let used = 3 + width(&title) + width(&tail) + 2;
     let room = DETAIL_COLUMNS.min(w.saturating_sub(used));
     if !detail.is_empty() && room >= 4 {
@@ -770,7 +783,7 @@ fn tool_lines(
     }
     let mut rows = vec![Line::from(spans)];
 
-    let mut result = result_summary(data, failed);
+    let mut result = result_summary(data, failed && !quiet);
     if result.is_empty() && a.payload["itemType"] == "file_change" {
         let files = changed_files(data);
         let listed = files

@@ -202,7 +202,8 @@ const CrewWaitInput = Schema.Struct({
   }),
   timeoutSeconds: Schema.optional(
     Schema.Number.annotate({
-      description: "How long to wait this call, at most 50 seconds. Call again while tasks run.",
+      description:
+        "How long to wait this call. The server caps it to what your client allows: 50 seconds, or 300 when the server has set your client's own MCP tool-call timeout (Claude Code). Call again while tasks run.",
     }),
   ),
 });
@@ -258,7 +259,7 @@ const CrewRosterTool = Tool.make("crew_roster", {
   .annotate(Tool.OpenWorld, false);
 
 const CrewDelegateTool = Tool.make("crew_delegate", {
-  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace (or, with isolation "worktree", its own worktree) as its own thread. Give it a todos checklist and, on each item something can prove, a check the server runs for you (command or files) that fails until the item is done and can run in that task's environment, so prefer a command you know works there (name test files, not a folder) and one that proves the content, since files alone only proves a change; keep each item to one step, and finish or hand on anything left undone, since it comes back partial. Returns at once with a taskId (and a warning when the task's writeScope overlaps one still running, or when no todo has a check so OOP cannot verify it); start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to the role's fallback models first, then another model of the same level. Fails when the crew is off; then do the work yourself.`,
+  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace (or, with isolation "worktree", its own worktree) as its own thread. Give it a todos checklist and, on each item something can prove, a check the server runs for you (command or files) that fails until the item is done and can run in that task's environment, so prefer a command you know works there (name test files, not a folder) and one that proves the content, since files alone only proves a change; keep each item to one step, and finish or hand on anything left undone, since it comes back partial. Returns at once with a taskId (and a warning when the task's writeScope overlaps one still running, when no todo has a check so OOP cannot verify it, or when paths the task, verify, or checks cite do not exist from the task's directory); start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to the role's fallback models first, then another model of the same level. Fails when the crew is off; then do the work yourself.`,
   parameters: CrewDelegateInput,
   success: CrewDelegateResult,
   failure: CrewToolError,
@@ -272,7 +273,7 @@ const CrewDelegateTool = Tool.make("crew_delegate", {
 
 const CrewWaitTool = Tool.make("crew_wait", {
   description:
-    "Waits up to 50 seconds for delegated crew tasks and returns each one's status and, when it finished, its report text (result) and, when the crew member ended with a JSON block, the parsed report with its changed files, verification, and findings. Call it again while any task is still running. Check the reports before telling the user the work is done. `proof` says whether OOP itself could verify the work. Only `verified` may be reported to the user as done; `inconclusive` means nothing proved it.",
+    "Waits for delegated crew tasks and returns each one's status and, when it finished, its report text (result) and, when the crew member ended with a JSON block, the parsed report with its changed files, verification, and findings. How long one call may wait depends on your MCP client's own tool-call timeout: 50 seconds by default, 300 when the server has set that timeout for your client. Call it again while any task is still running. Check the reports before telling the user the work is done. `proof` says whether OOP itself could verify the work. Only `verified` may be reported to the user as done; `inconclusive` means nothing proved it.",
   parameters: CrewWaitInput,
   success: CrewWaitResult,
   failure: CrewToolError,

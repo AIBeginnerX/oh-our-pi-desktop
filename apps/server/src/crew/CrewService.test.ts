@@ -1285,6 +1285,91 @@ describe("Crew service per-thread crew", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 
+  it.effect("waits up to 300 seconds for a lead whose client tool-call timeout OOP sets", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      harness.keepRunning.current = true;
+      const task = yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "work" });
+      for (;;) {
+        if ((yield* Queue.take(harness.dispatched)).type === "thread.turn.start") break;
+      }
+      const completed = yield* Ref.make(false);
+      yield* service.crew
+        .wait({
+          threadId: LEAD,
+          taskIds: [task.taskId],
+          timeoutSeconds: 300,
+          providerInstanceId: ProviderInstanceId.make("provider-1"),
+        })
+        .pipe(
+          Effect.tap(() => Ref.set(completed, true)),
+          Effect.forkChild,
+        );
+      // provider-1 is the claudeAgent instance whose SDK tool-call timeout OOP writes itself,
+      // so the call must not clamp to the 50 second unknown-client cap.
+      yield* TestClock.adjust("51 seconds");
+      assert.isFalse(yield* Ref.get(completed));
+      yield* TestClock.adjust("249 seconds");
+      assert.isTrue(yield* Ref.get(completed));
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("defaults the wait to the cap for a lead whose client tool-call timeout OOP sets", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      harness.keepRunning.current = true;
+      const task = yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "work" });
+      for (;;) {
+        if ((yield* Queue.take(harness.dispatched)).type === "thread.turn.start") break;
+      }
+      const completed = yield* Ref.make(false);
+      yield* service.crew
+        .wait({
+          threadId: LEAD,
+          taskIds: [task.taskId],
+          providerInstanceId: ProviderInstanceId.make("provider-1"),
+        })
+        .pipe(
+          Effect.tap(() => Ref.set(completed, true)),
+          Effect.forkChild,
+        );
+      // The 40 second unknown-client default would have ended the call here.
+      yield* TestClock.adjust("41 seconds");
+      assert.isFalse(yield* Ref.get(completed));
+      yield* TestClock.adjust("259 seconds");
+      assert.isTrue(yield* Ref.get(completed));
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect("keeps the 50 second wait when the calling client's timeout is unknown", () =>
+    Effect.gen(function* () {
+      const { harness, service } = yield* started;
+      harness.keepRunning.current = true;
+      const task = yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "work" });
+      for (;;) {
+        if ((yield* Queue.take(harness.dispatched)).type === "thread.turn.start") break;
+      }
+      const completed = yield* Ref.make(false);
+      yield* service.crew
+        .wait({
+          threadId: LEAD,
+          taskIds: [task.taskId],
+          timeoutSeconds: 300,
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        })
+        .pipe(
+          Effect.tap(() => Ref.set(completed, true)),
+          Effect.forkChild,
+        );
+      // Codex's MCP tool-call timeout cannot be proven from this repo, so the old cap holds.
+      yield* TestClock.adjust("50 seconds");
+      assert.isTrue(yield* Ref.get(completed));
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
   it.effect("rejects unavailable worktree isolation before creating a member", () =>
     Effect.gen(function* () {
       const { harness, service } = yield* started;

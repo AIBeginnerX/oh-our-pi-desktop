@@ -22,6 +22,8 @@ _Un breve recorrido por OOP hecho con grabaciones de pantalla reales. Haz clic e
 ## Contenido
 
 - [¿Por qué OOP?](#por-qué-oop)
+- [Novedades](#novedades)
+- [Todos tus equipos desde un solo OOP](#todos-tus-equipos-desde-un-solo-oop)
 - [Recorrido por las capturas](#recorrido-por-las-capturas)
 - [Referencia de funciones](#referencia-de-funciones)
 - [Proveedores compatibles](#proveedores-compatibles)
@@ -44,6 +46,7 @@ Los agentes de programación son buenos, pero cada uno vive en su propia termina
 - **Un solo lugar para muchos agentes.** Cambia entre Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode y MiniMax Code por hilo, con el mismo flujo de diff, terminal y aprobaciones.
 - **Deja que varios modelos compartan una tarea.** OOP Crew permite que un modelo "brain" (cerebro) delegue el trabajo rutinario en workers más baratos y el trabajo difícil en un expert, y que un auditor revise el resultado.
 - **Mantén el control.** Cuatro modos de permisos, un panel de diff con checkpoints que puedes restaurar y una página de uso para que los costes no te sorprendan.
+- **Varios equipos con un solo OOP.** Conecta los equipos donde ya ejecutas OOP y verás sus proyectos e hilos en la misma barra lateral; los hilos nuevos se pueden repartir entre ellos según CPU y memoria. Consulta [Todos tus equipos desde un solo OOP](#todos-tus-equipos-desde-un-solo-oop).
 - **Trabaja lejos del teclado.** Empareja tu teléfono con el ordenador que ejecuta los agentes y vigila (o dirige) las tareas largas.
 - **También desde una terminal.** `oop` abre los mismos hilos en una app de terminal a pantalla completa. Funciona con la app de escritorio cerrada y comparte con ella una única carpeta de datos.
 - **Todo en local.** Los proyectos, los inicios de sesión de los proveedores y el trabajo de los agentes se quedan en tu máquina. No hay cuenta de OOP ni servidor de OOP.
@@ -64,6 +67,39 @@ _Vista principal del chat: elige un proveedor y un modelo, define el modo de per
 3. Elige un modelo y un modo de permisos en el compositor y envía un mensaje.
 4. Revisa el resultado en el panel de diff; restaura desde un checkpoint si no te gusta.
 
+## Novedades
+
+Lo más destacado de las últimas versiones. La app muestra la misma lista en Settings → What's new.
+
+- **0.0.153 · Los valores por defecto de crew viven en los ajustes.** Settings → General → Crew define el crew y los modelos de respaldo con los que empieza cada chat nuevo, así que no hay que rehacer la configuración en cada compositor.
+- **0.0.153 · El crew se repite menos.** Una tarea reenviada recibe el resultado del intento anterior, un modelo que rechazó dos veces descansa un día, y los resultados de las tareas encargadas a la vez llegan en un solo seguimiento.
+- **0.0.154 · Informes de crew más honestos.** Una respuesta sin estado cuenta como inacabada, los resultados descartados aparecen en el registro de decisiones, y una comprobación con una ruta equivocada informa de que el archivo no existe en lugar de darse por buena.
+- **0.0.154 · Los hilos en marcha van primero.** Los hilos que están trabajando o esperando tu aprobación o tu respuesta encabezan la barra lateral, y un pequeño aviso en la esquina superior derecha te dice cuándo un hilo termina, falla o te necesita, aunque estuvieras en otra app.
+- **0.0.153–0.0.154 · Interrumpido es interrumpido, y menos trabajo en segundo plano.** Un chat cortado por un reinicio del servidor se muestra como interrumpido con una pista para continuar en lugar de como error; los ajustes y las conexiones se actualizan al cambiar en vez de sondearse, y los chats largos se redibujan copiando menos.
+- **0.0.155 · Gráficos de ocho colores, en escritorio y terminal.** Los gráficos del chat usan ocho colores de informe para que las series se distingan bien, y todos los temas de terminal usan los mismos colores en el mismo orden. Un gráfico de un solo punto se muestra como barra en lugar de un punto solitario, y un gráfico todo a cero lo indica.
+- **0.0.155 · Diagramas de flujo más limpios.** Los diagramas de flujo del chat usan líneas finas, conectores en ángulo recto que rodean las cajas y un tono por nivel. Para diagramas de arquitectura, secuencia o flujo de datos, el agente usa la skill diagram-design cuando está instalada.
+- **0.0.155 · Un grep que no encuentra nada no es un fallo.** Una consulta como `grep`, `test` o `which` que termina con exit 1 sin salida de error ahora se muestra como un `exit 1` atenuado, no como un comando fallido, en la app de escritorio y en la terminal.
+- **0.0.155 · El instalador comprueba tu instalación.** El instalador de solo terminal termina ejecutando `oop doctor` una vez, así que ves qué proveedores están listos y qué falta todavía.
+- **0.0.155 · Más seguro en equipos compartidos.** Los archivos que OOP escribe en un proyecto ya no siguen un enlace simbólico fuera de la carpeta del proyecto, la carpeta que guarda tu historial de chat solo la puede leer tu usuario en macOS y Linux, y las auditorías de crew bloquean los cambios que abren un agujero de seguridad.
+- **0.0.155 · El crew desperdicia menos turnos.** El crew dirigido por Claude Code ahora espera hasta cinco minutos por comprobación en lugar de 50 segundos, una tarea que cita una ruta inexistente recibe un aviso de antemano, y los miembros releen un archivo justo antes de editarlo.
+
+## Todos tus equipos desde un solo OOP
+
+OOP no se limita al ordenador donde lo abriste. Añade una vez los demás equipos donde ya ejecutas OOP (un sobremesa en casa, una máquina Linux, un portátil del trabajo) y dirige todos desde una sola ventana. Los proyectos y los inicios de sesión de los proveedores se quedan en cada máquina; el equipo que añadas tiene que estar encendido, ser accesible y tener OOP en marcha.
+
+- **Conectar un equipo.** Abre Settings → Connections → **Add environment** y elige la ruta: **OOP Connect** (inicia sesión en el host y en este dispositivo; sin configurar el router), un **enlace de emparejamiento por tu LAN o una red privada** (activa **Network access** en el host y crea un enlace al que el otro equipo pueda llegar) o **SSH** (indica un host o un alias; OOP arranca allí el servidor y abre el reenvío de puerto por ti). Los detalles del emparejamiento, las rutas y cómo revocar un dispositivo están en [Conectar desde tu teléfono](#conectar-desde-tu-teléfono); un equipo se empareja igual que un teléfono.
+
+- **Todos los proyectos en una barra lateral.** Los equipos conectados aparecen como entornos, uno al lado del otro, en la lista de hilos y en el selector de entorno. Cada hilo pertenece a la máquina donde se ejecuta, así que lo lees y lo continúas allí sin abrir una segunda app.
+
+- **Repartir hilos nuevos según CPU y memoria.** Cuando hay dos o más máquinas encendidas, abre **Settings → Connections → Load balancing** (viene desactivado) para que OOP elija la máquina de un borrador nuevo. Cada máquina empieza en **Normal**; elige **Prefer** para preferirla cuando tenga CPU y memoria libres, **Less often** para reducir su parte, o **Manual only** para dejarla fuera de la selección automática. Son preferencias, no porcentajes fijos, y se guardan por separado en cada cliente. En el compositor, **Auto balance** vuelve a comprobar los recursos actuales, y elegir una máquina o una rama tiene prioridad. Los hilos ya iniciados se quedan donde están, y si no se pueden comprobar los recursos o todas las máquinas elegibles están llenas, elige una a mano.
+
+- **Convertir un portátil en cliente remoto.** En un portátil ligero, abre **Settings → Connections** y desactiva **Local environment**. OOP se reinicia sin servidor local: no se ejecutan agentes ni terminales locales, otros dispositivos ya no pueden conectarse a este equipo, y tus proyectos, historial y conexiones guardadas se conservan. Sigues trabajando mediante emparejamiento, OOP Connect o SSH, y al volver a activarlo recuperas tu configuración local anterior.
+
+- **Los hosts SSH funcionan igual.** Un host añadido en Settings → Connections → Add environment → **SSH** tiene su propio servidor en `~/.oop-desktop` en esa máquina, con sus propios ajustes de proveedores e inicios de sesión (**Settings → Providers** y luego el entorno remoto arriba). Debe ser Linux (x64 o arm64) o un Mac con Apple Silicon con las CLI de los proveedores instaladas y con sesión iniciada.
+
+> [!TIP]
+> Un teléfono es otra superficie: se conecta a un solo equipo de escritorio, que debe seguir despierto. Para esa ruta, consulta [Conectar desde tu teléfono](#conectar-desde-tu-teléfono).
+
 ## Recorrido por las capturas
 
 Todas las capturas proceden de un perfil de demostración aislado, sin datos personales.
@@ -79,7 +115,7 @@ _Chat: compositor con selector de modelo y modo de permisos bajo la línea de ti
 
 ### OOP Crew
 
-Un chat, varios modelos. El modelo propio del chat es el **brain** (cerebro); planifica y habla contigo. Un **worker** (trabajador) se encarga del trabajo rutinario (búsquedas, ediciones, pruebas), un **expert** (experto) se encarga de la implementación difícil y un **auditor** revisa los turnos que modificaron archivos. Los ajustes preestablecidos son **OOP pick**, **Speed** (velocidad), **Quality** (calidad) y **Budget** (presupuesto), y puedes cambiar el modelo de cada rol. Si un modelo del crew falla (por ejemplo, por quedarse sin crédito), OOP pasa la tarea a otro modelo con sesión iniciada del mismo nivel. Los cambios pequeños de 20 líneas o menos que pasan las pruebas no se auditan.
+Un chat, varios modelos. El modelo propio del chat es el **brain** (cerebro); planifica y habla contigo. Un **worker** (trabajador) se encarga del trabajo rutinario (búsquedas, ediciones, pruebas), un **expert** (experto) se encarga de la implementación difícil y un **auditor** revisa los turnos que modificaron archivos. Los ajustes preestablecidos son **OOP pick**, **Speed** (velocidad), **Quality** (calidad) y **Budget** (presupuesto), y puedes cambiar el modelo de cada rol. Si un modelo del crew falla (por ejemplo, por quedarse sin crédito), OOP pasa la tarea a otro modelo con sesión iniciada del mismo nivel. Los cambios pequeños de 20 líneas o menos que pasan las pruebas reciben una revisión ligera breve en lugar de una auditoría completa.
 
 **Cuándo usarlo:** tareas grandes en las que quieres modelos baratos para el grueso del trabajo y un modelo potente para la revisión. **Cómo abrirlo:** **Crew**, junto al selector de modelo en el compositor. El trabajo del Crew se muestra en vivo en **Workflows** y **Agents** en el panel derecho. El tablero **Agents** muestra si cada tarea del crew está informada, probada o auditada, con sus tokens y su coste, y permite detenerla, abrirla o reintentarla. Las tareas del crew pueden declarar los archivos que pueden modificar, y OOP avisa cuando las tareas en paralelo se solapan.
 

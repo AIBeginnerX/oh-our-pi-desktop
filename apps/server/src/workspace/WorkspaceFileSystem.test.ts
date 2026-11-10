@@ -337,5 +337,116 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         expect(escapedStat).toBeNull();
       }),
     );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "rejects writes through a symlinked directory that resolves outside the workspace root",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const cwd = yield* makeTempDir;
+          const outsideDir = yield* makeTempDir;
+          yield* fileSystem.symlink(outsideDir, path.join(cwd, "outside-link"));
+
+          const error = yield* workspaceFileSystem
+            .writeFile({ cwd, relativePath: "outside-link/report.md", contents: "# Escaped\n" })
+            .pipe(Effect.flip);
+          const resolvedWorkspaceRoot = yield* fileSystem.realPath(cwd);
+          const resolvedPath = yield* fileSystem.realPath(outsideDir);
+
+          expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFilePathEscapeError);
+          expect(error).toMatchObject({
+            workspaceRoot: cwd,
+            relativePath: "outside-link/report.md",
+            resolvedWorkspaceRoot,
+            resolvedPath,
+          });
+          expect("cause" in error).toBe(false);
+
+          const escapedStat = yield* fileSystem
+            .stat(path.join(outsideDir, "report.md"))
+            .pipe(Effect.orElseSucceed(() => null));
+          expect(escapedStat).toBeNull();
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "rejects writes through a symlinked file that resolves outside the workspace root",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const cwd = yield* makeTempDir;
+          const outsideDir = yield* makeTempDir;
+          yield* writeTextFile(outsideDir, "existing-note.md", "# Existing\n");
+          yield* fileSystem.symlink(
+            path.join(outsideDir, "existing-note.md"),
+            path.join(cwd, "linked-note.md"),
+          );
+
+          const error = yield* workspaceFileSystem
+            .writeFile({ cwd, relativePath: "linked-note.md", contents: "# Overwritten\n" })
+            .pipe(Effect.flip);
+          const resolvedWorkspaceRoot = yield* fileSystem.realPath(cwd);
+          const resolvedPath = yield* fileSystem.realPath(
+            path.join(outsideDir, "existing-note.md"),
+          );
+
+          expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFilePathEscapeError);
+          expect(error).toMatchObject({
+            workspaceRoot: cwd,
+            relativePath: "linked-note.md",
+            resolvedWorkspaceRoot,
+            resolvedPath,
+          });
+          expect("cause" in error).toBe(false);
+
+          const saved = yield* fileSystem.readFileString(path.join(outsideDir, "existing-note.md"));
+          expect(saved).toBe("# Existing\n");
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "rejects writes through a dangling symlink that points outside the workspace root",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const cwd = yield* makeTempDir;
+          const outsideDir = yield* makeTempDir;
+          const outsideFile = path.join(outsideDir, "missing.md");
+          yield* fileSystem.symlink(outsideFile, path.join(cwd, "dangling.md"));
+
+          yield* workspaceFileSystem
+            .writeFile({ cwd, relativePath: "dangling.md", contents: "# Escaped\n" })
+            .pipe(Effect.flip);
+
+          expect(yield* fileSystem.exists(outsideFile)).toBe(false);
+        }),
+    );
+
+    it.effect("writes into a new nested subdirectory of the workspace", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+
+        const result = yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "docs/notes/deep/note.md",
+          contents: "# Deep note\n",
+        });
+        const saved = yield* fileSystem
+          .readFileString(path.join(cwd, "docs/notes/deep/note.md"))
+          .pipe(Effect.orDie);
+
+        expect(result).toEqual({ relativePath: "docs/notes/deep/note.md" });
+        expect(saved).toBe("# Deep note\n");
+      }),
+    );
   });
 });

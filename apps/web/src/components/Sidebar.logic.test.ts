@@ -43,6 +43,7 @@ import {
   sidebarListItemId,
   sortPinnedThreadsForSidebar,
   sortThreadsForSidebar,
+  sortActiveThreadsRunningFirst,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   shouldCreateNewThreadInCurrentProject,
@@ -872,6 +873,86 @@ describe("liftInProgressThreads", () => {
   });
 });
 
+describe("sortActiveThreadsRunningFirst", () => {
+  type Row = Pick<
+    SidebarThreadSummary,
+    | "id"
+    | "createdAt"
+    | "latestUserMessageAt"
+    | "latestTurn"
+    | "session"
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "activeOrderKey"
+  >;
+  const row = (id: string, createdAt: string, overrides: Partial<Row> = {}): Row => ({
+    id: ThreadId.make(id),
+    createdAt,
+    latestUserMessageAt: null,
+    latestTurn: null,
+    session: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    ...overrides,
+  });
+  const ids = (rows: readonly Row[]) => sortActiveThreadsRunningFirst(rows).map((r) => r.id);
+
+  it("keeps a thread at the top after the work that lifted it finishes", () => {
+    const others = [
+      row("arranged", "2026-03-09T11:00:00.000Z", { activeOrderKey: "a" }),
+      row("idle", "2026-03-09T10:00:00.000Z"),
+    ];
+    const old = row("old", "2026-03-09T09:00:00.000Z", { activeOrderKey: "z" });
+    expect(ids([old, ...others])).toEqual(["arranged", "idle", "old"]);
+
+    const turn: OrchestrationLatestTurn = {
+      turnId: "turn-1" as never,
+      state: "running",
+      assistantMessageId: null,
+      requestedAt: "2026-03-09T12:00:00.000Z",
+      startedAt: "2026-03-09T12:00:00.000Z",
+      completedAt: null,
+    };
+    const working = row("old", old.createdAt, {
+      latestUserMessageAt: turn.requestedAt,
+      latestTurn: turn,
+      session: {
+        threadId: ThreadId.make("old"),
+        status: "running",
+        providerName: "Codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        activeTurnId: turn.turnId,
+        lastError: null,
+        updatedAt: turn.requestedAt,
+      },
+    });
+    expect(ids([working, ...others])).toEqual(["old", "arranged", "idle"]);
+
+    const finished = {
+      ...working,
+      session: null,
+      latestTurn: { ...turn, state: "completed" as const, completedAt: "2026-03-09T12:05:00.000Z" },
+    };
+    expect(ids([finished, ...others])).toEqual(["old", "arranged", "idle"]);
+  });
+
+  it("keeps waiting rows above a thread that finished more recently", () => {
+    const finished = row("finished", "2026-03-09T09:00:00.000Z", {
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "completed",
+        assistantMessageId: null,
+        requestedAt: "2026-03-09T12:00:00.000Z",
+        startedAt: "2026-03-09T12:00:00.000Z",
+        completedAt: "2026-03-09T12:30:00.000Z",
+      },
+    });
+    const waiting = row("waiting", "2026-03-09T08:00:00.000Z", { hasPendingApprovals: true });
+    expect(ids([finished, waiting])).toEqual(["waiting", "finished"]);
+  });
+});
+
 describe("searchSidebarThreads", () => {
   const searchThread = (id: string, title: string, project: string) => ({
     environmentId: localEnvironmentId,
@@ -1461,6 +1542,33 @@ describe("planSidebarThreadDrop", () => {
         target: { section: "active", pinnedOrder: [], activeOrder: ["a1", "a2", "a3"] },
       }),
     ).toEqual({ kind: "none" });
+  });
+
+  it("leaves Active placement to the running-first sort", () => {
+    const target = { section: "active" as const, pinnedOrder: [] };
+    expect(
+      plan({
+        activeKey: "a1",
+        activeSection: "active",
+        activeOrderAutomatic: true,
+        target: { ...target, activeOrder: ["a2", "a1", "a3"] },
+      }),
+    ).toEqual({ kind: "none" });
+    expect(
+      plan({
+        activeKey: "s1",
+        activeSection: "settled",
+        activeOrderAutomatic: true,
+        target: { ...target, activeOrder: ["a1", "s1", "a2", "a3"] },
+      }),
+    ).toEqual({
+      kind: "move-active",
+      order: null,
+      assignments: [],
+      unpin: false,
+      unsettle: true,
+      unsnooze: false,
+    });
   });
 
   it("requires Active ordering support only for the threads whose keys must change", () => {

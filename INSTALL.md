@@ -110,7 +110,8 @@ have no terminal archives; the installer then stops without changing anything.
   `~/.oop-desktop` is not touched.
 - Next step: install and sign in to a provider CLI (for example Claude Code or
   Codex); the installer does not do that. Then run `oop` in a project folder, and
-  `oop provider` to see which providers are ready.
+  `oop provider` to see which providers are ready. Run `oop doctor` to see which
+  providers are ready and what is missing.
 - With the desktop app installed too, both use the data folder `~/.oop-desktop`.
   The installer that ran last decides which copy of `oop` the command starts.
 

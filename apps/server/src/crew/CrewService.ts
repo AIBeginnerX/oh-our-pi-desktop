@@ -14,6 +14,7 @@ import {
   MessageId,
   OWNED_USAGE_ACTIVITY_KIND,
   ProviderDriverKind,
+  type ProviderInstanceId,
   ThreadId,
   CREW_STOPPED_ACTIVITY,
   CREW_STOPPING_ACTIVITY,
@@ -148,8 +149,8 @@ import {
   ISOLATED_CHECKOUT_PROMPT,
 } from "./crewLogic.ts";
 import {
-  MAX_WAIT_SECONDS,
   WAIT_COLLECT_SECONDS,
+  waitBounds,
   RESULT_TEXT_LIMIT,
   NUDGE_IDLE_WAIT_SECONDS,
   CREW_LEAD_REFUSAL,
@@ -317,6 +318,12 @@ export class CrewService extends Context.Service<
       readonly threadId: ThreadId;
       readonly taskIds: ReadonlyArray<string>;
       readonly timeoutSeconds?: number | undefined;
+      /**
+       * The provider instance whose MCP client made the call. A client whose tool-call timeout
+       * OOP sets itself (claudeAgent) may wait past the unknown-client cap; without this, the
+       * 50 second cap holds.
+       */
+      readonly providerInstanceId?: ProviderInstanceId | undefined;
     }) => Effect.Effect<ReadonlyArray<CrewTaskReport>, CrewError>;
   }
 >()("t3/crew/CrewService") {}
@@ -3099,7 +3106,17 @@ export const make = Effect.gen(function* () {
   });
 
   const wait: CrewService["Service"]["wait"] = Effect.fn("CrewService.wait")(function* (input) {
-    const seconds = Math.min(Math.max(input.timeoutSeconds ?? 40, 1), MAX_WAIT_SECONDS);
+    // The client that called the tool decides how long one call may wait: a driver whose MCP
+    // client tool-call timeout OOP sets itself may wait past the unknown-client cap, an unknown
+    // or unproven one keeps the 50 second behaviour.
+    const driver =
+      input.providerInstanceId === undefined
+        ? undefined
+        : (yield* providers.getProviders).find(
+            (provider) => provider.instanceId === input.providerInstanceId,
+          )?.driver;
+    const { capSeconds, defaultSeconds } = waitBounds(driver);
+    const seconds = Math.min(Math.max(input.timeoutSeconds ?? defaultSeconds, 1), capSeconds);
     const records = input.taskIds.map((taskId) => [taskId, tasks.get(taskId)] as const);
     for (const [taskId, record] of records) {
       if (record !== undefined && record.leadThreadId !== input.threadId) {

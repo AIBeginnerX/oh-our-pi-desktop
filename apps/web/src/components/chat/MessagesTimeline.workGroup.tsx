@@ -4,6 +4,7 @@ import {
 } from "@t3tools/client-runtime/work-log/user-input";
 import { type ToolActivityIcon, type TurnId } from "@t3tools/contracts";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
+import { workEntryIsQuietCommandExit } from "@t3tools/client-runtime/work-log/presentation";
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
 import {
   memo,
@@ -336,6 +337,7 @@ export function LiveActivityRow({
   failedCount = 0,
   active = false,
   shimmer = false,
+  quietExit = false,
 }: {
   label: ReactNode;
   iconName?: WorkEntryIconName;
@@ -344,6 +346,7 @@ export function LiveActivityRow({
   failedCount?: number;
   active?: boolean;
   shimmer?: boolean;
+  quietExit?: boolean;
 }) {
   const animated = active && !failed;
   const showShimmer = animated && shimmer;
@@ -360,6 +363,7 @@ export function LiveActivityRow({
         failedCount={failedCount}
         announceFailure={failed}
         active={animated && !shimmer}
+        quietExit={quietExit}
       />
       {showShimmer ? (
         <ActivityShimmerOverlay>
@@ -379,6 +383,7 @@ function LiveActivityContent({
   announceFailure = false,
   active = false,
   highlighted = false,
+  quietExit = false,
 }: {
   label: ReactNode;
   iconName: WorkEntryIconName | undefined;
@@ -388,6 +393,7 @@ function LiveActivityContent({
   announceFailure?: boolean;
   active?: boolean;
   highlighted?: boolean;
+  quietExit?: boolean;
 }) {
   const showTrailingFailureMark =
     failed && iconName !== undefined && !toolIconAcceptsTint(iconName, toolIcon);
@@ -404,7 +410,13 @@ function LiveActivityContent({
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center",
-            failed ? failedToolIconClassName : highlighted ? "text-foreground" : "text-icon-muted",
+            quietExit
+              ? "text-muted-foreground"
+              : failed
+                ? failedToolIconClassName
+                : highlighted
+                  ? "text-foreground"
+                  : "text-icon-muted",
           )}
           role={announceFailure ? "img" : undefined}
           aria-label={announceFailure ? "Tool call failed" : undefined}
@@ -418,6 +430,11 @@ function LiveActivityContent({
         </span>
       ) : null}
       <span className={cn("min-w-0 flex-1 truncate", active && "live-tool-shine")}>{label}</span>
+      {quietExit ? (
+        <span className="shrink-0 font-mono text-2xs tabular-nums text-muted-foreground">
+          exit 1
+        </span>
+      ) : null}
       {failedCount > 0 ? <FailedCountMarker count={failedCount} /> : null}
       {showTrailingFailureMark ? (
         <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
@@ -443,6 +460,7 @@ export function LiveWorkEntryTimelineRow({
   }
   const label = liveWorkEntryLabel(row.entry, ctx.workspaceRoot, row.active);
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
+  const quietExit = workEntryIsQuietCommandExit(row.entry);
 
   return (
     <button
@@ -476,6 +494,7 @@ export function LiveWorkEntryTimelineRow({
         toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
         failed={failed}
         active={row.active}
+        quietExit={quietExit}
       />
     </button>
   );

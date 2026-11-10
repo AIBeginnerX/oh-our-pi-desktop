@@ -1,6 +1,32 @@
 {
   "versions": [
     {
+      "version": "0.0.155",
+      "date": "2026-11-10",
+      "highlights": [
+        {
+          "en": "Charts in chat have a new renderer: 14 chart kinds in eight colours that are easy to tell apart, and the terminal app uses the same colours in the same order. Flowcharts use thin lines and connectors that route around boxes.",
+          "ko": "대화창 차트가 새 렌더러로 바뀌었습니다. 14가지 차트를 구분하기 쉬운 여덟 가지 색으로 그리고, 터미널 앱도 같은 색을 같은 순서로 씁니다. 흐름도는 가는 선과 상자를 피해 꺾이는 연결선으로 그려집니다."
+        },
+        {
+          "en": "A thread that rose to the top of the sidebar while working now stays there after it finishes. To arrange the active list by dragging, turn off Settings → General → Running threads first.",
+          "ko": "작업하면서 사이드바 맨 위로 올라온 스레드가 작업이 끝난 뒤에도 그 자리에 남습니다. 활성 목록을 드래그로 정렬하려면 설정 → 일반 → 진행 중인 스레드 맨 위로를 끄세요."
+        },
+        {
+          "en": "Commands that end with exit 1 and no error output, such as grep finding nothing, no longer show as failed, on desktop or in the terminal. The terminal installer checks the setup with oop doctor when it finishes.",
+          "ko": "grep이 아무것도 찾지 못한 경우처럼 오류 출력 없이 exit 1로 끝난 명령을 데스크톱과 터미널 모두에서 더 이상 실패로 표시하지 않습니다. 터미널 설치기는 마지막에 oop doctor로 설정을 확인합니다."
+        },
+        {
+          "en": "When Claude Code leads a crew, each wait for results lasts up to five minutes. Crew also warns when a task brief names files that do not exist, and its audits block changes that open security holes.",
+          "ko": "Claude Code가 crew를 이끌 때 결과를 한 번에 최대 5분까지 기다립니다. 작업 지시에 없는 파일 경로가 있으면 경고하고, 감사가 보안 구멍을 여는 변경을 막습니다."
+        },
+        {
+          "en": "Workspace writes no longer follow symbolic links out of the project folder, and the server's state folder is readable only by you.",
+          "ko": "작업 공간 쓰기가 심볼릭 링크를 따라 프로젝트 폴더 밖으로 나가지 않으며, 서버 상태 폴더는 본인만 읽을 수 있습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.154",
       "date": "2026-11-09",
       "highlights": [

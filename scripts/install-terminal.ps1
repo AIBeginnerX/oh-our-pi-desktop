@@ -3,6 +3,7 @@
 # Windows x64 only. OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # OOP_INSTALL_DIR is the folder the terminal app is unpacked into (default %LOCALAPPDATA%\oop-terminal\app);
 # OOP_BIN_DIR is where oop.cmd goes (default %LOCALAPPDATA%\oop-terminal). PATH is never edited.
+# OOP_INSTALL_SKIP_DOCTOR=1 skips the final "oop doctor" setup check (for tests and CI).
 # The command runs the Rust terminal client (oop-rs.exe); an archive without a working one is refused.
 # Running it again reinstalls (replaces the unpacked folder). An "oop" that OOP did not create is
 # never overwritten. To uninstall: oop stop; Remove-Item -Recurse -Force "$env:LOCALAPPDATA\oop-terminal"
@@ -150,10 +151,25 @@
             Write-Host "$binDir is not on PATH yet. Add it to your user PATH with this command, then open a new terminal:"
             Write-Host "  [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path','User') + ';$binDir', 'User')"
         }
+        if ($env:OOP_INSTALL_SKIP_DOCTOR -ne "1") {
+            Write-Host ""
+            Write-Host "Checking your setup (oop doctor):"
+            # Reports only, with stdin from an empty file: a provider that is missing or not signed in
+            # never fails the install.
+            try {
+                $doctorInput = Join-Path $temp "doctor-stdin.txt"
+                Set-Content -LiteralPath $doctorInput -Value "" -Encoding Ascii
+                $doctor = Start-Process -FilePath $env:ComSpec -ArgumentList "/d /c `"`"$target`" doctor`"" -RedirectStandardInput $doctorInput -Wait -PassThru -NoNewWindow
+                if ($doctor.ExitCode -ne 0) { Write-Host "oop doctor could not check everything here; run `"oop doctor`" again after signing in to a provider." }
+            } catch {
+                Write-Host "oop doctor could not run here; run `"oop doctor`" again after signing in to a provider."
+            }
+        }
         Write-Host ""
         Write-Host "Next:"
         Write-Host "  1. Sign in to a provider CLI first (for example Claude Code or Codex). OOP does not sign in for you."
         Write-Host "  2. In a project folder, run: oop    (oop provider shows which providers are ready)"
+        Write-Host "     After signing in, run: oop doctor    (what is ready and what is still missing)"
         Write-Host "Update: run this install command again, then `"oop stop`" so the new background server starts."
         Write-Host "Uninstall: oop stop; Remove-Item -Recurse -Force '$root', '$target'"
     }

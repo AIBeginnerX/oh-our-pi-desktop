@@ -15,6 +15,7 @@ $oldBase = $env:OOP_RELEASE_BASE_URL
 $oldBinDir = $env:OOP_BIN_DIR
 $oldInstallDir = $env:OOP_INSTALL_DIR
 $oldLocalAppData = $env:LOCALAPPDATA
+$oldSkipDoctor = $env:OOP_INSTALL_SKIP_DOCTOR
 $oldSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
 $root = Join-Path ([IO.Path]::GetTempPath()) ("oop-terminal-powershell-test-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $root | Out-Null
@@ -73,6 +74,8 @@ try {
     $env:PROCESSOR_ARCHITEW6432 = $null
     $env:OOP_VERSION = "1.2.3"
     $env:OOP_RELEASE_BASE_URL = "https://fixture.invalid/releases/download"
+    # The setup check runs the installed command; Start-Process below only stands in for oop-rs.exe.
+    $env:OOP_INSTALL_SKIP_DOCTOR = "1"
     $command = Join-Path $env:OOP_BIN_DIR "oop.cmd"
     & $script
     if ($script:downloads.Count -ne 2 -or -not $script:downloads[0].EndsWith("/v1.2.3/OOP-terminal-1.2.3-windows-x64.zip")) { throw "Wrong release asset." }
@@ -163,6 +166,7 @@ finally {
     $env:OOP_BIN_DIR = $oldBinDir
     $env:OOP_INSTALL_DIR = $oldInstallDir
     $env:LOCALAPPDATA = $oldLocalAppData
+    $env:OOP_INSTALL_SKIP_DOCTOR = $oldSkipDoctor
     [Net.ServicePointManager]::SecurityProtocol = $oldSecurityProtocol
     Remove-Item -LiteralPath $root -Recurse -Force
 }

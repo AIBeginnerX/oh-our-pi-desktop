@@ -299,7 +299,11 @@ fn node_state_word(node: &Node) -> &'static str {
 fn has_begun(node: &Node) -> bool {
     matches!(
         node.state,
-        NodeState::Running | NodeState::Completed | NodeState::Failed | NodeState::Paused
+        NodeState::Running
+            | NodeState::Completed
+            | NodeState::Failed
+            | NodeState::Quiet
+            | NodeState::Paused
     ) || node.started_at.is_some()
 }
 

@@ -1,12 +1,24 @@
 import { parseChartSpec, parseFlowchart } from "@t3tools/client-runtime/visual-blocks";
 import { BarChart3Icon, Code2Icon, WorkflowIcon } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { lazy, Suspense, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "../../ui/button";
-import { ChartView } from "./ChartView";
 import { FlowchartView } from "./FlowchartView";
 
+// ztd-charts is fetched only when a chart block actually renders.
+const ZtdChartView = lazy(() => import("./ZtdChartView"));
+
 export const VISUAL_BLOCK_LANGUAGES: ReadonlySet<string> = new Set(["chart", "mermaid"]);
+
+/** Placeholder while the chart chunk loads; the same look as the drawing box a stream shows. */
+function ChartPlaceholder() {
+  return (
+    <div className="flex h-40 items-center justify-center gap-2 rounded-xl border border-dashed border-border/70 text-xs text-muted-foreground motion-safe:rpt-shimmer">
+      <BarChart3Icon className="size-4" />
+      Drawing chart…
+    </div>
+  );
+}
 
 /**
  * A ```chart or ```mermaid block shown as a report figure. Until the fence closes an unparsable
@@ -71,7 +83,9 @@ export function VisualBlock(props: {
       {showSource ? (
         props.fallback
       ) : chart !== null ? (
-        <ChartView spec={chart} />
+        <Suspense fallback={<ChartPlaceholder />}>
+          <ZtdChartView spec={chart} />
+        </Suspense>
       ) : flow !== null ? (
         <FlowchartView chart={flow} />
       ) : null}

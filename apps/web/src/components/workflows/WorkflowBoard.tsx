@@ -26,6 +26,7 @@ export const WORKFLOW_STATE_TONE: Record<WorkflowNodeState, string> = {
   pending: "text-muted-foreground",
   cancelled: "text-muted-foreground/60",
   skipped: "text-muted-foreground/60",
+  quiet: "text-muted-foreground",
 };
 
 const EVIDENCE_VARIANT = { reported: "outline", tested: "info", audited: "success" } as const;
@@ -164,6 +165,7 @@ function isStarted(node: WorkflowCard["node"]): boolean {
     node.state === "running" ||
     node.state === "completed" ||
     node.state === "failed" ||
+    node.state === "quiet" ||
     node.state === "paused" ||
     node.info.startedAt !== undefined
   );

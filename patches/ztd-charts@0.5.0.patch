@@ -1,0 +1,62 @@
+diff --git a/dist/index.js b/dist/index.js
+index 4c1ef3978cd246d9ff9f442a1f86d30746ea50dd..83e176a24d5109a88b1698e4286d6fe4dcbff878 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1574,6 +1574,14 @@ function midSwatch(p, k) {
+   const raw = mixHex(p.theme.neutralStrong, p.theme.neutral, k);
+   return { role: "mix", fill: p.mix("neutralStrong", "neutral", k), text: readableOn(p, raw), raw };
+ }
++// OOP patch: multi-series/multi-item fills cycle --ztd-c1..c8 (host app defines them,
++// e.g. a report palette) instead of the one-accent-plus-grey steps. Fixed hexes are the
++// fallbacks for contrast maths only; the highlight keeps the accent.
++var CAT_HEX = ["#6366f1", "#45a6e5", "#2fb56b", "#e5a832", "#e25c4a", "#9d6fe8", "#2ec5c0", "#e05a9d"];
++function catSwatch(p, i) {
++  const hex = CAT_HEX[i % 8];
++  return { role: "mix", fill: `var(--ztd-c${i % 8 + 1}, ${hex})`, text: readableOn(p, hex), raw: hex };
++}
+ function categorical(p, n, hi) {
+   const out = new Array(n);
+   const rest = [];
+@@ -1581,16 +1589,8 @@ function categorical(p, n, hi) {
+     if (hi.has(i)) out[i] = swatch(p, "accent");
+     else rest.push(i);
+   }
+-  const k = rest.length;
+-  rest.forEach((idx, j) => {
+-    if (k === 1) out[idx] = swatch(p, "neutral");
+-    else if (j === 0) out[idx] = swatch(p, "ink");
+-    else if (j === k - 1) out[idx] = swatch(p, "neutral");
+-    else if (k === 3) out[idx] = swatch(p, "strong");
+-    else {
+-      const t = (j - 1) / Math.max(1, k - 2);
+-      out[idx] = t <= 1e-3 ? swatch(p, "strong") : midSwatch(p, 1 - t);
+-    }
++  rest.forEach((idx) => {
++    out[idx] = catSwatch(p, idx);
+   });
+   return out;
+ }
+@@ -1601,12 +1601,8 @@ function categoricalTokens(n, hi) {
+     if (hi.has(i)) out[i] = "accent";
+     else rest.push(i);
+   }
+-  const k = rest.length;
+-  rest.forEach((idx, j) => {
+-    if (k === 1) out[idx] = "neutral";
+-    else if (j === 0) out[idx] = "ink";
+-    else if (j === k - 1) out[idx] = "neutral";
+-    else out[idx] = "neutralStrong";
++  rest.forEach((idx) => {
++    out[idx] = `c${idx % 8 + 1}`;
+   });
+   return out;
+ }
+@@ -5895,7 +5891,7 @@ function StreamGraph(props) {
+   const layers = useMemo19(() => {
+     const rest = order.filter((s) => !hi.has(s));
+     const palette = /* @__PURE__ */ new Map();
+-    rest.forEach((s, j) => palette.set(s, rest.length === 1 ? swatch(p, "neutral") : midSwatch(p, 1 - j / Math.max(1, rest.length - 1))));
++    rest.forEach((s) => palette.set(s, catSwatch(p, s)));
+     return order.map((s, li) => {
+       const topPx = st.y1[li].map((v) => y(v));
+       const botPx = st.y0[li].map((v) => y(v));

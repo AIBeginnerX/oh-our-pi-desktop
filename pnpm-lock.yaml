@@ -125,6 +125,7 @@ patchedDependencies:
   react-native-reanimated@4.5.5: bae9878a5bdba94e11c890e5ee164542feb622624fc81c13890063094608216d
   react-native-screens@4.26.2: 595114f3f9ce8b9f0d99d1aafe5c12c997b7d75ca9add31d46cbedbfe347b8e0
   uniwind@1.11.0: a91f3953483cfd434436de6358ff5b63c49974ef148fad91246c26ba95332625
+  ztd-charts@0.5.0: 2f9351b3d6823b24aeec84914be44c413cd2a4a546521884c7837eed65aed2ae
 
 importers:
 
@@ -737,6 +738,9 @@ importers:
       tailwind-merge:
         specifier: ^3.4.0
         version: 3.6.0
+      ztd-charts:
+        specifier: 0.5.0
+        version: 0.5.0(patch_hash=2f9351b3d6823b24aeec84914be44c413cd2a4a546521884c7837eed65aed2ae)(react-dom@19.2.6(react@19.2.6))(react@19.2.6)
       zustand:
         specifier: ^5.0.11
         version: 5.0.14(@types/react@19.2.16)(react@19.2.6)(use-sync-external-store@1.6.0(react@19.2.6))
@@ -11264,6 +11268,12 @@ packages:
 
   zod@4.6.7:
     resolution: {integrity: sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==}
+
+  ztd-charts@0.5.0:
+    resolution: {integrity: sha512-ttIsC3pMDc+Lo0aX7U5hWwqXwu4uwP0xe69h2OlA38R8CdPYgksisx1VEGGdyge8NGxd/eXB0i/JL+Qvf+U/1Q==}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
 
   zustand@5.0.14:
     resolution: {integrity: sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==}
@@ -22878,6 +22888,11 @@ snapshots:
   zod@3.25.76: {}
 
   zod@4.6.7: {}
+
+  ztd-charts@0.5.0(patch_hash=2f9351b3d6823b24aeec84914be44c413cd2a4a546521884c7837eed65aed2ae)(react-dom@19.2.6(react@19.2.6))(react@19.2.6):
+    dependencies:
+      react: 19.2.6
+      react-dom: 19.2.6(react@19.2.6)
 
   zustand@5.0.14(@types/react@19.2.16)(react@19.2.6)(use-sync-external-store@1.6.0(react@19.2.6)):
     optionalDependencies:

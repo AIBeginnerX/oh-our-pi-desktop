@@ -171,12 +171,14 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "进行中的会话置顶",
     es: "Hilos en curso primero",
   },
-  "Threads with work in progress, approval or input requests stay at the top of the active list.": {
-    ko: "작업 중이거나 승인·입력을 기다리는 스레드를 활성 목록 맨 위에 둡니다.",
-    ja: "作業中、または承認・入力を待っているスレッドをアクティブ一覧の先頭に表示します。",
-    "zh-CN": "正在工作或等待批准、输入的会话会显示在活动列表顶部。",
-    es: "Los hilos con trabajo en curso o que esperan aprobación o una respuesta se quedan arriba en la lista activa.",
-  },
+  "Threads with work in progress, approval or input requests lead the active list, and the rest follow their latest work. Turn off to arrange the active list by dragging.":
+    {
+      ko: "작업 중이거나 승인·입력을 기다리는 스레드를 활성 목록 맨 위에 두고, 나머지는 최근 작업 순으로 둡니다. 끄면 활성 목록을 드래그로 정렬할 수 있습니다.",
+      ja: "作業中、または承認・入力を待っているスレッドをアクティブ一覧の先頭に表示し、残りは最近の作業順に並べます。オフにするとアクティブ一覧をドラッグで並べ替えられます。",
+      "zh-CN":
+        "正在工作或等待批准、输入的会话显示在活动列表顶部，其余按最近的工作排序。关闭后可拖动排列活动列表。",
+      es: "Los hilos con trabajo en curso o que esperan aprobación o una respuesta encabezan la lista activa, y el resto sigue su trabajo más reciente. Desactívalo para ordenar la lista activa arrastrando.",
+    },
   "Setup notifications": {
     ko: "설정 알림",
     ja: "セットアップ通知",

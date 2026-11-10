@@ -17,6 +17,7 @@ import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
 import { sweepStalePendingAttachments } from "./attachmentStore.ts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { DEFAULT_SIGNAL_EXPORT, type SignalExport } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 
@@ -175,6 +176,7 @@ export const deriveServerPaths = Effect.fn(function* (
 export const ensureServerDirectories = Effect.fn(function* (derivedPaths: ServerDerivedPaths) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const platform = yield* HostProcessPlatform;
 
   yield* Effect.all(
     [
@@ -192,6 +194,19 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
     ],
     { concurrency: "unbounded" },
   );
+
+  // Other local users must not read state.sqlite (conversation history, settings, logs).
+  // Best-effort: a state dir owned by another user must not block startup.
+  if (platform !== "win32") {
+    yield* fs.chmod(derivedPaths.stateDir, 0o700).pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not restrict the server state directory to its owner.", {
+          stateDir: derivedPaths.stateDir,
+          cause,
+        }),
+      ),
+    );
+  }
 
   const swept = sweepStalePendingAttachments({
     attachmentsDir: derivedPaths.attachmentsDir,

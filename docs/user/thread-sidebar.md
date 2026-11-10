@@ -30,8 +30,9 @@ and worktree while you stay in the new thread composer. This requires a Git proj
 Pin a thread from its menu to keep it above your active work.
 
 Threads that are working or waiting for your approval or input move to the top of the active
-list, and return to their place when they finish. Turn this off in **Settings → General →
-Running threads first** to keep the active list in your own order.
+list. The rest follow their latest work, so a thread that just finished stays near the top.
+To arrange the active list yourself by dragging, turn off **Settings → General → Running
+threads first**.
 
 On web and desktop, unpinning, settling, snoozing, and archiving a thread each show
 a notification with **Undo** for five seconds. Undo restores the thread's previous
@@ -66,8 +67,10 @@ thread is over takes the accent color. Section labels also
 identify empty sections and a collapsed settled shelf.
 
 Drag within the pinned or active section to change its order. Other rows slide aside to show the
-spot where the thread will land. Drops into either section keep the position you choose. On
-mobile, open a thread's menu and choose **Arrange threads**. Drag a handle within or between
+spot where the thread will land. Drops into either section keep the position you choose. While
+**Running threads first** is on, the active list orders itself instead: its rows cannot be
+rearranged, and a thread dragged into it takes its place by latest work. On mobile, open a
+thread's menu and choose **Arrange threads**. Drag a handle within or between
 **Pinned** and **Active** to reorder, pin, or unpin. Drop onto the **Settled** divider to
 settle a thread. The dragged card shows the action before you release it. Expand **Snoozed**
 or **Settled** to drag a parked thread back into either live section. Each drop saves; **Done** returns to the thread list.

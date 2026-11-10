@@ -96,6 +96,8 @@ export function createSidebarCollisionDetection(
  * A zero scaleY marks rows/markers to hide while retaining their measured nodes. */
 export function createSidebarSortingStrategy(input: {
   items: readonly SidebarListItem[];
+  /** Where Active will place the row, when its sort decides instead of the drop slot. */
+  activeOrder?: readonly string[] | undefined;
   settledOrder: readonly string[];
   settledExpanded: boolean;
   settledVisibleCount?: number;
@@ -152,7 +154,7 @@ export function createSidebarSortingStrategy(input: {
         ? target.pinnedOrder
         : target.section === "settled"
           ? input.settledOrder
-          : target.activeOrder;
+          : (input.activeOrder ?? target.activeOrder);
     const ranks = new Map(order.map((key, index) => [key, index]));
     const rank = ranks.get(active.key) ?? Number.POSITIVE_INFINITY;
     const index = group.findIndex(

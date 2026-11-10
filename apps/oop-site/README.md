@@ -25,3 +25,11 @@ The hero and the Terminal section play `assets/video/desktop-demo.mp4` and `asse
 ## Deploy to GitHub Pages
 
 The site is served at <https://oop-desktop.github.io/> from the `oop-desktop/oop-desktop.github.io` repository, which holds this folder's files at its root. Each release copies this folder there, and between releases the owner publishes site-only changes with `oop-publish-site` (see `tools/public-export/README.md`). Pages serves the `main` branch as plain files (`.nojekyll`). All asset paths are relative; only the `canonical` and `og:` tags in `index.html` hold the absolute URL.
+
+## Next release preview
+
+The `#next` section in `index.html` and the hero `.next-pill` link preview merged-but-unreleased, user-visible work for one version, named by the `data-next-version` attribute on both. The two attributes must always hold the same version.
+
+To refresh the preview for a new release, change: the version in both `data-next-version` attributes, the version in the section's eyebrow, the h2 and lede, the showcase block (chart gallery, the desktop-vs-terminal panels and the palette strip), and the cards under it.
+
+At release time, move the preview's cards into `#whats-new` (which keeps the last three releases), then either point the preview at the following version, delete the section, the nav link and the pill, or keep the section as that release's showcase without the two attributes and reworded as shipped. The release export refuses to publish while a `data-next-version` is not newer than the version being released. Social carousel images for a preview live in `assets/social/<version>/`.

@@ -50,8 +50,13 @@
         </a>
         <nav class="nav" aria-label="Sections">
           <a href="#what"><span lang="en">What it is</span><span lang="ko">소개</span></a>
+          <a href="#next"
+            ><span lang="en">New in 0.0.155</span><span lang="ko">0.0.155 새 기능</span></a
+          >
+          <a href="#whats-new"><span lang="en">What's new</span><span lang="ko">새 소식</span></a>
           <a href="#features"><span lang="en">Features</span><span lang="ko">기능</span></a>
           <a href="#crew">Crew</a>
+          <a href="#machines"><span lang="en">Machines</span><span lang="ko">여러 컴퓨터</span></a>
           <a href="#terminal"><span lang="en">Terminal</span><span lang="ko">터미널</span></a>
           <a href="#charts"><span lang="en">Charts</span><span lang="ko">차트</span></a>
           <a href="#flows"><span lang="en">Workflows</span><span lang="ko">워크플로</span></a>
@@ -87,6 +92,10 @@
       <section class="hero" id="top">
         <div class="hero-mesh" aria-hidden="true"><i></i><i></i><i></i></div>
         <div class="wrap hero-grid">
+          <a class="next-pill" href="#next">
+            <span lang="en"><b>0.0.155</b> New: charts, redrawn →</span>
+            <span lang="ko"><b>0.0.155</b> 새 기능: 차트가 새로 그려집니다 →</span>
+          </a>
           <p class="eyebrow">
             <span lang="en">Open source · MIT · Local-first</span>
             <span lang="ko">오픈소스 · MIT · 로컬 우선</span>
@@ -339,6 +348,948 @@
               작업물입니다.</span
             >
           </p>
+        </div>
+      </section>
+
+      <!-- New in 0.0.155 (shipped showcase) -->
+      <section class="section wrap" id="next">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span lang="en">New in 0.0.155</span><span lang="ko">0.0.155 새 기능</span>
+            <span class="next-badge"
+              ><span lang="en">Released · 2026-11-10</span
+              ><span lang="ko">정식 출시 · 2026-11-10</span></span
+            >
+          </p>
+          <h2>
+            <span lang="en">Charts,<br /><em>redrawn.</em></span>
+            <span lang="ko">차트가<br /><em>새로 그려집니다.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >In 0.0.155 every chart an agent draws in chat gets a new renderer: fourteen chart
+              kinds in eight colours that stay easy to tell apart, the same colours in the same
+              order in the terminal, and flowcharts with cleaner lines.</span
+            >
+            <span lang="ko"
+              >0.0.155에서는 에이전트가 대화창에 그리는 차트가 새 렌더러로 바뀝니다. 14가지 차트를
+              서로 구분하기 쉬운 여덟 가지 색으로 그리고, 터미널에서도 같은 색을 같은 순서로 쓰며,
+              흐름도는 더 깔끔한 선으로 그립니다.</span
+            >
+          </p>
+        </header>
+
+        <div class="chart-wrap reveal">
+          <h3 class="sr">
+            <span lang="en">Fourteen chart kinds</span><span lang="ko">14가지 차트</span>
+          </h3>
+          <div class="chart-grid">
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <rect x="20" y="44" width="24" height="40" rx="3" style="fill: var(--c1)" />
+                <rect x="56" y="20" width="24" height="64" rx="3" style="fill: var(--c1)" />
+                <rect x="92" y="32" width="24" height="52" rx="3" style="fill: var(--c1)" />
+                <rect x="128" y="8" width="24" height="76" rx="3" style="fill: var(--c1)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Bar</span><span lang="ko">막대</span><code>bar</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <rect x="8" y="12" width="112" height="12" rx="3" style="fill: var(--c1)" />
+                <rect x="8" y="34" width="88" height="12" rx="3" style="fill: var(--c1)" />
+                <rect x="8" y="56" width="64" height="12" rx="3" style="fill: var(--c1)" />
+                <rect x="8" y="78" width="40" height="12" rx="3" style="fill: var(--c1)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Horizontal bar</span><span lang="ko">가로 막대</span
+                ><code>hbar</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <polyline
+                  points="8,64 40,44 72,52 104,28 152,36"
+                  fill="none"
+                  style="stroke: var(--c1)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <polyline
+                  points="8,76 40,62 72,68 104,50 152,58"
+                  fill="none"
+                  style="stroke: var(--c2)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <figcaption>
+                <span lang="en">Line</span><span lang="ko">선</span><code>line</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <path
+                  d="M8,72 L40,48 L72,56 L104,32 L152,40 L152,84 L8,84 Z"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.25"
+                />
+                <path
+                  d="M8,72 L40,48 L72,56 L104,32 L152,40"
+                  fill="none"
+                  style="stroke: var(--c1)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <figcaption>
+                <span lang="en">Area</span><span lang="ko">영역</span><code>area</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <path
+                  d="M8,64 H40 V48 H72 V56 H104 V32 H152"
+                  fill="none"
+                  style="stroke: var(--c1)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+              <figcaption>
+                <span lang="en">Step</span><span lang="ko">계단</span><code>step</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <polyline
+                  points="8,60 30,52 52,58 74,40 96,46 118,30 140,36 152,28"
+                  fill="none"
+                  style="stroke: var(--c1)"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <circle cx="152" cy="28" r="3.5" style="fill: var(--c1)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Sparkline</span><span lang="ko">스파크라인</span
+                ><code>sparkline</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <line
+                  x1="20"
+                  y1="30"
+                  x2="140"
+                  y2="62"
+                  style="stroke: var(--c1)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                />
+                <line
+                  x1="20"
+                  y1="66"
+                  x2="140"
+                  y2="26"
+                  style="stroke: var(--c2)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                />
+                <circle cx="20" cy="30" r="4" style="fill: var(--c1)" />
+                <circle cx="140" cy="62" r="4" style="fill: var(--c1)" />
+                <circle cx="20" cy="66" r="4" style="fill: var(--c2)" />
+                <circle cx="140" cy="26" r="4" style="fill: var(--c2)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Slope</span><span lang="ko">기울기</span><code>slope</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <polyline
+                  points="20,24 60,24 100,48 140,48"
+                  fill="none"
+                  style="stroke: var(--c1)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <polyline
+                  points="20,48 60,48 100,24 140,24"
+                  fill="none"
+                  style="stroke: var(--c2)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <polyline
+                  points="20,72 60,72 100,72 140,72"
+                  fill="none"
+                  style="stroke: var(--c3)"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+                <circle cx="140" cy="48" r="3.5" style="fill: var(--c1)" />
+                <circle cx="140" cy="24" r="3.5" style="fill: var(--c2)" />
+                <circle cx="140" cy="72" r="3.5" style="fill: var(--c3)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Bump (ranks)</span><span lang="ko">순위</span><code>bump</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <rect x="8" y="10" width="14" height="14" rx="2" style="fill: var(--c1)" />
+                <rect
+                  x="26"
+                  y="10"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.15"
+                />
+                <rect
+                  x="44"
+                  y="10"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.45"
+                />
+                <rect
+                  x="62"
+                  y="10"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.8"
+                />
+                <rect
+                  x="80"
+                  y="10"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.3"
+                />
+                <rect
+                  x="116"
+                  y="10"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.6"
+                />
+                <rect
+                  x="8"
+                  y="28"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.3"
+                />
+                <rect
+                  x="26"
+                  y="28"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.6"
+                />
+                <rect x="44" y="28" width="14" height="14" rx="2" style="fill: var(--c1)" />
+                <rect
+                  x="62"
+                  y="28"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.15"
+                />
+                <rect
+                  x="98"
+                  y="28"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.45"
+                />
+                <rect
+                  x="116"
+                  y="28"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.8"
+                />
+                <rect
+                  x="26"
+                  y="46"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.45"
+                />
+                <rect
+                  x="44"
+                  y="46"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.8"
+                />
+                <rect
+                  x="62"
+                  y="46"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.6"
+                />
+                <rect
+                  x="80"
+                  y="46"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.3"
+                />
+                <rect x="98" y="46" width="14" height="14" rx="2" style="fill: var(--c1)" />
+                <rect
+                  x="116"
+                  y="46"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.15"
+                />
+                <rect
+                  x="8"
+                  y="64"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.6"
+                />
+                <rect
+                  x="44"
+                  y="64"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.3"
+                />
+                <rect
+                  x="62"
+                  y="64"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.45"
+                />
+                <rect
+                  x="80"
+                  y="64"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.8"
+                />
+                <rect
+                  x="98"
+                  y="64"
+                  width="14"
+                  height="14"
+                  rx="2"
+                  style="fill: var(--c1)"
+                  fill-opacity="0.15"
+                />
+                <rect x="116" y="64" width="14" height="14" rx="2" style="fill: var(--c1)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Calendar heatmap</span><span lang="ko">캘린더 히트맵</span
+                ><code>calendar</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <path d="M8,70 C40,62 80,74 152,64 L152,84 L8,84 Z" style="fill: var(--c3)" />
+                <path
+                  d="M8,54 C40,48 80,58 152,48 L152,64 C80,74 40,62 8,70 Z"
+                  style="fill: var(--c2)"
+                />
+                <path
+                  d="M8,36 C40,30 80,42 152,30 L152,48 C80,58 40,48 8,54 Z"
+                  style="fill: var(--c1)"
+                />
+              </svg>
+              <figcaption>
+                <span lang="en">Stream</span><span lang="ko">스트림</span><code>stream</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <path d="M80,48 L80,12 A36,36 0 0 1 111.2,66 Z" style="fill: var(--c1)" />
+                <path d="M80,48 L111.2,66 A36,36 0 0 1 48.8,66 Z" style="fill: var(--c2)" />
+                <path d="M80,48 L48.8,66 A36,36 0 0 1 80,12 Z" style="fill: var(--c3)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Pie</span><span lang="ko">파이</span><code>pie</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <circle
+                  cx="80"
+                  cy="48"
+                  r="32"
+                  fill="none"
+                  style="stroke: var(--c1)"
+                  stroke-width="16"
+                  stroke-dasharray="80.4 120.7"
+                  transform="rotate(-90 80 48)"
+                />
+                <circle
+                  cx="80"
+                  cy="48"
+                  r="32"
+                  fill="none"
+                  style="stroke: var(--c2)"
+                  stroke-width="16"
+                  stroke-dasharray="70.4 130.7"
+                  transform="rotate(54 80 48)"
+                />
+                <circle
+                  cx="80"
+                  cy="48"
+                  r="32"
+                  fill="none"
+                  style="stroke: var(--c3)"
+                  stroke-width="16"
+                  stroke-dasharray="50.3 150.8"
+                  transform="rotate(180 80 48)"
+                />
+              </svg>
+              <figcaption>
+                <span lang="en">Donut</span><span lang="ko">도넛</span><code>donut</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <rect x="8" y="12" width="44" height="72" rx="8" style="fill: var(--tint)" />
+                <rect x="58" y="12" width="44" height="72" rx="8" style="fill: var(--tint)" />
+                <rect x="108" y="12" width="44" height="72" rx="8" style="fill: var(--tint)" />
+                <rect x="16" y="24" width="28" height="18" rx="4" style="fill: var(--c1)" />
+                <rect x="66" y="24" width="24" height="18" rx="4" style="fill: var(--c2)" />
+                <rect x="116" y="24" width="20" height="18" rx="4" style="fill: var(--c3)" />
+                <rect x="16" y="54" width="22" height="5" rx="2.5" style="fill: var(--muted)" />
+                <rect x="66" y="54" width="18" height="5" rx="2.5" style="fill: var(--muted)" />
+                <rect x="116" y="54" width="24" height="5" rx="2.5" style="fill: var(--muted)" />
+                <rect x="16" y="64" width="14" height="5" rx="2.5" style="fill: var(--muted)" />
+                <rect x="66" y="64" width="12" height="5" rx="2.5" style="fill: var(--muted)" />
+                <rect x="116" y="64" width="16" height="5" rx="2.5" style="fill: var(--muted)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Key figures</span><span lang="ko">핵심 수치</span><code>stats</code>
+              </figcaption>
+            </figure>
+            <figure class="chart-tile">
+              <svg viewBox="0 0 160 96" aria-hidden="true">
+                <rect x="8" y="22" width="144" height="12" rx="6" style="fill: var(--tint)" />
+                <rect x="8" y="22" width="112" height="12" rx="6" style="fill: var(--c1)" />
+                <rect x="8" y="42" width="144" height="12" rx="6" style="fill: var(--tint)" />
+                <rect x="8" y="42" width="72" height="12" rx="6" style="fill: var(--c2)" />
+                <rect x="8" y="62" width="144" height="12" rx="6" style="fill: var(--tint)" />
+                <rect x="8" y="62" width="40" height="12" rx="6" style="fill: var(--c3)" />
+              </svg>
+              <figcaption>
+                <span lang="en">Progress</span><span lang="ko">진행률</span><code>progress</code>
+              </figcaption>
+            </figure>
+          </div>
+          <p class="hint">
+            <span lang="en">Illustrations of each chart kind, drawn for this page.</span
+            ><span lang="ko">각 차트 종류를 이 페이지용으로 그린 예시입니다.</span>
+          </p>
+        </div>
+
+        <div class="sub-head reveal">
+          <h3>
+            <span lang="en">Same colours, desktop and terminal</span
+            ><span lang="ko">데스크톱과 터미널이 같은 색으로</span>
+          </h3>
+        </div>
+        <div class="next-pair reveal">
+          <div class="next-panel">
+            <p class="next-panel-label">
+              <span lang="en">Desktop app</span><span lang="ko">데스크톱 앱</span>
+            </p>
+            <p class="next-legend" aria-hidden="true">
+              <span
+                ><i style="background: var(--c1)"></i><span lang="en">Edits</span
+                ><span lang="ko">편집</span></span
+              >
+              <span
+                ><i style="background: var(--c2)"></i><span lang="en">Checks</span
+                ><span lang="ko">검사</span></span
+              >
+              <span
+                ><i style="background: var(--c3)"></i><span lang="en">Reviews</span
+                ><span lang="ko">검토</span></span
+              >
+            </p>
+            <svg
+              viewBox="0 0 320 190"
+              role="img"
+              aria-label="Grouped bar chart: the same three series drawn in the first three report colours"
+              data-aria-en="Grouped bar chart: the same three series drawn in the first three report colours"
+              data-aria-ko="묶은 막대 차트: 같은 세 시리즈가 같은 처음 세 가지 보고서 색으로 그려집니다"
+            >
+              <line
+                x1="8"
+                y1="150"
+                x2="312"
+                y2="150"
+                style="stroke: var(--line)"
+                stroke-width="1"
+              />
+              <rect x="14" y="50" width="16" height="100" rx="3" style="fill: var(--c1)" />
+              <rect x="34" y="100" width="16" height="50" rx="3" style="fill: var(--c2)" />
+              <rect x="54" y="120" width="16" height="30" rx="3" style="fill: var(--c3)" />
+              <rect x="90" y="90" width="16" height="60" rx="3" style="fill: var(--c1)" />
+              <rect x="110" y="60" width="16" height="90" rx="3" style="fill: var(--c2)" />
+              <rect x="130" y="130" width="16" height="20" rx="3" style="fill: var(--c3)" />
+              <rect x="166" y="70" width="16" height="80" rx="3" style="fill: var(--c1)" />
+              <rect x="186" y="110" width="16" height="40" rx="3" style="fill: var(--c2)" />
+              <rect x="206" y="90" width="16" height="60" rx="3" style="fill: var(--c3)" />
+              <rect x="242" y="30" width="16" height="120" rx="3" style="fill: var(--c1)" />
+              <rect x="262" y="80" width="16" height="70" rx="3" style="fill: var(--c2)" />
+              <rect x="282" y="110" width="16" height="40" rx="3" style="fill: var(--c3)" />
+              <text
+                lang="en"
+                x="42"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                Mon
+              </text>
+              <text
+                lang="ko"
+                x="42"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                월
+              </text>
+              <text
+                lang="en"
+                x="118"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                Tue
+              </text>
+              <text
+                lang="ko"
+                x="118"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                화
+              </text>
+              <text
+                lang="en"
+                x="194"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                Wed
+              </text>
+              <text
+                lang="ko"
+                x="194"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                수
+              </text>
+              <text
+                lang="en"
+                x="270"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                Thu
+              </text>
+              <text
+                lang="ko"
+                x="270"
+                y="170"
+                text-anchor="middle"
+                font-size="12"
+                style="fill: var(--muted)"
+              >
+                목
+              </text>
+            </svg>
+          </div>
+          <div class="next-panel">
+            <p class="next-panel-label">
+              <span lang="en">Terminal</span><span lang="ko">터미널</span>
+            </p>
+            <div class="tm-win next-term">
+              <div class="tm-bar" aria-hidden="true"><i></i><i></i><i></i><span>oop</span></div>
+              <div class="tm-body next-term-body" aria-hidden="true">
+                <p class="tm-line">oop › charts</p>
+                <p class="tm-row">
+                  <span class="tm-key"
+                    ><span lang="en">Edits</span><span lang="ko">편집</span></span
+                  >
+                  <b style="color: var(--c1)">████████████</b> 12
+                </p>
+                <p class="tm-row">
+                  <span class="tm-key"
+                    ><span lang="en">Checks</span><span lang="ko">검사</span></span
+                  >
+                  <b style="color: var(--c2)">███████</b> 7
+                </p>
+                <p class="tm-row">
+                  <span class="tm-key"
+                    ><span lang="en">Reviews</span><span lang="ko">검토</span></span
+                  >
+                  <b style="color: var(--c3)">████</b> 4
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="next-palette reveal">
+          <ul class="palette-strip" aria-hidden="true">
+            <li><i style="background: var(--c1)"></i>1</li>
+            <li><i style="background: var(--c2)"></i>2</li>
+            <li><i style="background: var(--c3)"></i>3</li>
+            <li><i style="background: var(--c4)"></i>4</li>
+            <li><i style="background: var(--c5)"></i>5</li>
+            <li><i style="background: var(--c6)"></i>6</li>
+            <li><i style="background: var(--c7)"></i>7</li>
+            <li><i style="background: var(--c8)"></i>8</li>
+          </ul>
+          <p class="hint">
+            <span lang="en"
+              >Each terminal theme carries the same eight colours and folds them to 256 or 16
+              colours, or none, when the terminal shows fewer. A one-point chart now draws as a bar,
+              and an all-zero chart says so.</span
+            >
+            <span lang="ko"
+              >터미널 테마마다 같은 여덟 가지 색을 갖고, 터미널이 표현하는 색이 적으면
+              256색·16색이나 흑백으로 맞춥니다. 값이 하나뿐인 차트는 막대로, 값이 모두 0인 차트는
+              그렇다는 안내와 함께 그립니다.</span
+            >
+          </p>
+        </div>
+
+        <div class="cards">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.155</span
+              ><span class="tag"
+                ><span lang="en">Diagrams</span><span lang="ko">다이어그램</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">Cleaner flowcharts</span><span lang="ko">더 깔끔한 흐름도</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Flowcharts in chat use thin lines, right-angle connectors that route around boxes,
+                and a tint per level. For architecture, sequence or data-flow diagrams, the agent
+                uses the diagram-design skill when it is installed.</span
+              >
+              <span lang="ko"
+                >대화창 흐름도가 가는 선, 상자를 피해 꺾이는 직각 연결선, 단계별 색으로 그려집니다.
+                아키텍처·시퀀스·데이터 흐름처럼 흐름도로 담기 어려운 그림은 diagram-design 스킬이
+                설치돼 있으면 그 스킬로 그립니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.155</span
+              ><span class="tag"><span lang="en">Commands</span><span lang="ko">명령</span></span>
+            </p>
+            <h3>
+              <span lang="en">A grep that finds nothing is not a failure</span
+              ><span lang="ko">아무것도 못 찾은 grep은 실패가 아닙니다</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >A query such as <code>grep</code>, <code>test</code> or <code>which</code> that
+                exits 1 with no error output now shows as a muted <code>exit 1</code>, not a failed
+                command, in the desktop app and the terminal.</span
+              >
+              <span lang="ko"
+                ><code>grep</code>, <code>test</code>, <code>which</code>처럼 결과가 없을 때 exit
+                1로 끝나는 명령이 오류 출력 없이 끝나면, 데스크톱 앱과 터미널 모두 실패가 아니라
+                흐린 <code>exit 1</code>로 표시합니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.155</span
+              ><span class="tag"><span lang="en">Install</span><span lang="ko">설치</span></span>
+            </p>
+            <h3>
+              <span lang="en">The installer checks your setup</span
+              ><span lang="ko">설치가 끝나면 바로 점검</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >The terminal-only installer ends by running <code>oop doctor</code> once, so you
+                see which providers are ready and what is still missing.</span
+              >
+              <span lang="ko"
+                >터미널 전용 설치 스크립트가 마지막에 <code>oop doctor</code>를 한 번 실행해, 준비된
+                provider와 아직 빠진 것을 바로 보여 줍니다.</span
+              >
+            </p>
+            <code>oop doctor</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.155</span
+              ><span class="tag"><span lang="en">Security</span><span lang="ko">보안</span></span>
+            </p>
+            <h3>
+              <span lang="en">Safer on shared machines</span
+              ><span lang="ko">공유 컴퓨터에서도 더 안전하게</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Files OOP writes in a project no longer follow a symlink outside the project
+                folder, the folder holding your chat history is readable only by your user on macOS
+                and Linux, and crew audits block changes that open a security hole.</span
+              >
+              <span lang="ko"
+                >OOP가 프로젝트에 쓰는 파일이 심볼릭 링크를 따라 프로젝트 폴더 밖으로 나가지 않고,
+                대화 기록이 담긴 폴더는 macOS·Linux에서 본인 계정만 읽을 수 있으며, crew 감사는 보안
+                구멍을 여는 변경을 막습니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top"><span class="num">0.0.155</span><span class="tag">Crew</span></p>
+            <h3>
+              <span lang="en">The crew wastes fewer turns</span
+              ><span lang="ko">crew가 헛도는 일이 줄었습니다</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >A Claude Code lead now waits up to five minutes per check instead of 50 seconds, a
+                task that cites a missing path gets a warning up front, and members re-read a file
+                right before editing it.</span
+              >
+              <span lang="ko"
+                >Claude Code가 이끄는 crew는 결과를 한 번에 최대 5분까지 기다리고(이전 50초), 없는
+                경로를 가리키는 작업은 맡길 때 바로 경고를 받으며, 멤버는 파일을 고치기 직전에 다시
+                읽습니다.</span
+              >
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- What's new -->
+      <section class="section wrap" id="whats-new">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>0.0.153–0.0.155</span> · <span lang="en">What's new</span
+            ><span lang="ko">새 소식</span>
+          </p>
+          <h2>
+            <span lang="en">Shipped since<br /><em>the last update.</em></span>
+            <span lang="ko">지난 업데이트 이후<br /><em>새로 들어온 것들.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >The last three releases in short. Every release also lists its highlights in Settings
+              → What's new.</span
+            >
+            <span lang="ko"
+              >최근 세 릴리스의 요약입니다. 각 릴리스의 하이라이트는 설정 → 새로운 기능에서도 볼 수
+              있습니다.</span
+            >
+          </p>
+        </header>
+        <div class="cards">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.155</span
+              ><span class="tag"><span lang="en">Charts</span><span lang="ko">차트</span></span>
+            </p>
+            <h3>
+              <span lang="en">Charts in chat get a new renderer</span
+              ><span lang="ko">대화창 차트가 새 렌더러로 바뀝니다</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Fourteen chart kinds in eight easy-to-tell-apart colours, and the terminal app uses
+                the same colours in the same order. Flowcharts use thin lines and connectors that
+                route around boxes. A thread that rose to the top of the sidebar while working stays
+                there after it finishes. Commands that end with exit 1 and no error output, such as
+                grep finding nothing, no longer show as failed.</span
+              >
+              <span lang="ko"
+                >14가지 차트를 구분하기 쉬운 여덟 가지 색으로 그리고, 터미널 앱도 같은 색을 같은
+                순서로 씁니다. 흐름도가 가는 선과 상자를 피해 꺾이는 연결선으로 그려집니다.
+                작업하면서 사이드바 맨 위로 올라온 스레드가 작업이 끝난 뒤에도 그 자리에 남습니다.
+                grep이 아무것도 찾지 못한 경우처럼 오류 출력 없이 exit 1로 끝난 명령을 더 이상
+                실패로 표시하지 않습니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top"><span class="num">0.0.153</span><span class="tag">Crew</span></p>
+            <h3>
+              <span lang="en">Set the crew once</span><span lang="ko">crew는 한 번만 설정</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Settings → General → Crew sets the crew and fallback models that every new chat
+                starts with, instead of picking them again in each composer.</span
+              >
+              <span lang="ko"
+                >설정 → 일반 → Crew에서 새 대화가 기본으로 쓸 crew와 fallback 모델을 정해 둘 수
+                있습니다. 입력창에서 매번 다시 고르지 않아도 됩니다.</span
+              >
+            </p>
+            <code>Settings → General → Crew</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top"><span class="num">0.0.153</span><span class="tag">Crew</span></p>
+            <h3>
+              <span lang="en">The crew repeats less</span
+              ><span lang="ko">crew가 같은 일을 덜 반복합니다</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >A repeated task gets the earlier attempt's outcome, a model that refused twice sits
+                out for a day, and results from tasks handed out together arrive in one
+                follow-up.</span
+              >
+              <span lang="ko"
+                >다시 맡긴 작업에는 이전 시도의 결과가 전달되고, 두 번 거부한 모델은 하루 쉬며, 함께
+                맡긴 작업의 결과는 한 번에 도착합니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top"><span class="num">0.0.154</span><span class="tag">Crew</span></p>
+            <h3>
+              <span lang="en">Crew reports you can trust</span
+              ><span lang="ko">믿을 수 있는 crew 보고</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >An answer without a status counts as unfinished, dropped results show in the
+                decision log, and a check with a wrong path says the file does not exist instead of
+                passing.</span
+              >
+              <span lang="ko"
+                >상태 표시가 없는 응답은 미완료로 계산하고, 버려진 결과는 결정 로그에 남으며, 경로가
+                틀린 확인은 통과가 아니라 파일이 없다고 알려 줍니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.154</span
+              ><span class="tag"
+                ><span lang="en">Sidebar</span><span lang="ko">사이드바</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">Running threads first, and a popup when one ends</span
+              ><span lang="ko">진행 중인 스레드가 먼저, 끝나면 팝업</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Threads that are working or waiting for your approval or input lead the sidebar,
+                and a small popup in the top-right corner tells you when a thread finishes, fails or
+                needs you, even if you were in another app.</span
+              >
+              <span lang="ko"
+                >작업 중이거나 승인·입력을 기다리는 스레드가 사이드바 맨 위로 올라오고, 스레드가
+                끝나거나 실패하거나 확인이 필요하면 오른쪽 위에 작은 팝업이 뜹니다. 다른 앱을 보고
+                있었어도 돌아오면 보입니다.</span
+              >
+            </p>
+            <code>Settings → General → Running threads first</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">0.0.153 · 0.0.154</span
+              ><span class="tag"><span lang="en">Recovery</span><span lang="ko">복구</span></span>
+            </p>
+            <h3>
+              <span lang="en">Interrupted is not an error</span
+              ><span lang="ko">중단된 대화는 중단됨으로</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >A chat cut off by a server restart now reads as interrupted with a hint to
+                continue, not as an error. Desktop and the terminal app also do less background
+                work: settings and connections update on change instead of polling, and long chats
+                redraw with less copying.</span
+              >
+              <span lang="ko"
+                >서버 재시작으로 끊긴 대화가 오류가 아니라 "중단됨"으로 표시되고, 이어서 진행하는
+                방법을 안내합니다. 데스크톱과 터미널 앱의 백그라운드 작업도 줄어, 설정과 연결은
+                주기적으로 확인하지 않고 바뀔 때만 갱신하며 긴 대화를 다시 그릴 때 복사도
+                줄었습니다.</span
+              >
+            </p>
+          </article>
         </div>
       </section>
 
@@ -1042,11 +1993,12 @@
                 </li>
                 <li data-on="auditor,w-a,x-a" data-off="" data-run="w-a,x-a">
                   <span lang="en"
-                    ><b>A turn that changed files</b> goes to the auditor. Small, test-passing
-                    changes of 20 lines or fewer are skipped.</span
+                    ><b>A turn that changed files</b> goes to the auditor. A small, test-passing
+                    change of 20 lines or fewer gets a short light review instead of a full
+                    audit.</span
                   ><span lang="ko"
                     ><b>파일을 바꾼 턴</b>은 auditor에게 갑니다. 테스트를 통과한 20줄 이하의 작은
-                    변경은 건너뜁니다.</span
+                    변경은 전체 감사 대신 짧은 경량 검토를 받습니다.</span
                   >
                 </li>
                 <li data-on="review" data-off="" data-run="review">
@@ -1088,8 +2040,14 @@
             >
           </li>
           <li>
-            <span lang="en">Small, test-passing changes of 20 lines or fewer are not audited.</span>
-            <span lang="ko">테스트를 통과한 20줄 이하의 작은 변경은 감사하지 않습니다.</span>
+            <span lang="en"
+              >A small, test-passing change of 20 lines or fewer gets a short light review instead
+              of a full audit.</span
+            >
+            <span lang="ko"
+              >테스트를 통과한 20줄 이하의 작은 변경은 전체 감사 대신 짧은 경량 검토를
+              받습니다.</span
+            >
           </li>
           <li>
             <span lang="en"
@@ -1105,10 +2063,366 @@
       </section>
 
       <!-- 04 -->
+      <section class="section wrap" id="machines">
+        <header class="sec-head reveal">
+          <p class="eyebrow">
+            <span>04</span> · <span lang="en">Machines</span><span lang="ko">여러 컴퓨터</span>
+          </p>
+          <h2>
+            <span lang="en">One OOP,<br /><em>every machine.</em></span>
+            <span lang="ko">하나의 OOP로<br /><em>모든 컴퓨터를.</em></span>
+          </h2>
+          <p class="sec-lede">
+            <span lang="en"
+              >Connect the computers you already run OOP on and drive all of them from one window.
+              Projects grouped across connected environments sit together, and new threads can go to
+              whichever machine has CPU and memory free.</span
+            >
+            <span lang="ko"
+              >이미 OOP를 돌리고 있는 컴퓨터들을 연결하면 창 하나로 모두 다룰 수 있습니다. 연결한
+              환경에 걸친 프로젝트가 한데 모이고, 새 스레드는 CPU와 메모리가 남은 컴퓨터로 배분할 수
+              있습니다.</span
+            >
+          </p>
+        </header>
+        <div class="cards">
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">M1</span
+              ><span class="tag"><span lang="en">Connect</span><span lang="ko">연결</span></span>
+            </p>
+            <h3>
+              <span lang="en">Add a computer once</span><span lang="ko">컴퓨터는 한 번만 추가</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Add a desktop through OOP Connect, pair it directly over your LAN or a private
+                network, or let OOP manage an SSH host: it starts the server there and opens the
+                port forward for you. Projects, provider credentials and agent work stay on that
+                machine.</span
+              >
+              <span lang="ko"
+                >OOP Connect로 데스크톱을 추가하거나, 같은 LAN이나 사설 네트워크에서 직접
+                페어링하거나, SSH 호스트를 맡길 수 있습니다. OOP가 그곳에서 서버를 띄우고 포트
+                포워딩까지 열어 줍니다. 프로젝트, provider 자격 증명, 에이전트 작업은 그 컴퓨터에
+                남습니다.</span
+              >
+            </p>
+            <code>Settings → Connections → Add environment</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">M2</span
+              ><span class="tag"
+                ><span lang="en">Sidebar</span><span lang="ko">사이드바</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">All of them in one sidebar</span
+              ><span lang="ko">사이드바 하나에 전부</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Each connected computer shows up as an environment beside the others in the thread
+                list and the environment picker, so you can read and continue a thread where it
+                already runs instead of opening a second app.</span
+              >
+              <span lang="ko"
+                >연결한 컴퓨터는 스레드 목록과 환경 선택기에 나란히 표시되므로, 다른 앱을 열지 않고
+                이미 돌고 있는 곳에서 스레드를 읽고 이어 갈 수 있습니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">M3</span
+              ><span class="tag"><span lang="en">Balance</span><span lang="ko">배분</span></span>
+            </p>
+            <h3>
+              <span lang="en">New threads pick a machine by CPU and memory</span
+              ><span lang="ko">새 스레드는 CPU·메모리를 보고 컴퓨터를 고름</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >Turn on Load balancing once two or more machines are connected and a draft's
+                environment is chosen for you from whichever machine has CPU and memory available.
+                Each machine starts at Normal; set Prefer, Less often or Manual only to change its
+                share. These are preferences, not fixed percentages, and existing threads stay where
+                they started.</span
+              >
+              <span lang="ko"
+                >컴퓨터가 두 대 이상 연결되면 Load balancing을 켤 수 있고, 초안의 환경은 CPU와
+                메모리가 남은 컴퓨터 중에서 자동으로 정해집니다. 각 컴퓨터는 Normal에서 시작하며,
+                Prefer·Less often·Manual only로 비중을 바꿀 수 있습니다. 고정 비율이 아니라
+                선호도이며, 이미 시작한 스레드는 있던 컴퓨터에 그대로 남습니다.</span
+              >
+            </p>
+            <code>Settings → Connections → Load balancing</code>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">M4</span
+              ><span class="tag"
+                ><span lang="en">Remote only</span><span lang="ko">원격 전용</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">A laptop that only drives the others</span
+              ><span lang="ko">다른 컴퓨터만 조종하는 노트북</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >On a light laptop, switch off Local environment: OOP restarts without a local
+                server, runs no local agents or terminals, and other devices can no longer connect
+                to it. Projects, history and saved connections are kept, and you keep working
+                through pairing, OOP Connect or SSH.</span
+              >
+              <span lang="ko"
+                >가벼운 노트북에서는 Local environment를 끄세요. OOP가 로컬 서버 없이 다시 시작되어
+                이 컴퓨터에서는 에이전트나 터미널이 돌지 않고, 다른 기기도 이 컴퓨터에 연결할 수
+                없습니다. 프로젝트, 기록, 저장된 연결은 유지되고, 페어링·OOP Connect·SSH로 계속
+                작업합니다.</span
+              >
+            </p>
+            <code>Settings → Connections → Local environment: off</code>
+          </article>
+        </div>
+        <div class="flow flow-machines reveal" data-flow>
+          <div class="flow-bar">
+            <div class="flow-ctl" role="group" aria-label="Animation controls / 애니메이션 제어">
+              <button type="button" class="ctl" data-act="play" data-state="paused">
+                <span class="s-paused"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5v11l9-5.5z" /></svg
+                  ><span lang="en">Play</span><span lang="ko">재생</span></span
+                ><span class="s-playing"
+                  ><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                    <path fill="currentColor" d="M4 2.5h3v11H4zM9 2.5h3v11H9z" /></svg
+                  ><span lang="en">Pause</span><span lang="ko">일시정지</span></span
+                >
+              </button>
+              <button type="button" class="ctl" data-act="step">
+                <span lang="en">Step</span><span lang="ko">한 단계</span>
+              </button>
+              <button type="button" class="ctl" data-act="replay">
+                <span lang="en">Replay</span><span lang="ko">다시 보기</span>
+              </button>
+            </div>
+          </div>
+          <div class="flow-body">
+            <svg
+              class="flow-svg"
+              viewBox="0 0 440 300"
+              role="img"
+              aria-label="One OOP window connects to a desktop on the same network, a laptop set to remote only, and an SSH host"
+              data-aria-en="One OOP window connects to a desktop on the same network, a laptop set to remote only, and an SSH host"
+              data-aria-ko="OOP 창 하나가 같은 네트워크의 데스크톱, 원격 전용으로 설정한 노트북, SSH 호스트에 연결됩니다"
+            >
+              <g class="particles"></g>
+              <g class="fl-node on" data-id="oop">
+                <rect class="halo" x="8" y="106" width="140" height="88" rx="14" />
+                <rect class="box" x="12" y="110" width="132" height="80" rx="10" />
+                <text x="78" y="146" text-anchor="middle" font-size="18" font-weight="600">
+                  OOP
+                </text>
+                <text
+                  lang="en"
+                  x="78"
+                  y="166"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  one window
+                </text>
+                <text
+                  lang="ko"
+                  x="78"
+                  y="166"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  창 하나
+                </text>
+              </g>
+              <g class="fl-node on" data-id="dt">
+                <rect class="halo" x="282" y="8" width="146" height="72" rx="14" />
+                <rect class="box" x="286" y="12" width="138" height="64" rx="10" />
+                <text x="355" y="42" text-anchor="middle" font-size="18" font-weight="600">
+                  Desktop
+                </text>
+                <text
+                  lang="en"
+                  x="355"
+                  y="60"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  LAN or Tailscale
+                </text>
+                <text
+                  lang="ko"
+                  x="355"
+                  y="60"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  LAN 또는 Tailscale
+                </text>
+              </g>
+              <g class="fl-node on" data-id="lp">
+                <rect class="halo" x="282" y="114" width="146" height="72" rx="14" />
+                <rect class="box" x="286" y="118" width="138" height="64" rx="10" />
+                <text x="355" y="148" text-anchor="middle" font-size="18" font-weight="600">
+                  Laptop
+                </text>
+                <text
+                  lang="en"
+                  x="355"
+                  y="166"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  remote only
+                </text>
+                <text
+                  lang="ko"
+                  x="355"
+                  y="166"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  원격 전용
+                </text>
+              </g>
+              <g class="fl-node on" data-id="srv">
+                <rect class="halo" x="282" y="220" width="146" height="72" rx="14" />
+                <rect class="box" x="286" y="224" width="138" height="64" rx="10" />
+                <text x="355" y="254" text-anchor="middle" font-size="18" font-weight="600">
+                  SSH host
+                </text>
+                <text
+                  lang="en"
+                  x="355"
+                  y="272"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  managed by OOP
+                </text>
+                <text
+                  lang="ko"
+                  x="355"
+                  y="272"
+                  text-anchor="middle"
+                  font-size="13"
+                  font-weight="400"
+                  class="sub"
+                >
+                  OOP가 관리
+                </text>
+              </g>
+              <path
+                class="fl-edge on"
+                data-id="e1"
+                pathLength="1"
+                d="M144,150 C214,150 216,44 286,44"
+              />
+              <path class="fl-head on" data-id="e1" d="M277.0,39.0 L286.0,44.0 L277.0,49.0" />
+              <path class="fl-edge on" data-id="e2" pathLength="1" d="M144,150 L286,150" />
+              <path class="fl-head on" data-id="e2" d="M277.0,145.0 L286.0,150.0 L277.0,155.0" />
+              <path
+                class="fl-edge on"
+                data-id="e3"
+                pathLength="1"
+                d="M144,150 C214,150 216,256 286,256"
+              />
+              <path class="fl-head on" data-id="e3" d="M277.0,251.0 L286.0,256.0 L277.0,261.0" />
+            </svg>
+            <div class="flow-side">
+              <ol class="flow-steps" data-steps="">
+                <li data-on="oop,dt,e1" data-off="" data-run="e1">
+                  <span lang="en"
+                    ><b>Add a desktop</b> through OOP Connect, or pair it on your LAN or private
+                    network. Its projects join the same thread list.</span
+                  ><span lang="ko"
+                    >OOP Connect로 <b>데스크톱을 추가</b>하거나 LAN·사설 네트워크에서 페어링합니다.
+                    그 컴퓨터의 프로젝트가 같은 스레드 목록에 들어옵니다.</span
+                  >
+                </li>
+                <li data-on="lp,e2" data-off="" data-run="e2">
+                  <span lang="en"
+                    ><b>A second machine</b> can be a laptop with Local environment switched off: it
+                    drives the others and runs nothing itself.</span
+                  ><span lang="ko"
+                    ><b>두 번째 컴퓨터</b>는 Local environment를 끈 노트북이어도 됩니다. 다른
+                    컴퓨터를 조종하고 자기 자신에서는 아무것도 실행하지 않습니다.</span
+                  >
+                </li>
+                <li data-on="srv,e3" data-off="" data-run="e3">
+                  <span lang="en"
+                    ><b>An SSH host</b> works the same way; OOP starts the server there and keeps
+                    the provider sign-ins on that host.</span
+                  ><span lang="ko"
+                    ><b>SSH 호스트</b>도 같습니다. OOP가 그곳에서 서버를 시작하고 provider 로그인은
+                    그 호스트에 둡니다.</span
+                  >
+                </li>
+                <li data-on="oop" data-off="" data-run="e1,e2">
+                  <span lang="en"
+                    ><b>New threads are balanced</b> across machines by CPU and memory once Load
+                    balancing is on; each machine has its own preference.</span
+                  ><span lang="ko"
+                    >Load balancing을 켜면 <b>새 스레드가</b> CPU와 메모리를 보고 컴퓨터 사이에
+                    배분되고, 컴퓨터마다 선호도를 따로 정할 수 있습니다.</span
+                  >
+                </li>
+              </ol>
+              <p class="flow-note">
+                <span lang="en"
+                  >Every machine you add has to be on and reachable, and OOP has to be running
+                  there.</span
+                ><span lang="ko"
+                  >추가한 컴퓨터는 켜져 있고 연결할 수 있어야 하며, 그곳에서 OOP가 실행 중이어야
+                  합니다.</span
+                >
+              </p>
+            </div>
+          </div>
+          <p class="sr" aria-live="polite" data-live></p>
+        </div>
+        <p class="hint reveal">
+          <span lang="en"
+            >Pairing a phone is a different route, and the phone connects to one desktop that has to
+            stay awake: see <a href="#mobile">Phone</a>. An SSH host must be Linux (x64 or arm64) or
+            an Apple Silicon Mac with its provider CLIs installed and signed in.</span
+          >
+          <span lang="ko"
+            >휴대폰 페어링은 다른 경로이며, 휴대폰은 켜져 있어야 하는 데스크톱 하나에 연결합니다.
+            <a href="#mobile">휴대폰</a> 섹션을 참고하세요. SSH 호스트는 Linux(x64 또는 arm64)이거나
+            provider CLI가 설치·로그인된 Apple Silicon Mac이어야 합니다.</span
+          >
+        </p>
+      </section>
+
+      <!-- 05 -->
       <section class="section wrap" id="terminal">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>04</span> · <span lang="en">Terminal</span><span lang="ko">터미널</span>
+            <span>05</span> · <span lang="en">Terminal</span><span lang="ko">터미널</span>
           </p>
           <h2>
             <span lang="en">The same threads,<br /><em>in your terminal.</em></span>
@@ -1815,6 +3129,54 @@
               <li><code>/theme</code></li>
             </ul>
           </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T7</span
+              ><span class="tag"><span lang="en">Charts</span><span lang="ko">차트</span></span>
+            </p>
+            <h3>
+              <span lang="en">Charts in the terminal too</span
+              ><span lang="ko">터미널에서도 차트</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >When the agent answers with a chart, <code>oop</code> draws it in the terminal:
+                bar, line, area, donut, sparkline, calendar, key figures and more. Series take the
+                same colours in the same order as the desktop chat, and each theme falls back to 256
+                or 16 colours, or none, when your terminal shows fewer.</span
+              ><span lang="ko"
+                >에이전트가 차트로 답하면 <code>oop</code>이 터미널에 그려 줍니다.
+                막대·선·영역·도넛·스파크라인·캘린더·핵심 수치 등을 지원합니다. 시리즈 색은 데스크톱
+                대화창과 같은 색을 같은 순서로 쓰고, 터미널이 표현하는 색이 적으면 테마마다
+                256색·16색이나 흑백으로 맞춥니다.</span
+              >
+            </p>
+          </article>
+          <article class="card reveal">
+            <p class="card-top">
+              <span class="num">T8</span
+              ><span class="tag"
+                ><span lang="en">Exit codes</span><span lang="ko">종료 코드</span></span
+              >
+            </p>
+            <h3>
+              <span lang="en">A “no” is not a failure</span
+              ><span lang="ko">“없음”은 실패가 아닙니다</span>
+            </h3>
+            <p>
+              <span lang="en"
+                >When a query such as <code>grep</code>, <code>test</code>, <code>which</code> or
+                <code>git diff --quiet</code> exits 1 with no error output, the command shows a
+                muted <code>exit 1</code> instead of a failure, the same rule as the desktop
+                app.</span
+              ><span lang="ko"
+                ><code>grep</code>, <code>test</code>, <code>which</code>,
+                <code>git diff --quiet</code>처럼 “없음”을 exit 1로 알리는 명령이 오류 출력 없이
+                끝나면, 실패 대신 흐린 <code>exit 1</code>로 표시합니다. 데스크톱 앱과 같은
+                규칙입니다.</span
+              >
+            </p>
+          </article>
         </div>
 
         <p class="hint reveal">
@@ -1837,11 +3199,11 @@
         </p>
       </section>
 
-      <!-- 05 -->
+      <!-- 06 -->
       <section class="section wrap" id="charts">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>05</span> · <span lang="en">Charts in chat</span
+            <span>06</span> · <span lang="en">Charts in chat</span
             ><span lang="ko">대화창 안의 차트</span>
           </p>
           <h2>
@@ -2069,11 +3431,11 @@
         </div>
       </section>
 
-      <!-- 06 -->
+      <!-- 07 -->
       <section class="section wrap" id="flows">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>06</span> · <span lang="en">Workflows</span><span lang="ko">워크플로</span>
+            <span>07</span> · <span lang="en">Workflows</span><span lang="ko">워크플로</span>
           </p>
           <h2>
             <span lang="en">Workflows you can see.<br /><em>Not just read about.</em></span>
@@ -2447,11 +3809,11 @@
         </div>
       </section>
 
-      <!-- 07 -->
+      <!-- 08 -->
       <section class="section wrap" id="mobile">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>07</span> · <span lang="en">Phone</span><span lang="ko">휴대폰</span>
+            <span>08</span> · <span lang="en">Phone</span><span lang="ko">휴대폰</span>
           </p>
           <h2>
             <span lang="en">Your desktop,<br /><em>from your phone.</em></span>
@@ -2801,11 +4163,11 @@
         </div>
       </section>
 
-      <!-- 08 -->
+      <!-- 09 -->
       <section class="section wrap" id="screens">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>08</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
+            <span>09</span> · <span lang="en">Screens</span><span lang="ko">화면</span>
           </p>
           <h2>
             <span lang="en">See it before<br /><em>you install it.</em></span>
@@ -3119,11 +4481,11 @@
         </div>
       </section>
 
-      <!-- 09 -->
+      <!-- 10 -->
       <section class="section wrap" id="install">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>09</span> · <span lang="en">Install</span><span lang="ko">설치</span>
+            <span>10</span> · <span lang="en">Install</span><span lang="ko">설치</span>
           </p>
           <h2>
             <span lang="en">One command.<br /><em>Checked before it installs.</em></span>
@@ -3226,18 +4588,21 @@
                 of Node.js under <code>~/.local/share/oop-terminal</code> and
                 <code>~/.local/bin/oop</code>. No Node, pnpm or git needed. If <code>oop</code> is
                 not found, the installer prints the line to add to your <code>PATH</code>. Then sign
-                in to a provider CLI and run <code>oop</code>. To update, run it again and then
-                <code>oop stop</code>; to uninstall, run <code>oop stop</code> and delete those two
-                locations. Intel Macs are not supported.</span
+                in to a provider CLI and run <code>oop</code>. The installer ends by running
+                <code>oop doctor</code> once, so you see which providers are ready and what is still
+                missing. To update, run it again and then <code>oop stop</code>; to uninstall, run
+                <code>oop stop</code> and delete those two locations. Intel Macs are not
+                supported.</span
               >
               <span lang="ko"
                 ><code>oop</code> 명령과 전용 백그라운드 서버, 전용 Node.js 사본을
                 <code>~/.local/share/oop-terminal</code>과 <code>~/.local/bin/oop</code>에
                 설치합니다. Node, pnpm, git이 필요 없습니다. <code>oop</code>을 찾지 못하면
                 <code>PATH</code>에 추가할 줄을 알려 줍니다. 그다음 provider CLI에 로그인하고
-                <code>oop</code>을 실행하세요. 업데이트는 다시 실행한 뒤 <code>oop stop</code>,
-                삭제는 <code>oop stop</code> 후 위 두 위치를 지우면 됩니다. Intel Mac은 지원하지
-                않습니다.</span
+                <code>oop</code>을 실행하세요. 설치 스크립트는 마지막에 <code>oop doctor</code>를 한
+                번 실행해 준비된 provider와 아직 빠진 것을 보여 줍니다. 업데이트는 다시 실행한 뒤
+                <code>oop stop</code>, 삭제는 <code>oop stop</code> 후 위 두 위치를 지우면 됩니다.
+                Intel Mac은 지원하지 않습니다.</span
               >
             </p>
           </div>
@@ -3290,19 +4655,21 @@
                 >Run in PowerShell, Windows x64 only. Installs <code>oop.cmd</code> and a private
                 copy of Node.js under <code>%LOCALAPPDATA%\oop-terminal</code>; no Node, pnpm or git
                 needed. If <code>oop</code> is not found, the installer prints the command that adds
-                the folder to your user <code>PATH</code>. Run <code>oop stop</code> before
-                updating, because Windows does not replace files in use. To uninstall, run
-                <code>oop stop</code> and delete that folder. Windows on ARM is not supported. Not
-                yet verified on a real Windows machine.</span
+                the folder to your user <code>PATH</code>. The installer ends by running
+                <code>oop doctor</code> once, so you see which providers are ready and what is still
+                missing. Run <code>oop stop</code> before updating, because Windows does not replace
+                files in use. To uninstall, run <code>oop stop</code> and delete that folder.
+                Windows on ARM is not supported. Not yet verified on a real Windows machine.</span
               >
               <span lang="ko"
                 >PowerShell에서 실행하세요(Windows x64만 지원). <code>oop.cmd</code>와 전용 Node.js
                 사본을 <code>%LOCALAPPDATA%\oop-terminal</code>에 설치하며 Node, pnpm, git이 필요
                 없습니다. <code>oop</code>을 찾지 못하면 사용자 <code>PATH</code>에 폴더를 추가하는
-                명령을 알려 줍니다. 사용 중인 파일은 Windows가 바꾸지 못하므로 업데이트 전에
-                <code>oop stop</code>을 실행하세요. 삭제는 <code>oop stop</code> 후 그 폴더를 지우면
-                됩니다. Windows on ARM은 지원하지 않습니다. 실제 Windows 컴퓨터에서는 아직 검증되지
-                않았습니다.</span
+                명령을 알려 줍니다. 설치 스크립트는 마지막에 <code>oop doctor</code>를 한 번 실행해
+                준비된 provider와 아직 빠진 것을 보여 줍니다. 사용 중인 파일은 Windows가 바꾸지
+                못하므로 업데이트 전에 <code>oop stop</code>을 실행하세요. 삭제는
+                <code>oop stop</code> 후 그 폴더를 지우면 됩니다. Windows on ARM은 지원하지
+                않습니다. 실제 Windows 컴퓨터에서는 아직 검증되지 않았습니다.</span
               >
             </p>
           </div>
@@ -3354,18 +4721,21 @@
                 is not supported). Installs the <code>oop</code> command, its own background server
                 and a private copy of Node.js under <code>~/.local/share/oop-terminal</code> and
                 <code>~/.local/bin/oop</code>. No Node, pnpm or git needed. Then sign in to a
-                provider CLI and run <code>oop</code>. To update, run it again and then
-                <code>oop stop</code>; to uninstall, run <code>oop stop</code> and delete those two
-                locations. Not yet verified on a real Linux machine.</span
+                provider CLI and run <code>oop</code>. The installer ends by running
+                <code>oop doctor</code> once, so you see which providers are ready and what is still
+                missing. To update, run it again and then <code>oop stop</code>; to uninstall, run
+                <code>oop stop</code> and delete those two locations. Not yet verified on a real
+                Linux machine.</span
               >
               <span lang="ko"
                 >x64와 arm64, glibc 배포판만 지원합니다(<code>libatomic1</code> 필요, Alpine은
                 미지원). <code>oop</code> 명령과 전용 백그라운드 서버, 전용 Node.js 사본을
                 <code>~/.local/share/oop-terminal</code>과 <code>~/.local/bin/oop</code>에 설치하며
                 Node, pnpm, git이 필요 없습니다. 그다음 provider CLI에 로그인하고 <code>oop</code>을
-                실행하세요. 업데이트는 다시 실행한 뒤 <code>oop stop</code>, 삭제는
-                <code>oop stop</code> 후 위 두 위치를 지우면 됩니다. 실제 Linux 컴퓨터에서는 아직
-                검증되지 않았습니다.</span
+                실행하세요. 설치 스크립트는 마지막에 <code>oop doctor</code>를 한 번 실행해 준비된
+                provider와 아직 빠진 것을 보여 줍니다. 업데이트는 다시 실행한 뒤
+                <code>oop stop</code>, 삭제는 <code>oop stop</code> 후 위 두 위치를 지우면 됩니다.
+                실제 Linux 컴퓨터에서는 아직 검증되지 않았습니다.</span
               >
             </p>
           </div>
@@ -3767,11 +5137,11 @@ node scripts/macos.mjs package</code></pre>
         </div>
       </section>
 
-      <!-- 10 -->
+      <!-- 11 -->
       <section class="section wrap" id="faq">
         <header class="sec-head reveal">
           <p class="eyebrow">
-            <span>10</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
+            <span>11</span> · <span lang="en">Honest notes</span><span lang="ko">솔직한 안내</span>
           </p>
           <h2>
             <span lang="en">Early, local,<br /><em>and clear about it.</em></span>

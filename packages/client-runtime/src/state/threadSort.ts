@@ -372,6 +372,40 @@ export function sortActiveThreadsByOrderKey<
   });
 }
 
+/** Active order when running threads lead the list: newest work first, by
+    creation, re-entry, the latest message, or the latest turn starting or
+    finishing. Finishing stamps a thread newest, so a row that rose while
+    working stays up instead of sinking back. Saved order keys are ignored. */
+export function sortActiveThreadsByRecentWork<
+  T extends Pick<OrchestrationThreadShell, "latestUserMessageAt" | "latestTurn"> & {
+    readonly id: string;
+    readonly createdAt: string;
+    readonly unsettledAt?: string | null | undefined;
+    readonly environmentId?: string | undefined;
+  },
+>(threads: readonly T[]): T[] {
+  if (threads.length < 2) return [...threads];
+  const timestamps = new Map<T, number>();
+  for (const thread of threads) {
+    let latest = activeThreadAnchorTimestampMs(thread);
+    for (const candidate of [
+      thread.latestUserMessageAt,
+      thread.latestTurn?.requestedAt,
+      thread.latestTurn?.startedAt,
+      thread.latestTurn?.completedAt,
+    ]) {
+      latest = Math.max(latest, toSortableTimestamp(candidate ?? undefined) ?? 0);
+    }
+    timestamps.set(thread, latest);
+  }
+  return [...threads].sort(
+    (left, right) =>
+      timestamps.get(right)! - timestamps.get(left)! ||
+      left.id.localeCompare(right.id) ||
+      (left.environmentId ?? "").localeCompare(right.environmentId ?? ""),
+  );
+}
+
 /**
  * planPinnedReorder specialized for mobile's Move up / Move down menu
  * actions: swap the moved thread with its displayed neighbor. Null when the

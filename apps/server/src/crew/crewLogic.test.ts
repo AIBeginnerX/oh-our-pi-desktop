@@ -295,6 +295,13 @@ describe("crew brief", () => {
     expect(line).toContain("crew_delegate and crew_stop");
   });
 
+  it("tells the brain to use worktree isolation only inside a git repository", () => {
+    // Outside a git repo worktree isolation is refused, so parallel tasks need disjoint scopes.
+    const brief = crewBrief({ worker: option("GLM", "OpenCode"), expert: null, auditor: null })!;
+    expect(brief).toContain("when the workspace is a git repository");
+    expect(brief).toContain("write scopes that do not overlap");
+  });
+
   it("keeps the arena steps in the brief, since the arena skill is user-invoked only", () => {
     const brief = crewBrief({ worker: option("GLM", "OpenCode"), expert: null, auditor: null })!;
     expect(brief).toContain("Arena (only when the user asks to compare approaches");
@@ -574,6 +581,15 @@ describe("crew failure handling", () => {
     expect(prompt).toContain("Reference files by path and line instead of pasting their contents");
     expect(prompt).toContain("first build a way to reproduce the failure");
   });
+
+  it("tells crew members to read a file right before editing it", () => {
+    // Members kept failing edits with "File has not been read yet" and "File has been modified
+    // since read", so the brief asks for a fresh read just before each edit.
+    const prompt = delegatePrompt({ role: "worker", leadTitle: "Fix login", task: "Add tests" });
+    expect(prompt).toContain(
+      "Read a file with your file tool right before you edit it, and read it again if another tool or member may have changed it since.",
+    );
+  });
 });
 
 describe("lightAuditPrompt", () => {
@@ -589,6 +605,7 @@ describe("lightAuditPrompt", () => {
     expect(prompt).toContain("improvement (at most 3 findings");
     expect(prompt).toContain("about 200 words");
     expect(prompt).toContain("`Verdict: needs changes` only for a proven blocking problem");
+    expect(prompt).toContain("or a security hole the change introduces");
     expect(prompt).toContain('"verdict":"approve"|"needs changes"');
     expect(prompt).toBe(lightAuditPrompt({ ...base, diff, turnRefs }));
     expect(prompt.length).toBeLessThan(auditPrompt({ ...base, diff, turnRefs }).length);
@@ -616,6 +633,9 @@ describe("auditPrompt", () => {
     });
     expect(prompt).toContain(
       "The user asked:\nKeep ids in order and run at most three requests at once.",
+    );
+    expect(prompt).toContain(
+      "a security hole the change introduces (injection, missing authorization, path traversal, SSRF, secrets in logs or responses)",
     );
     expect(prompt).toContain("Hardening beyond the request");
     expect(prompt).toContain("`Verdict: needs changes` only when a blocking problem remains");
@@ -879,6 +899,25 @@ describe("delegation sections", () => {
     expect(full).toContain("DONE WHEN:\nevery login case has a test");
     // The static preamble does not depend on the task, so providers can cache it.
     expect(full.slice(0, full.indexOf("TASK:"))).toBe(bare.slice(0, bare.indexOf("TASK:")));
+  });
+
+  it("adds one security line to a task with a write scope, and none to one without", () => {
+    const bare = delegatePrompt({ role: "worker", leadTitle: "Fix login", task: "Add tests" });
+    const scoped = delegatePrompt({
+      role: "worker",
+      leadTitle: "Fix login",
+      task: "Add tests",
+      writeScope: ["src/auth/", "docs/login.md"],
+    });
+    expect(scoped).toContain(
+      "Security: outside input is untrusted - build SQL, shell and HTML with parameters, argv and escaping, not string joins",
+    );
+    expect(scoped.match(/Security:/g)).toHaveLength(1);
+    expect(bare).not.toContain("Security:");
+    // An empty scope is still no scope: no security text is added for it.
+    expect(
+      delegatePrompt({ role: "worker", leadTitle: "Fix login", task: "Add tests", writeScope: [] }),
+    ).toBe(bare);
   });
 });
 

@@ -12,6 +12,7 @@ import {
   summarizeToolGroup,
   toolGroupAction,
   toolGroupSummaryKind,
+  workEntryIsQuietCommandExit,
   type ToolGroupSummaryKind,
 } from "@t3tools/client-runtime/work-log/presentation";
 export {
@@ -82,11 +83,15 @@ export function liveWorkEntryLabel(
   if (toolPresentation) return toolPresentation.displayName;
   const command = entry.command?.trim();
   if (command) {
+    // A quiet exit did run; it only answered "no", so it never reads as "Failed".
+    const quiet = workEntryIsQuietCommandExit(entry);
     const verb =
       status === "inProgress"
         ? "Running"
         : status === "failed"
-          ? "Failed"
+          ? quiet
+            ? "Ran"
+            : "Failed"
           : status === "declined"
             ? "Declined"
             : status === "stopped"

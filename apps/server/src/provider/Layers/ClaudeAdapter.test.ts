@@ -20,6 +20,7 @@ import {
   ClaudeSettings,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  EnvironmentId,
   MessageId,
   OWNED_USAGE_ACTIVITY_KIND,
   type OrchestrationCommand,
@@ -58,7 +59,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { attachmentRelativePath } from "../../attachmentStore.ts";
+import { PROVEN_CLIENT_WAIT_SECONDS, WAIT_COLLECT_SECONDS } from "../../crew/crewTaskRecord.ts";
 import { ServerConfig } from "../../config.ts";
+import { clearMcpProviderSession, setMcpProviderSession } from "../../mcp/McpProviderSession.ts";
 import {
   layer as projectMemorySendGateLayer,
   ProjectMemorySendGate,
@@ -107,7 +110,11 @@ import type {
   ProviderSubmissionRoutePreview,
 } from "../Services/ProviderAdapter.ts";
 import type { ClaudeScopedLimitNames } from "./claudeUsageLimits.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  makeClaudeAdapter,
+  T3_CODE_TOOL_TIMEOUT_MS,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -2135,6 +2142,44 @@ describe("ClaudeAdapterLive", () => {
       assert.deepEqual(createInput?.options.settingSources, ["user", "project", "local"]);
       assert.equal(createInput?.options.permissionMode, undefined);
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, undefined);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("bounds t3-code MCP tool calls above the crew wait budget", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      setMcpProviderSession({
+        environmentId: EnvironmentId.make("env-claude-test"),
+        threadId: THREAD_ID,
+        providerSessionId: "provider-session-1",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        endpoint: "http://127.0.0.1:9/mcp",
+        authorizationHeader: "Bearer t3-test",
+        capabilities: new Set(["crew"]),
+      });
+      try {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+
+        const server = harness.getLastCreateQueryInput()?.options.mcpServers?.["t3-code"];
+        assert.equal(server?.type, "http");
+        // The SDK applies this per-server timeout as a hard wall clock on every t3-code tool
+        // call, so it must cover the longest crew_wait plus its collection budget with margin.
+        assert.equal(server?.timeout, T3_CODE_TOOL_TIMEOUT_MS);
+        assert.isOk(
+          T3_CODE_TOOL_TIMEOUT_MS >=
+            (PROVEN_CLIENT_WAIT_SECONDS + WAIT_COLLECT_SECONDS + 30) * 1000,
+        );
+      } finally {
+        clearMcpProviderSession(THREAD_ID);
+      }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

@@ -15,11 +15,11 @@ import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
  * cost, read the measured size from the failure message, and set the constant
  * to that size plus about 5% in this file, in the same change that adds the text.
  */
-const RUNTIME_INSTRUCTIONS_MAX_BYTES = 3219;
+const RUNTIME_INSTRUCTIONS_MAX_BYTES = 3535;
 const CODEX_DEFAULT_MODE_INSTRUCTIONS_MAX_BYTES = 1015;
 const CODEX_PLAN_MODE_INSTRUCTIONS_MAX_BYTES = 9660;
 const CODEX_TOOL_CONTEXT_MAX_BYTES = 2054;
-const CREW_BRIEF_MAX_BYTES = 3882;
+const CREW_BRIEF_MAX_BYTES = 4217;
 
 const utf8Bytes = (text: string) => new TextEncoder().encode(text).length;
 

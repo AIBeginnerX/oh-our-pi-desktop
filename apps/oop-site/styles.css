@@ -380,7 +380,7 @@ html[data-lang="ko"] h2 {
   max-width: 760px;
 }
 
-.sec-head .eyebrow span:first-child {
+.sec-head .eyebrow > span:first-child {
   font-family: var(--mono);
 }
 
@@ -2048,5 +2048,216 @@ td {
   .rbar i,
   .nav a::after {
     transition: none !important;
+  }
+}
+
+/* ---- New in 0.0.155 (#next showcase) ------------------------------------- */
+#next {
+  /* Report series colours, --c1 mirrors the app's report-1 (its primary colour). */
+  --c1: var(--accent);
+  --c2: oklch(0.7 0.14 230);
+  --c3: oklch(0.72 0.16 155);
+  --c4: oklch(0.78 0.15 75);
+  --c5: oklch(0.66 0.19 15);
+  --c6: oklch(0.64 0.18 295);
+  --c7: oklch(0.7 0.13 195);
+  --c8: oklch(0.68 0.19 330);
+}
+
+.next-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--ok-bg);
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: none;
+  vertical-align: 1px;
+}
+
+/* Hero announcement pill for the new-release showcase; static on purpose. */
+.next-pill {
+  display: inline-block;
+  margin-bottom: 20px;
+  padding: 6px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent-dark);
+  text-decoration: none;
+}
+
+.next-pill b {
+  font-family: var(--mono);
+}
+
+.next-pill:hover {
+  border-color: var(--accent);
+  color: var(--accent-dark);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.chart-tile {
+  margin: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chart-tile svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.chart-tile figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.chart-tile figcaption code {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--accent-dark);
+  background: var(--tint);
+  padding: 1px 6px;
+  border-radius: 5px;
+}
+
+.next-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.next-panel {
+  margin: 0;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  min-width: 0;
+}
+
+.next-panel-label {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.next-panel svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.next-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.next-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.next-term .tm-body {
+  min-height: 0;
+}
+
+.tm-line {
+  margin: 0 0 10px;
+  color: var(--deep-dim);
+}
+
+.tm-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.tm-row b {
+  font-weight: 400;
+  letter-spacing: -1px;
+  white-space: nowrap;
+}
+
+.tm-key {
+  flex: none;
+  width: 76px;
+  color: var(--deep-dim);
+}
+
+.palette-strip {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+}
+
+.palette-strip li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font: 600 12px/1 var(--mono);
+  color: var(--muted);
+}
+
+.palette-strip i {
+  width: 44px;
+  height: 16px;
+  border-radius: 5px;
+}
+
+@media (max-width: 900px) {
+  .next-pair {
+    grid-template-columns: 1fr;
+  }
+  .palette-strip i {
+    width: 34px;
+  }
+}
+
+@media (max-width: 520px) {
+  .palette-strip {
+    gap: 8px;
+  }
+  .palette-strip i {
+    width: 30px;
   }
 }

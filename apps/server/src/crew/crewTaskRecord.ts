@@ -41,8 +41,27 @@ import {
 import type { CrewTaskReport } from "./CrewService.ts";
 
 export const MAX_WAIT_SECONDS = 50;
+/** Default wait when the lead omits timeoutSeconds: the cap minus a re-ask margin. */
+export const DEFAULT_WAIT_SECONDS = 40;
 /** Budget for collecting statuses after a crew_wait; keeps the whole call under a minute. */
 export const WAIT_COLLECT_SECONDS = 5;
+/**
+ * crew_wait cap for a lead whose MCP client's tool-call timeout OOP sets itself: today only
+ * claudeAgent (Claude Code SDK), where the t3-code registration writes the per-server timeout
+ * (ClaudeAdapter). Codex keeps the 50 second cap — its MCP tool-call timeout cannot be proven
+ * from this repo, so a longer wait could have the client kill the call mid-wait.
+ */
+export const PROVEN_CLIENT_WAIT_SECONDS = 300;
+
+/** The wait bounds one crew_wait call may use, by the driver kind of the client that called it. */
+export function waitBounds(driver: string | undefined): {
+  readonly capSeconds: number;
+  readonly defaultSeconds: number;
+} {
+  return driver === "claudeAgent"
+    ? { capSeconds: PROVEN_CLIENT_WAIT_SECONDS, defaultSeconds: PROVEN_CLIENT_WAIT_SECONDS }
+    : { capSeconds: MAX_WAIT_SECONDS, defaultSeconds: DEFAULT_WAIT_SECONDS };
+}
 export const RESULT_TEXT_LIMIT = 6_000;
 export const NUDGE_IDLE_WAIT_SECONDS = 30;
 

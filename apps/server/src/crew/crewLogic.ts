@@ -75,6 +75,10 @@ const REPORT_SHAPE = `{"status":"done"|"partial"|"blocked","summary":string,"cha
 
 const AUDIT_REPORT_SHAPE = `{"verdict":"approve"|"needs changes","summary":string,"safetyFact":{"fact":string,"level":${EVIDENCE_LEVELS},"evidence":string},"findings":[${FINDING_SHAPE}],"preExistingFailures":string[]}`;
 
+/** The one security line a task that edits files gets; a task without a scope gains no text. */
+const WRITE_SCOPE_SECURITY_LINE =
+  "Security: outside input is untrusted - build SQL, shell and HTML with parameters, argv and escaping, not string joins; check authorization per request; keep file paths in the workspace (resolve symlinks); validate URLs before server-side fetches; never put secrets in code, logs, tests or reports.";
+
 /**
  * The prompt for a delegated task. The preamble is the same for every task so providers can cache
  * it; the task and its optional sections come last.
@@ -100,6 +104,7 @@ export function delegatePrompt(input: {
     "Work in the current workspace. Do only this task; the lead owns the plan and the conversation with the user.",
     "Reference files by path and line instead of pasting their contents; paste only short excerpts that the task needs.",
     "For a bug, first build a way to reproduce the failure, then fix it.",
+    "Read a file with your file tool right before you edit it, and read it again if another tool or member may have changed it since.",
     "When you finish, reply with a short report: what you did, which files you changed, and anything left undone or uncertain.",
     "End the report with one line: `Status: done`, `Status: partial` when part of the task is left, or `Status: blocked` when you could not do it.",
     `After that line, close the reply with the same report as one fenced \`\`\`json block of this shape: ${REPORT_SHAPE}`,
@@ -120,6 +125,7 @@ export function delegatePrompt(input: {
           "",
           "SCOPE (the files you may change; leave everything else alone, and say so in your report if the task needs more):",
           ...input.writeScope.map((path) => `- ${path}`),
+          WRITE_SCOPE_SECURITY_LINE,
         ]),
     ...(verify
       ? [
@@ -392,7 +398,7 @@ export function auditPrompt(input: AuditPromptInput): string {
     diff === null
       ? "Review the change in this workspace (read the files and the git diff). Do not edit anything."
       : "Review the change from the diff above. Read other files or run checks only to settle a specific doubt about it. Do not edit anything.",
-    "Judge it against what the user asked. A blocking problem means the request is not done or something that worked is now broken: wrong results, failing tests, a broken build, a requested part missing. Hardening beyond the request, style, and extra tests are not blocking; list them under risky changes or missing tests.",
+    "Judge it against what the user asked. A blocking problem means the request is not done or something that worked is now broken: wrong results, failing tests, a broken build, a requested part missing, or a security hole the change introduces (injection, missing authorization, path traversal, SSRF, secrets in logs or responses). Hardening beyond the request, style, and extra tests are not blocking; list them under risky changes or missing tests.",
     "A failing test, typecheck, or lint run is a regression only if this turn's change could have caused it. Before calling one a regression, check whether it already failed before the turn.",
     turnRefsLine(input.turnRefs, "Read the diff to see whether the failing code was touched."),
     "A failure in code the turn did not touch, or one that also happens at the turn's start, is pre-existing: list it under preExistingFailures and do not call for changes because of it.",
@@ -423,7 +429,7 @@ export function lightAuditPrompt(input: AuditPromptInput): string {
     "The tests already passed in this turn: do not re-run them or the build.",
     turnRefsLine(input.turnRefs, "Read the changed files in this workspace and their git diff."),
     "Check two axes and report each on its own: spec (does it do exactly what the user asked, and is nothing requested missing) and improvement (at most 3 findings that would definitely make the result better: an unhandled edge case in the changed code, a missing test for the changed behaviour, or a clearly simpler equivalent). Skip anything optional, stylistic, or speculative.",
-    "A blocking problem is a proven one, or a requested part that is missing. Put a proven problem in `evidence` with `proven` true and its `level`; anything else is a P2 or P3 finding that never blocks.",
+    "A blocking problem is a proven one, a requested part that is missing, or a security hole the change introduces. Put a proven problem in `evidence` with `proven` true and its `level`; anything else is a P2 or P3 finding that never blocks.",
     "Keep the reply short, about 200 words before the JSON, then one verdict line: `Verdict: needs changes` only for a proven blocking problem or a missing requested part, otherwise `Verdict: approve`.",
     ...AUDIT_REPORT_LINES,
   ].join("\n");
@@ -643,7 +649,7 @@ export function crewBrief(roles: Record<CrewRole, CrewBriefRole | null>): string
     "Rules for this turn:",
     "1. Unless the request is a quick question you can answer in one short reply, split the work into self-contained tasks and hand them to the crew. Start independent tasks in parallel.",
     "2. Roles marked [fast path ...]: run the task with your built-in Agent tool, passing the model shown for that role, in the background so several run at once. This is fastest; no separate thread is needed.",
-    '3. Roles marked [crew_delegate]: use the crew_delegate tool of the t3-code MCP server (in Claude Code: mcp__t3-code__crew_delegate; if it is not loaded yet, load it with ToolSearch query "select:mcp__t3-code__crew_delegate,mcp__t3-code__crew_wait"), then collect results with crew_wait, calling it again while tasks run. A failed crew model is replaced automatically by another model of the same level. Give each task that edits files a writeScope, and a verify command when one proves it done; if crew_delegate returns a warning, wait for the overlapping tasks or narrow the scopes. For parallel tasks that edit code, pass isolation "worktree" so they cannot clobber each other.',
+    '3. Roles marked [crew_delegate]: use the crew_delegate tool of the t3-code MCP server (in Claude Code: mcp__t3-code__crew_delegate; if it is not loaded yet, load it with ToolSearch query "select:mcp__t3-code__crew_delegate,mcp__t3-code__crew_wait"), then collect results with crew_wait, calling it again while tasks run. A failed crew model is replaced automatically by another model of the same level. Give each task that edits files a writeScope, and a verify command when one proves it done; if crew_delegate returns a warning, wait for the overlapping tasks or narrow the scopes. For parallel tasks that edit code, pass isolation "worktree" when the workspace is a git repository, so they cannot clobber each other; outside one, worktree isolation is refused, so give parallel tasks write scopes that do not overlap instead.',
     'Each task: specific one-step todos, a check (command or files) where provable; extra work in a new task; unfinished items make it partial. Pass size "small" for mechanical one-file edits, lookups, and renames. Give crew_delegate and crew_stop a one-sentence "why".',
     'Arena (only when the user asks to compare approaches, or a choice is hard to undo): write 3-6 criteria; give 2-3 tasks the same brief, isolation "candidate", titles "Candidate A: ...", each later one differentFrom the earlier ids; then one expert judge, also a candidate differentFrom all of them, with the criteria and patch paths (if it warns no other family exists, tell the user the judge was not independent). Pick a base, git apply its patch, graft the best parts, verify, remove the worktrees, and tell the user what you kept and rejected.',
     'Call work done only when crew_wait shows proof VERIFIED. On INCONCLUSIVE, say "finished, not verified" to the user, then check it yourself or add a todo with a check.',

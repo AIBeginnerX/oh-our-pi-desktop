@@ -14,6 +14,7 @@ import {
   extractWorkLogToolLifecycleStatus,
   isWorktreeSetupActivity,
   isServerRecordActivity,
+  isQuietCommandExit,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
@@ -79,6 +80,8 @@ export interface WorkLogEntry {
   toolIcon?: import("@t3tools/contracts").ToolActivityIcon;
   toolSource?: import("@t3tools/contracts").ToolActivitySource;
   toolData?: unknown;
+  /** A failed command whose exit 1 only answers "no" (see `isQuietCommandExit`). */
+  quietExit?: boolean;
   itemType?: ToolLifecycleItemType;
   requestKind?: PendingApproval["requestKind"];
   /** From runtime item / task payload `status` when present (e.g. tool.updated). */
@@ -477,6 +480,9 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (toolLifecycleStatus) {
     entry.toolLifecycleStatus = toolLifecycleStatus;
+  }
+  if (isQuietCommandExit({ itemType, status: toolLifecycleStatus, data: payload?.data })) {
+    entry.quietExit = true;
   }
   if (isTaskActivity && typeof payload?.taskId === "string" && payload.taskId.length > 0) {
     entry.taskId = payload.taskId;

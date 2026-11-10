@@ -145,11 +145,13 @@ impl<'a> Ctx<'a> {
         fg(self.th.muted)
     }
 
-    /// The colour of a state: success, error, accent while it runs, warning while it waits.
+    /// The colour of a state: success, error, accent while it runs, warning while it waits,
+    /// muted for a quiet exit (a query's "no", never a failure).
     pub fn tone(&self, state: NodeState) -> Style {
         match state {
             NodeState::Completed => self.success(),
             NodeState::Failed => self.error(),
+            NodeState::Quiet => self.muted(),
             NodeState::Running => self.accent(),
             NodeState::Blocked | NodeState::Paused => self.warning(),
             _ => self.dim(),
@@ -159,7 +161,7 @@ impl<'a> Ctx<'a> {
     /// The mark of a state; a running one turns with the tick while animations are on.
     pub fn mark(&self, state: NodeState) -> &'static str {
         let index = match state {
-            NodeState::Pending => 0,
+            NodeState::Quiet | NodeState::Pending => 0,
             NodeState::Blocked => 1,
             NodeState::Running => {
                 return if self.animations {
@@ -505,6 +507,8 @@ pub fn state_word(state: NodeState) -> &'static str {
         NodeState::Completed => s("Done", "완료"),
         NodeState::Failed => s("Failed", "실패"),
         NodeState::Cancelled => s("Stopped", "중단됨"),
+        // An exit code, not a verdict; left untranslated like the numbers beside it.
+        NodeState::Quiet => "exit 1",
     }
 }
 

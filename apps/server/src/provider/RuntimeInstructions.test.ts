@@ -10,6 +10,16 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("call list_thread_pull_requests and link any PR");
   });
 
+  it("points at the diagram-design skill in one sentence for diagrams a flowchart cannot carry", () => {
+    const instructions = buildRuntimeInstructions({ harness: "Codex" });
+    const line = instructions.split("\n").find((entry) => entry.includes("diagram-design"));
+    expect(line).toBeDefined();
+    const pointer = line!.slice(line!.indexOf("For a diagram a flowchart cannot carry"));
+    expect(pointer).toBe(
+      "For a diagram a flowchart cannot carry (architecture, sequence, ER, data flow), when the diagram-design skill is available, draw it with that skill, export an SVG and embed it by absolute path.",
+    );
+  });
+
   it("keeps known model and effort metadata on one line", () => {
     expect(
       buildRuntimeInstructions({

@@ -32,7 +32,9 @@ export type WorkflowNodeState =
   | "completed"
   | "failed"
   | "cancelled"
-  | "skipped";
+  | "skipped"
+  /** A failed command whose exit 1 only means "no" (grep no-match, false test): shown muted. */
+  | "quiet";
 
 /** What a tool call did, in the terms a person uses: reading, editing, running, searching. */
 export type ToolCategory = "read" | "edit" | "run" | "search" | "web" | "other";
@@ -149,6 +151,7 @@ const SETTLED: ReadonlySet<WorkflowNodeState> = new Set([
   "failed",
   "cancelled",
   "skipped",
+  "quiet",
 ]);
 const LIVE: ReadonlySet<WorkflowNodeState> = new Set(["running", "blocked", "paused", "pending"]);
 

@@ -36,6 +36,7 @@ import {
   type WorkflowNodeInfo,
   type WorkflowNodeState,
 } from "./workflowGraph.ts";
+import { isQuietCommandExit } from "./work-log/quietExit.ts";
 
 const MAX_TURN_STEPS = 60;
 const TEXT_LIMIT = 240;
@@ -372,6 +373,23 @@ function toolState(status: unknown): WorkflowNodeState {
   }
 }
 
+/**
+ * A failed command whose exit 1 only answers "no" is a quiet step: muted on the board, and never
+ * counted as a failure. Anything the payload cannot prove stays failed.
+ */
+function toolStepState(payload: Readonly<Record<string, unknown>>): WorkflowNodeState {
+  if (
+    isQuietCommandExit({
+      itemType: payload.itemType,
+      status: payload.status,
+      data: payload.data,
+    })
+  ) {
+    return "quiet";
+  }
+  return toolState(payload.status);
+}
+
 function taskState(kind: string, status: unknown): WorkflowNodeState | undefined {
   if (kind === "task.completed" || (kind === "task.updated" && status !== undefined)) {
     // A crew report that stopped partway (partial, blocked) did not finish its task.
@@ -464,7 +482,7 @@ function collectToolSteps(activities: ReadonlyArray<OrchestrationThreadActivity>
       // A later update that names nothing must not erase what an earlier one made clear.
       const category = toolCategory(step.name, data?.kind, payload.itemType);
       if (existing === undefined || category !== "other") step.category = category;
-      step.state = toolState(payload.status);
+      step.state = toolStepState(payload);
       const detail = text(payload.detail);
       if (detail !== undefined) step.description = detail;
       const target = toolTarget(data, detail, step.name);

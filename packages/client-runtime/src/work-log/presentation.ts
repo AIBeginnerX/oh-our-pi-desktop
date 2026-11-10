@@ -12,6 +12,8 @@ import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
 import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 
+export { isQuietCommandExit } from "./quietExit.ts";
+
 /**
  * Activities the worktree setup card already represents. The settled record
  * is rendered by the card on web and mobile, never as a
@@ -57,6 +59,8 @@ export interface WorkLogPresentationEntry {
   readonly sourceActivityKind?: string;
   readonly taskId?: string;
   readonly toolSource?: ToolActivitySource;
+  /** Set when the entry is built: a failed command whose exit 1 only answers "no". */
+  readonly quietExit?: boolean;
 }
 
 export type ToolGroupAction =
@@ -454,7 +458,19 @@ export function workEntryIndicatesToolFailure(entry: WorkLogPresentationEntry): 
 
 /** Checks rendered output without treating the user's command as an error. */
 export function workEntryDisplayIndicatesToolFailure(entry: WorkLogPresentationEntry): boolean {
+  // A quiet exit is a query's "no", not a failure; the row shows "exit 1" instead.
+  if (workEntryIsQuietCommandExit(entry)) return false;
   return workEntryIndicatesToolFailureFromOutput(entry, false);
+}
+
+/**
+ * Whether a failed command row is a quiet exit — an exit 1 that only means "no" (a grep that
+ * found nothing, a false `test`) — shown muted as "exit 1" and left out of failed counts.
+ */
+export function workEntryIsQuietCommandExit(
+  entry: Pick<WorkLogPresentationEntry, "quietExit">,
+): boolean {
+  return entry.quietExit === true;
 }
 
 /** Decides whether the row can show a success marker. */

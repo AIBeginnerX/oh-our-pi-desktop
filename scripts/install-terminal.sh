@@ -5,6 +5,7 @@
 # OOP_VERSION pins a stable version; OOP_RELEASE_BASE_URL supplies a release mirror.
 # OOP_INSTALL_DIR is the folder the terminal app is unpacked into (default ~/.local/share/oop-terminal);
 # OOP_BIN_DIR is where the "oop" command goes (default ~/.local/bin). PATH is never edited.
+# OOP_INSTALL_SKIP_DOCTOR=1 skips the final "oop doctor" setup check (for tests and CI).
 # The command runs the Rust terminal client (oop-rs) of the archive; the bundled Node.js only runs the
 # server it starts. An archive without a working oop-rs is refused.
 # Running it again reinstalls (replaces the unpacked folder). An "oop" that OOP did not create is
@@ -153,8 +154,13 @@ case ":$PATH:" in
     printf 'Then open a new terminal, or run "%s" directly.\n' "$target"
     ;;
 esac
+if [ "${OOP_INSTALL_SKIP_DOCTOR:-}" != 1 ]; then
+  printf '\nChecking your setup (oop doctor):\n'
+  "$target" doctor < /dev/null || true
+fi
 printf '\nNext:\n'
 printf '  1. Sign in to a provider CLI first (for example Claude Code or Codex). OOP does not sign in for you.\n'
 printf '  2. In a project folder, run: oop    (oop provider shows which providers are ready)\n'
+printf '     After signing in, run: oop doctor    (what is ready and what is still missing)\n'
 printf 'Update: run this install command again, then "oop stop" so the new background server starts.\n'
 printf 'Uninstall: oop stop; rm -rf %s %s\n' "$(sh_quote "$root")" "$(sh_quote "$target")"

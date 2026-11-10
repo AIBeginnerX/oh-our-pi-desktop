@@ -24,10 +24,42 @@ pub struct Theme {
     pub user_bg: Color,
     pub code_bg: Color,
     pub gradient: [Color; 4],
+    /// The chat chart series colours, cycled in this order: the web's eight `--report-*` hues
+    /// (`apps/web/src/index.css`), the first of them the theme's own brand.
+    pub series: [Color; 8],
 }
 
 const fn hex(rgb: u32) -> Color {
     Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+}
+
+// Slots 2-8 of the series palette are the web's report hues, in the web's order. Each is the OKLCH
+// value from `apps/web/src/index.css` taken to sRGB through the web's own path (`themePalette.ts`:
+// `oklchToRgbUnclamped`, then the chroma-reducing `mapThemeOklchToSrgbGamut` where the hue leaves
+// sRGB), so the terminal and the web name the same colour:
+//   2 oklch(0.70 0.14 230) blue   = #00ade4
+//   3 oklch(0.72 0.16 155) green  = #35c177
+//   4 oklch(0.78 0.15 75)  amber  = #efa831
+//   5 oklch(0.66 0.19 15)  red    = #ef546c
+//   6 oklch(0.64 0.18 295) purple = #9670ec
+//   7 oklch(0.70 0.13 195) cyan   = #00b5b5 (chroma cut to 0.1195 to fit sRGB)
+//   8 oklch(0.68 0.19 330) pink   = #d665cf
+const REPORT: [Color; 7] = [
+    hex(0x00ade4),
+    hex(0x35c177),
+    hex(0xefa831),
+    hex(0xef546c),
+    hex(0x9670ec),
+    hex(0x00b5b5),
+    hex(0xd665cf),
+];
+
+/// The series palette with `brand` as its first colour: every truecolor theme shares the report
+/// hues and keeps its own brand, so switching the theme changes series 1 and only series 1.
+const fn series(brand: Color) -> [Color; 8] {
+    [
+        brand, REPORT[0], REPORT[1], REPORT[2], REPORT[3], REPORT[4], REPORT[5], REPORT[6],
+    ]
 }
 
 // The user's own text (`user_fg`, in a box tinted `user_bg`; the composer types in the same ink) is a
@@ -52,6 +84,7 @@ pub const LAVENDER: Theme = Theme {
     user_bg: hex(0x1e2433),
     code_bg: hex(0x1a1f2c),
     gradient: [hex(0x7253b9), hex(0xa78bfa), hex(0x38bdf8), hex(0x34d399)],
+    series: series(hex(0xa78bfa)),
 };
 
 /// 16-colour names only (the TypeScript terminal's `ansi` theme), so it looks the same on every
@@ -79,6 +112,17 @@ const ANSI: Theme = Theme {
         Color::Cyan,
         Color::LightCyan,
     ],
+    // The report hues' nearest 16-colour names, brand first.
+    series: [
+        Color::LightMagenta,
+        Color::LightBlue,
+        Color::Green,
+        Color::Yellow,
+        Color::LightRed,
+        Color::Magenta,
+        Color::Cyan,
+        Color::Red,
+    ],
 };
 
 /// Every colour left to the terminal: NO_COLOR. Bold, reverse and the shapes still tell things apart.
@@ -100,6 +144,7 @@ const MONO: Theme = Theme {
     user_bg: Color::Reset,
     code_bg: Color::Reset,
     gradient: [Color::Reset; 4],
+    series: [Color::Reset; 8],
 };
 
 /// How many colours the terminal takes: 0 none, 1 sixteen, 2 256, 3 truecolor. The same rules, in
@@ -176,6 +221,7 @@ impl Theme {
                 user_bg: fold(self.user_bg),
                 code_bg: fold(self.code_bg),
                 gradient: self.gradient.map(fold),
+                series: self.series.map(fold),
             },
             _ => self,
         }
@@ -209,6 +255,7 @@ const OOP_LIGHT: Theme = Theme {
     user_bg: hex(0xeef0f6),
     code_bg: hex(0xf1f3f8),
     gradient: [hex(0x7253b9), hex(0x5b6fd6), hex(0x0284c7), hex(0x059669)],
+    series: series(hex(0x7253b9)),
 };
 
 const AURORA: Theme = Theme {
@@ -229,6 +276,7 @@ const AURORA: Theme = Theme {
     user_bg: hex(0x16282a),
     code_bg: hex(0x12211f),
     gradient: [hex(0x0d9488), hex(0x5eead4), hex(0xa3e635), hex(0x86efac)],
+    series: series(hex(0x5eead4)),
 };
 
 const SUNSET: Theme = Theme {
@@ -249,6 +297,7 @@ const SUNSET: Theme = Theme {
     user_bg: hex(0x2b2124),
     code_bg: hex(0x241b1f),
     gradient: [hex(0xf97316), hex(0xfb7185), hex(0xe879f9), hex(0xa78bfa)],
+    series: series(hex(0xfb923c)),
 };
 
 /// Added lines are blue and removed lines orange; nothing depends on telling red from green.
@@ -267,6 +316,7 @@ const COLORBLIND: Theme = Theme {
     user_bg: hex(0x14283a),
     code_bg: hex(0x101f2e),
     gradient: [hex(0x0072b2), hex(0x56b4e9), hex(0xcc79a7), hex(0xf0e442)],
+    series: series(hex(0x56b4e9)),
     ..LAVENDER
 };
 
@@ -439,7 +489,11 @@ fn apply_overrides(mut base: Theme, overrides: &serde_json::Value) -> (Theme, Ve
                 continue;
             };
             match key.as_str() {
-                "brand" => base.brand = color,
+                "brand" => {
+                    base.brand = color;
+                    // The chart series lead with the brand, so an overridden brand leads them too.
+                    base.series[0] = color;
+                }
                 "brandDim" => base.brand_dim = color,
                 "accent" => base.accent = color,
                 "muted" => base.muted = color,
@@ -814,6 +868,93 @@ mod tests {
         assert_eq!(LAVENDER.brand, Color::Rgb(0xa7, 0x8b, 0xfa));
         assert_eq!(builtin("oop").unwrap().brand, LAVENDER.brand);
         assert_eq!(builtin("lavender").unwrap().brand, LAVENDER.brand);
+    }
+
+    /// The report hues the web gives series 2-8 (`--report-2`..`--report-8` in
+    /// `apps/web/src/index.css`), taken to sRGB as the web does it.
+    fn web_report_hues() -> [Color; 7] {
+        [
+            Color::Rgb(0x00, 0xad, 0xe4),
+            Color::Rgb(0x35, 0xc1, 0x77),
+            Color::Rgb(0xef, 0xa8, 0x31),
+            Color::Rgb(0xef, 0x54, 0x6c),
+            Color::Rgb(0x96, 0x70, 0xec),
+            Color::Rgb(0x00, 0xb5, 0xb5),
+            Color::Rgb(0xd6, 0x65, 0xcf),
+        ]
+    }
+
+    #[test]
+    fn every_theme_leads_its_series_with_its_own_brand_then_the_web_hues() {
+        for name in ["oop", "oop-light", "aurora", "sunset", "colorblind"] {
+            let theme = builtin(name).unwrap();
+            assert_eq!(theme.series[0], theme.brand, "{name}: brand first");
+            assert_eq!(
+                &theme.series[1..],
+                &web_report_hues(),
+                "{name}: the web hues"
+            );
+            let distinct: std::collections::HashSet<String> =
+                theme.series.iter().map(|c| format!("{c:?}")).collect();
+            assert_eq!(distinct.len(), 8, "{name}: eight distinct colours");
+        }
+        // The brand really is per theme: two themes differ only in slot 0.
+        let (a, b) = (builtin("oop").unwrap(), builtin("sunset").unwrap());
+        assert_ne!(a.series[0], b.series[0]);
+        assert_eq!(a.series[1..], b.series[1..]);
+        // The 16-colour and mono themes carry their own palettes.
+        assert_eq!(ANSI.series[0], Color::LightMagenta);
+        assert!(ANSI.series.iter().all(|c| !matches!(c, Color::Rgb(..))));
+        assert!(MONO.series.iter().all(|c| *c == Color::Reset));
+    }
+
+    #[test]
+    fn the_series_palette_folds_with_the_theme() {
+        let truecolor = LAVENDER.series;
+        let folded = LAVENDER.for_level(2);
+        assert!(folded.series.iter().all(|c| matches!(c, Color::Indexed(_))));
+        // One cell per hue: the fold keeps the series apart.
+        let cells: std::collections::HashSet<u8> = folded
+            .series
+            .iter()
+            .filter_map(|c| match c {
+                Color::Indexed(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(cells.len(), 8, "{:?}", folded.series);
+        assert_eq!(folded.series[0], Color::Indexed(indexed(0xa7, 0x8b, 0xfa)));
+        assert_eq!(truecolor[0], LAVENDER.brand);
+        // 16 colours: the ANSI theme's names, no Rgb and no Indexed where the theme has none.
+        let ansi = LAVENDER.for_level(1);
+        assert!(ansi.series.iter().all(|c| !matches!(c, Color::Rgb(..))));
+        assert_eq!(ansi.series[0], Color::LightMagenta);
+        let named: std::collections::HashSet<String> =
+            ansi.series.iter().map(|c| format!("{c:?}")).collect();
+        assert_eq!(named.len(), 8, "{:?}", ansi.series);
+        // No colour at all: every slot is Reset, and charts fall back to their patterns.
+        assert!(
+            LAVENDER
+                .for_level(0)
+                .series
+                .iter()
+                .all(|c| *c == Color::Reset)
+        );
+    }
+
+    #[test]
+    fn a_brand_override_leads_the_series_too() {
+        let dir = temp("series-brand");
+        std::fs::write(
+            dir.join("themes/mine.json"),
+            r##"{"base": "oop", "overrides": {"brand": "#112233"}}"##,
+        )
+        .unwrap();
+        let theme = load("mine", &dir).unwrap().theme;
+        assert_eq!(theme.brand, Color::Rgb(0x11, 0x22, 0x33));
+        assert_eq!(theme.series[0], theme.brand, "the override leads series 1");
+        assert_eq!(&theme.series[1..], &web_report_hues(), "the rest stay");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     fn temp(name: &str) -> std::path::PathBuf {

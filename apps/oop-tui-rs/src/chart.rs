@@ -693,10 +693,12 @@ pub(crate) struct Env<'a> {
 const PATTERNS: [char; 6] = ['█', '▓', '▒', '░', '▚', '▞'];
 
 impl Env<'_> {
-    /// Series colour: the web's six report colours are these six roles of the theme.
+    /// Series colour: the web's eight report hues, cycled, the theme's own brand first. A theme is
+    /// already folded to the terminal's colour level (`Theme::for_level`), so this needs no folding
+    /// of its own: 256 colours get the nearest Indexed cells, 16 colours the ANSI names, and mono is
+    /// all `Reset` (series told apart by `full`'s patterns instead).
     pub(crate) fn color(&self, i: usize) -> Color {
-        let t = self.th;
-        [t.brand, t.accent, t.success, t.warning, t.error, t.tool][i % 6]
+        self.th.series[i % 8]
     }
 
     pub(crate) fn ink(&self, i: usize) -> Style {
@@ -715,7 +717,7 @@ impl Env<'_> {
         Style::new().add_modifier(Modifier::BOLD)
     }
 
-    /// No colour at all: the six series cannot be told apart by hue.
+    /// No colour at all: the eight series cannot be told apart by hue.
     pub(crate) fn mono(&self) -> bool {
         self.th.brand == self.th.accent
     }
@@ -2791,9 +2793,36 @@ mod tests {
         };
         assert_eq!(ink(&LAVENDER, 0), LAVENDER.brand);
         assert_ne!(ink(&LAVENDER, 0), ink(&LAVENDER, 1));
+        // Eight distinct hues in the web's order, the theme's brand first, then cycling at 8.
+        let eight = |i: usize| ink(&LAVENDER, i);
+        let expected = [
+            Color::Rgb(0xa7, 0x8b, 0xfa),
+            Color::Rgb(0x00, 0xad, 0xe4),
+            Color::Rgb(0x35, 0xc1, 0x77),
+            Color::Rgb(0xef, 0xa8, 0x31),
+            Color::Rgb(0xef, 0x54, 0x6c),
+            Color::Rgb(0x96, 0x70, 0xec),
+            Color::Rgb(0x00, 0xb5, 0xb5),
+            Color::Rgb(0xd6, 0x65, 0xcf),
+        ];
+        assert_eq!(
+            (0..8).map(eight).collect::<Vec<_>>(),
+            expected.to_vec(),
+            "the web's report hues, brand first"
+        );
+        assert_eq!(
+            (0..8).map(eight).collect::<HashSet<_>>().len(),
+            8,
+            "eight distinct colours"
+        );
+        assert_eq!(ink(&LAVENDER, 8), ink(&LAVENDER, 0), "cycles at 8");
+        assert_eq!(ink(&LAVENDER, 9), ink(&LAVENDER, 1));
         let folded = LAVENDER.for_level(2);
         assert!(matches!(ink(&folded, 0), Color::Indexed(_)));
         assert!(colors(&folded).iter().all(|c| !c.starts_with("Rgb")));
+        // 256 colours keep eight distinct cells: the fold loses none of the hue differences.
+        let cells: HashSet<String> = (0..8).map(|i| format!("{:?}", ink(&folded, i))).collect();
+        assert_eq!(cells.len(), 8, "eight distinct 256-colour cells: {cells:?}");
         // Sixteen colours use the ANSI theme's names; none uses a background.
         let ansi = LAVENDER.for_level(1);
         assert!(
@@ -2801,8 +2830,14 @@ mod tests {
                 .iter()
                 .all(|c| !c.starts_with("Rgb") && !c.starts_with("Indexed"))
         );
+        let named: HashSet<String> = (0..8).map(|i| format!("{:?}", ink(&ansi, i))).collect();
+        assert_eq!(named.len(), 8, "eight distinct ANSI names: {named:?}");
         let mono = LAVENDER.for_level(0);
         assert_eq!(ink(&mono, 0), Color::Reset);
+        assert!(
+            (0..8).all(|i| ink(&mono, i) == Color::Reset),
+            "no colour at all"
+        );
         let lines = render(&parse(MULTI).unwrap(), 80, 1.0, &mono, &UNICODE).unwrap();
         let text = plain(&lines).join("\n");
         assert!(

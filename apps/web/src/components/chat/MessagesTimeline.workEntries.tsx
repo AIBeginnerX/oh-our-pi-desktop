@@ -7,6 +7,7 @@ import { type ToolActivityIcon } from "@t3tools/contracts";
 import {
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
+  workEntryIsQuietCommandExit,
   workEntryViewedImagePath,
 } from "@t3tools/client-runtime/work-log/presentation";
 import type { RuntimeSubagent } from "@t3tools/client-runtime/state/subagentRuntime";
@@ -682,6 +683,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
+  const quietExit = workEntryIsQuietCommandExit(workEntry);
   const showDestructiveRowStyle =
     showFailedIndicator &&
     (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
@@ -739,9 +741,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     ? "font-medium text-warning"
     : showDestructiveRowStyle
       ? "font-medium text-destructive"
-      : workLogEntryIsToolLike(workEntry)
-        ? "text-secondary-label"
-        : "text-foreground/80";
+      : quietExit
+        ? "text-muted-foreground"
+        : workLogEntryIsToolLike(workEntry)
+          ? "text-secondary-label"
+          : "text-foreground/80";
   const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
   const accessibleDisplayText = showFailedIndicator
     ? `${accessiblePreview}, tool call failed`
@@ -820,6 +824,11 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           !showDestructiveRowStyle &&
           !toolIconAcceptsTint(entryIconName, entryToolIcon) ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
+          ) : null}
+          {quietExit ? (
+            <span className="shrink-0 font-mono text-2xs tabular-nums text-muted-foreground">
+              exit 1
+            </span>
           ) : null}
           <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />
           <span

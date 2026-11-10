@@ -22,6 +22,8 @@ _A short tour of OOP built from real screen recordings. Click the image to open 
 ## Contents
 
 - [Why OOP?](#why-oop)
+- [What's new](#whats-new)
+- [Run every machine from one OOP](#run-every-machine-from-one-oop)
 - [Screenshot tour](#screenshot-tour)
 - [Feature reference](#feature-reference)
 - [Supported providers](#supported-providers)
@@ -44,6 +46,7 @@ Coding agents are good, but each one lives in its own terminal or app, with its 
 - **One place for many agents.** Switch between Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode and MiniMax Code per thread, with the same diff, terminal and approval flow.
 - **Let several models share a task.** OOP Crew lets one "brain" model hand routine work to cheaper workers, hard work to an expert, and have an auditor review the result.
 - **Stay in control.** Four permission modes, a diff panel with checkpoints you can restore, and a usage page so costs do not surprise you.
+- **One OOP for several computers.** Connect the desktops you already run OOP on and see their projects and threads in the same sidebar; new threads can be balanced across them by CPU and memory. See [Run every machine from one OOP](#run-every-machine-from-one-oop).
 - **Work away from the keyboard.** Pair your phone to the computer that runs the agents and keep an eye on (or steer) long tasks.
 - **Use it from a terminal too.** `oop` opens the same threads in a full-screen terminal app. It works with the desktop app closed and shares one data folder with it. It is a native Rust client, and on macOS the desktop app also installs **OOP Terminal**, a window with split panes for `oop` and shells.
 - **Keep it local.** Projects, provider logins and agent work stay on your machine. There is no OOP account and no OOP server.
@@ -63,6 +66,39 @@ _Main chat view: pick a provider and model, set the permission mode, and follow 
 3. Pick a model and a permission mode in the composer, then send a message.
 4. Review the result in the diff panel; restore from a checkpoint if you do not like it.
 
+## What's new
+
+Highlights of the last releases. The app shows the same list under Settings → What's new.
+
+- **0.0.153 · Crew defaults live in settings.** Settings → General → Crew sets the crew and fallback models every new chat starts with, so you no longer rebuild the setup in each composer.
+- **0.0.153 · The crew repeats itself less.** A repeated task gets the earlier attempt's outcome, a model that refused twice sits out for a day, and the results of tasks handed out together arrive in one follow-up.
+- **0.0.154 · Crew reports are honest.** An answer without a status counts as unfinished, dropped results show in the decision log, and a check pointed at the wrong path reports the file as missing instead of passing.
+- **0.0.154 · Running threads come first.** Threads that are working or waiting for your approval or input lead the sidebar, and a small popup in the top-right corner tells you when a thread finishes, fails or needs you, even while you were in another app.
+- **0.0.153–0.0.154 · Interrupted means interrupted, and less work in the background.** A chat cut off by a server restart now reads as interrupted with a hint to continue instead of an error; settings and connections update on change instead of polling, and long chats redraw with less copying.
+- **0.0.155 · Eight-colour charts, desktop and terminal.** Chat charts use eight report colours so series are easy to tell apart, and every terminal theme uses the same colours in the same order. A one-point chart shows as a bar instead of a lone dot, and an all-zero chart says so.
+- **0.0.155 · Cleaner flowcharts.** Flowcharts in chat use thin lines, right-angle connectors that route around boxes, and a tint per level. For architecture, sequence or data-flow diagrams, the agent uses the diagram-design skill when it is installed.
+- **0.0.155 · A grep that finds nothing is not a failure.** A query such as `grep`, `test` or `which` that exits 1 with no error output now shows as a muted `exit 1`, not a failed command, in the desktop app and the terminal.
+- **0.0.155 · The installer checks your setup.** The terminal-only installer ends by running `oop doctor` once, so you see which providers are ready and what is still missing.
+- **0.0.155 · Safer on shared machines.** Files OOP writes in a project no longer follow a symlink outside the project folder, the folder holding your chat history is readable only by your user on macOS and Linux, and crew audits block changes that open a security hole.
+- **0.0.155 · The crew wastes fewer turns.** A Claude Code lead now waits up to five minutes per check instead of 50 seconds, a task that cites a missing path gets a warning up front, and members re-read a file right before editing it.
+
+## Run every machine from one OOP
+
+OOP is not limited to the computer you opened it on. Add the other computers you already run OOP on (a desktop at home, a Linux box, a work laptop) once, and drive all of them from one window. Projects and provider logins stay on each machine; the machine you add has to be on and reachable, with OOP running there.
+
+- **Connect a computer.** Open Settings → Connections → **Add environment** and pick the route: **OOP Connect** (sign in on the host and on this device; no router setup), a **pairing link over your LAN or a private network** (**Network access** on the host, then create a link the other computer can reach), or **SSH** (enter a host or SSH alias; OOP starts the server there and opens the port forward for you). Pairing details, routes and how to revoke a device are in [Connect from your phone](#connect-from-your-phone); a computer pairs the same way a phone does.
+
+- **See every project in one sidebar.** Connected computers appear as environments beside each other in the thread list and the environment picker. Each thread belongs to the machine it runs on, so you read and continue it there instead of opening a second app.
+
+- **Balance new threads by CPU and memory.** Once two or more machines are on, open **Settings → Connections → Load balancing** (off by default) and let OOP choose the machine for a new draft. Each machine starts at **Normal**; choose **Prefer** to favor it while it has CPU and memory free, **Less often** to reduce its share, or **Manual only** to leave it out of automatic selection. These are preferences, not fixed percentages, and they are saved separately in each client. In the composer, **Auto balance** re-checks current resources, and choosing a machine or a branch overrides it. Threads that already started stay where they are, and if resource checks are unavailable or every eligible machine is full, pick a machine yourself.
+
+- **Turn a laptop into a remote-only client.** On a light laptop, open **Settings → Connections** and switch off **Local environment**. OOP restarts without a local server: no local agents or terminals run, other devices can no longer connect to it, and your projects, history and saved connections are kept. You keep working through pairing, OOP Connect or SSH, and switching it back on restores the previous local setup.
+
+- **SSH hosts behave the same way.** A host added under Settings → Connections → Add environment → **SSH** gets its own server under `~/.oop-desktop` on that machine, with its own provider settings and sign-ins (**Settings → Providers**, then pick the remote environment at the top). It must be Linux (x64 or arm64) or an Apple Silicon Mac with its provider CLIs installed and signed in.
+
+> [!TIP]
+> A phone is a different surface: it connects to one desktop, which has to stay awake. See [Connect from your phone](#connect-from-your-phone) for that route instead.
+
 ## Screenshot tour
 
 All screenshots come from an isolated demo profile with no personal data.
@@ -78,7 +114,7 @@ _Chat: composer with model picker and permission mode below the thread timeline.
 
 ### OOP Crew
 
-One chat, several models. The chat's own model is the **brain**; it plans and talks to you. A **worker** takes routine work (searches, edits, tests), an **expert** takes hard implementation, and an **auditor** reviews turns that changed files. Presets are **OOP pick**, **Speed**, **Quality** and **Budget**, and you can override the model per role. If a crew model fails (for example, out of credit), OOP hands the task to another signed-in model of the same level. Small, test-passing changes of 20 lines or fewer are not audited.
+One chat, several models. The chat's own model is the **brain**; it plans and talks to you. A **worker** takes routine work (searches, edits, tests), an **expert** takes hard implementation, and an **auditor** reviews turns that changed files. Presets are **OOP pick**, **Speed**, **Quality** and **Budget**, and you can override the model per role. If a crew model fails (for example, out of credit), OOP hands the task to another signed-in model of the same level. A small, test-passing change of 20 lines or fewer gets a short light review instead of a full audit.
 
 **When to use it:** larger tasks where you want cheap models for the bulk and a strong model for review. **Open it:** **Crew** next to the model picker in the composer. Crew work shows live under **Workflows** and **Agents** in the right panel. The **Agents** board shows whether each crew task is reported, tested or audited, with its tokens and cost, and lets you stop, open or retry it. Crew tasks can declare the files they may change, and OOP warns when parallel tasks overlap.
 

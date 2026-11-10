@@ -2435,6 +2435,8 @@ code {
   --report-4: oklch(0.78 0.15 75);
   --report-5: oklch(0.66 0.19 15);
   --report-6: oklch(0.64 0.18 295);
+  --report-7: oklch(0.7 0.13 195);
+  --report-8: oklch(0.68 0.19 330);
 }
 
 :root {
@@ -2453,6 +2455,8 @@ html[data-theme-id="iris"] {
   --report-4: oklch(0.42 0.16 280);
   --report-5: oklch(0.62 0.15 255);
   --report-6: oklch(0.9 0.05 292);
+  --report-7: oklch(0.5 0.13 305);
+  --report-8: oklch(0.86 0.07 262);
 
   @variant dark {
     --report-2: oklch(0.74 0.12 265);
@@ -2460,7 +2464,39 @@ html[data-theme-id="iris"] {
     --report-4: oklch(0.86 0.07 285);
     --report-5: oklch(0.66 0.15 255);
     --report-6: oklch(0.48 0.16 280);
+    --report-7: oklch(0.62 0.13 305);
+    --report-8: oklch(0.44 0.1 262);
   }
+}
+
+/*
+ * ztd-charts canvases (chat ```chart blocks). The patched library paints every multi-series and
+ * multi-item fill from --ztd-c1..c8, so those mirror the report palette; the accent is report-1.
+ * Panel and page stay transparent so the surrounding figure card shows through, and ink, muted
+ * and line follow the app's own text and border tokens, so light and dark need no extra rules.
+ * The ThemeProvider in ZtdChartView passes the same values (with fixed hex fallbacks) inline,
+ * which is what the library's contrast maths read.
+ */
+.oop-ztd {
+  --ztd-c1: var(--report-1);
+  --ztd-c2: var(--report-2);
+  --ztd-c3: var(--report-3);
+  --ztd-c4: var(--report-4);
+  --ztd-c5: var(--report-5);
+  --ztd-c6: var(--report-6);
+  --ztd-c7: var(--report-7);
+  --ztd-c8: var(--report-8);
+  --ztd-accent: var(--report-1);
+  --ztd-accent-text: var(--report-1);
+  --ztd-bg: transparent;
+  --ztd-panel: transparent;
+  --ztd-ink: var(--foreground);
+  --ztd-muted: var(--muted-foreground);
+  --ztd-dim: var(--muted-foreground);
+  --ztd-line: var(--border);
+  --ztd-line2: var(--border);
+  --ztd-on-accent: var(--background);
+  --ztd-on-ink: var(--background);
 }
 
 @utility rpt-enter {

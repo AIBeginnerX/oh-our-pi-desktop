@@ -100,11 +100,16 @@ pub enum NodeState {
     Completed,
     Failed,
     Cancelled,
+    /// A failed command whose exit 1 only answers "no": shown dim as "exit 1", never failed.
+    Quiet,
 }
 
 impl NodeState {
     pub fn settled(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Quiet
+        )
     }
 }
 
@@ -223,6 +228,275 @@ fn tool_state(status: &Value) -> NodeState {
         Some("failed" | "error" | "declined") => NodeState::Failed,
         Some("cancelled" | "stopped") => NodeState::Cancelled,
         _ => NodeState::Running,
+    }
+}
+
+/// The state of a tool step: a failed command whose exit 1 only answers "no" is quiet.
+fn quiet_or_tool_state(payload: &Value) -> NodeState {
+    if is_quiet_command_exit(payload) {
+        return NodeState::Quiet;
+    }
+    tool_state(&payload["status"])
+}
+
+/// Output words that report trouble, so an exit 1 beside them is a real failure. Mirrors
+/// packages/client-runtime/src/work-log/quietExit.ts.
+const QUIET_EXIT_ERROR_WORDS: [&str; 25] = [
+    "error",
+    "fail",
+    "fatal",
+    "no such file",
+    "not found",
+    "denied",
+    "traceback",
+    "panic",
+    "exception",
+    "enoent",
+    "eacces",
+    "cannot",
+    "can't",
+    "unable",
+    "invalid",
+    "refused",
+    "timeout",
+    "timed out",
+    "abort",
+    "segmentation",
+    "killed",
+    "blocked",
+    "✗",
+    "×",
+    "no matches found",
+];
+
+/// Whether a failed command item is a quiet exit: an intended "no" to draw dim as "exit 1"
+/// instead of red. Conservative like the TypeScript rule — an unknown or non-1 exit code, error
+/// words in the output, or a last command that mutates rather than queries all stay failed.
+pub(crate) fn is_quiet_command_exit(payload: &Value) -> bool {
+    if payload["itemType"].as_str() != Some("command_execution")
+        || payload["status"].as_str() != Some("failed")
+    {
+        return false;
+    }
+    let Some((output, command)) = quiet_exit_facts(&payload["data"]) else {
+        return false;
+    };
+    let lowered = output.to_lowercase();
+    if QUIET_EXIT_ERROR_WORDS
+        .iter()
+        .any(|word| lowered.contains(word))
+    {
+        return false;
+    }
+    last_command_queries(command)
+}
+
+/// The exit facts a payload must state outright: a Codex item's numeric `exitCode`, or a Claude
+/// result (or raw output) whose first line is the code. Any other shape (ACP records without a code) proves
+/// nothing and stays failed.
+fn quiet_exit_facts(data: &Value) -> Option<(String, Option<&str>)> {
+    let item = &data["item"];
+    if let Some(code) = item["exitCode"].as_i64() {
+        if code != 1 {
+            return None;
+        }
+        return Some((
+            item["aggregatedOutput"].as_str().unwrap_or("").to_string(),
+            item["command"].as_str(),
+        ));
+    }
+    // Claude states the code as the first line of its result, under `result` or `rawOutput`.
+    let content = claude_content_text(&data["result"]["content"])
+        .or_else(|| claude_content_text(&data["rawOutput"]["content"]))?;
+    let (first_line, rest) = match content.split_once('\n') {
+        Some((first, rest)) => (first, rest),
+        None => (content.as_str(), ""),
+    };
+    if first_line.trim() != "Exit code 1" {
+        return None;
+    }
+    let command = data["input"]["command"]
+        .as_str()
+        .or_else(|| data["command"].as_str());
+    Some((rest.to_string(), command))
+}
+
+/// Claude results carry text either as one string or as `{type: "text", text}` blocks.
+fn claude_content_text(content: &Value) -> Option<String> {
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+    let blocks = content.as_array()?;
+    let mut chunks = Vec::new();
+    for block in blocks {
+        if block["type"] == "text"
+            && let Some(text) = block["text"].as_str()
+        {
+            chunks.push(text.to_string());
+        }
+    }
+    (!chunks.is_empty()).then(|| chunks.join("\n"))
+}
+
+/// Unwraps a `/bin/zsh -lc '…'` / `bash -lc "…"` wrapper; an unterminated quote leaves it on.
+fn unwrap_shell_wrapper(command: &str) -> &str {
+    let trimmed = command.trim();
+    let Some(closing) = trimmed
+        .chars()
+        .next_back()
+        .filter(|c| *c == '\'' || *c == '"')
+    else {
+        return trimmed;
+    };
+    let body_end = trimmed.len() - closing.len_utf8();
+    let Some(open_offset) = trimmed[..body_end].find(closing) else {
+        return trimmed;
+    };
+    let head = trimmed[..open_offset].trim_end();
+    let Some(flag) = ["-lc", "-c"].into_iter().find(|f| head.ends_with(f)) else {
+        return trimmed;
+    };
+    let shell = head[..head.len() - flag.len()].trim_end();
+    let basename = shell.rsplit(['/', '\\']).next().unwrap_or(shell);
+    if matches!(basename, "zsh" | "bash" | "sh") {
+        &trimmed[open_offset + closing.len_utf8()..body_end]
+    } else {
+        trimmed
+    }
+}
+
+/// Splits on newlines, `;`, `&&`, `||`, and `|` outside quotes; empty segments dropped.
+fn split_command_segments(script: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0usize;
+    let mut quote: Option<char> = None;
+    let mut chars = script.char_indices().peekable();
+    while let Some((index, c)) = chars.next() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '\n' | ';' => {
+                segments.push(&script[start..index]);
+                start = index + c.len_utf8();
+            }
+            '|' => {
+                let double = chars.peek() == Some(&(index + 1, '|'));
+                if double {
+                    chars.next();
+                }
+                segments.push(&script[start..index]);
+                start = index + 1 + usize::from(double);
+            }
+            '&' if chars.peek() == Some(&(index + 1, '&')) => {
+                chars.next();
+                segments.push(&script[start..index]);
+                start = index + 2;
+            }
+            _ => {}
+        }
+    }
+    segments.push(&script[start..]);
+    segments
+        .into_iter()
+        .map(str::trim)
+        .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
+fn strip_leading_assignment(segment: &str) -> Option<String> {
+    let eq = segment.find('=')?;
+    let name = &segment[..eq];
+    let first = name.chars().next()?;
+    if !(first.is_ascii_alphabetic() || first == '_')
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    let value_and_rest = &segment[eq + 1..];
+    let value_end = match value_and_rest.chars().next() {
+        Some(q @ ('\'' | '"')) => value_and_rest[1..].find(q)? + 2,
+        _ => value_and_rest
+            .find(char::is_whitespace)
+            .unwrap_or(value_and_rest.len()),
+    };
+    let rest = value_and_rest[value_end..].trim_start();
+    (!rest.is_empty()).then(|| rest.to_string())
+}
+
+fn strip_leading_prefix(segment: &str) -> Option<String> {
+    let (first, rest) = segment.split_once(char::is_whitespace)?;
+    matches!(first, "sudo" | "time" | "env").then(|| rest.trim_start().to_string())
+}
+
+fn unquote(token: &str) -> &str {
+    let bytes = token.as_bytes();
+    if bytes.len() >= 2
+        && (bytes[0] == b'\'' || bytes[0] == b'"')
+        && bytes[bytes.len() - 1] == bytes[0]
+    {
+        &token[1..token.len() - 1]
+    } else {
+        token
+    }
+}
+
+/// Drops leading `NAME=value` assignments and leading `sudo`, `time`, `env` before naming the
+/// program; only the prefix tokens go, so `sudo -u root grep` stays unnamed and failed.
+fn strip_command_head(segment: &str) -> String {
+    let mut current = segment.trim().to_string();
+    loop {
+        let before = current.clone();
+        if let Some(rest) = strip_leading_assignment(&current) {
+            current = rest;
+        }
+        if let Some(rest) = strip_leading_prefix(&current) {
+            current = rest;
+        }
+        if current == before {
+            return current;
+        }
+    }
+}
+
+/// Whether the last command's exit 1 can only mean "no": a query tool, probe, or quiet git check.
+fn last_command_queries(command: Option<&str>) -> bool {
+    let Some(command) = command else {
+        return false;
+    };
+    let segments = split_command_segments(unwrap_shell_wrapper(command));
+    let Some(last) = segments.last() else {
+        return false;
+    };
+    let head = strip_command_head(last);
+    if head.trim_start().starts_with('!') {
+        return false;
+    }
+    let tokens: Vec<&str> = head.split_whitespace().map(unquote).collect();
+    let Some(first) = tokens.first() else {
+        return false;
+    };
+    let program = first
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(first)
+        .to_lowercase();
+    match program.as_str() {
+        "grep" | "egrep" | "fgrep" | "rg" | "ag" | "ack" | "test" | "[" | "[[" | "pgrep"
+        | "which" | "diff" | "cmp" => true,
+        "kill" => tokens.get(1).copied() == Some("-0"),
+        "command" => tokens.get(1).copied() == Some("-v"),
+        "type" => true,
+        "git" => match tokens.get(1).copied() {
+            Some("grep") => true,
+            Some("diff") => tokens.contains(&"--quiet") || tokens.contains(&"--exit-code"),
+            _ => false,
+        },
+        _ => false,
     }
 }
 
@@ -993,7 +1267,7 @@ fn collect_tool_steps(activities: &[Activity]) -> Vec<TurnSteps> {
             if !existed || category != Some(Cat::Other) {
                 step.category = category;
             }
-            step.state = tool_state(&payload["status"]);
+            step.state = quiet_or_tool_state(payload);
             if activity.kind == "tool.completed" || step.state != NodeState::Running {
                 step.completed_at = Some(activity.created_at.clone());
             }
@@ -2623,5 +2897,183 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    // ---- quiet command exits (work-log/quietExit.ts) ----------------------------------------------
+
+    fn codex_failed(command: &str, exit_code: i64, aggregated_output: &str) -> Value {
+        json!({
+            "itemType": "command_execution",
+            "status": "failed",
+            "data": {"item": {
+                "command": command,
+                "exitCode": exit_code,
+                "aggregatedOutput": aggregated_output,
+            }},
+        })
+    }
+
+    fn claude_failed(command: &str, content: Value) -> Value {
+        json!({
+            "itemType": "command_execution",
+            "status": "failed",
+            "data": {"input": {"command": command}, "result": {"content": content}},
+        })
+    }
+
+    #[test]
+    fn a_grep_no_match_is_quiet() {
+        assert!(is_quiet_command_exit(&codex_failed(
+            "/bin/zsh -lc 'grep pattern src/main.ts'",
+            1,
+            ""
+        )));
+        assert!(is_quiet_command_exit(&claude_failed(
+            "grep pattern src/main.ts",
+            json!("Exit code 1\n")
+        )));
+        assert!(is_quiet_command_exit(&claude_failed(
+            "rg --files -g missing",
+            json!([
+                {"type": "text", "text": "Exit code 1\n"},
+                {"type": "text", "text": "no output"},
+            ])
+        )));
+    }
+
+    #[test]
+    fn a_mutating_command_stays_failed() {
+        assert!(!is_quiet_command_exit(&codex_failed(
+            "pnpm test > log",
+            1,
+            ""
+        )));
+        assert!(!is_quiet_command_exit(&codex_failed(
+            "grep pattern src/main.ts | head",
+            1,
+            ""
+        )));
+        assert!(!is_quiet_command_exit(&codex_failed(
+            "! grep pattern src/main.ts",
+            1,
+            ""
+        )));
+        assert!(!is_quiet_command_exit(&codex_failed("git diff", 1, "")));
+    }
+
+    #[test]
+    fn error_output_and_other_exit_codes_stay_failed() {
+        assert!(!is_quiet_command_exit(&codex_failed(
+            "cat missing.txt",
+            1,
+            "cat: missing.txt: No such file or directory"
+        )));
+        assert!(!is_quiet_command_exit(&claude_failed(
+            "git -C repo status",
+            json!("Exit code 1\nfatal: not a git repository")
+        )));
+        assert!(!is_quiet_command_exit(&codex_failed("grep x f", 2, "")));
+        assert!(!is_quiet_command_exit(&claude_failed(
+            "grep x f",
+            json!("Exit code 2\n")
+        )));
+    }
+
+    #[test]
+    fn probes_and_quiet_git_checks_are_quiet() {
+        assert!(is_quiet_command_exit(&codex_failed("kill -0 123", 1, "")));
+        assert!(is_quiet_command_exit(&codex_failed(
+            "command -v docker",
+            1,
+            ""
+        )));
+        assert!(is_quiet_command_exit(&codex_failed("type docker", 1, "")));
+        assert!(is_quiet_command_exit(&codex_failed(
+            "git grep pattern",
+            1,
+            ""
+        )));
+        assert!(is_quiet_command_exit(&codex_failed(
+            "git diff --quiet",
+            1,
+            ""
+        )));
+        assert!(is_quiet_command_exit(&codex_failed(
+            "git diff --exit-code",
+            1,
+            ""
+        )));
+        // A quoted `|` is a pattern, not a pipe.
+        assert!(is_quiet_command_exit(&codex_failed(
+            "grep \"a|b\" notes.md",
+            1,
+            ""
+        )));
+        assert!(is_quiet_command_exit(&codex_failed(
+            "/bin/zsh -lc 'grep \"a|b\" notes.md'",
+            1,
+            ""
+        )));
+        assert!(is_quiet_command_exit(&codex_failed(
+            "CI=1 sudo grep pattern file",
+            1,
+            ""
+        )));
+    }
+
+    #[test]
+    fn shapes_without_a_stated_exit_code_stay_failed() {
+        assert!(!is_quiet_command_exit(&json!({
+            "itemType": "command_execution",
+            "status": "failed",
+            "data": {"toolCallId": "call_1", "kind": "execute"},
+        })));
+        assert!(!is_quiet_command_exit(&json!({
+            "itemType": "command_execution",
+            "status": "completed",
+            "data": {"item": {"command": "grep x f", "exitCode": 1}},
+        })));
+        assert!(!is_quiet_command_exit(&json!({
+            "itemType": "mcp_tool_call",
+            "status": "failed",
+            "data": {"item": {"command": "grep x f", "exitCode": 1}},
+        })));
+    }
+
+    #[test]
+    fn the_raw_output_shape_and_glob_misses_follow_the_rule() {
+        let raw = |command: &str, content: &str| {
+            json!({
+                "itemType": "command_execution",
+                "status": "failed",
+                "data": {"command": command, "rawOutput": {"content": content}},
+            })
+        };
+        assert!(is_quiet_command_exit(&raw(
+            "grep pattern src/main.ts",
+            "Exit code 1\n"
+        )));
+        assert!(!is_quiet_command_exit(&raw("pnpm build", "Exit code 1\n")));
+        assert!(!is_quiet_command_exit(&raw(
+            "grep -rn x src/codex*",
+            "Exit code 1\nzsh:1: no matches found: src/codex*",
+        )));
+    }
+
+    #[test]
+    fn a_quiet_step_settles_without_counting_failed() {
+        let step = quiet_or_tool_state(&codex_failed(
+            "/bin/zsh -lc 'grep pattern src/main.ts'",
+            1,
+            "",
+        ));
+        assert_eq!(step, NodeState::Quiet);
+        assert!(step.settled());
+        let failed = quiet_or_tool_state(&codex_failed(
+            "cat missing.txt",
+            1,
+            "cat: missing.txt: No such file",
+        ));
+        assert_eq!(failed, NodeState::Failed);
     }
 }

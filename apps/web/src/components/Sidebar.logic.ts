@@ -10,7 +10,10 @@ import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-searc
 import type { ContextMenuItem, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
-import { planPinnedReorder } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  planPinnedReorder,
+  sortActiveThreadsByRecentWork,
+} from "@t3tools/client-runtime/state/thread-sort";
 import {
   effectiveSnoozed,
   type ThreadSnoozeShell,
@@ -281,9 +284,10 @@ export type SidebarThreadDropPlan =
       readonly orderKey: string | undefined;
       readonly extraAssignments: ReadonlyArray<{ readonly id: string; readonly orderKey: string }>;
     }
+  /** Into the active list. A null order lets the active sort place the row. */
   | {
       readonly kind: "move-active";
-      readonly order: readonly string[];
+      readonly order: readonly string[] | null;
       readonly assignments: ReadonlyArray<{ readonly id: string; readonly orderKey: string }>;
       readonly unpin: boolean;
       readonly unsettle: boolean;
@@ -323,6 +327,9 @@ export function planSidebarThreadDrop(input: {
   readonly activeOrder: readonly string[];
   readonly activeKeysById: ReadonlyMap<string, string | null | undefined>;
   readonly activeReorderableKeys?: ReadonlySet<string>;
+  /** Running threads first sorts the active list itself: rows cannot be
+      rearranged inside it, and rows dropped into it land where it sorts them. */
+  readonly activeOrderAutomatic?: boolean;
 }): SidebarThreadDropPlan {
   const {
     activeKey,
@@ -336,12 +343,25 @@ export function planSidebarThreadDrop(input: {
     activeOrder,
     activeKeysById,
     activeReorderableKeys,
+    activeOrderAutomatic = false,
   } = input;
   if (input.supportsSettlement === false && (target.section === "settled" || activeSettled)) {
     return { kind: "none" };
   }
   switch (target.section) {
     case "active": {
+      if (activeOrderAutomatic) {
+        return activeSection === "active"
+          ? { kind: "none" }
+          : {
+              kind: "move-active",
+              order: null,
+              assignments: [],
+              unpin: activePinned,
+              unsettle: activeSettled,
+              unsnooze: activeSection === "snoozed",
+            };
+      }
       const order = target.activeOrder;
       if (
         activeSection === "active" &&
@@ -921,6 +941,14 @@ export function liftInProgressThreads<T>(
 export function isSidebarThreadInProgress(thread: SidebarThreadStatusInput): boolean {
   const status = resolveSidebarThreadStatus(thread);
   return status === "working" || status === "approval" || status === "input";
+}
+
+/** Active order with Running threads first: in-progress rows lead and the
+    rest follow their latest work, so a finished row stays where it rose. */
+export function sortActiveThreadsRunningFirst<
+  T extends SidebarThreadStatusInput & Parameters<typeof sortActiveThreadsByRecentWork>[0][number],
+>(threads: readonly T[]): T[] {
+  return liftInProgressThreads(sortActiveThreadsByRecentWork(threads), isSidebarThreadInProgress);
 }
 
 /** First VALID timestamp wins: `a ?? b` falls through on null, but a present-

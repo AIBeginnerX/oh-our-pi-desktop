@@ -90,6 +90,9 @@ export function stateText(node: Pick<WorkflowNode, "state" | "info">, t: Transla
         : node.info.crew?.outcome === "partial"
           ? t("Partial")
           : t("Failed");
+    case "quiet":
+      // An exit code, not a verdict; left untranslated like the numbers and codes beside it.
+      return "exit 1";
     case "cancelled":
       return t("Stopped");
     case "blocked":

@@ -19,6 +19,34 @@ function makeCommandActivity(
 }
 
 describe("deriveWorkLogEntries command output", () => {
+  it("marks a grep that found nothing as a quiet exit, not a failure", () => {
+    const [quiet, failed] = deriveWorkLogEntries([
+      makeCommandActivity("quiet-grep", {
+        itemType: "command_execution",
+        status: "failed",
+        title: "Ran command",
+        detail: "/bin/zsh -lc 'grep pattern src/main.ts'",
+        data: {
+          item: {
+            command: "/bin/zsh -lc 'grep pattern src/main.ts'",
+            exitCode: 1,
+            aggregatedOutput: "",
+          },
+        },
+      }),
+      makeCommandActivity("real-failure", {
+        itemType: "command_execution",
+        status: "failed",
+        title: "Ran command",
+        detail: "pnpm build",
+        data: { item: { command: "pnpm build", exitCode: 1, aggregatedOutput: "" } },
+      }),
+    ]);
+
+    expect(quiet?.quietExit).toBe(true);
+    expect(failed?.quietExit).toBeUndefined();
+  });
+
   it("uses Codex aggregated output instead of repeating the command", () => {
     const [entry] = deriveWorkLogEntries([
       makeCommandActivity("codex-command", {

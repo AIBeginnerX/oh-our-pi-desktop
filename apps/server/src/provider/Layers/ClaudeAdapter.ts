@@ -165,6 +165,15 @@ export interface ClaudeAdapterLiveOptions {
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
 }
 
+/**
+ * Hard wall-clock timeout the SDK applies to each t3-code tool call (the per-server `timeout`
+ * of the MCP http-server config, in milliseconds; without it the client's own default governs).
+ * It must cover the longest crew_wait a claudeAgent lead may use — the proven-client cap plus
+ * its collection budget (crewTaskRecord PROVEN_CLIENT_WAIT_SECONDS + WAIT_COLLECT_SECONDS) —
+ * with margin to spare; keep it above that budget when either side moves.
+ */
+export const T3_CODE_TOOL_TIMEOUT_MS = 360_000;
+
 export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   claudeSettings: ClaudeSettings,
   options?: ClaudeAdapterLiveOptions,
@@ -1079,6 +1088,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                   headers: {
                     Authorization: mcpSession.authorizationHeader,
                   },
+                  timeout: T3_CODE_TOOL_TIMEOUT_MS,
                 },
               },
             }

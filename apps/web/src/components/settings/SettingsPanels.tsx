@@ -833,7 +833,7 @@ export function GeneralSettingsPanel() {
           {...searchableSetting("running-threads-first")}
           title={t(searchableSetting("running-threads-first").title)}
           description={t(
-            "Threads with work in progress, approval or input requests stay at the top of the active list.",
+            "Threads with work in progress, approval or input requests lead the active list, and the rest follow their latest work. Turn off to arrange the active list by dragging.",
           )}
           control={
             <Switch

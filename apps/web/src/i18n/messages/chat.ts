@@ -94,4 +94,10 @@ export const CHAT_MESSAGES: MessageCatalog = {
   Less: { ko: "적음", ja: "少", "zh-CN": "少", es: "Menos" },
   More: { ko: "많음", ja: "多", "zh-CN": "多", es: "Más" },
   "no data": { ko: "데이터 없음", ja: "データなし", "zh-CN": "无数据", es: "sin datos" },
+  "All values are 0": {
+    ko: "모든 값이 0입니다",
+    ja: "すべての値が 0 です",
+    "zh-CN": "所有值均为 0",
+    es: "Todos los valores son 0",
+  },
 };

@@ -140,6 +140,31 @@ export const make = Effect.gen(function* () {
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
 
   /**
+   * Fails unless a real path stays strictly inside the real workspace root. Both
+   * reads and writes re-check containment on real paths, since the lexical check
+   * in WorkspacePaths cannot see where existing symlinks resolve.
+   */
+  const failIfOutsideRealRoot = Effect.fn("WorkspaceFileSystem.failIfOutsideRealRoot")(function* (
+    input: { readonly workspaceRoot: string; readonly relativePath: string },
+    realWorkspaceRoot: string,
+    realPath: string,
+  ) {
+    const relativeRealPath = path.relative(realWorkspaceRoot, realPath);
+    if (
+      relativeRealPath.startsWith(`..${path.sep}`) ||
+      relativeRealPath === ".." ||
+      path.isAbsolute(relativeRealPath)
+    ) {
+      return yield* new WorkspaceFilePathEscapeError({
+        workspaceRoot: input.workspaceRoot,
+        relativePath: input.relativePath,
+        resolvedWorkspaceRoot: realWorkspaceRoot,
+        resolvedPath: realPath,
+      });
+    }
+  });
+
+  /**
    * Resolves the file a read targets. Workspace-relative paths must stay inside the
    * root, symlinks included. An absolute path reads a host file in place, such as a
    * report an agent wrote to a temp directory; it gets no root check.
@@ -193,19 +218,11 @@ export const make = Effect.gen(function* () {
           cause,
         }),
     });
-    const relativeRealPath = path.relative(realWorkspaceRoot, realTargetPath);
-    if (
-      relativeRealPath.startsWith(`..${path.sep}`) ||
-      relativeRealPath === ".." ||
-      path.isAbsolute(relativeRealPath)
-    ) {
-      return yield* new WorkspaceFilePathEscapeError({
-        workspaceRoot: input.cwd,
-        relativePath: input.relativePath,
-        resolvedWorkspaceRoot: realWorkspaceRoot,
-        resolvedPath: realTargetPath,
-      });
-    }
+    yield* failIfOutsideRealRoot(
+      { workspaceRoot: input.cwd, relativePath: input.relativePath },
+      realWorkspaceRoot,
+      realTargetPath,
+    );
     return { relativePath: target.relativePath, realTargetPath };
   });
 
@@ -309,6 +326,52 @@ export const make = Effect.gen(function* () {
       workspaceRoot: input.cwd,
       relativePath: input.relativePath,
     });
+
+    const realWorkspaceRoot = yield* Effect.tryPromise({
+      try: () => NodeFSP.realpath(input.cwd),
+      catch: (cause) =>
+        new WorkspaceFileSystemOperationError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: target.absolutePath,
+          operationPath: input.cwd,
+          operation: "realpath-workspace-root",
+          cause,
+        }),
+    });
+    // Missing components of the target are created fresh under its deepest
+    // existing ancestor, but that ancestor may itself be a symlink resolving
+    // outside the root, so containment must be re-checked on its real path.
+    // lstat, not stat: a dangling symlink counts as existing, so its realpath
+    // fails below instead of the write following it outside the root.
+    let existingAncestor = target.absolutePath;
+    for (;;) {
+      const exists = yield* Effect.tryPromise(() => NodeFSP.lstat(existingAncestor)).pipe(
+        Effect.as(true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (exists) break;
+      const parent = path.dirname(existingAncestor);
+      if (parent === existingAncestor) break;
+      existingAncestor = parent;
+    }
+    const realAncestorPath = yield* Effect.tryPromise({
+      try: () => NodeFSP.realpath(existingAncestor),
+      catch: (cause) =>
+        new WorkspaceFileSystemOperationError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: target.absolutePath,
+          operationPath: existingAncestor,
+          operation: "realpath-target",
+          cause,
+        }),
+    });
+    yield* failIfOutsideRealRoot(
+      { workspaceRoot: input.cwd, relativePath: input.relativePath },
+      realWorkspaceRoot,
+      realAncestorPath,
+    );
 
     yield* fileSystem.makeDirectory(path.dirname(target.absolutePath), { recursive: true }).pipe(
       Effect.mapError(

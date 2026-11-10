@@ -9,6 +9,7 @@ import {
   planPinnedReorder,
   resolveSettledThreadTimestamp,
   sortActiveThreadsByOrderKey,
+  sortActiveThreadsByRecentWork,
   sortPinnedThreadsByOrderKey,
   sortSettledThreads,
   sortThreads,
@@ -497,5 +498,55 @@ describe("sortActiveThreadsByOrderKey", () => {
     const keys = new Map(assignments.map((assignment) => [assignment.id, assignment.orderKey]));
     const updated = threads.map((thread) => ({ ...thread, activeOrderKey: keys.get(thread.id) }));
     expect(sortActiveThreadsByOrderKey(updated).map((thread) => thread.id)).toEqual(orderedIds);
+  });
+});
+
+describe("sortActiveThreadsByRecentWork", () => {
+  const turn = (requestedAt: string, completedAt: string): OrchestrationLatestTurn => ({
+    turnId: TurnId.make("turn-1"),
+    state: "completed",
+    assistantMessageId: null,
+    requestedAt,
+    startedAt: requestedAt,
+    completedAt,
+  });
+
+  it("orders by the latest work and ignores saved order keys", () => {
+    const sorted = sortActiveThreadsByRecentWork([
+      {
+        id: "arranged",
+        createdAt: "2026-03-09T12:00:00.000Z",
+        activeOrderKey: "a",
+        latestUserMessageAt: null,
+        latestTurn: null,
+      },
+      {
+        // Started before "started-later" but finished after it.
+        id: "finished-last",
+        createdAt: "2026-03-01T09:00:00.000Z",
+        activeOrderKey: "z",
+        latestUserMessageAt: "2026-03-09T13:00:00.000Z",
+        latestTurn: turn("2026-03-09T13:00:00.000Z", "2026-03-09T13:30:00.000Z"),
+      },
+      {
+        id: "started-later",
+        createdAt: "2026-03-01T10:00:00.000Z",
+        latestUserMessageAt: "2026-03-09T13:10:00.000Z",
+        latestTurn: turn("2026-03-09T13:10:00.000Z", "2026-03-09T13:20:00.000Z"),
+      },
+      {
+        id: "reopened",
+        createdAt: "2026-02-01T09:00:00.000Z",
+        unsettledAt: "2026-03-09T12:30:00.000Z",
+        latestUserMessageAt: null,
+        latestTurn: null,
+      },
+    ]);
+    expect(sorted.map((thread) => thread.id)).toEqual([
+      "finished-last",
+      "started-later",
+      "reopened",
+      "arranged",
+    ]);
   });
 });

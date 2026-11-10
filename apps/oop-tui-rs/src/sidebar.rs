@@ -270,21 +270,31 @@ pub(crate) fn sort_pinned(threads: &mut [&ThreadShell]) {
     });
 }
 
-/// New and reopened threads lead the active list; arranged threads follow their saved keys.
+/// Newest work first: creation, re-entry, the latest message, or the latest
+/// turn starting or finishing. Finishing stamps a thread newest, so a row the
+/// lift raised stays up when its work ends. Same order as the web sidebar with
+/// Running threads first on, which this list always is; saved keys are ignored.
 fn sort_active(threads: &mut [&ThreadShell]) {
-    let anchor = |t: &ThreadShell| {
-        ms(&t.created_at)
-            .unwrap_or(0)
-            .max(ms_opt(&t.unsettled_at).unwrap_or(0))
+    let latest_work = |t: &ThreadShell| {
+        let turn = t.latest_turn.as_ref();
+        [
+            Some(t.created_at.as_str()),
+            t.unsettled_at.as_deref(),
+            t.latest_user_message_at.as_deref(),
+            turn.map(|turn| turn.requested_at.as_str()),
+            turn.and_then(|turn| turn.started_at.as_deref()),
+            turn.and_then(|turn| turn.completed_at.as_deref()),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(ms)
+        .max()
+        .unwrap_or(0)
     };
     threads.sort_by(|a, b| {
-        let order = match (&a.active_order_key, &b.active_order_key) {
-            (None, Some(_)) => return Ordering::Less,
-            (Some(_), None) => return Ordering::Greater,
-            (Some(x), Some(y)) => x.cmp(y),
-            (None, None) => anchor(b).cmp(&anchor(a)),
-        };
-        order.then_with(|| a.id.cmp(&b.id))
+        latest_work(b)
+            .cmp(&latest_work(a))
+            .then_with(|| a.id.cmp(&b.id))
     });
 }
 
@@ -495,7 +505,7 @@ pub fn build(input: &Input) -> Vec<Nav> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::thread::Session;
+    use crate::thread::{LatestTurn, Session};
 
     const NOW: i64 = 1_767_225_600_000; // 2026-01-01T00:00:00Z
 
@@ -661,6 +671,27 @@ mod tests {
             (waiting.title.as_str(), waiting.status),
             ("crew Worker · ask", Status::Approval)
         );
+    }
+
+    #[test]
+    fn a_thread_stays_where_it_rose_after_its_work_finishes() {
+        let threads = vec![
+            thread("arranged", |t| {
+                t.created_at = "2025-12-31T12:00:00.000Z".into();
+                t.active_order_key = Some("a".into());
+            }),
+            thread("finished", |t| {
+                t.active_order_key = Some("z".into());
+                t.latest_turn = Some(LatestTurn {
+                    requested_at: "2025-12-31T20:00:00.000Z".into(),
+                    started_at: Some("2025-12-31T20:00:00.000Z".into()),
+                    completed_at: Some("2025-12-31T20:05:00.000Z".into()),
+                    ..Default::default()
+                });
+            }),
+        ];
+        let items = build_for(&threads, &View::default(), None);
+        assert_eq!(ids(&items), vec!["new", "finished", "arranged"]);
     }
 
     #[test]
