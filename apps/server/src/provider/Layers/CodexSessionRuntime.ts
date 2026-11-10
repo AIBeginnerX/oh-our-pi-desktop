@@ -40,6 +40,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs, withCodexAnalyticsDefault } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
+import { isServerShuttingDown } from "../../serverShutdown.ts";
 import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
@@ -187,6 +188,8 @@ export interface CodexSessionRuntimeOptions {
   readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
   /** Capabilities the session's `t3-code` MCP credential grants; drives the prompt blocks. */
   readonly mcpCapabilities?: ReadonlySet<string>;
+  /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
+  readonly isShuttingDown?: () => boolean;
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
@@ -1337,6 +1340,7 @@ export const makeCodexSessionRuntime = (
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
     const closedRef = yield* Ref.make(false);
+    const isShuttingDown = options.isShuttingDown ?? isServerShuttingDown;
     /** The `additionalContext` of the latest `turn/start`, restored after compaction. */
     const lastAdditionalContextRef =
       yield* Ref.make<CodexTurnStartParamsWithCollaborationMode["additionalContext"]>(undefined);
@@ -2477,7 +2481,11 @@ export const makeCodexSessionRuntime = (
       Effect.flatMap((exitCode) =>
         Ref.get(closedRef).pipe(
           Effect.flatMap((closed) => {
-            if (closed) {
+            // The shutdown signal reaches the app server with the server, and
+            // one that exits on it is not an error. Leave the session running
+            // with its turn: `ProviderService.runStopAll` records the
+            // continuation and closes it through `stopAll`.
+            if (closed || isShuttingDown()) {
               return Effect.void;
             }
             const nextStatus = exitCode === 0 ? "closed" : "error";

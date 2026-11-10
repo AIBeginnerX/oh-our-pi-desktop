@@ -38,6 +38,7 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { isServerShuttingDown } from "../../serverShutdown.ts";
 import type { AntigravityAuth } from "../AntigravityAuth.ts";
 import {
   ProviderAdapterRequestError,
@@ -144,6 +145,8 @@ export interface AntigravityAdapterOptions {
   /** Model the provider default alias selects, when the account offers it. */
   readonly defaultModel?: Effect.Effect<string | undefined>;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
+  readonly isShuttingDown?: () => boolean;
 }
 
 interface PendingApproval {
@@ -308,6 +311,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
   settings: AntigravitySettings,
   options: AntigravityAdapterOptions,
 ) {
+  const isShuttingDown = options.isShuttingDown ?? isServerShuttingDown;
   const crypto = yield* Crypto.Crypto;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -571,6 +575,10 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         yield* options.onConfigOptionsUpdated?.(event.configOptions) ?? Effect.void;
         return;
       case "ConnectionTerminated":
+        // The shutdown signal kills the agent with the server, which is not an
+        // error. Leave the session running with its turn:
+        // `ProviderService.runStopAll` records the continuation and stops it.
+        if (isShuttingDown()) return;
         context.stopped = true;
         context.disconnected = true;
         yield* stopContext(context).pipe(Effect.forkIn(ownerScope));
@@ -1142,7 +1150,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       ),
       Effect.tapError((cause) =>
         Effect.suspend(() =>
-          intent
+          intent && !isShuttingDown()
             ? context.promptLock.withPermit(
                 finishTurn(intent, { state: "failed", errorMessage: cause.message }),
               )
@@ -1153,7 +1161,13 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
         context.promptLock.withPermit(
           Effect.gen(function* () {
             const turn = intent;
-            if (!turn || turn.settled || context.stopped || context.generation !== turn.generation)
+            if (
+              !turn ||
+              turn.settled ||
+              context.stopped ||
+              context.generation !== turn.generation ||
+              isShuttingDown()
+            )
               return;
             const promptFiber = context.promptFiber;
             yield* cancelRequests(context);
@@ -1163,6 +1177,11 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
           }),
         ),
       ),
+      // While the server shuts down, the agent dies with it and the server
+      // interrupts this send. Neither ends the turn: the guards above leave it
+      // running for `ProviderService.runStopAll`, and a failure ends
+      // interrupted, which the caller does not report.
+      Effect.catchCause((cause) => (isShuttingDown() ? Effect.interrupt : Effect.failCause(cause))),
     );
   });
 

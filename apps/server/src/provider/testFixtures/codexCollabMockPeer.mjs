@@ -184,6 +184,11 @@ rl.on("line", (line) => {
         params: { threadId: rootThreadId, turn },
       });
     }
+    if (script.exitAfterTurnStarted === true) {
+      // Exits mid-turn with a code, as an app server that handles a shutdown signal does.
+      process.stdout.write("", () => process.exit(1));
+      return;
+    }
     for (const notification of script.notifications) {
       write({ jsonrpc: "2.0", method: notification.method, params: notification.params });
     }

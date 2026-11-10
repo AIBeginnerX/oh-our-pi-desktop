@@ -7,6 +7,7 @@ import {
   ThreadId,
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -74,6 +75,7 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
   readonly holdCancel?: boolean;
   readonly holdClose?: boolean;
   readonly holdDispatch?: boolean;
+  readonly isShuttingDown?: () => boolean;
 }) {
   const runtimeEvents = yield* Queue.unbounded<AcpSessionRuntimeEvent>();
   const canonicalEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -242,6 +244,7 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
       onAuthRequired: Effect.sync(() => {
         controls.authInvalidations += 1;
       }),
+      ...(options?.isShuttingDown ? { isShuttingDown: options.isShuttingDown } : {}),
     },
   );
   yield* adapter.streamEvents.pipe(
@@ -733,6 +736,55 @@ it.layer(layer)("AntigravityAdapter", (it) => {
         status: "ready",
         activeTurnId: undefined,
       });
+    }),
+  );
+
+  it.effect("keeps the running turn for runStopAll when the agent dies during shutdown", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness({ isShuttingDown: () => true });
+      yield* h.adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+      });
+      const sending = yield* h.adapter
+        .sendTurn({ threadId, input: "Keep working" })
+        .pipe(Effect.forkChild);
+      const prompt = yield* h.nextPrompt;
+      const died = new AcpErrors.AcpProcessExitedError({ code: 143 });
+      yield* h.emitNative({ _tag: "ConnectionTerminated", error: died });
+      yield* Deferred.fail(prompt.result, died);
+      const exit = yield* Fiber.await(sending);
+      yield* h.drainEvents;
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true);
+      expect((yield* h.adapter.listSessions())[0]).toMatchObject({ status: "running" });
+      expect((yield* h.adapter.listSessions())[0]?.activeTurnId).toBeDefined();
+      expect(h.seen.filter((event) => event.type === "turn.completed")).toEqual([]);
+      expect(h.seen.filter((event) => event.type === "session.exited")).toEqual([]);
+      // stopAll then owns the session and stops it.
+      yield* h.adapter.stopAll();
+      expect(yield* h.adapter.listSessions()).toEqual([]);
+    }),
+  );
+
+  it.effect("keeps the running turn when shutdown interrupts its send caller", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness({ isShuttingDown: () => true });
+      yield* h.adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+      });
+      const sending = yield* h.adapter
+        .sendTurn({ threadId, input: "Keep working" })
+        .pipe(Effect.forkChild);
+      yield* h.nextPrompt;
+      yield* Fiber.interrupt(sending);
+
+      expect(h.hasActivePrompt()).toBe(true);
+      expect((yield* h.adapter.listSessions())[0]).toMatchObject({ status: "running" });
+      expect(h.seen.filter((event) => event.type === "turn.completed")).toEqual([]);
     }),
   );
 

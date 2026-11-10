@@ -6,9 +6,11 @@ import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -142,13 +144,19 @@ const makeResolveCursorSettings = Effect.gen(function* () {
   );
 });
 
+// The suite adapter's shutdown marker; a test that sets it restores it.
+let serverShuttingDown = false;
+
 const cursorAdapterTestLayer = it.layer(
   Layer.effect(
     CursorAdapter,
     Effect.gen(function* () {
       const cursorConfig = decodeCursorSettings({});
       const resolveSettings = yield* makeResolveCursorSettings;
-      return yield* makeCursorAdapter(cursorConfig, { resolveSettings });
+      return yield* makeCursorAdapter(cursorConfig, {
+        resolveSettings,
+        isShuttingDown: () => serverShuttingDown,
+      });
     }),
   ).pipe(
     Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -218,6 +226,38 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       const runtimeEvents = yield* Fiber.join(runtimeEventsFiber);
       assert.isFalse(runtimeEvents.some((event) => event.type === "turn.completed"));
     }),
+  );
+
+  it.effect("keeps the running turn for runStopAll when the agent dies during shutdown", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-exit-during-shutdown");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EXIT_ON_PROMPT: "1" }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+      yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+
+      serverShuttingDown = true;
+      const exit = yield* adapter
+        .sendTurn({ threadId, input: "keep working", attachments: [] })
+        .pipe(Effect.exit);
+
+      assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause));
+      const [session] = yield* adapter.listSessions();
+      assert.equal(session?.status, "running");
+      assert.isDefined(session?.activeTurnId);
+      // stopAll then owns the session and stops it.
+      yield* adapter.stopAll();
+      assert.deepEqual(yield* adapter.listSessions(), []);
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          serverShuttingDown = false;
+        }),
+      ),
+    ),
   );
 
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>

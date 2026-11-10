@@ -59,7 +59,7 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            runner: macos-14
+            runner: macos-26
             platform: mac
             target: dmg
             arch: arm64
@@ -237,7 +237,7 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            runner: macos-14
+            runner: macos-26
             platform: mac
             arch: arm64
             asset: OOP-${{ needs.preflight.outputs.version }}-arm64.dmg
@@ -381,7 +381,7 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            runner: macos-14
+            runner: macos-26
             platform: mac
             arch: arm64
             monitor: t3-resource-monitor
@@ -520,7 +520,7 @@ jobs:
       matrix:
         include:
           - label: macOS arm64
-            runner: macos-14
+            runner: macos-26
             platform: mac
             arch: arm64
             asset: OOP-terminal-${{ needs.preflight.outputs.version }}-macos-arm64.tar.gz

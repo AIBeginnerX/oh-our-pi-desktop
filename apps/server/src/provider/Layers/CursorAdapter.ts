@@ -44,6 +44,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { isServerShuttingDown } from "../../serverShutdown.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -122,6 +123,8 @@ export interface CursorAdapterLiveOptions {
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
     cwd: string,
   ) => Effect.Effect<void>;
+  /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
+  readonly isShuttingDown?: () => boolean;
 }
 
 interface PendingApproval {
@@ -331,6 +334,7 @@ export function makeCursorAdapter(
 ) {
   return Effect.gen(function* () {
     const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("cursor");
+    const isShuttingDown = options?.isShuttingDown ?? isServerShuttingDown;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -1005,6 +1009,7 @@ export function makeCursorAdapter(
           }
           ctx.session = {
             ...ctx.session,
+            status: "running",
             activeTurnId: turnId,
             updatedAt: yield* nowIso,
           };
@@ -1157,9 +1162,19 @@ export function makeCursorAdapter(
             resumeCursor: ctx.session.resumeCursor,
           };
         }).pipe(
+          // The shutdown signal kills the agent with the server, so a prompt
+          // failing then is not the turn's. End interrupted, which the caller
+          // does not report, and keep the turn running for
+          // `ProviderService.runStopAll` to record and stop.
+          Effect.catchCause((cause) =>
+            isShuttingDown() ? Effect.interrupt : Effect.failCause(cause),
+          ),
           Effect.ensuring(
             Effect.sync(() => {
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
+              if (ctx.promptsInFlight === 0 && !isShuttingDown()) {
+                ctx.session = { ...ctx.session, status: "ready" };
+              }
             }),
           ),
         );

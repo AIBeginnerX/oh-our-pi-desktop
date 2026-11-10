@@ -44,6 +44,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { isServerShuttingDown } from "../../serverShutdown.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -132,6 +133,8 @@ export interface GrokAdapterLiveOptions {
   readonly harnessLabel?: string;
   /** The agent's sign-in command, named in the error when its session reports it is signed out. */
   readonly signInCommand?: string;
+  /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
+  readonly isShuttingDown?: () => boolean;
 }
 
 interface PendingApproval {
@@ -395,6 +398,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
   const LABEL = options?.providerLabel ?? "Grok";
   const productModelSlug = options?.productModelSlug;
   const harnessLabel = options?.harnessLabel ?? "Grok";
+  const isShuttingDown = options?.isShuttingDown ?? isServerShuttingDown;
   const baseModelId = (model: string | null | undefined) =>
     resolveGrokAcpBaseModelId(
       productModelSlug !== undefined && model?.trim() === productModelSlug ? undefined : model,
@@ -2040,9 +2044,16 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             }),
           );
         }).pipe(
+          // The shutdown signal kills the agent with the server, so a prompt
+          // failing or interrupted then is not the turn's. End interrupted,
+          // which the caller does not report, and leave the turn running for
+          // `ProviderService.runStopAll` to record and stop.
+          Effect.catchCause((cause) =>
+            isShuttingDown() ? Effect.interrupt : Effect.failCause(cause),
+          ),
           Effect.ensuring(
             Effect.gen(function* () {
-              if (yield* Ref.get(promptSettled)) {
+              if ((yield* Ref.get(promptSettled)) || isShuttingDown()) {
                 return;
               }
 

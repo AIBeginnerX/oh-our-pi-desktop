@@ -113,6 +113,7 @@ import * as GitManager from "./git/GitManager.ts";
 import * as EnvironmentTheme from "./environmentTheme.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ServerInstanceLock from "./serverInstanceLock.ts";
+import { installServerShutdownSignalListeners } from "./serverShutdown.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import { OrchestrationReactorLive } from "./orchestration/Layers/OrchestrationReactor.ts";
 import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus.ts";
@@ -228,6 +229,19 @@ export const HTTP_ROUTER_CONFIG = {
 // already closes the websocket gracefully. Do not add an artificial drain before
 // those finalizers get a chance to run.
 const HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS = 0;
+
+// Provider CLIs share the server's process group, so the shutdown signal kills
+// them while the server is only beginning its graceful shutdown. Marking the
+// instant the signal arrives lets adapters leave running sessions to
+// `ProviderService.runStopAll` instead of failing their turns. Built as the
+// first dependency of the server layer, so the remover runs last and the
+// listeners stay installed while every finalizer runs.
+const ServerShutdownSignalLayerLive = Layer.effectDiscard(
+  Effect.acquireRelease(
+    Effect.sync(() => installServerShutdownSignalListeners()),
+    (removeListeners) => Effect.sync(removeListeners),
+  ),
+);
 const ResourceAttributionLayerLive = ResourceAttribution.layer;
 const ApplicationObservabilityLive = EventLoopMonitor.layer.pipe(
   Layer.provideMerge(ObservabilityLive),
@@ -1172,6 +1186,7 @@ const makeServerLayer = Layer.unwrap(
     );
 
     return serverApplicationLayer.pipe(
+      Layer.provideMerge(ServerShutdownSignalLayerLive),
       Layer.provideMerge(runtimeServicesLive),
       Layer.provide(activationLayer),
       Layer.provideMerge(serverRelayBrokerTracingLayer),

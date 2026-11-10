@@ -55,6 +55,7 @@ const emitOverlappingXAiPromptCompleteOutOfOrder =
 const failPrompt = process.env.T3_ACP_FAIL_PROMPT === "1";
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === "1";
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === "1";
+const exitOnPrompt = process.env.T3_ACP_EXIT_ON_PROMPT === "1";
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT;
 const initialGrokReasoningEffort =
   process.env.T3_ACP_INITIAL_GROK_REASONING_EFFORT?.trim() || undefined;
@@ -621,6 +622,12 @@ const program = Effect.gen(function* () {
     Effect.gen(function* () {
       const requestedSessionId = String(request.sessionId ?? sessionId);
       promptCount += 1;
+
+      if (exitOnPrompt) {
+        return yield* Effect.sync(() => {
+          process.exit(7);
+        });
+      }
 
       if (completeFirstPromptOnCancel && promptCount === 1) {
         yield* agent.client.sessionUpdate({

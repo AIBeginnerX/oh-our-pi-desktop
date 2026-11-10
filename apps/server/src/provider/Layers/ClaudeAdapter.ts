@@ -61,6 +61,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { isServerShuttingDown } from "../../serverShutdown.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import { discoverClaudeSkills } from "../Drivers/ClaudeSkills.ts";
@@ -163,6 +164,8 @@ export interface ClaudeAdapterLiveOptions {
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
   /** Scoped-bucket names the driver's status probe last saw; see `claudeUsageLimits`. */
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
+  /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
+  readonly isShuttingDown?: () => boolean;
 }
 
 /**
@@ -179,6 +182,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   options?: ClaudeAdapterLiveOptions,
 ) {
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("claudeAgent");
+  const isShuttingDown = options?.isShuttingDown ?? isServerShuttingDown;
   const modelCatalogEffect = (
     options?.modelCatalog ?? Effect.succeed(BUNDLED_CLAUDE_MODEL_CATALOG)
   ).pipe(Effect.map((catalog) => scopeClaudeModelCatalog(catalog, claudeSettings.customModels)));
@@ -347,6 +351,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     exit: Exit.Exit<void, ProviderAdapterProcessError>,
   ) {
     if (context.stopped) {
+      return;
+    }
+
+    // The shutdown signal kills the provider CLI with the server, so its
+    // stream dying then is not an error. Leave the session listed as running
+    // with its turn: `ProviderService.runStopAll` records the continuation
+    // and stops it through `stopAll`.
+    if (isShuttingDown()) {
       return;
     }
 

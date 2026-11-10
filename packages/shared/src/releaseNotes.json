@@ -1,6 +1,16 @@
 {
   "versions": [
     {
+      "version": "0.0.156",
+      "date": "2026-11-10",
+      "highlights": [
+        {
+          "en": "Quitting or restarting the app while an agent works no longer ends the turn with an error such as \"Claude runtime stream failed\". This covers Claude, Codex, Cursor, Grok and Antigravity, and the app can continue the turn once it starts again, as it does after an update.",
+          "ko": "에이전트가 작업하는 중에 앱을 종료하거나 다시 시작해도 그 턴이 \"Claude runtime stream failed\" 같은 오류로 끝나지 않습니다. Claude, Codex, Cursor, Grok, Antigravity 모두 해당되며, 업데이트 때처럼 앱이 다시 켜지면 그 턴을 이어서 진행할 수 있습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.155",
       "date": "2026-11-10",
       "highlights": [

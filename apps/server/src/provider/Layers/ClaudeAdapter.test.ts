@@ -285,6 +285,7 @@ function makeHarness(config?: {
   readonly getSessionMessages?: ClaudeAdapterLiveOptions["getSessionMessages"];
   readonly forkSession?: ClaudeAdapterLiveOptions["forkSession"];
   readonly modelCatalog?: ClaudeAdapterLiveOptions["modelCatalog"];
+  readonly isShuttingDown?: ClaudeAdapterLiveOptions["isShuttingDown"];
 }) {
   const query = new FakeClaudeQuery();
   const queries = [query];
@@ -302,6 +303,7 @@ function makeHarness(config?: {
     modelCatalog: config?.modelCatalog ?? Effect.succeed(SYNTHETIC_CLAUDE_MODEL_CATALOG),
     ...(config?.getSessionMessages ? { getSessionMessages: config.getSessionMessages } : {}),
     ...(config?.forkSession ? { forkSession: config.forkSession } : {}),
+    ...(config?.isShuttingDown ? { isShuttingDown: config.isShuttingDown } : {}),
     createQuery: (input) => {
       if (createInput && config?.getSessionMessages) queries.push(new FakeClaudeQuery());
       createInput = input;
@@ -6811,6 +6813,70 @@ describe("ClaudeAdapterLive", () => {
         assert.equal(completed.payload.state, "failed");
         assert.equal(completed.payload.errorMessage, "Claude runtime stream failed.");
       }
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("leaves the session for runStopAll when the stream fails during shutdown", () => {
+    let shuttingDown = false;
+    const harness = makeHarness({ isShuttingDown: () => shuttingDown });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const runtimeEvents: Array<ProviderRuntimeEvent> = [];
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          runtimeEvents.push(event);
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId: THREAD_ID,
+        input: "hello",
+        attachments: [],
+      });
+
+      // The shutdown group signal has already killed the CLI by the time the
+      // stream notices, and the server's shutdown marker is set.
+      shuttingDown = true;
+      harness.query.fail(new Error("killed with the server's process group"));
+
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+      runtimeEventsFiber.interruptUnsafe();
+
+      // Not an error: no runtime.error, no failed turn, no exit. The session
+      // stays listed as running so ProviderService.runStopAll sees the turn.
+      assert.equal(
+        runtimeEvents.find((event) => event.type === "runtime.error"),
+        undefined,
+      );
+      assert.equal(
+        runtimeEvents.find((event) => event.type === "turn.completed"),
+        undefined,
+      );
+      assert.equal(
+        runtimeEvents.find((event) => event.type === "session.exited"),
+        undefined,
+      );
+      const sessions = yield* adapter.listSessions();
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]?.status, "running");
+      assert.equal(String(sessions[0]?.activeTurnId), String(turn.turnId));
+      assert.equal(yield* adapter.hasSession(THREAD_ID), true);
+      assert.equal(harness.query.closeCalls, 0);
+
+      // stopAll then owns the session and stops it.
+      yield* adapter.stopAll();
+      assert.equal(harness.query.closeCalls, 1);
+      assert.equal((yield* adapter.listSessions()).length, 0);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

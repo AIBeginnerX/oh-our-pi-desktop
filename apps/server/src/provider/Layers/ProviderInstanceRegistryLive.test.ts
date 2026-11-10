@@ -228,7 +228,7 @@ const makeTildeProviderFixtures = Effect.fn(
       "    },",
       '  }) + "\\n");',
       "});",
-      "setInterval(() => {}, 1_000);",
+      'lines.on("close", () => process.exit(0));',
       "",
     ].join("\n"),
   );

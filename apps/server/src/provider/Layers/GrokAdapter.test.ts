@@ -6,8 +6,10 @@ import * as NodeURL from "node:url";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -1895,6 +1897,44 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* Fiber.interrupt(runtimeEventsFiber);
       yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("keeps the running turn for runStopAll when the agent dies during shutdown", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-exit-during-shutdown");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_EXIT_ON_PROMPT: "1" }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath, { isShuttingDown: () => true });
+      const runtimeEvents: ProviderRuntimeEvent[] = [];
+      const runtimeEventsFiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => {
+          runtimeEvents.push(event);
+        }),
+      ).pipe(Effect.forkChild);
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("grok"), model: "grok-build" },
+      });
+
+      const exit = yield* adapter
+        .sendTurn({ threadId, input: "keep working", attachments: [] })
+        .pipe(Effect.exit);
+      const [session] = yield* adapter.listSessions();
+
+      assert.isTrue(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause));
+      assert.equal(session?.status, "running");
+      assert.isDefined(session?.activeTurnId);
+      assert.isUndefined(runtimeEvents.find((event) => event.type === "turn.completed"));
+      // stopAll then owns the session and stops it.
+      yield* adapter.stopAll();
+      assert.deepEqual(yield* adapter.listSessions(), []);
+      yield* Fiber.interrupt(runtimeEventsFiber);
     }),
   );
 
