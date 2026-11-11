@@ -1,3 +1,5 @@
+import { useT } from "../i18n";
+import { runningCrewAudit, completedCrewAuditCount } from "@t3tools/client-runtime/crew-board";
 import { collectProviderUsageLimits, hasProviderUsageLimits } from "@t3tools/shared/usageLimits";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
@@ -47,6 +49,8 @@ import { vcsEnvironment } from "../state/vcs";
 import { worktreeSetupAgentStarted } from "./chat/MessagesTimeline.logic";
 import type { ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
+import { useThreadUsageSummary } from "../state/threadUsageSummary";
+import { formatCrewAuditFooter, formatThreadUsageFooter } from "./chat/threadUsageText";
 import {
   latestTurnStartFailureId,
   shouldShowPlanFollowUpPrompt,
@@ -371,6 +375,21 @@ export function useChatViewTimelineData({
     () => deriveLatestContextWindowSnapshot(threadActivities),
     [threadActivities],
   );
+  const t = useT();
+  const audit = useMemo(() => runningCrewAudit(threadActivities), [threadActivities]);
+  const completedAuditCount = useMemo(
+    () => completedCrewAuditCount(threadActivities),
+    [threadActivities],
+  );
+  // The chat usage footer read: fetched on thread open, turn settle, and audit completion.
+  const threadUsageSummary = useThreadUsageSummary({
+    environmentId,
+    threadId: activeThreadId,
+    latestTurnId: activeLatestTurn?.turnId ?? null,
+    latestTurnSettled,
+    auditRunning: audit !== null,
+    completedAuditCount,
+  });
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the
   // Agents surface, live strip, and workflow cards. v2Projection is null
@@ -737,6 +756,16 @@ export function useChatViewTimelineData({
     isRevertingCheckpoint ||
     isCompacting ||
     awaitingBootstrapTurn;
+  // Hidden while anything is running, so the line never flickers per update.
+  const threadUsageFooter = useMemo(
+    () =>
+      isWorking
+        ? ""
+        : audit
+          ? formatCrewAuditFooter(audit, t)
+          : formatThreadUsageFooter(threadUsageSummary, activeContextWindow),
+    [activeContextWindow, isWorking, threadUsageSummary, audit, t],
+  );
   const isPreparingWorktree = isLocallyPreparingWorktree || awaitingBootstrapTurn;
   const needsInput = pendingApprovals.length > 0 || pendingUserInputs.length > 0;
   const pillWorking = isWorking && !isRevertingCheckpoint;
@@ -1101,6 +1130,8 @@ export function useChatViewTimelineData({
   return {
     timelineEntries,
     isWorking,
+    threadUsageFooter,
+    threadAuditRunning: audit !== null,
     backgroundSubmissionPending,
     worktreeSetup,
     workspaceMutationId,

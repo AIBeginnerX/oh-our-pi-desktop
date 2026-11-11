@@ -63,6 +63,7 @@ import {
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
 import { parsePermissionRequest, type AcpToolCallState } from "../acp/AcpRuntimeModel.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
+import { acpTurnTokenUsageFromPromptResponses } from "../acp/AcpTurnTokenUsage.ts";
 import {
   antigravityPermissionMode,
   antigravityModelOptions,
@@ -1128,10 +1129,18 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
       const record = context.turns.find((turn) => turn.id === launch.turn.turnId);
       if (record) record.items.push(result);
       else context.turns.push({ id: launch.turn.turnId, items: [result] });
+      const tokenUsage = acpTurnTokenUsageFromPromptResponses(record?.items ?? [result], {
+        // Read before finishTurn settles the open batches and drops their turn.
+        hasSubagents: [...context.subagents.values()].some(
+          (subagent) => typeof subagent === "object" && subagent.turnId === launch.turn.turnId,
+        ),
+        completed: result.stopReason !== "cancelled",
+      });
       yield* context.promptLock.withPermit(
         finishTurn(launch.turn, {
           state: result.stopReason === "cancelled" ? "cancelled" : "completed",
           stopReason: result.stopReason,
+          ...(tokenUsage ? { tokenUsage } : {}),
         }),
       );
       return {

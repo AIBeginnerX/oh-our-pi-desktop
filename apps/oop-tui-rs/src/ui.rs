@@ -1060,7 +1060,12 @@ fn draw_conversation(frame: &mut Frame, area: Rect, app: &App) {
             lines
         }
         None => {
-            let mut lines = crate::notes::lines(app, w);
+            let mut lines: Vec<Line<'static>> = Vec::new();
+            // The thread's usage line closes the conversation; notes and the live lines come under it.
+            if let Some(line) = crate::usage_footer::line(app, w) {
+                lines.push(line);
+            }
+            lines.extend(crate::notes::lines(app, w));
             lines.extend(live_lines(app, w));
             lines
         }

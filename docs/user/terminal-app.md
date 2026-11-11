@@ -50,6 +50,22 @@ app (**Settings -> Connections -> Add environment -> SSH**). The terminal does n
 over. The server keeps running on the host when you close `oop`; the SSH tunnel closes. Run
 `oop ssh devbox` again to reconnect; the saved login is reused.
 
+## Other computers
+
+`/computers` lists the computers the desktop app can reach: the first row is this computer, then
+one row per other computer with whether it is online. Enter switches this terminal to that
+computer's projects and threads — the same ones the desktop sidebar shows — and its name stays in
+the title of the lists while you work there. Enter on this computer switches back. On the project
+list, **Ctrl+O** opens the same picker.
+
+A computer only appears in the list while the OOP desktop app is running and its connection is
+switched on for the phone (Settings → Connections, **Available on phone**). Enter on a computer
+that is offline, or whose saved sign-in was refused, says so instead of switching. Without the
+desktop app, `oop ssh <host>` still connects to a computer on its own.
+
+While you are on another computer, `oop mobile`, pairing and `oop stop` keep concerning the
+computer the terminal itself runs on.
+
 ## Over Tailscale
 
 On a tailnet, either of these works from a Mac or Windows terminal to a host that runs OOP:

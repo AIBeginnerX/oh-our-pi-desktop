@@ -328,6 +328,31 @@ fn dechunk(mut data: &[u8]) -> Result<Vec<u8>, String> {
     }
 }
 
+/// `encodeURIComponent`: the characters a path segment may keep stay as they are, every other
+/// byte of the text becomes %XX. Unlike `form_encode` a space is %20, not `+`, so a path built
+/// with it reads back as it went in.
+pub fn encode_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'_'
+            | b'.'
+            | b'!'
+            | b'~'
+            | b'*'
+            | b'\''
+            | b'('
+            | b')' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 /// `application/x-www-form-urlencoded` value encoding.
 pub fn form_encode(value: &str) -> String {
     let mut out = String::new();

@@ -165,6 +165,13 @@ pub const COMMANDS: &[Command] = &[
         "Pick a project",
         "프로젝트 고르기",
     ),
+    cmd(
+        "computers",
+        &[],
+        None,
+        "Work on another computer",
+        "다른 컴퓨터에서 작업",
+    ),
     cmd("stats", &[], None, "Usage statistics", "사용 통계"),
     cmd(
         "skills",

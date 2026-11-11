@@ -6,6 +6,7 @@ use crate::clipboard::{self, Why};
 use crate::commands::{self, Bootstrap, Ctx, Turn};
 use crate::i18n::tr;
 use crate::input::{Input, Move};
+use crate::link::Target;
 use crate::panels_common::{fill, s};
 use crate::pet;
 use crate::selection::{self, End, Pos, Selection};
@@ -80,6 +81,10 @@ pub enum Msg {
         /// Where the server is and the login the socket used, for the HTTP page of older turns.
         origin: String,
         bearer: String,
+        /// The label the host announces itself with, for the computer picker.
+        label: String,
+        /// The gateway computer the session talks to; `None` for this computer.
+        remote: Option<crate::link::Remote>,
     },
     Shell(Value),
     ShellEnd(Option<String>),
@@ -357,6 +362,14 @@ pub struct App {
     auto_selected: bool,
     pub(crate) origin: Option<String>,
     pub(crate) bearer: Option<String>,
+    /// The label of the host server, for the computer picker's first row.
+    pub host_label: String,
+    /// The gateway computer the session talks to; `None` on this computer.
+    pub remote: Option<crate::link::Remote>,
+    /// The computer the link should talk to, changed by the computer picker, and the nudge the
+    /// link reconnects on when it does (see `link::supervise`).
+    target: tokio::sync::watch::Sender<Target>,
+    switch: std::sync::Arc<tokio::sync::Notify>,
     /// Tick at which a queued message was sent; the next waits for the agent to start on it.
     pub(crate) awaiting: Option<usize>,
     /// The message just sent to the open thread (its id, the tick it left): until it comes back
@@ -366,6 +379,8 @@ pub struct App {
     pub(crate) sent: Option<(String, usize)>,
     /// What `/undo`, `/diff` and `/history` are waiting for (see `cmd_history.rs`).
     pub(crate) threadops: crate::cmd_history::State,
+    /// The thread usage line under the conversation (see `usage_footer.rs`).
+    pub(crate) usage: crate::usage_footer::State,
     cache: RefCell<Option<Cached>>,
     /// The laid-out blocks behind `cache`, so a new revision re-lays-out only what changed.
     blocks: RefCell<crate::transcript::BlockCache>,
@@ -489,9 +504,14 @@ impl App {
             auto_selected: false,
             origin: None,
             bearer: None,
+            host_label: String::new(),
+            remote: None,
+            target: tokio::sync::watch::channel(Target::This).0,
+            switch: std::sync::Arc::new(tokio::sync::Notify::new()),
             awaiting: None,
             sent: None,
             threadops: Default::default(),
+            usage: Default::default(),
             cache: RefCell::new(None),
             blocks: RefCell::new(Default::default()),
             recent: Vec::new(),
@@ -532,10 +552,11 @@ impl App {
     // --- derived views ----------------------------------------------------------------------
 
     /// The list as the desktop sidebar has it; the "add this folder" row leads when the working
-    /// folder is not a project yet.
+    /// folder is not a project yet. On another computer the working folder is a path here, so it
+    /// is never offered.
     pub fn rows(&self) -> Vec<Row> {
         let mut rows = Vec::new();
-        if self.shell.loaded && self.cwd_project.is_none() {
+        if self.shell.loaded && self.remote.is_none() && self.cwd_project.is_none() {
             rows.push(Row::AddFolder);
         }
         if !self.shell.loaded {
@@ -760,10 +781,21 @@ impl App {
                 server,
                 origin,
                 bearer,
+                label,
+                remote,
             } => {
-                if self.server.as_ref() != Some(&server) {
+                // Another computer (or this one again) is another project list: everything the
+                // last session showed is let go, and its list opens fresh.
+                let switched = self.remote.as_ref().map(|r| r.environment_id.clone())
+                    != remote.as_ref().map(|r| r.environment_id.clone());
+                if self.server.as_ref() != Some(&server) || switched {
                     self.recent.clear();
                 }
+                if switched {
+                    self.reset_for_computer();
+                }
+                self.remote = remote;
+                self.host_label = label;
                 self.rpc = Some(rpc);
                 self.config = config;
                 self.server = Some(server);
@@ -864,6 +896,7 @@ impl App {
     fn after_thread_update(&mut self) {
         self.ring_for_update();
         crate::cmd_history::on_thread(self);
+        crate::usage_footer::on_thread(self);
         if self.runtime_intent.as_deref() == Some(self.conv.thread.runtime_mode.as_str()) {
             self.runtime_intent = None;
         }
@@ -917,12 +950,16 @@ impl App {
     }
 
     fn on_shell_changed(&mut self) {
-        self.cwd_project = self
-            .shell
-            .projects
-            .iter()
-            .find(|p| same_folder(&p.workspace_root, &self.cwd))
-            .map(|p| p.id.clone());
+        // On another computer the working folder is a path on this one, and matches nothing there.
+        self.cwd_project = if self.remote.is_none() {
+            self.shell
+                .projects
+                .iter()
+                .find(|p| same_folder(&p.workspace_root, &self.cwd))
+                .map(|p| p.id.clone())
+        } else {
+            None
+        };
         if let Some(id) = self.adding.clone() {
             if self.shell.projects.iter().any(|p| p.id == id) {
                 self.adding = None;
@@ -979,6 +1016,59 @@ impl App {
     /// A way for work in the background to hand its result back (`Msg::Ext`).
     pub fn sender(&self) -> UnboundedSender<Msg> {
         self.tx.clone()
+    }
+
+    /// Which computer the session talks to, for the tests of the picker.
+    #[cfg(test)]
+    pub fn link_target(&self) -> Target {
+        self.target.borrow().clone()
+    }
+
+    /// What the link needs to reach another computer: the target it reconnects on, and the nudge
+    /// that drops the live session so the reconnect starts at once (`link::supervise`).
+    pub fn link_control(
+        &self,
+    ) -> (
+        tokio::sync::watch::Sender<Target>,
+        std::sync::Arc<tokio::sync::Notify>,
+    ) {
+        (self.target.clone(), self.switch.clone())
+    }
+
+    /// The picker's answer: the link drops the session and comes back on `target`, whose projects
+    /// screen opens when it is connected. An unchanged choice does nothing.
+    pub fn use_computer(&mut self, target: Target) {
+        if *self.target.borrow() == target {
+            return;
+        }
+        self.notice = Some(s("Switching computer…", "컴퓨터를 전환하는 중…").to_string());
+        self.target.send_replace(target);
+        self.switch.notify_one();
+    }
+
+    /// The last session's view of a computer is not the next one's: the conversation, the project
+    /// list, everything drafted and every pending question go, and the new computer's project
+    /// list opens as soon as its snapshot arrives.
+    fn reset_for_computer(&mut self) {
+        self.leave_thread();
+        self.recent.clear();
+        self.drafts.clear();
+        self.side_settings.clear();
+        self.visited.clear();
+        self.answered.clear();
+        self.cwd_project = None;
+        self.draft_project = None;
+        self.adding = None;
+        self.auto_selected = false;
+        self.threadops = Default::default();
+        self.shell = Shell::default();
+        self.conv = Conversation::default();
+        self.active = Active::None;
+        self.selected = 0;
+        self.scroll.set(0);
+        self.input.take(false);
+        self.notice = None;
+        crate::lists::open_projects(self);
     }
 
     fn leave_thread(&mut self) {
@@ -1147,6 +1237,8 @@ impl App {
     /// a new one opens on its latest turns (the older ones are read as they are scrolled to).
     fn subscribe_thread(&mut self, id: &str) {
         self.abort_thread();
+        // The usage line is this thread's, not the last one's, and is asked for afresh.
+        crate::usage_footer::opened(self, id);
         let Some(rpc) = self.rpc.clone() else { return };
         let mut payload = json!({"threadId": id});
         let flags = [
@@ -1196,9 +1288,13 @@ impl App {
         self.conv.loading_older = true;
         self.conv.revision += 1;
         let tx = self.tx.clone();
+        // On another computer the environment's HTTP answers behind the gateway path of the host.
+        let prefix = self.remote.as_ref().map_or(String::new(), |r| {
+            crate::gateway::environment_prefix(&r.environment_id)
+        });
         tokio::spawn(async move {
             let path = format!(
-                "/api/orchestration/threads/{id}?reasoningMessages=true&turnLimit={TURN_WINDOW}&beforeCursor={}",
+                "{prefix}/api/orchestration/threads/{id}?reasoningMessages=true&turnLimit={TURN_WINDOW}&beforeCursor={}",
                 crate::http::form_encode(&cursor)
             );
             let headers = [("Authorization", format!("Bearer {bearer}"))];

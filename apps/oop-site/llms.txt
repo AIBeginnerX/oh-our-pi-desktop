@@ -1,0 +1,53 @@
+# OOP
+
+> OOP is one desktop app for every coding agent: a minimal GUI that wraps provider CLIs such as Codex, Claude Code and Cursor, with web, desktop, mobile web and terminal clients.
+
+OOP is open source (MIT) and local-first: the agents run on your own machine and OOP controls them from one chat-style workspace, with an optional multi-model team on top. This file indexes OOP's documentation for AI tools and chat assistants: the README and install guide come first, then one entry per user guide page.
+
+## Start here
+
+- [OOP (oh-our-pi)](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/README.md): One desktop app for every coding agent.
+- [OOP Desktop installation](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/INSTALL.md): The commands below install the desktop app from a GitHub release.
+
+## User guide
+
+- [Appearance and themes](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/appearance.md): Choose a theme and follow the system appearance or stay in light or dark mode.
+- [Running OOP in the background](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/background-service.md): On Linux and macOS, OOP can run as a service for your user so you do not need to keep a terminal open.
+- [Import browser sessions](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/browser-import.md): The desktop app can import cookies from another browser so you can reuse its signed-in sessions in the preview browser.
+- [Verify a macOS release build](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/build-verification.md): Open the server thread for the project, then select Verify macOS build in the chat header.
+- [Messages and context](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/composer.md): Give the agent a task in the composer.
+- [OOP Crew](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/crew.md): OOP Crew lets one chat use several models at once.
+- [Devices](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/devices.md): The Device panel shows a live iOS Simulator or Android Emulator next to a thread, so you can watch an agent verify mobile work and tap the device yourself.
+- [Install OOP](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/install.md): OOP runs coding agents on your computer and lets you control them from its desktop, web, or a phone browser.
+- [Keybindings](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/keybindings.md): Customize shortcuts in Settings → Keybindings on web and desktop.
+- [Keyboard focus](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/keyboard-focus.md): The command palette keeps focus while open.
+- [Mobile notifications](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/mobile-notifications.md): Push notifications, Ongoing Agent Activity, and Live Activity Updates belong to the React Native app for iOS and Android.
+- [Notifications](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/notifications.md): OOP tells you when a thread needs you: it finishes, fails, or waits for your input or approval.
+- [Open source licenses](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/open-source-licenses.md): OOP includes third-party software and adapted assets.
+- [Permission modes](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/permission-modes.md): Permission modes control when an agent needs your approval to act.
+- [Settings and project overrides](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/project-settings.md): The "Applying settings for …" sentence at the top of Settings pages picks the project and environment a change applies to.
+- [Antigravity](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/providers-antigravity.md): OOP runs Google's official Antigravity ACP agent on your selected environment.
+- [Claude](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/providers-claude.md): OOP uses Claude Code's login and configuration.
+- [Codex](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/providers-codex.md): Use your ChatGPT plan or an existing Codex CLI login to code in OOP.
+- [MiniMax Code](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/providers-minimax.md): MiniMax Code is MiniMax's own coding agent.
+- [OpenCode](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/providers-opencode.md): Install and authenticate OpenCode on the machine running your environment, then enable it in Settings > Providers.
+- [ZCode (GLM)](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/providers-zcode.md): ZCode is Z.ai's coding agent for GLM models.
+- [Files in question answers](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/question-attachments.md): When an agent asks a question that accepts a custom answer, use Attach files or paste an image into the answer field.
+- [Remote access](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/remote-access.md): Connect a phone, browser, or another desktop app to OOP running on a different machine.
+- [Reports in chat](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/reports.md): When an agent reports results, analysis, or a plan, OOP draws its answer as a report: charts, key-figure cards, progress bars, and flow diagrams animate into the conversation, so the answer reads at a glance without a separate document.
+- [SnapShots](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/snap-shot.md): A SnapShot captures the window you are working in and attaches it to your current draft.
+- [Source control](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/source-control.md): OOP integrates with GitHub, GitLab, Forgejo, Gitea, Bitbucket, and Azure DevOps to clone and publish repositories, create pull requests, and review changes.
+- [Product usage data and network requests](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/telemetry.md): OOP does not report product usage, and it ships without an analytics project key.
+- [Terminal app](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/terminal-app.md): oop is OOP in a terminal.
+- [Terminal history](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/terminal.md): Each terminal keeps up to 5,000 lines and 8 MiB of scrollback on its environment server.
+- [Working with threads](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/thread-sidebar.md): Use a new thread for a separate task.
+- [Updating OOP](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/updating.md): The app you use and the server running your agents can be on different machines.
+- [Usage and limits](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/usage.md): Open Usage from the sidebar or the command palette, or press mod+u on web and desktop when the terminal is not focused.
+- [Welcome wizard](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/welcome-wizard.md): OOP shows a setup flow when you open a new installation or connect to the hosted app for the first time.
+- [Thread workflow](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/docs/user/workflows.md): Workflow draws the work an agent is doing in a thread as a live diagram, next to the chat.
+
+## Optional
+
+- [Contributing](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/CONTRIBUTING.md): Thanks for your interest in OOP.
+- [Security Policy](https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/SECURITY.md): Please report security problems privately.
+- [OOP website](https://oop-desktop.github.io/): Presents OOP, shows how to install it, and links to the public GitHub repository.

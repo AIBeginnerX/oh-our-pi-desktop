@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, PreviewTabId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -8,7 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import { McpProtocol, McpSchema, McpServer } from "effect/unstable/ai";
+import { McpProtocol, McpSchema, McpServer, Tool, Toolkit } from "effect/unstable/ai";
 import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
@@ -125,6 +126,49 @@ it("normalizes empty successful notification responses to accepted", () => {
   );
   expect(resultResponse.status).toBe(200);
 });
+
+/**
+ * `tools/list` answers in registration order, and layer builds race each other.
+ * These two toolkits resolve at opposite speeds so a concurrent merge would
+ * list them in whichever order won; the ordered registration must not.
+ */
+const orderedToolkit = (names: ReadonlyArray<string>, settleDelayMs: number) => {
+  const tools = Toolkit.make(
+    ...names.map((name) =>
+      Tool.make(name, {
+        description: name,
+        parameters: Schema.Struct({ value: Schema.optional(Schema.String) }),
+        success: Schema.Struct({ ok: Schema.Boolean }),
+      }),
+    ),
+  );
+  const handlers = tools.toLayer(
+    Object.fromEntries(names.map((name) => [name, () => Effect.succeed({ ok: true })])) as never,
+  );
+  const gate = Layer.effectDiscard(Effect.sleep(`${settleDelayMs} millis`));
+  return McpServer.toolkit(tools).pipe(Layer.provide(handlers), Layer.provide(gate));
+};
+
+const toolsListOrder = (slowFirst: boolean) =>
+  Effect.gen(function* () {
+    const first = orderedToolkit(["first-a", "first-b"], slowFirst ? 25 : 0);
+    const second = orderedToolkit(["second-a", "second-b"], slowFirst ? 0 : 25);
+    const context = yield* Layer.build(
+      McpHttpServer.thenRegisterToolkit(first, second).pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+      ),
+    );
+    return Context.get(context, McpServer.McpServer).tools.map(({ tool }) => tool.name);
+  });
+
+it.live("lists tools in source order no matter which toolkit's layer settles first", () =>
+  Effect.gen(function* () {
+    const slowFirst = yield* toolsListOrder(true);
+    const slowSecond = yield* toolsListOrder(false);
+    expect(slowFirst).toEqual(["first-a", "first-b", "second-a", "second-b"]);
+    expect(slowSecond).toEqual(slowFirst);
+  }),
+);
 
 it.effect.each([{}, { includeImage: false }])(
   "returns bounded structural preview snapshot failures %#",

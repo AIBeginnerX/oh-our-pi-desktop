@@ -1038,6 +1038,8 @@ pub(crate) mod testkit {
             server: "fake".into(),
             origin: "http://127.0.0.1:1".into(),
             bearer: "b".into(),
+            label: String::new(),
+            remote: None,
         });
         app.link = LinkStatus::Online;
         app.active = crate::app::Active::Thread("t1".into());

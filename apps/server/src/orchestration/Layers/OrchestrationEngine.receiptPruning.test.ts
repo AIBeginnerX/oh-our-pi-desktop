@@ -79,10 +79,14 @@ describe("OrchestrationEngine receipt pruning", () => {
           status: input.status,
           error: input.status === "rejected" ? "rejected" : null,
         });
-      yield* seed("cmd-old-accepted", { ageDays: 20, status: "accepted" });
-      yield* seed("cmd-recent-accepted", { ageDays: 13, status: "accepted" });
-      yield* seed("cmd-old-rejected", { ageDays: 20, status: "rejected" });
-      yield* seed("cmd-old-ahead", { ageDays: 20, status: "accepted", ahead: true });
+      yield* seed("cmd-old-accepted", { ageDays: 400, status: "accepted" });
+      yield* seed("cmd-recent-accepted", { ageDays: 3, status: "accepted" });
+      yield* seed("cmd-old-rejected", { ageDays: 400, status: "rejected" });
+      yield* seed("cmd-old-ahead", { ageDays: 400, status: "accepted", ahead: true });
+
+      yield* seed("provider:old-accepted", { ageDays: 3, status: "accepted" });
+      yield* seed("provider:recent-accepted", { ageDays: 0, status: "accepted" });
+      yield* seed("provider:old-ahead", { ageDays: 3, status: "accepted", ahead: true });
 
       const present = (id: string) =>
         receipts.getByCommandId({ commandId: CommandId.make(id) }).pipe(Effect.map(Option.isSome));
@@ -92,6 +96,9 @@ describe("OrchestrationEngine receipt pruning", () => {
         yield* Effect.yieldNow;
       }
 
+      expect(yield* present("provider:old-accepted")).toBe(false);
+      expect(yield* present("provider:recent-accepted")).toBe(true);
+      expect(yield* present("provider:old-ahead")).toBe(true);
       expect(yield* present("cmd-old-accepted")).toBe(false);
       expect(yield* present("cmd-recent-accepted")).toBe(true);
       expect(yield* present("cmd-old-rejected")).toBe(true);

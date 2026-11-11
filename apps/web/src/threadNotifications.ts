@@ -1,4 +1,8 @@
-import type { ClientSettings } from "@t3tools/contracts/settings";
+import {
+  NO_ACTIVITY_ALERT_MINUTE_CHOICES,
+  type ClientSettings,
+  type NoActivityAlertMinutes,
+} from "@t3tools/contracts/settings";
 
 import completionUrl from "./assets/notification-completion.mp3";
 import inputUrl from "./assets/notification-input.mp3";
@@ -10,6 +14,18 @@ export const NOTIFICATION_MODE_LABELS = {
   sound: "Sound only",
   "notifications-and-sound": "Notifications with sound",
 } satisfies Record<NotificationMode, string>;
+
+/** Trigger labels for the no-activity alert; `off` is the null (default) state. */
+export const NO_ACTIVITY_ALERT_LABELS: Record<"off" | NoActivityAlertMinutes, string> = {
+  off: "Off",
+  10: "10 minutes",
+  20: "20 minutes",
+  30: "30 minutes",
+};
+export const NO_ACTIVITY_ALERT_SELECT_VALUES = [
+  "off",
+  ...NO_ACTIVITY_ALERT_MINUTE_CHOICES,
+] as const;
 
 export function hasNotificationSound(mode: NotificationMode) {
   return mode === "sound" || mode === "notifications-and-sound";

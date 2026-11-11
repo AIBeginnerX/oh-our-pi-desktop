@@ -128,6 +128,18 @@ fn resolve(typed: &str, home: &str, cwd: &str) -> PathBuf {
 }
 
 fn add_path(app: &mut App, typed: &str) {
+    // On another computer the folder is checked on this one, so a path of theirs would be
+    // refused and one of ours would be believed: the project list is the way there.
+    if app.remote.is_some() {
+        app.notice = Some(
+            s(
+                "On another computer, choose one of its projects. Folders of this computer cannot be added from here.",
+                "다른 컴퓨터에서는 그 컴퓨터의 프로젝트를 고르세요. 이 컴퓨터의 폴더는 여기서 추가할 수 없습니다.",
+            )
+            .to_string(),
+        );
+        return;
+    }
     let path = resolve(typed, &app.home, &app.cwd);
     if !path.is_dir() {
         app.notice = Some(format!(

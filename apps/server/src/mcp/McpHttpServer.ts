@@ -635,6 +635,20 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
   );
 });
 
+/**
+ * Registers `next` only after `first` finished registering its tools.
+ *
+ * `tools/list` answers in registration order, and `Layer.mergeAll` builds its
+ * layers concurrently, so whichever toolkit's handler layer settled first used
+ * to own the earlier positions. That made the tool array differ between
+ * sessions and server restarts for the same granted capabilities. Chaining
+ * through this helper makes the order the argument order, every time.
+ */
+export const thenRegisterToolkit = <E, R, E2, R2>(
+  first: Layer.Layer<never, E, R>,
+  next: Layer.Layer<never, E2, R2>,
+): Layer.Layer<never, E | E2, R | R2> => Layer.flatMap(first, () => next);
+
 const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewStandardToolkitHandlersLive),
 );
@@ -643,7 +657,7 @@ const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnaps
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
 );
 
-export const PreviewToolkitRegistrationLive = Layer.mergeAll(
+export const PreviewToolkitRegistrationLive = thenRegisterToolkit(
   PreviewStandardToolkitRegistrationLive,
   PreviewSnapshotRegistrationLive,
 );
@@ -670,7 +684,7 @@ const DeviceScreenshotRegistrationLive = Layer.effectDiscard(registerDeviceScree
   Layer.provide(DeviceScreenshotToolkitHandlersLive),
 );
 
-export const DeviceToolkitRegistrationLive = Layer.mergeAll(
+export const DeviceToolkitRegistrationLive = thenRegisterToolkit(
   DeviceStandardToolkitRegistrationLive,
   DeviceScreenshotRegistrationLive,
 );
@@ -682,10 +696,13 @@ const McpTransportLive = McpServer.layerHttp({
   protocols: [McpProtocol.v2025_06_18],
 }).pipe(Layer.provide(McpAuthMiddlewareLive));
 
-export const layer = Layer.mergeAll(
+export const layer = thenRegisterToolkit(
   PreviewToolkitRegistrationLive,
-  PullRequestsToolkitRegistrationLive,
-  CrewToolkitRegistrationLive,
-  MemoryToolkitRegistrationLive,
-  DeviceToolkitRegistrationLive,
+  thenRegisterToolkit(
+    PullRequestsToolkitRegistrationLive,
+    thenRegisterToolkit(
+      CrewToolkitRegistrationLive,
+      thenRegisterToolkit(MemoryToolkitRegistrationLive, DeviceToolkitRegistrationLive),
+    ),
+  ),
 ).pipe(Layer.provideMerge(McpTransportLive));

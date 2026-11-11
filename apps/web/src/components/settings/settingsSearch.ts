@@ -356,6 +356,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["notification toast popup completion input approval failure"],
   },
   {
+    id: "no-activity-alert",
+    title: "Alert when a running agent shows no activity for",
+    to: "/settings/general",
+    searchTerms: ["notification silence quiet running agent minutes no activity alert idle"],
+  },
+  {
     id: "setup-notifications",
     title: "Setup notifications",
     to: "/settings/general",

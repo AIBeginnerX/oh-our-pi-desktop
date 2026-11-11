@@ -200,3 +200,40 @@ export function crewOverall(
   }
   return { done, total, percent: crewPercent(done, total) };
 }
+
+interface AuditActivity {
+  readonly kind: string;
+  readonly payload: unknown;
+}
+
+/** Audit completion IDs also invalidate totals when an audit starts after its lead settled. */
+export function completedCrewAuditCount(activities: ReadonlyArray<AuditActivity>): number {
+  return new Set(
+    activities.flatMap(({ kind, payload }) => {
+      if (kind !== "task.completed" || !payload || typeof payload !== "object") return [];
+      const p = payload as Record<string, unknown>;
+      return p.crewRole === "auditor" && typeof p.taskId === "string" ? [p.taskId] : [];
+    }),
+  ).size;
+}
+
+/** Running auditor tasks, folded by task identity from the lead's activities. */
+export function runningCrewAudit(
+  activities: ReadonlyArray<AuditActivity>,
+): { model?: string } | null {
+  const tasks = new Map<string, { model?: string }>();
+  const completed = new Set<string>();
+  for (const { kind, payload } of activities) {
+    if (!kind.startsWith("task.") || !payload || typeof payload !== "object") continue;
+    const p = payload as Record<string, unknown>;
+    if (p.crewRole !== "auditor" || typeof p.taskId !== "string") continue;
+    if (kind === "task.completed") completed.add(p.taskId);
+    if (kind === "task.started" || kind === "task.progress") {
+      tasks.set(
+        p.taskId,
+        typeof p.model === "string" && p.model ? { model: p.model } : (tasks.get(p.taskId) ?? {}),
+      );
+    }
+  }
+  return [...tasks].findLast(([id]) => !completed.has(id))?.[1] ?? null;
+}

@@ -156,6 +156,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import { readOwnedResultUsage } from "./usage/ownedResultUsage.ts";
+import { readThreadUsageSummary } from "./usage/threadUsageSummaryRead.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -559,9 +560,6 @@ const makeWsRpcLayer = (
           ),
         );
 
-      const { coalesceShellStream, coalesceShellLiveInputs } =
-        makeShellStreamCoalescers(projectionSnapshotQuery);
-
       const refreshGitStatus = (cwd: string) =>
         vcsStatusBroadcaster
           .refreshStatus(cwd)
@@ -849,7 +847,10 @@ const makeWsRpcLayer = (
               // so bursts of high-frequency events (streaming message deltas,
               // activity appends) collapse into a single shell refetch and never
               // serialize a brand-new thread's `thread.created` behind hundreds
-              // of per-event DB reads. See coalesceShellStream.
+              // of per-event DB reads. See coalesceShellStream. The coalescers
+              // keep per-subscription state (when each thread was last pushed).
+              const { coalesceShellStream, coalesceShellLiveInputs } =
+                makeShellStreamCoalescers(projectionSnapshotQuery);
               // Attach live delivery into a scope-bound buffer BEFORE loading any
               // snapshot or draining catch-up, otherwise an event published while
               // the snapshot query is in flight is lost (it is past the snapshot's
@@ -1541,6 +1542,18 @@ const makeWsRpcLayer = (
             readOwnedResultUsage(input.threadId).pipe(
               Effect.provideService(OrchestrationEventStore, orchestrationEventStore),
               Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.catchCause((cause) =>
+                Effect.failCause(toOwnedResultUsageReadErrorCause(cause)),
+              ),
+            ),
+            { "rpc.aggregate": "usage" },
+          ),
+        [WS_METHODS.threadUsageSummary]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadUsageSummary,
+            readThreadUsageSummary(input.threadId).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.provideService(UsageService.UsageService, usage),
               Effect.catchCause((cause) =>
                 Effect.failCause(toOwnedResultUsageReadErrorCause(cause)),
               ),

@@ -343,6 +343,46 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
   );
 
   it.effect(
+    "records token usage only on the one turn.completed, none when the agent sends none",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* CursorAdapter;
+        const settings = yield* ServerSettingsService;
+        const threadId = ThreadId.make("cursor-usage-once-thread");
+
+        // The mock agent never populates PromptResponse.usage, so the turn must
+        // settle without a tokenUsage and every streaming event stays usage-free.
+        const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+        yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+        const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.threadId === threadId),
+          Stream.takeUntil((event) => event.type === "turn.completed"),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+
+        yield* adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+        });
+        yield* adapter.sendTurn({ threadId, input: "hello mock", attachments: [] });
+
+        const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
+        assert.equal(runtimeEvents.filter((event) => event.type === "turn.completed").length, 1);
+        assert.deepEqual(
+          runtimeEvents.filter((event) => "tokenUsage" in event.payload),
+          [],
+        );
+
+        yield* adapter.stopSession(threadId);
+      }),
+  );
+
+  it.effect(
     "sends skills in Cursor's native form, exact slash commands, and the runtime note once",
     () =>
       Effect.gen(function* () {

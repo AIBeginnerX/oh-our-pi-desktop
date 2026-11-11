@@ -1,8 +1,10 @@
 //! Keeps one WebSocket session alive: find or start the server, get a bearer token, open the
 //! socket, read the config, and when the socket ends, try again after a backoff (500 ms doubling
-//! to 10 s, spread by up to +-20 %, as the former TypeScript terminal's link client did).
+//! to 10 s, spread by up to +-20 %, as the former TypeScript terminal's link client did). The
+//! session talks to one computer at a time: this one, or — through the host's gateway — another
+//! the running desktop app shares (`Target`).
 
-use crate::app::{CONFIG_RPC, LinkStatus, Msg};
+use crate::app::{App, CONFIG_RPC, LinkStatus, Msg};
 use crate::server::{self, Found};
 use crate::wire::Rpc;
 use serde_json::{Value, json};
@@ -10,12 +12,75 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedSender;
 
+/// Another computer the host's gateway can reach, as the picker names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remote {
+    pub environment_id: String,
+    pub label: String,
+}
+
+/// Which computer the one session talks to. This one is the default at every start and the choice
+/// is never saved; a host that was gone brings the terminal back here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    This,
+    Gateway(Remote),
+}
+
 pub struct Session {
     pub rpc: Rpc,
     pub config: Value,
     pub found: Found,
     /// The login the socket was opened with, for the few requests that go over plain HTTP.
     pub bearer: String,
+    /// The gateway computer this session talks to; `None` for this computer.
+    pub remote: Option<Remote>,
+    /// Said when a gateway computer was asked for but had to be left: the session that came back
+    /// is this computer's, and the reason goes to the user once.
+    pub fallback: Option<String>,
+}
+
+/// What one session will be opened on: the socket address, the computer it belongs to, and the
+/// fallback a gateway computer that refused it left behind.
+#[derive(Debug)]
+pub struct SessionPlan {
+    pub url: String,
+    pub remote: Option<Remote>,
+    pub fallback: Option<String>,
+}
+
+/// The socket address for `target`: this computer's, or the gateway path of the chosen computer.
+/// A gateway computer that says it cannot be used (the host stopped sharing it, cannot reach it,
+/// or refused the login) is not retried: the plan falls back to this computer and carries the
+/// reason.
+pub async fn session_plan(
+    found: &Found,
+    bearer: &str,
+    version: &str,
+    target: &Target,
+) -> Result<SessionPlan, String> {
+    match target {
+        Target::This => Ok(SessionPlan {
+            url: server::websocket_url(found, bearer, version).await?,
+            remote: None,
+            fallback: None,
+        }),
+        Target::Gateway(remote) => {
+            match server::gateway_websocket_url(found, bearer, remote, version).await {
+                Ok(url) => Ok(SessionPlan {
+                    url,
+                    remote: Some(remote.clone()),
+                    fallback: None,
+                }),
+                Err(server::GatewayFail::Final(why)) => Ok(SessionPlan {
+                    url: server::websocket_url(found, bearer, version).await?,
+                    remote: None,
+                    fallback: Some(why),
+                }),
+                Err(server::GatewayFail::Retry(why)) => Err(why),
+            }
+        }
+    }
 }
 
 /// A session shorter than this counts as a failed attempt, so a server that drops us at once is
@@ -97,6 +162,7 @@ pub async fn connect_once_with(
         version,
         may_start_own,
         None,
+        &Target::This,
         progress,
     )
     .await
@@ -107,6 +173,7 @@ pub async fn connect_once_with(
 /// to the same environment at an address that token is valid for (`reverifiedOrigin` in
 /// resolveServer.ts). A different server is a transient failure with nothing sent, and no token is
 /// minted for it. Without `expect`, or with an address given by `--server`, it is `resolve`.
+#[allow(clippy::too_many_arguments)]
 pub async fn connect_once_expecting(
     home: &std::path::Path,
     isolated: bool,
@@ -114,6 +181,7 @@ pub async fn connect_once_expecting(
     version: &str,
     may_start_own: bool,
     expect: Option<&Found>,
+    target: &Target,
     progress: impl Fn(&str) + Copy,
 ) -> Result<Session, ConnectFailure> {
     let known = expect.filter(|known| {
@@ -141,16 +209,18 @@ pub async fn connect_once_expecting(
     let bearer = server::bearer_for(&found, home, progress)
         .await
         .map_err(failed)?;
-    let url = server::websocket_url(&found, &bearer, version)
+    let plan = session_plan(&found, &bearer, version, target)
         .await
         .map_err(failed)?;
-    let rpc = Rpc::connect(&url).await.map_err(failed)?;
+    let rpc = Rpc::connect(&plan.url).await.map_err(failed)?;
     let config = rpc.call(CONFIG_RPC, json!({})).await.map_err(failed)?;
     Ok(Session {
         rpc,
         config,
         found,
         bearer,
+        remote: plan.remote,
+        fallback: plan.fallback,
     })
 }
 
@@ -164,13 +234,21 @@ fn jitter() -> f64 {
     ) / 1000.0
 }
 
+/// Runs the reconnect loop for the whole session. The computer it talks to is `target`, changed
+/// by the picker; a change (`switch`) drops the live session and reconnects at once. One socket is
+/// open at a time. When the host itself is gone, the target returns to this computer, so the
+/// host's own reconnect behaviour carries on here; a gateway computer that says it cannot be used
+/// is left with a note and not retried either.
 pub async fn supervise(
     home: PathBuf,
     isolated: bool,
     server: Option<String>,
     version: String,
     tx: UnboundedSender<Msg>,
+    target: tokio::sync::watch::Sender<Target>,
+    switch: std::sync::Arc<tokio::sync::Notify>,
 ) {
+    let watched = target.subscribe();
     let mut attempt = 0u32;
     let mut ever_online = false;
     // When a server was first missed since one was last found; cleared whenever one is found, so
@@ -179,6 +257,7 @@ pub async fn supervise(
     // The server the last session ran on: a reconnection is verified against it.
     let mut last_found: Option<Found> = None;
     loop {
+        let now = watched.borrow().clone();
         let _ = tx.send(Msg::Link(if attempt == 0 {
             LinkStatus::Connecting
         } else {
@@ -198,6 +277,7 @@ pub async fn supervise(
             &version,
             may_start_own,
             last_found.as_ref(),
+            &now,
             progress,
         )
         .await
@@ -219,20 +299,50 @@ pub async fn supervise(
                     server,
                     origin: session.found.origin.clone(),
                     bearer: session.bearer.clone(),
+                    label: session.found.label.clone(),
+                    remote: session.remote.clone(),
                 });
-                let reason = session.rpc.closed().await;
-                attempt = if started.elapsed() >= STABLE_SESSION {
-                    1
-                } else {
-                    attempt + 1
-                };
-                reason
+                // A gateway computer that had to be left has already said why; the picker's
+                // choice is undone, so the next reconnection opens this computer again.
+                if let Some(why) = session.fallback.clone() {
+                    let _ = target.send(Target::This);
+                    let _ = tx.send(Msg::Ext(Box::new(move |app: &mut App| {
+                        app.notice = Some(why);
+                    })));
+                }
+                {
+                    // The wait borrows the session, so it ends before the loop dials again: the
+                    // socket closes when the session drops at the end of the round.
+                    let closed = session.rpc.closed();
+                    tokio::pin!(closed);
+                    tokio::select! {
+                        reason = closed.as_mut() => {
+                            attempt = if started.elapsed() >= STABLE_SESSION {
+                                1
+                            } else {
+                                attempt + 1
+                            };
+                            reason
+                        }
+                        // The picker chose another computer: the session goes, and the loop
+                        // dials the new one from the start.
+                        _ = switch.notified() => {
+                            attempt = 0;
+                            String::new()
+                        }
+                    }
+                }
             }
             Err(failure) => {
                 // A server that was found clears the miss even though the connection failed: the
                 // app is there, so the next absence starts its grace from the start.
                 gone_since = grace_after(failure.found, gone_since, Instant::now());
                 let error = failure.reason;
+                // The host itself is gone: today's reconnect behaviour takes over, on this
+                // computer. What the gateway listed comes back only when it is picked again.
+                if !failure.found && watched.borrow().clone() != Target::This {
+                    let _ = target.send(Target::This);
+                }
                 // Before the first connection an error means something to fix (no app to start a
                 // server from, a login that cannot be made); retrying would only repeat it. An
                 // app installing an update is the exception: waiting is the fix, and the app's
@@ -377,5 +487,248 @@ mod tests {
             one_shot_reason("nothing answers at http://127.0.0.1:1".into()),
             "nothing answers at http://127.0.0.1:1"
         );
+    }
+
+    // ---- the plan of a session on another computer -----------------------------------------
+
+    use std::sync::{Arc, Mutex};
+
+    /// An HTTP server that answers by request path and keeps the request heads it saw.
+    async fn path_server(
+        answer: impl Fn(&str) -> (u16, String) + Send + 'static,
+    ) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let keep = seen.clone();
+        tokio::spawn(async move {
+            // One connection per request (`Connection: close`); a session plan that falls back
+            // asks twice.
+            loop {
+                let Ok((mut tcp, _)) = listener.accept().await else {
+                    return;
+                };
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut raw = Vec::new();
+                let mut buf = [0u8; 2048];
+                while !raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let read = match tcp.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(read) => read,
+                    };
+                    raw.extend_from_slice(&buf[..read]);
+                }
+                if raw.is_empty() {
+                    return;
+                }
+                let head = String::from_utf8_lossy(&raw).to_string();
+                let path = head
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or_default()
+                    .to_string();
+                keep.lock().unwrap().push(head);
+                let (status, body) = answer(&path);
+                let words = match status {
+                    200 => "OK",
+                    401 => "Unauthorized",
+                    404 => "Not Found",
+                    500 => "Server Error",
+                    _ => "Bad Gateway",
+                };
+                let _ = tcp
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status} {words}\r\nContent-Length: {}\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await;
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), seen)
+    }
+
+    fn found_at(origin: &str) -> Found {
+        Found {
+            pid: 1,
+            origin: origin.into(),
+            environment_id: "host".into(),
+            label: "Mac".into(),
+            daemon: false,
+        }
+    }
+
+    fn remote(id: &str) -> Target {
+        Target::Gateway(Remote {
+            environment_id: id.into(),
+            label: "ai-server".into(),
+        })
+    }
+
+    /// The path the gateway forwards to the computer: the descriptor that says which computer
+    /// answers, asked before the ticket because the host answers a ticket by itself.
+    const DESCRIPTOR_TAIL: &str = "/.well-known/t3/environment";
+    const TICKET_TAIL: &str = "/api/auth/websocket-ticket";
+
+    #[tokio::test]
+    async fn the_gateway_session_goes_through_the_gateway_path_with_the_hosts_login() {
+        crate::i18n::init(Some("en"));
+        let (origin, seen) = path_server(|path| {
+            if path.ends_with(DESCRIPTOR_TAIL) {
+                (200, r#"{"environmentId":"env id/1"}"#.into())
+            } else {
+                assert!(path.ends_with(TICKET_TAIL), "{path}");
+                (200, r#"{"ticket":"t k/1"}"#.into())
+            }
+        })
+        .await;
+        let found = found_at(&origin);
+        let plan = session_plan(&found, "b", "9.9", &remote("env id/1"))
+            .await
+            .expect("the gateway answered");
+        assert!(plan.fallback.is_none());
+        assert_eq!(plan.remote.as_ref().unwrap().label, "ai-server");
+        let authority = crate::http::authority(&origin).unwrap();
+        assert_eq!(
+            plan.url,
+            format!(
+                "ws://{authority}/_gw/env%20id%2F1/ws?wsTicket=t+k%2F1&clientSurface=cli&clientAppVersion=9.9&clientDeviceType=desktop&clientOs={}&connectionMethod=direct&orchestrationProtocol=1",
+                server::client_os()
+            )
+        );
+        let heads = seen.lock().unwrap().clone();
+        assert_eq!(heads.len(), 2, "{heads:?}");
+        assert!(
+            heads[0].starts_with("GET /_gw/env%20id%2F1/.well-known/t3/environment "),
+            "the descriptor is asked first: {}",
+            heads[0]
+        );
+        assert!(
+            heads[1].starts_with("POST /_gw/env%20id%2F1/api/auth/websocket-ticket "),
+            "{}",
+            heads[1]
+        );
+        for head in &heads {
+            assert!(head.contains("Authorization: Bearer b"), "{head}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_gateway_computer_that_cannot_be_used_falls_back_to_this_one_and_says_why() {
+        crate::i18n::init(Some("en"));
+        for (status, word) in [
+            (404u16, "not shared"),
+            (502, "cannot be reached"),
+            (401, "sign-in"),
+        ] {
+            let (origin, seen) = path_server(move |path| {
+                if path.ends_with(DESCRIPTOR_TAIL) {
+                    (status, String::new())
+                } else {
+                    (200, r#"{"ticket":"ok"}"#.into())
+                }
+            })
+            .await;
+            let found = found_at(&origin);
+            let plan = session_plan(&found, "b", "1", &remote("e"))
+                .await
+                .expect("the host session stands in");
+            assert!(plan.remote.is_none(), "{status}");
+            assert!(
+                plan.url.contains("/ws?wsTicket=ok"),
+                "this computer's socket"
+            );
+            let why = plan.fallback.expect("{status} says why");
+            assert!(why.contains("ai-server") && why.contains(word), "{why}");
+            // The descriptor answered for the computer, so no ticket was asked through the
+            // gateway: the fallback went straight to this computer's own ticket.
+            let heads = seen.lock().unwrap().clone();
+            assert!(
+                !heads
+                    .iter()
+                    .any(|head| head.contains(&format!("/_gw/e{TICKET_TAIL} "))),
+                "{status}: {heads:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_descriptor_the_gateway_cannot_reach_falls_back_without_asking_for_a_ticket() {
+        // A computer that is still listed but unreachable passes the ticket step, because the host
+        // answers that itself; only the forwarded descriptor is refused.
+        crate::i18n::init(Some("en"));
+        let (origin, seen) = path_server(|path| {
+            if path.ends_with(DESCRIPTOR_TAIL) {
+                (502, String::new())
+            } else {
+                (200, r#"{"ticket":"ok"}"#.into())
+            }
+        })
+        .await;
+        let found = found_at(&origin);
+        let plan = session_plan(&found, "b", "1", &remote("e"))
+            .await
+            .expect("the host session stands in");
+        assert!(plan.remote.is_none());
+        assert!(plan.url.contains("/ws?wsTicket=ok"), "{}", plan.url);
+        let why = plan.fallback.expect("the unreachable computer says why");
+        assert!(
+            why.contains("ai-server") && why.contains("cannot be reached"),
+            "{why}"
+        );
+        let heads = seen.lock().unwrap().clone();
+        assert_eq!(
+            heads.len(),
+            2,
+            "the descriptor and this computer's ticket only: {heads:?}"
+        );
+        assert!(heads[0].starts_with("GET /_gw/e/.well-known/t3/environment "));
+        assert!(heads[1].starts_with("POST /api/auth/websocket-ticket "));
+    }
+
+    #[tokio::test]
+    async fn a_route_that_leads_to_another_computer_falls_back_and_says_so() {
+        crate::i18n::init(Some("en"));
+        let (origin, seen) = path_server(|path| {
+            if path.ends_with(DESCRIPTOR_TAIL) {
+                (200, r#"{"environmentId":"someone-else"}"#.into())
+            } else {
+                (200, r#"{"ticket":"ok"}"#.into())
+            }
+        })
+        .await;
+        let found = found_at(&origin);
+        let plan = session_plan(&found, "b", "1", &remote("e"))
+            .await
+            .expect("the host session stands in");
+        assert!(plan.remote.is_none());
+        assert!(plan.url.contains("/ws?wsTicket=ok"), "{}", plan.url);
+        let why = plan.fallback.expect("the other computer says why");
+        assert!(
+            why.contains("ai-server") && why.contains("different computer"),
+            "{why}"
+        );
+        let heads = seen.lock().unwrap().clone();
+        assert_eq!(heads.len(), 2, "{heads:?}");
+        assert!(
+            !heads
+                .iter()
+                .any(|head| head.contains(&format!("/_gw/e{TICKET_TAIL} "))),
+            "{heads:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_undecided_gateway_answer_keeps_the_target_for_another_try() {
+        crate::i18n::init(Some("en"));
+        let (origin, _seen) = path_server(|_| (500, String::new())).await;
+        let found = found_at(&origin);
+        let error = session_plan(&found, "b", "1", &remote("e"))
+            .await
+            .expect_err("nothing was decided");
+        assert!(error.contains("500"), "{error}");
     }
 }

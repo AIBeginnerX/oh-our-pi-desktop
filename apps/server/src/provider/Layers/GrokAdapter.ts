@@ -53,6 +53,7 @@ import {
 } from "../Errors.ts";
 import { acpSignedOutDetail, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
+import { acpTurnTokenUsageFromPromptResponses } from "../acp/AcpTurnTokenUsage.ts";
 import {
   makeAcpAssistantItemEvent,
   makeAcpContentDeltaEvent,
@@ -764,6 +765,13 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             },
           });
         } else if (shouldEmitCompletedTurn) {
+          const tokenUsage = acpTurnTokenUsageFromPromptResponses(
+            liveCtx.turns.find((turn) => turn.id === settleTurnId)?.items ?? [],
+            {
+              hasSubagents: false,
+              completed: options.completedStopReason !== "cancelled",
+            },
+          );
           yield* offerRuntimeEvent({
             type: "turn.completed",
             ...(yield* makeEventStamp()),
@@ -773,6 +781,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             payload: {
               state: options.completedStopReason === "cancelled" ? "cancelled" : "completed",
               stopReason: options.completedStopReason ?? null,
+              ...(tokenUsage ? { tokenUsage } : {}),
             },
           });
         }
@@ -2019,6 +2028,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 };
                 yield* clearTurnLiveness(ctx);
                 const completedStopReason = completedStopReasonFromPromptResponse(result);
+                const tokenUsage = acpTurnTokenUsageFromPromptResponses(
+                  ctx.turns.find((turn) => turn.id === prepared.turnId)?.items ?? [],
+                  { hasSubagents: false, completed: result.stopReason !== "cancelled" },
+                );
                 yield* offerRuntimeEvent({
                   type: "turn.completed",
                   ...(yield* makeEventStamp()),
@@ -2028,6 +2041,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   payload: {
                     state: result.stopReason === "cancelled" ? "cancelled" : "completed",
                     stopReason: completedStopReason,
+                    ...(tokenUsage ? { tokenUsage } : {}),
                   },
                 });
                 ctx.interruptedTurnIds.delete(prepared.turnId);

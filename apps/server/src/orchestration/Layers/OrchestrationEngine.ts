@@ -252,7 +252,13 @@ function commandToAggregateRef(command: OrchestrationCommand): {
   }
 }
 
-const RECEIPT_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+// Provider command ids are random per dispatch
+// (`provider:${eventId}:${tag}:${uuid}`), so their receipts are never read
+// again once the dispatch settles; two days only has to cover in-flight
+// retries. Other receipts (user, crew, checkpoint, title commands) stay
+// dedupable and inspectable for a year.
+const PROVIDER_RECEIPT_RETENTION_MS = 2 * 24 * 60 * 60 * 1000;
+const COMMAND_RECEIPT_RETENTION_MS = 365 * 24 * 60 * 60 * 1000;
 
 const makeOrchestrationEngine = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -1604,7 +1610,10 @@ const makeOrchestrationEngine = Effect.gen(function* () {
     const now = yield* Clock.currentTimeMillis;
     const { snapshotSequence } = yield* projectionSnapshotQuery.getSnapshotSequence();
     const removed = yield* commandReceiptRepository.pruneAccepted({
-      acceptedBefore: DateTime.formatIso(DateTime.makeUnsafe(now - RECEIPT_RETENTION_MS)),
+      providerAcceptedBefore: DateTime.formatIso(
+        DateTime.makeUnsafe(now - PROVIDER_RECEIPT_RETENTION_MS),
+      ),
+      acceptedBefore: DateTime.formatIso(DateTime.makeUnsafe(now - COMMAND_RECEIPT_RETENTION_MS)),
       throughSequence: snapshotSequence,
     });
     if (removed > 0) {

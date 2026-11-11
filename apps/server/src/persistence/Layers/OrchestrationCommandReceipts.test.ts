@@ -25,12 +25,12 @@ layer("OrchestrationCommandReceiptRepository.pruneAccepted", (it) => {
           ) VALUES (${id}, 'thread', 'thread-1', ${acceptedAt}, ${resultSequence}, ${status}, NULL)
         `;
       for (let index = 0; index < 7; index += 1) {
-        yield* put(`old-${index}`, "2026-01-01T00:00:00.000Z", 5, "accepted");
+        yield* put(`old-${index}`, "2025-01-25T00:00:00.000Z", 5, "accepted");
       }
-      yield* put("rejected", "2026-01-01T00:00:00.000Z", 5, "rejected");
-      yield* put("recent", "2026-02-20T00:00:00.000Z", 5, "accepted");
-      yield* put("crew-pending", "2026-01-01T00:00:00.000Z", 5, "accepted");
-      yield* put("crew-settled", "2026-01-01T00:00:00.000Z", 5, "accepted");
+      yield* put("rejected", "2025-01-25T00:00:00.000Z", 5, "rejected");
+      yield* put("recent", "2026-02-26T00:00:00.000Z", 5, "accepted");
+      yield* put("crew-pending", "2025-01-25T00:00:00.000Z", 5, "accepted");
+      yield* put("crew-settled", "2025-01-25T00:00:00.000Z", 5, "accepted");
       for (const [id, commandId, delivered] of [
         ["delivery-1", "crew-pending", null],
         ["delivery-2", "crew-settled", "2026-01-02T00:00:00.000Z"],
@@ -39,23 +39,27 @@ layer("OrchestrationCommandReceiptRepository.pruneAccepted", (it) => {
           INSERT INTO crew_followups (
             delivery_id, lead_thread_id, command_id, message_id, record_json, created_at, delivered_at
           ) VALUES (${id}, ${`lead-${id}`}, ${commandId}, ${`message-${id}`}, '{}',
-            '2026-01-01T00:00:00.000Z', ${delivered})
+            '2025-01-25T00:00:00.000Z', ${delivered})
         `;
       }
-      yield* put("ahead", "2026-01-01T00:00:00.000Z", 6, "accepted");
+      yield* put("ahead", "2025-01-25T00:00:00.000Z", 6, "accepted");
+
+      yield* put("provider:old", "2026-02-26T00:00:00.000Z", 5, "accepted");
+      yield* put("provider:ahead", "2026-02-26T00:00:00.000Z", 6, "accepted");
 
       const removed = yield* receipts.pruneAccepted({
-        acceptedBefore: "2026-02-15T00:00:00.000Z",
+        providerAcceptedBefore: "2026-02-27T00:00:00.000Z",
+        acceptedBefore: "2025-03-01T00:00:00.000Z",
         throughSequence: 5,
         batchSize: 3,
       });
-      assert.strictEqual(removed, 7);
+      assert.strictEqual(removed, 8);
       const remaining = yield* sql<{ readonly id: string }>`
         SELECT command_id AS "id" FROM orchestration_command_receipts ORDER BY command_id
       `;
       assert.deepEqual(
         remaining.map((row) => row.id),
-        ["ahead", "crew-pending", "crew-settled", "recent", "rejected"],
+        ["ahead", "crew-pending", "crew-settled", "provider:ahead", "recent", "rejected"],
       );
       assert.isTrue(
         Option.isSome(yield* receipts.getByCommandId({ commandId: CommandId.make("recent") })),

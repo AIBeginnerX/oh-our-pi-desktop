@@ -34,7 +34,13 @@ export const OrchestrationCommandReceipt = Schema.Struct({
 export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type;
 
 export const PruneAcceptedInput = Schema.Struct({
-  /** Only receipts accepted strictly before this instant are eligible. */
+  /**
+   * Provider receipts (`command_id LIKE 'provider:%'`) accepted strictly
+   * before this instant are eligible. Their ids are random per dispatch, so
+   * the receipt is never read again once the dispatch settles.
+   */
+  providerAcceptedBefore: IsoDateTime,
+  /** All other receipts accepted strictly before this instant are eligible. */
   acceptedBefore: IsoDateTime,
   /** Only receipts at or below this projection checkpoint are eligible. */
   throughSequence: NonNegativeInt,

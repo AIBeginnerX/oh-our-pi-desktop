@@ -51,6 +51,12 @@ pub fn tr(key: &str) -> &'static str {
     lookup(key, lang() == Lang::Ko)
 }
 
+/// The same string in a language the caller names, for text made ahead of the drawing (the usage
+/// line, which the tests read in both languages).
+pub fn tr_in_lang(key: &str, ko: bool) -> &'static str {
+    lookup(key, ko)
+}
+
 fn lookup(key: &str, ko: bool) -> &'static str {
     let pick = |en: &'static str, kr: &'static str| if ko { kr } else { en };
     match key {
@@ -104,6 +110,14 @@ fn lookup(key: &str, ko: bool) -> &'static str {
         "conv.jump" => pick("↓ newer: PgDn to follow", "↓ 최신 대화: PgDn"),
         "transcript.plan" => pick("Plan", "계획"),
         "transcript.compaction" => pick("Context compacted", "컨텍스트 압축됨"),
+        // The thread usage line under the conversation, joined by " · ".
+        "usage.audit" => pick(
+            "Auditor is reviewing this answer",
+            "감사자가 이 답변을 검토하는 중",
+        ),
+        "usage.cache" => pick("Cache {rate}", "캐시 {rate}"),
+        "usage.context" => pick("Context {usage}", "컨텍스트 {usage}"),
+        "usage.costUnknown" => pick("Cost unknown", "비용 알 수 없음"),
         "hint.composer" => pick(
             "Enter send · Shift-Enter newline · Tab list · Ctrl-B/G side panes · PgUp/PgDn scroll · /model /mode /effort · Ctrl-C quit",
             "Enter 전송 · Shift-Enter 줄바꿈 · Tab 목록 · Ctrl-B/G 옆 창 · PgUp/PgDn 스크롤 · /model /mode /effort · Ctrl-C 종료",
@@ -291,8 +305,8 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "새 스레드입니다. 메시지를 입력하면 시작합니다.",
         ),
         "notice.help" => pick(
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /computers /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
+            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /computers /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
         ),
         "notice.unsupported" => pick(
             "Not in oop-rs yet: use the TypeScript terminal for it.",

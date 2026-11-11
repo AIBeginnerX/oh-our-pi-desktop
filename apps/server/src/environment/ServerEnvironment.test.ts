@@ -379,59 +379,65 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
     }),
   );
 
-  it.effect("reports the embedded app version without changing standalone server versions", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-environment-desktop-update-test-",
-      });
-      const serverConfig = yield* makeServerConfig(baseDir);
-      yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
+  it.effect(
+    "reports the embedded app version on desktop and the OOP release on other servers",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-server-environment-desktop-update-test-",
+        });
+        const serverConfig = yield* makeServerConfig(baseDir);
+        yield* fileSystem.makeDirectory(serverConfig.stateDir, { recursive: true });
 
-      const describeWith = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =>
-        Effect.gen(function* () {
-          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-          return yield* serverEnvironment.getDescriptor;
-        }).pipe(
-          Effect.provide(
-            ServerEnvironment.layer.pipe(
-              Layer.provide(ServerSecretStore.layer),
-              Layer.provide(ServerConfig.layer({ ...serverConfig, ...overrides })),
+        const describeWith = (overrides: Partial<ServerConfig.ServerConfig["Service"]>) =>
+          Effect.gen(function* () {
+            const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
+            return yield* serverEnvironment.getDescriptor;
+          }).pipe(
+            Effect.provide(
+              ServerEnvironment.layer.pipe(
+                Layer.provide(ServerSecretStore.layer),
+                Layer.provide(ServerConfig.layer({ ...serverConfig, ...overrides })),
+              ),
             ),
-          ),
-        );
+          );
 
-      const withFd = yield* describeWith({
-        mode: "desktop",
-        desktopTelemetryControlFd: 5,
-        desktopAppVersion: "9.8.7",
-      });
-      expect(withFd.serverVersion).toBe("9.8.7");
-      expect(withFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
-      expect(withFd.capabilities.desktopAppUpdate).toBe(true);
-      expect(withFd.capabilities.serverSelfUpdateProgress).toBe(true);
-      expect(withFd.capabilities.serverUpdateThreadContinuation).toBe(true);
+        const withFd = yield* describeWith({
+          mode: "desktop",
+          desktopTelemetryControlFd: 5,
+          desktopAppVersion: "9.8.7",
+        });
+        expect(withFd.serverVersion).toBe("9.8.7");
+        expect(withFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
+        expect(withFd.capabilities.desktopAppUpdate).toBe(true);
+        expect(withFd.capabilities.serverSelfUpdateProgress).toBe(true);
+        expect(withFd.capabilities.serverUpdateThreadContinuation).toBe(true);
 
-      const withoutFd = yield* describeWith({ mode: "desktop" });
-      expect(withoutFd.serverVersion).toBe(packageJson.version);
-      expect(withoutFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
-      expect(withoutFd.capabilities.desktopAppUpdate).toBeUndefined();
-      expect(withoutFd.capabilities.serverSelfUpdateProgress).toBeUndefined();
-      expect(withoutFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
+        const withoutFd = yield* describeWith({ mode: "desktop" });
+        expect(withoutFd.serverVersion).toBe(packageJson.version);
+        expect(withoutFd.capabilities.serverSelfUpdate).toBe("desktop-managed");
+        expect(withoutFd.capabilities.desktopAppUpdate).toBeUndefined();
+        expect(withoutFd.capabilities.serverSelfUpdateProgress).toBeUndefined();
+        expect(withoutFd.capabilities.serverUpdateThreadContinuation).toBeUndefined();
 
-      const web = yield* describeWith({
-        mode: "web",
-        desktopTelemetryControlFd: 5,
-        desktopAppVersion: "9.8.7",
-      });
-      expect(web.serverVersion).toBe(packageJson.version);
-      expect(web.capabilities.desktopAppUpdate).toBeUndefined();
+        // Plain serve has no desktop to ask either: it reports the OOP app
+        // release so clients do not take the upstream package version for an
+        // older app, and desktop-only fields do not leak into it.
+        const web = yield* describeWith({
+          mode: "web",
+          desktopTelemetryControlFd: 5,
+          desktopAppVersion: "9.8.7",
+        });
+        expect(web.serverVersion).toBe(APP_RELEASE_VERSION);
+        expect(web.serverVersion).not.toBe(packageJson.version);
+        expect(web.capabilities.desktopAppUpdate).toBeUndefined();
 
-      // The terminal's daemon has no desktop to ask; it reports the app release.
-      const daemon = yield* describeWith({ mode: "web", daemon: true });
-      expect(daemon.serverVersion).toBe(APP_RELEASE_VERSION);
-      expect(daemon.serverVersion).not.toBe(packageJson.version);
-    }),
+        // The terminal's daemon reports the same release.
+        const daemon = yield* describeWith({ mode: "web", daemon: true });
+        expect(daemon.serverVersion).toBe(APP_RELEASE_VERSION);
+        expect(daemon.serverVersion).not.toBe(packageJson.version);
+      }),
   );
 
   it.effect("structures persisted environment id filesystem failures", () =>

@@ -220,14 +220,12 @@ export const make = Effect.gen(function* () {
       arch: platformArch(hostArchitecture),
       ...(machine === null ? {} : { machine }),
     },
-    // A terminal daemon reports the app release like the desktop does, or the
-    // terminal would take the upstream package version for an older app.
+    // Every OOP server reports the app release the desktop does, or clients
+    // would take the upstream package version for an older app.
     serverVersion:
       serverConfig.mode === "desktop"
         ? (serverConfig.desktopAppVersion ?? packageJson.version)
-        : serverConfig.daemon === true
-          ? APP_RELEASE_VERSION
-          : packageJson.version,
+        : APP_RELEASE_VERSION,
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     capabilities: {
       repositoryIdentity: true,

@@ -1,7 +1,7 @@
 import * as NodeAssert from "node:assert/strict";
 import * as NodeTest from "node:test";
 
-import { oopRsDockerArgs, parseArgs, TARGETS } from "./build-oop-cli-archives.mjs";
+import { oopRsDockerArgs, parseArgs, run, TARGETS } from "./build-oop-cli-archives.mjs";
 
 NodeTest.test("--terminal also builds the terminal-only archives, and nothing else changes", () => {
   NodeAssert.deepEqual(parseArgs([]), {
@@ -44,3 +44,15 @@ NodeTest.test(
     NodeAssert.equal(args[args.indexOf("-w") + 1], "/src/apps/oop-tui-rs");
   },
 );
+
+NodeTest.test("a command that cannot start says so instead of reporting a null exit", () => {
+  NodeAssert.throws(
+    () => run("oop-cli-archive-missing-command", ["--version"]),
+    (error) => {
+      NodeAssert.match(error.message, /could not start/u);
+      NodeAssert.match(error.message, /ENOENT/u);
+      NodeAssert.doesNotMatch(error.message, /exited with null/u);
+      return true;
+    },
+  );
+});

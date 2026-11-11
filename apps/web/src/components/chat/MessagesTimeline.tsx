@@ -192,6 +192,7 @@ import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
 
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
+import { THREAD_USAGE_NOTE } from "./threadUsageText";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
 import { cn } from "~/lib/utils";
@@ -238,6 +239,34 @@ function TimelineListFooter({ composerInset }: { readonly composerInset: number 
     </div>
   );
 }
+
+/**
+ * One muted line after the latest settled turn. The hover text carries the
+ * estimate caveat; there is deliberately no animation and no interaction.
+ */
+function TimelineUsageFooterRow({
+  text,
+  audit,
+}: {
+  readonly text: string;
+  readonly audit: boolean;
+}) {
+  const t = useT();
+  return (
+    <div className="mx-auto w-full max-w-(--chat-max-width) pb-3 sm:pb-4">
+      {audit ? (
+        <p className="text-muted-foreground text-xs">{text}</p>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger render={<p className="text-muted-foreground text-xs" />}>
+            {text}
+          </TooltipTrigger>
+          <TooltipPopup side="top">{t(THREAD_USAGE_NOTE)}</TooltipPopup>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
@@ -273,6 +302,9 @@ interface MessagesTimelineProps {
   agentPanelModel?: AgentPanelModel;
   onOpenAgents?: () => void;
   isWorking: boolean;
+  /** Settled usage footer text; rendered only while no turn is running. */
+  threadUsageFooter?: string | null;
+  threadAuditRunning?: boolean;
   isPreparingWorktree?: boolean;
   isCompacting?: boolean;
   activeTurnStartedAt: string | null;
@@ -347,6 +379,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   citationHistoryLoading = false,
   onCiteAssistantText,
   isWorking,
+  threadUsageFooter = null,
+  threadAuditRunning = false,
   worktreeSetup = null,
   onCancelWorktreeSetup,
   onWorktreeSetupWorkLocally,
@@ -395,6 +429,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   steerQueuedMessageShortcutLabel = null,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
+  const threadUsageFooterText = !isWorking && threadUsageFooter ? threadUsageFooter : null;
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
     () => readTimelinePosition(listIdentityKey),
@@ -847,8 +882,15 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     return config ? { ...config, onReady: handleAnchorReady } : undefined;
   }, [anchorMessageId, handleAnchorReady, rows]);
   const timelineListFooter = useMemo(
-    () => <TimelineListFooter composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment} />,
-    [anchoredEndSpace, contentInsetEndAdjustment],
+    () => (
+      <>
+        {threadUsageFooterText !== null ? (
+          <TimelineUsageFooterRow text={threadUsageFooterText} audit={threadAuditRunning} />
+        ) : null}
+        <TimelineListFooter composerInset={anchoredEndSpace ? 0 : contentInsetEndAdjustment} />
+      </>
+    ),
+    [anchoredEndSpace, contentInsetEndAdjustment, threadUsageFooterText, threadAuditRunning],
   );
 
   const measureContentOverflow = useCallback(

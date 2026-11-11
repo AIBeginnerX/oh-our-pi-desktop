@@ -505,6 +505,7 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
   usageGetThreadResults: "usage.getThreadResults",
+  threadUsageSummary: "thread.usageSummary",
 
   // Crew methods
   crewRetryTask: "crew.retryTask",
@@ -840,6 +841,36 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   payload: UsageSummaryInput,
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
+});
+
+const ThreadUsageDimension = Schema.Struct({ sum: Schema.Number, reportedTurns: NonNegativeInt });
+export const ThreadUsageCost = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("reported"), usd: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("estimated"), usd: Schema.Number }),
+  Schema.Struct({ kind: Schema.Literal("unknown") }),
+]);
+const ThreadUsageTotals = Schema.Struct({
+  inputTokens: Schema.Number,
+  outputTokens: Schema.Number,
+  cachedInputTokens: ThreadUsageDimension,
+  cacheCreationTokens: ThreadUsageDimension,
+  turns: NonNegativeInt,
+  cacheRate: Schema.NullOr(Schema.Number),
+  cost: ThreadUsageCost,
+});
+export const ThreadUsageSummary = Schema.Struct({
+  threadId: ThreadId,
+  status: Schema.Literals(["ok", "too-large"]),
+  totals: ThreadUsageTotals,
+  models: Schema.Array(
+    Schema.Struct({ ...ThreadUsageTotals.fields, model: Schema.String, driver: Schema.String }),
+  ),
+});
+export type ThreadUsageSummary = typeof ThreadUsageSummary.Type;
+export const WsThreadUsageSummaryRpc = Rpc.make(WS_METHODS.threadUsageSummary, {
+  payload: OwnedResultUsageInput,
+  success: ThreadUsageSummary,
+  error: Schema.Union([EnvironmentAuthorizationError, OwnedResultUsageReadError]),
 });
 
 export const WsUsageGetThreadResultsRpc = Rpc.make(WS_METHODS.usageGetThreadResults, {
@@ -1957,6 +1988,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsUsageGetThreadResultsRpc,
+  WsThreadUsageSummaryRpc,
   WsCrewRetryTaskRpc,
   WsCrewStopTasksRpc,
   WsServerRefreshUsageRatesRpc,

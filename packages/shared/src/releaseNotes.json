@@ -1,6 +1,36 @@
 {
   "versions": [
     {
+      "version": "0.0.157",
+      "date": "2026-11-11",
+      "highlights": [
+        {
+          "en": "The end of a chat shows one line with the cache rate, how much of the context is in use, and the cost of each model, including the chat's crew tasks. Costs the provider did not report are estimated from API list prices. While the OOP Crew auditor is still reviewing an answer, that line says so instead, so an answer under review no longer looks final. The terminal app shows the same line.",
+          "ko": "대화 끝에 캐시 사용률, 컨텍스트 사용량, 모델별 비용을 한 줄로 보여 줍니다. 그 대화의 크루 작업도 포함하며, 제공자가 알려 주지 않은 비용은 API 정가로 추정합니다. OOP Crew 감사자가 답변을 아직 검토하는 동안에는 그 자리에 검토 중이라고 표시하므로, 검토 중인 답변이 끝난 것처럼 보이지 않습니다. 터미널 앱도 같은 줄을 보여 줍니다."
+        },
+        {
+          "en": "Turns on ZCode, MiniMax, Grok, Cursor and Antigravity now record the token usage the agent reports, so it counts in the chat's usage line.",
+          "ko": "ZCode, MiniMax, Grok, Cursor, Antigravity의 턴도 에이전트가 알려 주는 토큰 사용량을 기록해, 대화의 사용량 줄에 반영됩니다."
+        },
+        {
+          "en": "In the terminal app, /computers (or Ctrl+O on the project list) opens the other computers the desktop app shares, such as a connected Linux server, and oop status lists them.",
+          "ko": "터미널 앱에서 /computers(프로젝트 목록에서는 Ctrl+O)로 데스크톱 앱이 공유하는 다른 컴퓨터(연결된 Linux 서버 등)를 열 수 있고, oop status에도 표시됩니다."
+        },
+        {
+          "en": "Settings → General → Alert when a running agent shows no activity for can alert you once when a working agent goes quiet for 10, 20 or 30 minutes. It is off by default and never stops the agent.",
+          "ko": "설정 → 일반 → 실행 중인 에이전트가 다음 시간 동안 활동이 없으면 알림을 켜면, 작업 중인 에이전트가 10·20·30분 동안 조용할 때 한 번 알려 줍니다. 기본값은 꺼짐이며 에이전트를 멈추지는 않습니다."
+        },
+        {
+          "en": "The app's database grows much more slowly: tool progress updates and context meters that later ones replaced are removed after a week, and command records are kept for a year, except per-provider ones, which go after two days. Only the latest two update backups are kept.",
+          "ko": "앱 데이터베이스가 훨씬 느리게 커집니다. 나중 기록으로 대체된 도구 진행 기록과 컨텍스트 표시는 일주일 뒤 지우고, 명령 처리 기록은 1년 보관하되 제공자별 기록은 이틀 뒤 지웁니다. 업데이트 백업은 최근 두 개만 남깁니다."
+        },
+        {
+          "en": "Every OOP server, including a Linux service or one started over SSH, reports the OOP release version, so the app no longer takes a current server for an old one. OOP's tool list keeps one order in every session, so providers can reuse their prompt cache.",
+          "ko": "Linux 서비스나 SSH로 띄운 서버를 포함해 모든 OOP 서버가 OOP 릴리스 버전을 알려, 앱이 최신 서버를 옛 버전으로 착각하지 않습니다. OOP 도구 목록이 세션마다 같은 순서를 유지해 제공자가 프롬프트 캐시를 다시 쓸 수 있습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.156",
       "date": "2026-11-10",
       "highlights": [

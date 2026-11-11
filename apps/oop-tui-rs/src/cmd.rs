@@ -13,6 +13,7 @@ pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
         "update" => crate::cmd_misc::update(app),
         "threads" | "t" => crate::cmd_misc::threads(app),
         "projects" | "p" => crate::cmd_misc::projects(app),
+        "computers" => crate::lists::open_computers(app),
         "goal" => crate::cmd_goal::run(app, argument),
         "crew" => crate::cmd_crew::run(app, argument),
         "provider" => crate::cmd_provider::run(app, argument),

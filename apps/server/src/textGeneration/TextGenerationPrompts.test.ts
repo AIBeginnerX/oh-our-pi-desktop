@@ -5,6 +5,7 @@ import {
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
+  buildWorkLessonsPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -224,6 +225,29 @@ describe("buildThreadTitlePrompt", () => {
       `Thread contents:\n[Earlier content truncated]\n\n${retainedContext}`,
     );
     expect(result.prompt.match(/\[Earlier content truncated\]/g)).toHaveLength(1);
+  });
+});
+
+describe("buildWorkLessonsPrompt", () => {
+  it("keeps the lesson limits and states the shared-cause and do-not-widen rules", () => {
+    const result = buildWorkLessonsPrompt({ digest: "[]" });
+
+    expect(result.prompt).toContain(
+      "- Propose at most 3 lessons. Return an empty list when nothing repeats.",
+    );
+    expect(result.prompt).toContain(
+      "- A lesson must be supported by at least two different threads; list their labels in threads.",
+    );
+    expect(result.prompt).toContain(
+      "write one lesson for that cause and list all of those threads",
+    );
+    expect(result.prompt).toContain("Never widen a lesson beyond what the summaries show");
+    expect(result.prompt).toContain("if any summary contradicts the wider statement");
+    expect(result.prompt).toContain(
+      "Each lesson has: category (fact, prohibition, preference or procedure), text, threads.",
+    );
+    expect(result.prompt).toContain("Summaries:");
+    expect(result.prompt).toContain("[]");
   });
 });
 

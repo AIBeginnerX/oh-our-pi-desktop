@@ -53,6 +53,7 @@ import {
 } from "../Errors.ts";
 import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
+import { acpTurnTokenUsageFromPromptResponses } from "../acp/AcpTurnTokenUsage.ts";
 import {
   makeAcpAssistantItemEvent,
   makeAcpContentDeltaEvent,
@@ -1143,6 +1144,10 @@ export function makeCursorAdapter(
           // superseded prompt resolving (usually cancelled) while another is
           // in flight or pending must leave the merged turn running.
           if (ctx.promptsInFlight === 1) {
+            const tokenUsage = acpTurnTokenUsageFromPromptResponses(
+              ctx.turns.find((turn) => turn.id === turnId)?.items ?? [],
+              { hasSubagents: false, completed: result.stopReason !== "cancelled" },
+            );
             yield* offerRuntimeEvent({
               type: "turn.completed",
               ...(yield* makeEventStamp()),
@@ -1152,6 +1157,7 @@ export function makeCursorAdapter(
               payload: {
                 state: result.stopReason === "cancelled" ? "cancelled" : "completed",
                 stopReason: result.stopReason ?? null,
+                ...(tokenUsage ? { tokenUsage } : {}),
               },
             });
           }

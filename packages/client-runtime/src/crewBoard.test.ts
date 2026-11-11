@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  runningCrewAudit,
   crewEvidence,
   crewOverall,
   crewPercent,
@@ -230,5 +231,29 @@ describe("crew todo progress", () => {
     expect(crewProofOf("inconclusive")).toBe("inconclusive");
     expect(crewProofOf(undefined)).toBeUndefined();
     expect(crewProofOf("VERIFIED")).toBeUndefined();
+  });
+});
+
+describe("runningCrewAudit", () => {
+  const event = (kind: string, taskId: string, crewRole = "auditor") => ({
+    kind,
+    payload: { taskId, crewRole, model: "astra" },
+  });
+  it("shows a running audit", () => {
+    expect(runningCrewAudit([event("task.started", "a")])).toEqual({ model: "astra" });
+    expect(runningCrewAudit([event("task.progress", "a")])).toEqual({ model: "astra" });
+  });
+  it("hides completed audits and other crew roles", () => {
+    expect(runningCrewAudit([event("task.started", "a"), event("task.completed", "a")])).toBeNull();
+    expect(runningCrewAudit([event("task.started", "a", "worker")])).toBeNull();
+  });
+  it("shows the later running audit", () => {
+    expect(
+      runningCrewAudit([
+        event("task.started", "a"),
+        event("task.completed", "a"),
+        event("task.started", "b"),
+      ]),
+    ).toEqual({ model: "astra" });
   });
 });

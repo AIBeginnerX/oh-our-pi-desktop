@@ -1610,6 +1610,129 @@ pub async fn websocket_url(found: &Found, bearer: &str, version: &str) -> Result
     ))
 }
 
+/// How opening a gateway computer went. `Final` says the computer cannot be used now (the host
+/// stopped sharing it, cannot reach it, or refused the login): the terminal goes back to this
+/// computer instead of retrying. `Retry` leaves it open whether another try is worth it.
+pub enum GatewayFail {
+    Final(String),
+    Retry(String),
+}
+
+/// The WebSocket address of a gateway computer: the computer's public descriptor and a one-time
+/// host ticket, both asked through that computer's gateway path, then the same client parameters
+/// the direct session sends, on the gateway's own `/ws`. The host's login goes with every step; the
+/// gateway trades it for its own toward the upstream.
+///
+/// The descriptor goes first because the host answers the ticket itself while the computer is
+/// still registered: only the descriptor is forwarded, so it is what tells an unreachable computer
+/// (502) or a route that now leads somewhere else (another `environmentId`) from a working one.
+pub async fn gateway_websocket_url(
+    found: &Found,
+    bearer: &str,
+    remote: &crate::link::Remote,
+    version: &str,
+) -> Result<String, GatewayFail> {
+    let prefix = crate::gateway::environment_prefix(&remote.environment_id);
+    let auth = [("Authorization", format!("Bearer {bearer}"))];
+    // The reason names the computer that was picked, not the host that answered.
+    let gone = |en: &'static str, ko: &'static str| {
+        GatewayFail::Final(fill(s(en, ko), &[("label", remote.label.clone())]))
+    };
+    let descriptor = http::request(
+        "GET",
+        &found.origin,
+        &format!("{prefix}/.well-known/t3/environment"),
+        &auth,
+        None,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(GatewayFail::Retry)?;
+    match descriptor.status {
+        401 | 403 => {
+            return Err(gone(
+                "The sign-in for {label} was refused. Back on this computer.",
+                "{label} 의 로그인이 거부되었습니다. 이 컴퓨터로 돌아왔습니다.",
+            ));
+        }
+        404 => {
+            return Err(gone(
+                "{label} is not shared from this computer any more. Back on this computer.",
+                "{label} 이(가) 더 이상 이 컴퓨터에서 공유되지 않습니다. 이 컴퓨터로 돌아왔습니다.",
+            ));
+        }
+        502 => {
+            return Err(gone(
+                "{label} cannot be reached right now. Back on this computer.",
+                "지금 {label} 에 연결할 수 없습니다. 이 컴퓨터로 돌아왔습니다.",
+            ));
+        }
+        200 => {
+            // A descriptor without an id says nothing about which computer answered, so it is
+            // taken as the one that was asked for.
+            let answered = descriptor
+                .json()
+                .map_err(GatewayFail::Retry)?
+                .get("environmentId")
+                .and_then(|id| id.as_str())
+                .map(str::to_string);
+            if answered.is_some_and(|id| id != remote.environment_id) {
+                return Err(gone(
+                    "{label} answered as a different computer. Back on this computer.",
+                    "{label} 이(가) 다른 컴퓨터로 응답했습니다. 이 컴퓨터로 돌아왔습니다.",
+                ));
+            }
+        }
+        status => return Err(GatewayFail::Retry(format!("the server answered {status}"))),
+    }
+    let answer = http::request(
+        "POST",
+        &found.origin,
+        &format!("{prefix}/api/auth/websocket-ticket"),
+        &auth,
+        None,
+        Duration::from_secs(10),
+    )
+    .await
+    .map_err(GatewayFail::Retry)?;
+    match answer.status {
+        401 | 403 => {
+            return Err(gone(
+                "The sign-in for {label} was refused. Back on this computer.",
+                "{label} 의 로그인이 거부되었습니다. 이 컴퓨터로 돌아왔습니다.",
+            ));
+        }
+        404 => {
+            return Err(gone(
+                "{label} is not shared from this computer any more. Back on this computer.",
+                "{label} 이(가) 더 이상 이 컴퓨터에서 공유되지 않습니다. 이 컴퓨터로 돌아왔습니다.",
+            ));
+        }
+        502 => {
+            return Err(gone(
+                "{label} cannot be reached right now. Back on this computer.",
+                "지금 {label} 에 연결할 수 없습니다. 이 컴퓨터로 돌아왔습니다.",
+            ));
+        }
+        status if status != 200 => {
+            return Err(GatewayFail::Retry(format!("the server answered {status}")));
+        }
+        _ => {}
+    }
+    let ticket = answer.json().map_err(GatewayFail::Retry)?["ticket"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| GatewayFail::Retry("the server issued no WebSocket ticket".into()))?;
+    let authority = http::authority(&found.origin).map_err(GatewayFail::Retry)?;
+    let scheme = http::ws_scheme(&found.origin).map_err(GatewayFail::Retry)?;
+    Ok(format!(
+        "{scheme}://{authority}{prefix}/ws?wsTicket={}&clientSurface=cli&clientAppVersion={}&clientDeviceType=desktop&clientOs={}&connectionMethod=direct&orchestrationProtocol={ORCHESTRATION_PROTOCOL}",
+        http::form_encode(&ticket),
+        http::form_encode(version),
+        http::form_encode(client_os()),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

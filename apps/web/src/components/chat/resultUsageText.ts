@@ -116,6 +116,15 @@ export function formatResultUsageBucketLine(bucket: OwnedMainUsageBucketV1): str
     t("Output {count}", { count: subtotal.outputTokens }),
     formatCachePart(t("Cache input"), subtotal.cachedInputTokens, subtotal.completeTurns),
     ...(hitRate === null ? [] : [t("Cache hit rate {rate}", { rate: formatPercent(hitRate) })]),
+    ...(subtotal.cacheCreationTokens.reportedTurns > 0 &&
+    subtotal.cachedInputTokens.reportedTurns === subtotal.completeTurns &&
+    subtotal.inputTokens > 0
+      ? [
+          t("Cache rate including writes {rate}", {
+            rate: formatPercent(subtotal.cachedInputTokens.sum / subtotal.inputTokens),
+          }),
+        ]
+      : []),
     formatCachePart(t("Cache creation"), subtotal.cacheCreationTokens, subtotal.completeTurns),
     formatCachePart(t("Reasoning"), subtotal.reasoningTokens, subtotal.completeTurns),
     t("Complete turns {count}", { count: subtotal.completeTurns }),

@@ -802,6 +802,8 @@ async fn a_streamed_reply_grows_on_screen_chunk_by_chunk() {
         server: "fake".into(),
         origin: String::new(),
         bearer: String::new(),
+        label: String::new(),
+        remote: None,
     });
     let mut next = async |app: &mut App| {
         let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())

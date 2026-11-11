@@ -144,7 +144,7 @@ export function welcomeHtml() {
 <li>첫 실행 안내가 업데이트 폴더(NAS 공유 폴더) 연결, 에이전트 로그인, 프로젝트 가져오기를 차례로 도와줍니다.</li>
 <li>대화·프로젝트·설정은 Mac마다 따로 저장되므로 새 Mac은 빈 상태로 시작합니다.</li>
 </ol>
-<p>업데이트할 때는 기존 대화와 설정이 그대로 유지되고, 이전 앱은 /Library/Application Support/OOP/Updates에 백업됩니다.</p>
+<p>업데이트할 때는 기존 대화와 설정이 그대로 유지되고, 이전 앱은 /Library/Application Support/OOP/Updates에 백업되며 최근 2개만 보관됩니다.</p>
 </body></html>
 `;
 }
@@ -177,6 +177,23 @@ export function targetProcessCheck({ pgrep = "/usr/bin/pgrep", ps = "/bin/ps" } 
     fi
   done
   if [ -n "$blocked" ]; then echo 'Quit OOP with Cmd+Q before installing this update.' >&2; exit 1; fi
+`;
+}
+
+// Runs only after the new backup is verified. Best effort: a pruning failure never fails the install.
+export function backupPruneScript() {
+  return `  retain=2
+  (
+    set +e
+    for old in "$backups"/before-*; do
+      if [ ! -d "$old" ] || [ -L "$old" ] || [ "$old" = "$backupDir" ]; then continue; fi
+      newer=0
+      for other in "$backups"/before-*; do
+        if [ -d "$other" ] && [ ! -L "$other" ] && [ "$other" -nt "$old" ]; then newer=$((newer + 1)); fi
+      done
+      if [ "$newer" -ge "$retain" ]; then /bin/rm -rf -- "$old" || echo "Could not remove old OOP backup: $old" >&2; fi
+    done
+  ) || echo 'Could not prune old OOP backups.' >&2
 `;
 }
 
@@ -214,7 +231,7 @@ ${targetProcessCheck()}  parent='/Library/Application Support/OOP'
   /usr/bin/ditto "$target" "$backup"
   if [ ! -f "$backup/Contents/Info.plist" ]; then echo 'Could not back up the existing OOP app.' >&2; exit 1; fi
   echo "OOP app backup: $backup"
-fi
+${backupPruneScript()}fi
 exit 0
 `;
 }

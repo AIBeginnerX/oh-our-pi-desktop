@@ -9,6 +9,7 @@ import * as NodeTest from "node:test";
 import { macUpdatePkgName } from "./oop-release-names.mjs";
 
 import {
+  backupPruneScript,
   buildOopUpdatePkg,
   componentPlist,
   distributionXml,
@@ -1321,3 +1322,98 @@ NodeTest.test(
     }
   },
 );
+
+NodeTest.describe("preinstall backup retention", () => {
+  const prune = async (setup, { chmodBackups, after } = {}) => {
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "oop-prune-test-"));
+    try {
+      const backups = NodePath.join(root, "Application Support", "Updates");
+      await NodeFSP.mkdir(backups, { recursive: true });
+      await setup(backups, root);
+      if (chmodBackups) await NodeFSP.chmod(backups, chmodBackups);
+      const script = `set -eu\nbackups=${JSON.stringify(backups)}\nbackupDir=${JSON.stringify(
+        NodePath.join(backups, "before-9.9.9-new"),
+      )}\nif true; then\n${backupPruneScript()}fi\nexit 0\n`;
+      NodeAssert.equal(NodeChildProcess.spawnSync("/bin/sh", ["-n"], { input: script }).status, 0);
+      const result = NodeChildProcess.spawnSync("/bin/sh", [], { input: script, encoding: "utf8" });
+      if (chmodBackups) await NodeFSP.chmod(backups, 0o700);
+      await after?.(root);
+      return { result, backups, root, entries: (await NodeFSP.readdir(backups)).toSorted() };
+    } finally {
+      if (chmodBackups)
+        await NodeFSP.chmod(NodePath.join(root, "Application Support", "Updates"), 0o700);
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  };
+  const backup = async (backups, name, ageSeconds) => {
+    const dir = NodePath.join(backups, name);
+    await NodeFSP.mkdir(NodePath.join(dir, "OOP.app"), { recursive: true });
+    const time = new Date(Date.now() - ageSeconds * 1000);
+    await NodeFSP.utimes(dir, time, time);
+  };
+
+  NodeTest.test(
+    "keeps the newest two by mtime, ignoring names, links, files and other dirs",
+    async () => {
+      const { result, entries } = await prune(
+        async (backups, root) => {
+          // Names deliberately do not sort chronologically.
+          await backup(backups, "before-0.0.9-old", 500);
+          await backup(backups, "before-0.0.100-older with space", 400);
+          await backup(backups, "before-0.0.10-mid", 300);
+          await backup(backups, "before-0.0.2-newer with space", 200);
+          await backup(backups, "before-9.9.9-new", 10);
+          const outside = NodePath.join(root, "outside");
+          await NodeFSP.mkdir(outside);
+          await NodeFSP.writeFile(NodePath.join(outside, "keep.txt"), "x");
+          await NodeFSP.symlink(outside, NodePath.join(backups, "before-link"));
+          await NodeFSP.writeFile(NodePath.join(backups, "before-file"), "x");
+          await backup(backups, "other", 900);
+        },
+        {
+          after: async (root) =>
+            NodeAssert.equal(
+              await NodeFSP.readFile(NodePath.join(root, "outside", "keep.txt"), "utf8"),
+              "x",
+            ),
+        },
+      );
+      NodeAssert.equal(result.status, 0);
+      NodeAssert.deepEqual(entries, [
+        "before-0.0.2-newer with space",
+        "before-9.9.9-new",
+        "before-file",
+        "before-link",
+        "other",
+      ]);
+    },
+  );
+
+  NodeTest.test("one backup or an empty folder prunes nothing and succeeds", async () => {
+    const one = await prune(async (backups) => backup(backups, "before-9.9.9-new", 10));
+    NodeAssert.equal(one.result.status, 0);
+    NodeAssert.deepEqual(one.entries, ["before-9.9.9-new"]);
+    const none = await prune(async () => {});
+    NodeAssert.equal(none.result.status, 0);
+    NodeAssert.deepEqual(none.entries, []);
+    NodeAssert.equal(none.result.stderr, "");
+  });
+
+  NodeTest.test(
+    "a removal failure is logged and does not change the exit status",
+    { skip: process.getuid?.() === 0 },
+    async () => {
+      const { result, entries } = await prune(
+        async (backups) => {
+          await backup(backups, "before-1.0.0-a", 300);
+          await backup(backups, "before-1.0.1-b", 200);
+          await backup(backups, "before-9.9.9-new", 10);
+        },
+        { chmodBackups: 0o500 },
+      );
+      NodeAssert.equal(result.status, 0);
+      NodeAssert.match(result.stderr, /Could not remove old OOP backup/u);
+      NodeAssert.equal(entries.length, 3);
+    },
+  );
+});

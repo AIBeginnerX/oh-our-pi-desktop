@@ -75,7 +75,10 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* () {
       WHERE command_id IN (
         SELECT command_id FROM orchestration_command_receipts
         WHERE status = 'accepted'
-          AND accepted_at < ${input.acceptedBefore}
+          AND accepted_at < CASE
+            WHEN command_id LIKE 'provider:%' THEN ${input.providerAcceptedBefore}
+            ELSE ${input.acceptedBefore}
+          END
           AND result_sequence <= ${input.throughSequence}
           AND NOT EXISTS (
             SELECT 1 FROM crew_followups

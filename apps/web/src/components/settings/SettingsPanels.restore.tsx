@@ -64,6 +64,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
         ? ["In-app notifications"]
         : []),
+      ...(settings.noActivityAlertMinutes !== DEFAULT_UNIFIED_SETTINGS.noActivityAlertMinutes
+        ? ["No-activity alerts"]
+        : []),
       ...(settings.setupNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.setupNotificationsEnabled
         ? ["Setup notifications"]
         : []),
@@ -226,6 +229,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.timestampFormat,
       settings.notificationMode,
       settings.inAppNotificationsEnabled,
+      settings.noActivityAlertMinutes,
       settings.setupNotificationsEnabled,
       settings.wordWrap,
       followSystem,
@@ -303,6 +307,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
+      noActivityAlertMinutes: DEFAULT_UNIFIED_SETTINGS.noActivityAlertMinutes,
       setupNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.setupNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,

@@ -1,12 +1,15 @@
-//! `/projects` and `/threads`: the two pickers of the TypeScript terminal (`showProjects`,
-//! `showThreads`, `handlePickerKey` and `app/projects.ts`, `threadList.ts`, `listSearch.ts`) as
-//! full-body screens. Letters are search (every typed word has to match, best match first), the
-//! arrows move, Enter opens, Esc undoes the search and then steps back, and Ctrl+P pins or unpins
-//! the thread under the pointer.
+//! `/projects`, `/threads` and `/computers`: the pickers of the TypeScript terminal
+//! (`showProjects`, `showThreads`, `handlePickerKey` and `app/projects.ts`, `threadList.ts`,
+//! `listSearch.ts`) as full-body screens. Letters are search (every typed word has to match, best
+//! match first), the arrows move, Enter opens, Esc undoes the search and then steps back, and
+//! Ctrl+P pins or unpins the thread under the pointer. `/computers` chooses which computer the
+//! one session talks to (see `link::Target`).
 
-use crate::app::{Active, App};
+use crate::app::{Active, App, Msg};
+use crate::gateway::{self, Status};
+use crate::link::{Remote, Target};
 use crate::notes::Tone;
-use crate::panels_common::{fill, s};
+use crate::panels_common::{fill, flat, s};
 use crate::screen::Screen;
 use crate::sidebar::{is_crew_sub_thread, sort_pinned};
 use crate::state::{ProjectShell, ThreadShell};
@@ -520,6 +523,26 @@ pub fn open_projects(app: &mut App) {
     app.screen = Some(Box::new(ProjectsScreen::new(app)));
 }
 
+/// `/computers`: the picker for the computer the session talks to. It needs the host to ask about
+/// the computers it shares; without a connection there is nothing to ask.
+pub fn open_computers(app: &mut App) {
+    if app.origin.is_none() || app.bearer.is_none() {
+        app.notice = Some(crate::i18n::tr("notice.offline").to_string());
+        return;
+    }
+    app.screen = Some(Box::new(ComputersScreen::new(app)));
+}
+
+/// The title of a picker: on another computer its label leads, so a list is never mistaken for
+/// this computer's.
+fn picker_title(app: &App, en: &'static str, ko: &'static str) -> String {
+    let base = s(en, ko);
+    match &app.remote {
+        Some(remote) => format!("{} · {}", remote.label, base),
+        None => base.to_string(),
+    }
+}
+
 pub fn open_threads(app: &mut App, project_id: &str) {
     app.screen = Some(Box::new(ThreadsScreen::new(project_id)));
 }
@@ -650,9 +673,12 @@ pub struct ProjectsScreen {
 impl ProjectsScreen {
     pub fn new(app: &App) -> ProjectsScreen {
         // The pointer starts on the project of the working folder; the row that adds this folder
-        // leads the list when it is in no project, so a position by project moves down one.
+        // leads the list when it is in no project, so a position by project moves down one. On
+        // another computer the working folder is a path on this one, and matches nothing there.
         let projects = sorted_projects(&app.shell.projects, &app.shell.threads);
-        let matched = project_for_directory(&app.shell.projects, &app.cwd, canonical)
+        let matched = (app.remote.is_none())
+            .then(|| project_for_directory(&app.shell.projects, &app.cwd, canonical))
+            .flatten()
             .and_then(|m| projects.iter().position(|p| p.id == m.id));
         let selected = matched.map_or(0, |at| at + usize::from(Self::can_add_folder(app, "")));
         ProjectsScreen {
@@ -661,9 +687,11 @@ impl ProjectsScreen {
         }
     }
 
-    /// Whether the list offers "Add this folder": the folder is in no project, and no words are typed.
+    /// Whether the list offers "Add this folder": the folder is in no project, and no words are
+    /// typed. Never on another computer, where the folder is a path on this one.
     fn can_add_folder(app: &App, query: &str) -> bool {
-        app.shell.loaded
+        app.remote.is_none()
+            && app.shell.loaded
             && query.is_empty()
             && project_for_directory(&app.shell.projects, &app.cwd, canonical).is_none()
     }
@@ -709,8 +737,9 @@ impl Screen for ProjectsScreen {
             )
         };
         let selected = self.selected.get().min(items.len().saturating_sub(1));
+        let title = picker_title(app, "Pick a project", "프로젝트를 고르세요");
         let view = View {
-            title: s("Pick a project", "프로젝트를 고르세요"),
+            title: &title,
             query: &self.query,
             items: &items,
             selected,
@@ -720,6 +749,11 @@ impl Screen for ProjectsScreen {
     }
 
     fn key(&mut self, key: KeyEvent, app: &mut App) -> bool {
+        // Ctrl+O opens the computer picker ("other computers") from the project list.
+        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            open_computers(app);
+            return false;
+        }
         let lead = usize::from(Self::can_add_folder(app, &self.query));
         let count = lead + self.visible(app).len();
         if edit_search(&mut self.query, &self.selected, &key)
@@ -766,8 +800,8 @@ impl Screen for ProjectsScreen {
     fn hint(&self) -> String {
         fill(
             s(
-                "↑/↓ move • Enter open • Type to search • {end}",
-                "↑/↓ 이동 • Enter 열기 • 글자 입력 검색 • {end}",
+                "↑/↓ move • Enter open • Type to search • Ctrl+O computers • {end}",
+                "↑/↓ 이동 • Enter 열기 • 글자 입력 검색 • Ctrl+O 컴퓨터 • {end}",
             ),
             &[(
                 "end",
@@ -958,8 +992,9 @@ impl Screen for ThreadsScreen {
         self.settle(app);
         let items = self.items(app);
         let selected = self.selected.get().min(items.len().saturating_sub(1));
+        let title = picker_title(app, "Pick a thread", "스레드를 고르세요");
         let view = View {
-            title: s("Pick a thread", "스레드를 고르세요"),
+            title: &title,
             query: &self.query,
             items: &items,
             selected,
@@ -1042,6 +1077,237 @@ impl Screen for ThreadsScreen {
                 .to_string(),
             )],
         )
+    }
+}
+
+// ---- /computers ----------------------------------------------------------------------------
+
+/// What the host answered about the computers it shares, or why it could not be asked. The list
+/// is asked for once, when the screen opens; nothing asks again in the background.
+enum Answer {
+    Waiting,
+    Listed(Vec<gateway::Environment>),
+    Failed(String),
+}
+
+/// The rows of `/computers`: this computer, or one of the listed ones by its place in the answer.
+#[derive(Clone, Copy)]
+enum ComputerRow {
+    This,
+    Listed(usize),
+}
+
+pub struct ComputersScreen {
+    selected: Cell<usize>,
+    query: String,
+    /// The answer to the one list request this screen made when it opened.
+    answer: Arc<Mutex<Answer>>,
+}
+
+impl ComputersScreen {
+    pub fn new(app: &App) -> ComputersScreen {
+        let answer = Arc::new(Mutex::new(Answer::Waiting));
+        if let (Some(origin), Some(bearer)) = (app.origin.clone(), app.bearer.clone()) {
+            let asked = answer.clone();
+            let tx = app.sender();
+            tokio::spawn(async move {
+                let listed = gateway::environments(&origin, &bearer).await;
+                if let Ok(mut slot) = asked.lock() {
+                    *slot = match listed {
+                        Ok(list) => Answer::Listed(list),
+                        Err(why) => Answer::Failed(why),
+                    };
+                }
+                // The screen only redraws on a message; this one carries the answer's.
+                let _ = tx.send(Msg::Ext(Box::new(|_: &mut App| {})));
+            });
+        }
+        ComputersScreen {
+            selected: Cell::new(0),
+            query: String::new(),
+            answer,
+        }
+    }
+
+    /// The computers the host listed; empty while it has not answered.
+    fn listed(&self) -> Vec<gateway::Environment> {
+        match self.answer.lock() {
+            Ok(slot) => match &*slot {
+                Answer::Listed(list) => list.clone(),
+                _ => Vec::new(),
+            },
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn rows(&self, list: &[gateway::Environment]) -> Vec<ComputerRow> {
+        let shown = filter_ranked((0..list.len()).collect::<Vec<_>>(), &self.query, |at| {
+            vec![search_field(&list[*at].label)]
+        });
+        let mut rows = Vec::new();
+        if self.query.is_empty() {
+            rows.push(ComputerRow::This);
+        }
+        rows.extend(shown.into_iter().map(ComputerRow::Listed));
+        rows
+    }
+
+    /// The rows as they are drawn, with where each computer stands.
+    fn items(&self, app: &App, list: &[gateway::Environment]) -> Vec<Item> {
+        self.rows(list)
+            .into_iter()
+            .map(|row| match row {
+                ComputerRow::This => Item {
+                    label: s("This computer", "이 컴퓨터").to_string(),
+                    note: if app.remote.is_none() {
+                        s("here", "여기").to_string()
+                    } else {
+                        app.host_label.clone()
+                    },
+                },
+                ComputerRow::Listed(at) => {
+                    let env = &list[at];
+                    let current = app
+                        .remote
+                        .as_ref()
+                        .is_some_and(|r| r.environment_id == env.environment_id);
+                    let status = env.status.word();
+                    Item {
+                        label: env.label.clone(),
+                        note: if current {
+                            format!("{status} · {}", s("here", "여기"))
+                        } else {
+                            status.to_string()
+                        },
+                    }
+                }
+            })
+            .collect()
+    }
+}
+
+impl Screen for ComputersScreen {
+    fn draw(&self, frame: &mut Frame, area: Rect, app: &App) {
+        let (items, empty) = match &*self.answer.lock().unwrap_or_else(|e| e.into_inner()) {
+            Answer::Waiting => (
+                Vec::new(),
+                s("Looking for other computers…", "다른 컴퓨터를 확인하는 중…").to_string(),
+            ),
+            Answer::Failed(why) => (
+                Vec::new(),
+                fill(
+                    s(
+                        "Could not ask the desktop app about other computers: {why}",
+                        "데스크톱 앱에 다른 컴퓨터를 물어보지 못했습니다: {why}",
+                    ),
+                    &[("why", flat(why))],
+                ),
+            ),
+            Answer::Listed(list) if list.is_empty() && self.query.is_empty() => (
+                Vec::new(),
+                s(
+                    "Other computers appear here while the OOP desktop app is running and their connection is switched on for the phone (Settings → Connections, \"Available on phone\"). Without the desktop app, oop ssh <host> connects to one directly.",
+                    "OOP 데스크톱 앱이 실행 중이고 연결이 휴대폰과 공유되어 있으면(Settings → Connections 의 \"Available on phone\") 다른 컴퓨터가 여기에 나타납니다. 데스크톱 앱 없이는 oop ssh <호스트> 로 직접 연결할 수 있습니다.",
+                )
+                .to_string(),
+            ),
+            Answer::Listed(list) => (
+                self.items(app, list),
+                s(
+                    "No matching computers. Press Esc to clear the search.",
+                    "일치하는 컴퓨터가 없습니다. Esc로 검색어를 지우세요.",
+                )
+                .to_string(),
+            ),
+        };
+        let selected = self.selected.get().min(items.len().saturating_sub(1));
+        let view = View {
+            title: s("Pick a computer", "컴퓨터를 고르세요"),
+            query: &self.query,
+            items: &items,
+            selected,
+            empty: &empty,
+        };
+        draw_list(frame, area, app, &view);
+    }
+
+    fn key(&mut self, key: KeyEvent, app: &mut App) -> bool {
+        let list = self.listed();
+        let count = self.rows(&list).len();
+        if edit_search(&mut self.query, &self.selected, &key)
+            || move_pointer(&self.selected, count, key.code)
+        {
+            return false;
+        }
+        match key.code {
+            // A search is undone before the list is left.
+            KeyCode::Esc if !self.query.is_empty() => {
+                self.query.clear();
+                self.selected.set(0);
+                false
+            }
+            KeyCode::Esc => true,
+            KeyCode::Enter => {
+                let at = self.selected.get().min(count.saturating_sub(1));
+                match self.rows(&list).get(at).copied() {
+                    // Already here: the picker just closes.
+                    Some(ComputerRow::This) => {
+                        if app.remote.is_some() {
+                            app.use_computer(Target::This);
+                        }
+                        true
+                    }
+                    Some(ComputerRow::Listed(at)) => {
+                        let env = &list[at];
+                        match env.status {
+                            Status::Online => {
+                                app.use_computer(Target::Gateway(Remote {
+                                    environment_id: env.environment_id.clone(),
+                                    label: env.label.clone(),
+                                }));
+                                true
+                            }
+                            Status::Offline => {
+                                app.notice = Some(fill(
+                                    s(
+                                        "{label} is not answering. Wake it, and check that its OOP app is open.",
+                                        "{label} 이(가) 응답하지 않습니다. 컴퓨터를 깨우고 OOP 앱이 켜져 있는지 확인하세요.",
+                                    ),
+                                    &[("label", env.label.clone())],
+                                ));
+                                false
+                            }
+                            Status::AuthFailed => {
+                                app.notice = Some(fill(
+                                    s(
+                                        "The saved sign-in for {label} was refused. Reconnect it in the desktop app (Settings → Connections).",
+                                        "{label} 의 저장된 로그인이 거부되었습니다. 데스크톱 앱(Settings → Connections)에서 다시 연결하세요.",
+                                    ),
+                                    &[("label", env.label.clone())],
+                                ));
+                                false
+                            }
+                        }
+                    }
+                    None => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn wheel(&mut self, up: bool) {
+        let at = self.selected.get();
+        self.selected
+            .set(if up { at.saturating_sub(1) } else { at + 1 });
+    }
+
+    fn hint(&self) -> String {
+        s(
+            "↑/↓ move • Enter switch • Type to search • Esc close",
+            "↑/↓ 이동 • Enter 전환 • 글자 입력 검색 • Esc 닫기",
+        )
+        .to_string()
     }
 }
 
@@ -1834,5 +2100,243 @@ mod tests {
                 .is_err()
         );
         assert!(app.notes.is_empty());
+    }
+
+    // ---- /computers ------------------------------------------------------------------------
+
+    fn computer(id: &str, label: &str, status: crate::gateway::Status) -> gateway::Environment {
+        gateway::Environment {
+            environment_id: id.into(),
+            label: label.into(),
+            status,
+        }
+    }
+
+    fn computer_screen(list: Vec<gateway::Environment>) -> ComputersScreen {
+        ComputersScreen {
+            selected: Cell::new(0),
+            query: String::new(),
+            answer: Arc::new(Mutex::new(Answer::Listed(list))),
+        }
+    }
+
+    /// The rows of the computer picker, as drawn.
+    fn computer_rows(app: &App) -> Vec<String> {
+        let rows = draw_rows(app, 110, 30);
+        let title = rows
+            .iter()
+            .position(|r| r.starts_with(s("Pick a computer", "컴퓨터를 고르세요")))
+            .unwrap_or_else(|| panic!("no computer picker on screen:\n{}", rows.join("\n")));
+        rows[title + 3..rows.len() - 1]
+            .iter()
+            .filter(|r| !r.is_empty())
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_computer_picker_names_this_one_first_and_the_others_with_their_state() {
+        let (mut app, _rx) = world("/tmp/oop-rs-lists/work/demo");
+        app.host_label = "Mac mini".into();
+        app.remote = Some(crate::link::Remote {
+            environment_id: "e1".into(),
+            label: "ai-server".into(),
+        });
+        app.screen = Some(Box::new(computer_screen(vec![
+            computer("e1", "ai-server", gateway::Status::Online),
+            computer("e2", "lab", gateway::Status::Offline),
+        ])));
+        let rows = computer_rows(&app);
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        // This computer leads; away from it, its name says which one the session is on.
+        assert!(rows[0].contains(s("This computer", "이 컴퓨터")) && rows[0].contains("Mac mini"));
+        assert!(rows[1].contains("ai-server") && rows[1].contains(s("online", "온라인")));
+        assert!(
+            rows[1].contains(s("here", "여기")),
+            "the current one is marked: {rows:?}"
+        );
+        assert!(rows[2].contains("lab") && rows[2].contains(s("offline", "오프라인")));
+        // The projects screen of another computer leads with its name, too.
+        app.screen = Some(Box::new(ProjectsScreen::new(&app)));
+        assert!(computer_rows_of_title(
+            &app,
+            s(
+                "ai-server · Pick a project",
+                "ai-server · 프로젝트를 고르세요"
+            )
+            .to_string()
+        ));
+    }
+
+    fn computer_rows_of_title(app: &App, title: String) -> bool {
+        draw_rows(app, 110, 30)
+            .iter()
+            .any(|r| r.starts_with(&title))
+    }
+
+    #[tokio::test]
+    async fn enter_on_an_online_computer_switches_and_on_a_gone_one_explains() {
+        let (mut app, _rx) = world("/tmp/oop-rs-lists/work/demo");
+        app.screen = Some(Box::new(computer_screen(vec![
+            computer("e1", "ai-server", gateway::Status::Online),
+            computer("e2", "lab", gateway::Status::Offline),
+            computer("e3", "old", gateway::Status::AuthFailed),
+        ])));
+        // Row 2 is the offline one: Enter explains and stays.
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+        assert!(app.screen.is_some());
+        assert_eq!(app.link_target(), crate::link::Target::This);
+        assert!(
+            app.notice.as_deref().unwrap().contains("lab"),
+            "{:?}",
+            app.notice
+        );
+        // Row 3 refused the login: said, not switched.
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+        assert!(app.screen.is_some());
+        assert_eq!(app.link_target(), crate::link::Target::This);
+        assert!(
+            app.notice.as_deref().unwrap().contains("old"),
+            "{:?}",
+            app.notice
+        );
+        // Row 1 (ai-server) is online: Enter switches.
+        press(&mut app, KeyCode::Home);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Enter);
+        assert!(app.screen.is_none());
+        assert_eq!(
+            app.link_target(),
+            crate::link::Target::Gateway(crate::link::Remote {
+                environment_id: "e1".into(),
+                label: "ai-server".into(),
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn an_empty_computer_list_says_why_and_what_works_without_the_desktop() {
+        let (mut app, _rx) = world("/tmp/oop-rs-lists/work/demo");
+        app.screen = Some(Box::new(computer_screen(vec![])));
+        let rows = draw_rows(&app, 400, 30);
+        let note = rows.iter().find(|r| r.contains("desktop app")).unwrap();
+        assert!(
+            note.contains("Available on phone"),
+            "the exact name of the desktop's toggle: {note}"
+        );
+        assert!(note.contains("oop ssh <host>"), "{note}");
+        // Letters search: a word that matches nothing says so.
+        app.screen = Some(Box::new(computer_screen(vec![computer(
+            "e1",
+            "ai-server",
+            gateway::Status::Online,
+        )])));
+        type_text(&mut app, "zzz");
+        let rows = computer_rows(&app);
+        assert!(
+            rows.len() == 1
+                && rows[0].contains(s("No matching computers", "일치하는 컴퓨터가 없습니다")),
+            "{rows:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn another_computer_hides_add_this_folder_and_matches_no_local_folder() {
+        // The working folder is a project here; on another computer it is a path on this one.
+        let (mut app, _rx) = world("/tmp/oop-rs-lists/work/demo");
+        let (rpc, _seen) = dispatch_server(None).await;
+        app.handle(Msg::Connected {
+            rpc,
+            config: json!({}),
+            server: "127.0.0.1:1".into(),
+            origin: "http://127.0.0.1:1".into(),
+            bearer: "b".into(),
+            label: "Mac mini".into(),
+            remote: Some(crate::link::Remote {
+                environment_id: "e1".into(),
+                label: "ai-server".into(),
+            }),
+        });
+        // The other computer's snapshot arrives: this Mac's folder is no project there, and
+        // nothing of it is offered.
+        app.handle(Msg::Shell(json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 2,
+            "projects": [
+                {"id": "p1", "title": "demo", "workspaceRoot": "/srv/demo", "updatedAt": "2026-01-01T00:00:00.000Z"},
+                {"id": "p2", "title": "other", "workspaceRoot": "/srv/other", "updatedAt": "2026-01-01T00:00:00.000Z"}],
+            "threads": []}})));
+        assert_eq!(
+            app.active,
+            Active::None,
+            "the local folder matches no project there"
+        );
+        assert!(
+            app.rows()
+                .iter()
+                .all(|row| !matches!(row, crate::app::Row::AddFolder))
+        );
+        crate::cmd::run(&mut app, "projects", "");
+        let rows = computer_rows_of_any(&app);
+        assert_eq!(rows.len(), 2, "the add row is not offered: {rows:?}");
+        assert!(rows.iter().all(|r| !r.contains(app.cwd.as_str())));
+    }
+
+    fn computer_rows_of_any(app: &App) -> Vec<String> {
+        let rows = draw_rows(app, 110, 30);
+        let title = rows
+            .iter()
+            .position(|r| r.contains(s("Pick a project", "프로젝트를 고르세요")))
+            .unwrap_or_else(|| panic!("no project picker:\n{}", rows.join("\n")));
+        rows[title + 3..rows.len() - 1]
+            .iter()
+            .filter(|r| !r.is_empty())
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn connecting_to_another_computer_puts_its_project_list_up_with_nothing_carried() {
+        let (mut app, _rx) = world("/tmp/oop-rs-lists/work/demo");
+        app.open_thread("first");
+        app.input.set("half typed");
+        let (rpc, _seen) = dispatch_server(None).await;
+        app.handle(Msg::Connected {
+            rpc,
+            config: json!({}),
+            server: "127.0.0.1:1".into(),
+            origin: "http://127.0.0.1:1".into(),
+            bearer: "b".into(),
+            label: "Mac mini".into(),
+            remote: Some(crate::link::Remote {
+                environment_id: "e1".into(),
+                label: "ai-server".into(),
+            }),
+        });
+        assert_eq!(app.remote.as_ref().unwrap().label, "ai-server");
+        assert_eq!(app.host_label, "Mac mini");
+        assert!(!app.shell.loaded, "the other computer's list is its own");
+        assert_eq!(app.active, Active::None);
+        assert!(app.input.text().is_empty(), "nothing typed here goes there");
+        assert!(
+            app.screen
+                .as_ref()
+                .is_some_and(|screen| screen.hint().contains("Enter")),
+            "the projects screen opens"
+        );
+        // And going back to this computer resets the same way.
+        let (rpc, _seen) = dispatch_server(None).await;
+        app.handle(Msg::Connected {
+            rpc,
+            config: json!({}),
+            server: "127.0.0.1:1".into(),
+            origin: "http://127.0.0.1:1".into(),
+            bearer: "b".into(),
+            label: "Mac mini".into(),
+            remote: None,
+        });
+        assert!(app.remote.is_none());
+        assert!(!app.shell.loaded);
     }
 }

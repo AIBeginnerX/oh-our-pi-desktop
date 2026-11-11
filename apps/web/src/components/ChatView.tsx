@@ -221,6 +221,8 @@ export default function ChatView(props: ChatViewProps) {
     agentPanelLead,
     paintOnlyDisplayedTimeline,
     isWorking,
+    threadUsageFooter,
+    threadAuditRunning,
     isPreparingWorktree,
     isCompacting,
     activeWorkStartedAt,
@@ -849,6 +851,8 @@ export default function ChatView(props: ChatViewProps) {
                 timelineEntries={displayedTimeline.entries}
                 latestTurn={paintOnlyDisplayedTimeline ? null : activeLatestTurn}
                 runningTurnId={paintOnlyDisplayedTimeline ? null : activeRunningTurnId}
+                threadAuditRunning={threadAuditRunning}
+                threadUsageFooter={paintOnlyDisplayedTimeline ? null : threadUsageFooter}
                 turnDiffSummaries={
                   paintOnlyDisplayedTimeline
                     ? EMPTY_HELD_TURN_DIFF_SUMMARIES

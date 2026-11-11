@@ -120,6 +120,20 @@ export class UsageService extends Context.Service<
     readonly readSummary: (input: UsageSummaryInput) => Effect.Effect<UsageSummary, UsageReadError>;
     /** Refetches the rate table ahead of its TTL. See `ensureRates`. */
     readonly refreshRates: Effect.Effect<UsagePricing>;
+    /**
+     * Rate table and user price overrides exactly as the usage screen prices
+     * them: the fresh-or-cached LiteLLM table (empty when unavailable, so
+     * costs come back unknown instead of failing) plus the settings overrides.
+     * Fails only when settings cannot be read; unavailable rates degrade to
+     * an empty table.
+     */
+    readonly pricingTables: Effect.Effect<
+      {
+        readonly rates: RateTable;
+        readonly overrides: RateTable;
+      },
+      UsageReadError
+    >;
   }
 >()("t3/usage/UsageService") {}
 
@@ -147,6 +161,7 @@ export const layerTest = Layer.succeed(
         scanDurationMs: 0,
       }),
     refreshRates: Effect.succeed(EMPTY_PRICING),
+    pricingTables: Effect.succeed({ rates: new Map(), overrides: new Map() }),
   }),
 );
 
@@ -244,6 +259,12 @@ export const make = Effect.gen(function* () {
     Effect.map(pricing),
     Effect.withSpan("UsageService.refreshRates"),
   );
+
+  const pricingTables = Effect.gen(function* () {
+    yield* ensureRates(false);
+    const settings = yield* readSettings;
+    return { rates, overrides: createOverrideRateTable(settings.usagePriceOverrides) };
+  }).pipe(Effect.withSpan("UsageService.pricingTables"));
 
   // A settings failure must not silently discard custom rates or transcript homes.
   const readSettings = settingsService.getSettings.pipe(
@@ -935,7 +956,7 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
-  return { readSummary, refreshRates } as const;
+  return { readSummary, refreshRates, pricingTables } as const;
 });
 
 export const layer = Layer.effect(UsageService, make);

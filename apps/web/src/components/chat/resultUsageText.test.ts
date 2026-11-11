@@ -167,6 +167,15 @@ describe("result usage disclosure copy", () => {
       expect(line).toContain("캐시 입력 250(2/2턴 보고) · 캐시 적중률 25.0%");
     });
 
+    it("also labels the write-inclusive rate when writes were reported", () => {
+      expect(
+        lineFor({
+          cached: { sum: 300, reportedTurns: 2 },
+          cacheCreation: { sum: 400, reportedTurns: 2 },
+        }),
+      ).toContain("캐시 비율(쓰기 포함) 30.0%");
+    });
+
     it("leaves cache writes out of observed input", () => {
       const line = lineFor(
         { cached: { sum: 300, reportedTurns: 2 }, cacheCreation: { sum: 400, reportedTurns: 2 } },

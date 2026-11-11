@@ -34,6 +34,7 @@ mod fixtures;
 mod flow;
 mod flowgraph;
 mod folder;
+mod gateway;
 mod http;
 mod i18n;
 mod input;
@@ -76,6 +77,7 @@ mod thread;
 mod transcript;
 mod ui;
 mod update;
+mod usage_footer;
 mod usage_panel;
 mod wire;
 mod work_scope;
@@ -669,6 +671,22 @@ async fn status(home: Option<String>, address: Option<String>) -> Result<(), Str
             provider["auth"]["status"].as_str().unwrap_or("?"),
         );
     }
+    // The computers the running desktop app shares, asked for once; an empty or failed answer is
+    // not worth a line.
+    if let Ok(list) = gateway::environments(&session.found.origin, &session.bearer).await
+        && !list.is_empty()
+    {
+        println!(
+            "{}",
+            panels_common::s(
+                "computers shared by the desktop app:",
+                "데스크톱 앱이 공유하는 컴퓨터:"
+            )
+        );
+        for computer in list {
+            println!("computer {}  [{}]", computer.label, computer.status.word());
+        }
+    }
     let mut stream = session.rpc.stream(app::SHELL_RPC, serde_json::json!({}));
     let mut shell = state::Shell::default();
     while let Some(message) = stream.rx.recv().await {
@@ -765,12 +783,15 @@ async fn run(
             }
         }
     });
+    let (target, switch) = app.link_control();
     tokio::spawn(link::supervise(
         home,
         isolated,
         address,
         version(),
         tx.clone(),
+        target,
+        switch,
     ));
 
     let ended = termination();

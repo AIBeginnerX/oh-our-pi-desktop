@@ -13,6 +13,7 @@ import {
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
+  NO_ACTIVITY_ALERT_MINUTE_CHOICES,
   type ChatWidth,
   type DiffLayout,
   type EnvironmentIdentificationMode,
@@ -58,6 +59,10 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { isMacPlatform } from "../../lib/utils";
+import {
+  NO_ACTIVITY_ALERT_LABELS,
+  NO_ACTIVITY_ALERT_SELECT_VALUES,
+} from "../../threadNotifications";
 import { EMPTY_SERVER_PROVIDERS } from "../../state/server";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -1003,6 +1008,57 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) => updateSettings({ inAppNotificationsEnabled: checked })}
               aria-label={t("In-app notifications")}
             />
+          }
+        />
+        <SettingsRow
+          {...searchableSetting("no-activity-alert")}
+          title={t(searchableSetting("no-activity-alert").title)}
+          description={t(
+            "Off by default. Notifies when a running agent shows no activity for the chosen time. It never stops the agent.",
+          )}
+          resetAction={
+            settings.noActivityAlertMinutes !== null ? (
+              <SettingResetButton
+                label={t("no-activity alert")}
+                onClick={() => updateSettings({ noActivityAlertMinutes: null })}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={
+                settings.noActivityAlertMinutes === null
+                  ? "off"
+                  : String(settings.noActivityAlertMinutes)
+              }
+              onValueChange={(value) => {
+                if (value === "off") {
+                  updateSettings({ noActivityAlertMinutes: null });
+                  return;
+                }
+                const minutes = NO_ACTIVITY_ALERT_MINUTE_CHOICES.find(
+                  (choice) => String(choice) === value,
+                );
+                if (minutes !== undefined) updateSettings({ noActivityAlertMinutes: minutes });
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-full sm:w-56"
+                aria-label={t("Alert when a running agent shows no activity for")}
+              >
+                <SelectValue>
+                  {t(NO_ACTIVITY_ALERT_LABELS[settings.noActivityAlertMinutes ?? "off"])}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {NO_ACTIVITY_ALERT_SELECT_VALUES.map((value) => (
+                  <SelectItem key={String(value)} hideIndicator value={String(value)}>
+                    {t(NO_ACTIVITY_ALERT_LABELS[value])}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
         <SettingsRow

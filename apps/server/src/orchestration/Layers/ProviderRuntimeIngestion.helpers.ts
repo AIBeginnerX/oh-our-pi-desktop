@@ -14,6 +14,7 @@ import {
   type ProviderRequestKind,
   type ProviderRuntimeEvent,
   OWNED_USAGE_ACTIVITY_KIND,
+  type TurnTokenUsage,
 } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Predicate from "effect/Predicate";
@@ -521,6 +522,29 @@ export function nativeConversationIdFromEvent(event: ProviderRuntimeEvent): stri
   const trimmed = threadId.trim();
   return trimmed.length > 0 ? trimmed : null;
 }
+
+/**
+ * Fraction of a turn's input tokens that the provider wrote into its prompt
+ * cache. `inputTokens` already includes cache reads and writes, so the share is
+ * directly comparable across providers. Null when the provider reported neither
+ * count or reported no input at all: an unreported cache write is not a zero
+ * one, and there is nothing to take a share of.
+ */
+export function promptCacheWriteShare(usage: TurnTokenUsage): number | null {
+  const cacheCreationTokens = usage.cacheCreationTokens;
+  const inputTokens = usage.inputTokens;
+  if (cacheCreationTokens === undefined || inputTokens === undefined || inputTokens <= 0) {
+    return null;
+  }
+  return cacheCreationTokens / inputTokens;
+}
+
+/**
+ * A turn whose input is at least this fraction fresh cache writes usually means
+ * the provider's cached prefix was invalidated, so the whole prompt was billed
+ * and written again. Logged, never persisted.
+ */
+export const PROMPT_CACHE_REWRITE_SHARE_THRESHOLD = 0.05;
 
 export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,

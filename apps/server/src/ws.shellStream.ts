@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -26,7 +27,10 @@ export const SHELL_INERT_ACTIVITY_KINDS: ReadonlySet<string> = new Set([
 // A streaming assistant delta or a tool activity only bumps the thread's
 // `updatedAt`. Pushing a full shell for each (per subscriber, every
 // coalescing window) is pure overhead: the turn start/end, the finished
-// message, and every other event still push the current `updatedAt`.
+// message, and every other event still push the current `updatedAt`. One
+// still gets through per thread every SHELL_INERT_REFRESH_MS, so the shell's
+// `updatedAt` shows clients that a long tool-only stretch is still working
+// (the web no-activity alert reads it).
 export const isShellInertEvent = (event: OrchestrationEvent): boolean => {
   switch (event.type) {
     case "thread.message-sent":
@@ -77,6 +81,7 @@ export const retryShellProjectionRead = <A, E>(
 // traffic so it can't serialize the shell stream behind per-event DB reads.
 export const SHELL_COALESCE_WINDOW = Duration.millis(50);
 export const SHELL_COALESCE_MAX_CHUNK = 512;
+export const SHELL_INERT_REFRESH_MS = 30_000;
 
 export type ShellLiveInput =
   | { readonly kind: "event"; readonly event: ShellEvent }
@@ -196,6 +201,9 @@ export const makeShellStreamCoalescers = (
   // and drops any `sequence <= snapshotSequence` — never skips a coalesced
   // item. The refetch runs with bounded concurrency (order-preserving).
   const SHELL_REFETCH_CONCURRENCY = 8;
+  // When this subscriber last got (or, for inert-only threads, first saw) each
+  // aggregate, in clock millis. Bounded by the threads seen on this stream.
+  const lastPushedAt = new Map<string, number>();
   const coalesceShellEvents = (
     events: ReadonlyArray<ShellEvent>,
   ): Effect.Effect<ReadonlyArray<OrchestrationShellStreamEvent>, never, never> =>
@@ -203,14 +211,22 @@ export const makeShellStreamCoalescers = (
       if (events.length === 0) {
         return [];
       }
+      const now = yield* Clock.currentTimeMillis;
       const latestByAggregate = new Map<string, ShellEvent>();
       // Inert events must not displace an earlier real change in the same
       // window: the refetch they would trigger is only needed if something
       // else did not already trigger it.
       for (const event of events) {
-        if (event.inert) continue;
-        latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event);
+        const key = `${event.aggregateKind}:${event.aggregateId}`;
+        if (event.inert) {
+          const last = lastPushedAt.get(key);
+          if (last === undefined) lastPushedAt.set(key, now);
+          if (last === undefined || latestByAggregate.has(key)) continue;
+          if (now - last < SHELL_INERT_REFRESH_MS) continue;
+        }
+        latestByAggregate.set(key, event);
       }
+      for (const key of latestByAggregate.keys()) lastPushedAt.set(key, now);
       const survivors = Array.from(latestByAggregate.values()).sort(
         (left, right) => left.sequence - right.sequence,
       );

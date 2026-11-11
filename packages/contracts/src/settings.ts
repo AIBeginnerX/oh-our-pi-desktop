@@ -236,6 +236,15 @@ export const NotificationMode = Schema.Literals([
 ]);
 export type NotificationMode = typeof NotificationMode.Type;
 
+/**
+ * Opt-in quiet-turn alerting, in whole minutes of shell silence before the
+ * client alerts once. `null` (the default) leaves it off; this client setting
+ * never turns itself on.
+ */
+export const NO_ACTIVITY_ALERT_MINUTE_CHOICES = [10, 20, 30] as const;
+export const NoActivityAlertMinutes = Schema.Literals(NO_ACTIVITY_ALERT_MINUTE_CHOICES);
+export type NoActivityAlertMinutes = typeof NoActivityAlertMinutes.Type;
+
 export const QuitConfirmationMode = Schema.Literals(["direct", "hold", "double-click"]);
 export type QuitConfirmationMode = typeof QuitConfirmationMode.Type;
 const DEFAULT_QUIT_CONFIRMATION_MODE: QuitConfirmationMode = "hold";
@@ -311,6 +320,10 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
   inAppNotificationsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Quiet-turn alerting; off (null) by default, choices in whole minutes. */
+  noActivityAlertMinutes: Schema.NullOr(NoActivityAlertMinutes).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   /** Toasts that point at something to finish before the app works (update folder, providers). */
   setupNotificationsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   diffColorScheme: DiffColorScheme.pipe(
@@ -1796,6 +1809,7 @@ export const ClientSettingsPatch = Schema.Struct({
   loadLinkIcons: Schema.optionalKey(Schema.Boolean),
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
+  noActivityAlertMinutes: Schema.optionalKey(Schema.NullOr(NoActivityAlertMinutes)),
   setupNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   chatWidth: Schema.optionalKey(ChatWidth),

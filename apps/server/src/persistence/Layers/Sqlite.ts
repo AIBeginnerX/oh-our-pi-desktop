@@ -7,6 +7,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { runMigrations } from "../Migrations.ts";
 import { ServerConfig } from "../../config.ts";
+import { periodicEventStoreCompaction } from "../EventStoreCompaction.ts";
 import {
   convertToIncrementalVacuum,
   periodicIncrementalVacuum,
@@ -34,6 +35,7 @@ const makeSetup = (file?: { readonly dbDirectory: string; readonly freeBytes?: F
           dbDirectory: file.dbDirectory,
           ...(file.freeBytes ? { freeBytes: file.freeBytes } : {}),
         });
+        yield* Effect.forkScoped(periodicEventStoreCompaction);
         yield* Effect.forkScoped(periodicIncrementalVacuum);
       }
     }),

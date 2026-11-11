@@ -83,6 +83,7 @@ import Migration0068 from "./Migrations/068_ProjectMemoryDerivedProposals.ts";
 import Migration0069 from "./Migrations/069_ProjectMemoryProposalEvidenceNamed.ts";
 import Migration0070 from "./Migrations/070_DropUnusedOrchestrationEventIndexes.ts";
 import Migration0071 from "./Migrations/071_PruneSupersededToolUpdatedActivities.ts";
+import Migration0072 from "./Migrations/072_DropUnusedOrchestrationCommandReceiptIndexes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -166,6 +167,7 @@ const migrationEntries = [
   [69, "ProjectMemoryProposalEvidenceNamed", Migration0069],
   [70, "DropUnusedOrchestrationEventIndexes", Migration0070],
   [71, "PruneSupersededToolUpdatedActivities", Migration0071],
+  [72, "DropUnusedOrchestrationCommandReceiptIndexes", Migration0072],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

@@ -2,6 +2,48 @@ import type { MessageCatalog } from "./types";
 
 /** Project memory references, skill trials and activation, and per-result usage. */
 export const PROJECT_CONTEXT_MESSAGES: MessageCatalog = {
+  "Cache rate including writes {rate}": {
+    ko: "캐시 비율(쓰기 포함) {rate}",
+    ja: "書き込みを含むキャッシュ率 {rate}",
+    "zh-CN": "含写入的缓存率 {rate}",
+    es: "Tasa de caché con escrituras {rate}",
+  },
+  "Auditor is reviewing this answer": {
+    ko: "감사자가 이 답변을 검토하는 중",
+    ja: "監査担当がこの回答を確認しています",
+    "zh-CN": "审核员正在审查此回答",
+    es: "El auditor está revisando esta respuesta",
+  },
+  "Auditor is reviewing this answer · {model}": {
+    ko: "감사자가 이 답변을 검토하는 중 · {model}",
+    ja: "監査担当がこの回答を確認しています · {model}",
+    "zh-CN": "审核员正在审查此回答 · {model}",
+    es: "El auditor está revisando esta respuesta · {model}",
+  },
+  "Cache {rate}": {
+    ko: "캐시 {rate}",
+    ja: "キャッシュ {rate}",
+    "zh-CN": "缓存 {rate}",
+    es: "Caché {rate}",
+  },
+  "Context {usage}": {
+    ko: "컨텍스트 {usage}",
+    ja: "コンテキスト {usage}",
+    "zh-CN": "上下文 {usage}",
+    es: "Contexto {usage}",
+  },
+  "Cost unknown": {
+    ko: "비용 알 수 없음",
+    ja: "費用不明",
+    "zh-CN": "费用未知",
+    es: "Coste desconocido",
+  },
+  "Estimates use API list prices, not your subscription bill. Cache rate includes cache writes.": {
+    ko: "추정 비용은 구독 청구액이 아닌 API 공개 요금 기준입니다. 캐시 비율의 입력 합계에는 캐시 쓰기가 포함됩니다.",
+    ja: "推定はサブスクリプション請求額ではなくAPI公開価格です。キャッシュ率は書き込みを含みます。",
+    "zh-CN": "估算使用API公开价格，而非订阅账单。缓存率包含缓存写入。",
+    es: "Las estimaciones usan precios públicos de API, no su factura de suscripción. La tasa incluye escrituras de caché.",
+  },
   Fact: {
     ko: "사실",
     ja: "事実",

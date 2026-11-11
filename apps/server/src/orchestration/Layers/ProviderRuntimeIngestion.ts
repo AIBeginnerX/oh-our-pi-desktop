@@ -93,6 +93,8 @@ import {
   normalizeRuntimeTurnState,
   orchestrationSessionStatusFromRuntimeState,
   sessionStatusAllowsActiveTurn,
+  promptCacheWriteShare,
+  PROMPT_CACHE_REWRITE_SHARE_THRESHOLD,
   runtimeEventToActivities,
 } from "./ProviderRuntimeIngestion.helpers.ts";
 
@@ -496,6 +498,26 @@ const make = Effect.gen(function* () {
   // turn's own terminal, so a duplicate of that terminal cannot settle the turn as completed.
   const faultByThread = new Map<ThreadId, AssistantWriteFault>();
 
+  // Model the provider announced with a turn's start, so the terminal usage log can name it.
+  // Terminal events carry usage but not the model, and the thread's selection may have changed
+  // since. Bounded by threads and swept on session exit, like the fault map above.
+  const turnModelByThread = new Map<ThreadId, { turnId: TurnId | undefined; model: string }>();
+
+  const rememberTurnModel = (threadId: ThreadId, turnId: TurnId | undefined, model: string) =>
+    Effect.sync(() => {
+      turnModelByThread.set(threadId, { turnId, model });
+    });
+
+  const turnModelOf = (threadId: ThreadId, turnId: TurnId | undefined): string | undefined => {
+    const entry = turnModelByThread.get(threadId);
+    if (entry === undefined) return undefined;
+    // A remembered model from a different turn says nothing about this one.
+    if (turnId !== undefined && entry.turnId !== undefined && !sameId(entry.turnId, turnId)) {
+      return undefined;
+    }
+    return entry.model;
+  };
+
   const markAssistantWriteFault = <E>(
     event: ProviderRuntimeEvent,
     faultContext: AssistantFaultContext,
@@ -879,6 +901,7 @@ const make = Effect.gen(function* () {
   const clearTurnStateForSession = (threadId: ThreadId) =>
     Effect.gen(function* () {
       faultByThread.delete(threadId);
+      turnModelByThread.delete(threadId);
       const prefix = `${threadId}:`;
       const proposedPlanPrefix = `plan:${threadId}:`;
       const turnKeys = Array.from(yield* Cache.keys(turnMessageIdsByTurnKey));
@@ -1060,6 +1083,14 @@ const make = Effect.gen(function* () {
       const conflictsWithActiveTurn =
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId);
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined;
+
+      // A turn's model arrives with its start, not with its terminal usage; remember it so the
+      // usage log below can name the model the numbers belong to.
+      // Adapters may send `turn.started` without a payload.
+      const startedModel = event.type === "turn.started" ? event.payload?.model : undefined;
+      if (startedModel !== undefined) {
+        yield* rememberTurnModel(thread.id, eventTurnId, startedModel);
+      }
 
       // A turn.started that conflicts with the active turn is legitimate when
       // the server itself has a turn start pending for this thread AND the
@@ -1942,6 +1973,30 @@ const make = Effect.gen(function* () {
               afterTokens: activityEvent.payload.afterTokens ?? tokenCounts.afterTokens,
             },
           };
+        }
+      }
+
+      if (activityEvent.type === "turn.completed" || activityEvent.type === "turn.aborted") {
+        const usage = activityEvent.payload.tokenUsage;
+        const share = usage === undefined ? null : promptCacheWriteShare(usage);
+        if (
+          usage !== undefined &&
+          share !== null &&
+          share >= PROMPT_CACHE_REWRITE_SHARE_THRESHOLD
+        ) {
+          // A large share of fresh cache writes usually means the cached prefix was invalidated,
+          // so the whole prompt was billed and written again. Diagnostic only: logged, never
+          // stored, and the log sink's rotation bounds the volume.
+          yield* Effect.logInfo("prompt cache rewrite", {
+            threadId: thread.id,
+            driver: event.provider,
+            providerInstanceId: activityEvent.providerInstanceId ?? null,
+            model: turnModelOf(thread.id, eventTurnId) ?? null,
+            inputTokens: usage.inputTokens ?? null,
+            cachedInputTokens: usage.cachedInputTokens ?? null,
+            cacheCreationTokens: usage.cacheCreationTokens ?? null,
+            cacheWriteShare: Math.round(share * 1_000) / 1_000,
+          });
         }
       }
 

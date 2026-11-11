@@ -227,6 +227,8 @@ pub mod fake {
             server: "fake".into(),
             origin: String::new(),
             bearer: String::new(),
+            label: String::new(),
+            remote: None,
         });
         (app, rx)
     }

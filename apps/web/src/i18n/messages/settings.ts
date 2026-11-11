@@ -185,6 +185,55 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "设置提醒",
     es: "Avisos de configuración",
   },
+  "Alert when a running agent shows no activity for": {
+    ko: "실행 중인 에이전트가 다음 시간 동안 활동이 없으면 알림",
+    ja: "実行中のエージェントが次の時間動かなければ通知",
+    "zh-CN": "运行中的智能体在以下时长内无活动时提醒",
+    es: "Avisar cuando un agente en ejecución no muestre actividad durante",
+  },
+  "Off by default. Notifies when a running agent shows no activity for the chosen time. It never stops the agent.":
+    {
+      ko: "기본적으로 꺼져 있습니다. 실행 중인 에이전트가 설정한 시간 동안 활동이 없으면 알려 줍니다. 에이전트를 멈추지 않습니다.",
+      ja: "デフォルトはオフです。実行中のエージェントが選択した時間動かなければ通知します。エージェントを停止することはありません。",
+      "zh-CN": "默认关闭。当运行中的智能体在所选时长内没有活动时提醒您。它不会停止智能体。",
+      es: "Desactivado de forma predeterminada. Avisa cuando un agente en ejecución no muestra actividad durante el tiempo elegido. Nunca detiene al agente.",
+    },
+  Off: {
+    ko: "끔",
+    ja: "オフ",
+    "zh-CN": "关闭",
+    es: "Desactivado",
+  },
+  "10 minutes": {
+    ko: "10분",
+    ja: "10分",
+    "zh-CN": "10 分钟",
+    es: "10 minutos",
+  },
+  "20 minutes": {
+    ko: "20분",
+    ja: "20分",
+    "zh-CN": "20 分钟",
+    es: "20 minutos",
+  },
+  "30 minutes": {
+    ko: "30분",
+    ja: "30分",
+    "zh-CN": "30 分钟",
+    es: "30 minutos",
+  },
+  "No activity for {minutes} minutes": {
+    ko: "{minutes}분 동안 활동이 없습니다",
+    ja: "{minutes}分間動きがありません",
+    "zh-CN": "{minutes} 分钟没有活动",
+    es: "Sin actividad durante {minutes} minutos",
+  },
+  "no-activity alert": {
+    ko: "활동 없음 알림",
+    ja: "無活動通知",
+    "zh-CN": "无活动提醒",
+    es: "aviso sin actividad",
+  },
   "Time format": { ko: "시간 형식", ja: "時刻形式", "zh-CN": "时间格式", es: "Formato de hora" },
   "Response streaming": {
     ko: "응답 스트리밍",

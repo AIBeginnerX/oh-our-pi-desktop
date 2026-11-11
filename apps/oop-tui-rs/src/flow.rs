@@ -1404,6 +1404,16 @@ struct CrewStep {
     todos: Option<CrewTodos>,
 }
 
+/// The open lead's unfinished audit, using the same crew fold as the board.
+pub(crate) fn running_crew_audit(activities: &[Activity]) -> Option<Option<String>> {
+    collect_crew_tasks(activities)
+        .into_iter()
+        .flat_map(|(_, tasks)| tasks)
+        .filter(|t| t.role == "auditor" && t.completed_at.is_none())
+        .max_by(|a, b| a.started_at.cmp(&b.started_at))
+        .map(|t| t.model)
+}
+
 /// The crew tasks of every lead turn, folded from the lead's task activities.
 fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
     let mut tasks: Vec<(String, CrewStep)> = Vec::new();

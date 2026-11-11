@@ -346,6 +346,8 @@ export function buildWorkLessonsPrompt(input: WorkLessonsPromptInput) {
     "Rules:",
     "- Propose at most 3 lessons. Return an empty list when nothing repeats.",
     "- A lesson must be supported by at least two different threads; list their labels in threads.",
+    "- When threads fail or get corrected for one shared cause (the same mistake through different files, checks, tools or providers), write one lesson for that cause and list all of those threads, instead of one narrow lesson per case.",
+    "- Never widen a lesson beyond what the summaries show: if any summary contradicts the wider statement, keep the lesson to the cases it does cover.",
     "- Use only what the summaries show: a check that failed then passed, an audit that asked for changes, a revert, an interrupt followed by the user steering. Do not guess preferences or intentions.",
     "- fact: something about the project that held across threads. prohibition: something that caused a revert or a failed audit. preference: how the user steered the work, only if an interrupt or a withdrawn result shows it. procedure: a repeatable sequence of steps that led to an accepted result with passing checks.",
     "- Write each text as one short, self-contained sentence or numbered steps. Name check names and file paths exactly as given.",

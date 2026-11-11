@@ -58,11 +58,15 @@ export function checksumListing(entries) {
   return entries.map(({ name, sha256 }) => `${sha256}  ${name}\n`).join("");
 }
 
-function run(command, args, options = {}) {
+export function run(command, args, options = {}) {
   console.log(`$ ${[command, ...args].join(" ")}`);
   const result = NodeChildProcess.spawnSync(command, args, { stdio: "inherit", ...options });
+  const label = `${command} ${args[0] ?? ""}`;
+  // A command that cannot be spawned (a missing vp, say) leaves status and signal null and puts the
+  // reason in error, so say it could not start instead of reporting a null exit.
+  if (result.error) throw new Error(`${label} could not start: ${result.error.message}`);
   if (result.status !== 0) {
-    throw new Error(`${command} ${args[0] ?? ""} exited with ${result.status ?? result.signal}.`);
+    throw new Error(`${label} exited with ${result.status ?? result.signal}.`);
   }
 }
 
