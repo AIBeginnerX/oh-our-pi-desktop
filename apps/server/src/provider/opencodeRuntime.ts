@@ -47,6 +47,14 @@ const OPENCODE_EMPTY_CONFIG_CONTENT = "{}";
 export const MINIMUM_OPENCODE_VERSION = "1.14.19";
 const OPENCODE_HEALTH_TIMEOUT = "5 seconds";
 
+// One process-wide sequence for OpenCode session contexts, drawn by both the
+// 1.x and v2 adapters. A thread can move between them after an OpenCode
+// upgrade and may resume the same native session id, so per-adapter counters
+// could hand two different contexts the same generation and let a
+// memory-bearing send publish on a context its admission never judged.
+let openCodeSessionGenerationCounter = 0;
+export const nextOpenCodeSessionGeneration = (): number => ++openCodeSessionGenerationCounter;
+
 const OpenCodeHealthSchema = Schema.Struct({
   healthy: Schema.Literal(true),
   version: Schema.String,

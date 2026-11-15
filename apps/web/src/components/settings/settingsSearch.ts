@@ -632,6 +632,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "agent-instructions",
+    title: "Instructions for all agents",
+    to: "/settings/providers",
+    searchTerms: [
+      "system prompt rules language environment global every agent session provider AGENTS.md",
+    ],
+    providerSettingsOnly: true,
+  },
+  {
     id: "usage-providers",
     title: "Usage providers",
     to: "/settings/providers",

@@ -43,6 +43,7 @@ import {
 } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
+  makeAgentInstructionsReader,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
@@ -163,6 +164,7 @@ export const MiniMaxDriver: ProviderDriver<MiniMaxCodeSettings, MiniMaxDriverEnv
         productModelSlug: MINIMAX_CODE_DEFAULT_MODEL,
         harnessLabel: "MiniMax Code",
         signInCommand: `${launch.command} login --region global`,
+        agentInstructions: makeAgentInstructionsReader(serverSettings),
       });
       const textGeneration = yield* makeGrokTextGeneration(acpSettings, processEnv, {
         launch,

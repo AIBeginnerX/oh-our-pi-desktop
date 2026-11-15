@@ -150,6 +150,45 @@ describe("usage pricing", () => {
     );
   });
 
+  it("prices 1h cache writes at the published above-1h rate", () => {
+    const table = parseRateTable({
+      "claude-opus-5-5": {
+        input_cost_per_token: 4e-6,
+        output_cost_per_token: 2e-5,
+        cache_read_input_token_cost: 2e-7,
+        cache_creation_input_token_cost: 5e-6,
+        cache_creation_input_token_cost_above_1hr: 8e-6,
+      },
+    });
+    expect(lookupRate(table, "claude-opus-5-5")?.cacheCreation1hCostPerToken).toBe(8e-6);
+
+    // 1M of everything else, with writes split 1M at 5m + 1M at 1h.
+    const splitTotals = { ...totals, cacheCreationTokens: 2_000_000 };
+    const splitRecord = {
+      model: "claude-opus-5-5",
+      totals: splitTotals,
+      reportedCostUsd: null as null,
+      fast: false,
+      cacheWriteOneHourTokens: 1_000_000,
+    };
+    // 4 + 0.2 + 5 + 8 + 20
+    expect(priceUsage(table, splitRecord).costUsd).toBeCloseTo(37.2, 9);
+
+    // Without a recorded split, everything prices at the 5-minute rate: 4 + 0.2 + 5 + 20.
+    expect(priceUsage(table, record("claude-opus-5-5")).costUsd).toBeCloseTo(29.2, 9);
+
+    // A split beyond the legacy total clamps to it: 4 + 0.2 + 16 + 20.
+    expect(
+      priceUsage(table, { ...splitRecord, cacheWriteOneHourTokens: 9_000_000 }).costUsd,
+    ).toBeCloseTo(40.2, 9);
+
+    // A model without a published 1h tier prices the whole split at 5m either way.
+    const noTier = parseRateTable({ "claude-fable-5": rate(1e-5) });
+    expect(priceUsage(noTier, splitRecord).costUsd).toBe(
+      priceUsage(noTier, { ...splitRecord, cacheWriteOneHourTokens: 0 }).costUsd,
+    );
+  });
+
   it("keeps the canonical Fable rate separate from DeepInfra in either order", () => {
     const canonical = ["claude-fable-5", rate(1e-5, 1e-6)] as const;
     const deepInfra = ["deepinfra/anthropic/claude-fable-5", rate(1e-5)] as const;

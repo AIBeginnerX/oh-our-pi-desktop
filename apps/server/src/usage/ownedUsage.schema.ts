@@ -130,7 +130,12 @@ export const OwnedTurnUsageObservationV1 = Schema.Struct({
   }),
   terminal: OwnedTurnTerminal,
   usage: TurnTokenUsage,
-  /** The turn's cost as the provider reported it (USD); absent when it reported none. */
+  /**
+   * The cost the provider reported at this turn's end (USD); absent when it
+   * reported none. Claude reports its session's running total, not the turn's
+   * own cost, so aggregation turns consecutive reports of a
+   * thread+driver+instance chain into per-turn steps before summing.
+   */
   costUsd: Schema.optional(Schema.Number),
 });
 export type OwnedTurnUsageObservationV1 = typeof OwnedTurnUsageObservationV1.Type;

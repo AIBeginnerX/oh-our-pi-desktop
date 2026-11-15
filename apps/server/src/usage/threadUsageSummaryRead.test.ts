@@ -16,7 +16,7 @@ import {
 
 const threadId = ThreadId.make("lead");
 
-const observationJson = (): string =>
+const observationJson = (costUsd?: number): string =>
   JSON.stringify({
     v: 1,
     scope: "main-turn",
@@ -35,6 +35,7 @@ const observationJson = (): string =>
       inputTokens: 1000,
       outputTokens: 100,
     },
+    ...(costUsd === undefined ? {} : { costUsd }),
   });
 
 const createdAt = "2026-01-01T00:00:00.000Z";
@@ -307,12 +308,14 @@ describe("readThreadUsageSummary", () => {
 });
 
 describe("deriveThreadUsageSummary", () => {
+  const childThreadId = ThreadId.make("child");
   const row = (
     payloadJson = observationJson(),
     modelSelectionJson = '{"model":"claude-opus-4-5"}',
     at = createdAt,
+    rowThreadId: ThreadId = threadId,
   ) => ({
-    threadId,
+    threadId: rowThreadId,
     modelSelectionJson,
     payloadJson,
     createdAt: at,
@@ -406,5 +409,34 @@ describe("deriveThreadUsageSummary", () => {
     );
     expect(read.models.map((model) => model.model)).toEqual(["claude-opus-4-5"]);
     expect(read.totals.turns).toBe(1);
+  });
+
+  it("reads the provider's running total as per-turn cost across the thread family", () => {
+    // The lead's reports repeat the session's whole spend: the chain's steps
+    // (2 + 2) plus the child's own session (3) total 7, not the 16 the raw
+    // reports sum to.
+    const read = derive(
+      [
+        row(observationJson(2), modelSelection("gpt-5.2"), "2026-01-01T00:01:01.000Z"),
+        row(observationJson(4), modelSelection("gpt-5.2"), "2026-01-01T00:03:01.000Z"),
+        row(
+          observationJson(),
+          modelSelection("gpt-5.2"),
+          "2026-01-01T00:03:31.000Z",
+          childThreadId,
+        ),
+        row(
+          observationJson(3),
+          modelSelection("gpt-5.2"),
+          "2026-01-01T00:03:32.000Z",
+          childThreadId,
+        ),
+      ],
+      THREAD_USAGE_MAX_ROWS,
+    );
+    assert.strictEqual(read.status, "ok");
+    expect(read.totals.turns).toBe(4);
+    expect(read.totals.cost).toEqual({ kind: "reported", usd: 7 });
+    expect(read.models[0]!.cost).toEqual({ kind: "reported", usd: 7 });
   });
 });

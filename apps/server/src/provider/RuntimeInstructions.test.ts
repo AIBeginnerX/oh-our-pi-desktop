@@ -55,4 +55,30 @@ describe("buildRuntimeInstructions", () => {
     const added = withMemory.length - buildRuntimeInstructions({ harness: "Codex" }).length;
     expect(added).toBeLessThan(400);
   });
+
+  it("appends the user's standing instructions with their newlines intact", () => {
+    const text = "Always reply in Korean.\n\n- Prefer focused tests.\n- No repo-wide checks.";
+    const instructions = buildRuntimeInstructions({
+      harness: "Codex",
+      projectMemory: true,
+      agentInstructions: `  ${text}  `,
+    });
+    expect(instructions).toContain(
+      "<user_instructions>\nThe user wrote these standing instructions for every agent they run in OOP. Follow them unless a message in this conversation says otherwise.\n\n",
+    );
+    expect(instructions).toContain(`\n\n${text}\n</user_instructions>`);
+    expect(instructions.endsWith("</user_instructions>")).toBe(true);
+    expect(instructions.indexOf("<project_memory>")).toBeLessThan(
+      instructions.indexOf("<user_instructions>"),
+    );
+  });
+
+  it.each([undefined, "", "   \n\t  "])(
+    "adds nothing for empty agent instructions %s",
+    (agentInstructions) => {
+      const instructions = buildRuntimeInstructions({ harness: "Codex", agentInstructions });
+      expect(instructions).not.toContain("<user_instructions>");
+      expect(instructions).toBe(buildRuntimeInstructions({ harness: "Codex" }));
+    },
+  );
 });

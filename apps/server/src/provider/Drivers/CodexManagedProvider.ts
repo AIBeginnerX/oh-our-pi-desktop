@@ -15,6 +15,7 @@ import {
   probeCodexSkillsForCwd,
 } from "../Layers/CodexProvider.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { makeAgentInstructionsReader } from "../providerUpdateSettings.ts";
 import { makeCodexProcessEnvironment } from "../Layers/codexLaunchArgs.ts";
 import { type ProviderDriverCreateInput, type ProviderInstance } from "../ProviderDriver.ts";
 import { codexContinuationIdentity } from "./CodexHomeLayout.ts";
@@ -217,6 +218,7 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
     instanceId,
     resolveRuntime,
     onManagedConnectionRevoked: runtime.auth.revoke.pipe(Effect.ignore),
+    agentInstructions: makeAgentInstructionsReader(settings),
   });
   const nativeGeneration = yield* makeCodexTextGeneration(
     config,

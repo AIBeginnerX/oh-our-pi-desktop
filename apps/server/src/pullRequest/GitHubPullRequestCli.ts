@@ -1328,7 +1328,23 @@ export const make = Effect.gen(function* () {
     readonly privateVariables?: Readonly<Record<string, string>>;
     readonly query: string;
     readonly decode: (raw: string) => Result.Result<A, unknown>;
+    /**
+     * Keeps an answer GitHub sent alongside errors. `gh` exits 1 when any part of the document
+     * failed, so without this one missing repository fails a whole batch.
+     */
+    readonly usablePartial?: (answer: A) => boolean;
   }): Effect.Effect<A, GitHubPullRequestCliError> => {
+    const { usablePartial } = input;
+    const partial =
+      usablePartial === undefined
+        ? {}
+        : {
+            acceptExit: ({ exitCode, stdout }: { exitCode: number; stdout: string }) => {
+              if (exitCode !== 1) return false;
+              const answer = input.decode(stdout.trim());
+              return Result.isSuccess(answer) && usablePartial(answer.success);
+            },
+          };
     return graphQlBudget
       .query(
         input.host,
@@ -1350,6 +1366,7 @@ export const make = Effect.gen(function* () {
                     "-f",
                     `query=${query}`,
                   ],
+                  ...partial,
                 }
               : {
                   cwd: input.cwd,
@@ -1358,6 +1375,7 @@ export const make = Effect.gen(function* () {
                     query,
                     variables: input.privateVariables,
                   }),
+                  ...partial,
                 },
           ),
         ),
@@ -1833,11 +1851,12 @@ export const make = Effect.gen(function* () {
               operation: "getPullRequestSummary",
               query,
               decode: decodePullRequestSummariesJson,
+              // A partial answer with nothing in it may be a rate limit; let that fail as one.
+              usablePartial: (summaries) => summaries.size > 0,
             });
       return batched.pipe(
-        // A GraphQL error anywhere fails the whole document — one repository gone or out of
-        // reach — so a batch that could not be read leaves every entry to its own read. A paused
-        // budget is the exception: reading one at a time would only spend what is being saved.
+        // Unreadable batches fall back individually; partial responses retain answered aliases.
+        // A paused budget must not spend more quota through individual reads.
         Effect.catchCauseIf(
           (cause) =>
             !Cause.hasInterruptsOnly(cause) &&

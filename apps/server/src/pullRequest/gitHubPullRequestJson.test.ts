@@ -1899,6 +1899,39 @@ describe("batched pull request summaries", () => {
     expect(buildPullRequestSummariesGraphQlQuery([])).toBeNull();
   });
 
+  it("leaves out an answer GitHub reported an error under", () => {
+    const pullRequest = (number: number) => ({
+      number,
+      title: `Pull request ${number}`,
+      url: `https://github.com/acme/web/pull/${number}`,
+      headRefName: `feat/${number}`,
+      baseRefName: "main",
+      state: "OPEN",
+      updatedAt: "2026-08-24T00:00:00Z",
+      commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+    });
+    const decode = (errors: ReadonlyArray<unknown>) =>
+      decodePullRequestSummariesJson(
+        JSON.stringify({
+          data: { s0: { pullRequest: pullRequest(7) }, s1: { pullRequest: pullRequest(8) } },
+          errors,
+        }),
+      );
+
+    // A field GitHub could not read comes back null, which would pass for "no checks".
+    const fieldError = decode([
+      { type: "FORBIDDEN", path: ["s1", "pullRequest", "commits", "nodes", 0, "commit"] },
+    ]);
+    expect(Result.isSuccess(fieldError)).toBe(true);
+    if (!Result.isSuccess(fieldError)) return;
+    expect([...fieldError.success.keys()]).toEqual([0]);
+
+    const unplaced = decode([{ message: "Something went wrong" }]);
+    expect(Result.isSuccess(unplaced)).toBe(true);
+    if (!Result.isSuccess(unplaced)) return;
+    expect(unplaced.success.size).toBe(0);
+  });
+
   it("files each answer by its alias and skips what GitHub or the decoder could not give", () => {
     const decoded = decodePullRequestSummariesJson(
       JSON.stringify({

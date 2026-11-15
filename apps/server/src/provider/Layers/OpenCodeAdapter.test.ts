@@ -1829,7 +1829,11 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
       NodeAssert.deepEqual(prompt.parts, [{ type: "text", text: "/unknown explain this" }]);
       NodeAssert.equal(
         prompt.system,
-        buildRuntimeInstructions({ harness: "OpenCode", model: "openai/gpt-5" }),
+        buildRuntimeInstructions({
+          harness: "OpenCode",
+          model: "openai/gpt-5",
+          projectMemory: true,
+        }),
       );
       yield* adapter.stopSession(threadId);
     }),
@@ -6658,6 +6662,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         system: buildRuntimeInstructions({
           harness: "OpenCode",
           model: "anthropic/claude-sonnet-4-5",
+          projectMemory: true,
         }),
         parts: [{ type: "text", text: "Fix it" }],
       });
@@ -6714,6 +6719,7 @@ it.layer(OpenCodeAdapterTestLayer)("OpenCodeAdapterLive", (it) => {
         system: buildRuntimeInstructions({
           harness: "OpenCode",
           model: "anthropic/claude-sonnet-4-5",
+          projectMemory: true,
         }),
         parts: [{ type: "text", text: "Fix it" }],
       });

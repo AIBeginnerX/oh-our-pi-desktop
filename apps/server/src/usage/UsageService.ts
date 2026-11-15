@@ -433,6 +433,9 @@ export const make = Effect.gen(function* () {
       const cached = fileCache.get(filePath);
       // Provider is part of the identity: if both providers were ever pointed
       // at one directory, a hit parsed by the other parser must not be reused.
+      // `cacheReportUnknown` marks rows cached before coverage reporting or
+      // before the 1h cache-write split (decodeScanCache flags both), so both
+      // guards below veto them into one whole re-parse that clears the flag.
       if (
         cached &&
         cached.size === size &&

@@ -3,7 +3,7 @@ import {
   type FlowLayoutNode,
   type Flowchart,
 } from "@t3tools/client-runtime/visual-blocks";
-import { useId, useMemo } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { reportColor } from "./chartShared";
 
@@ -13,6 +13,8 @@ const STROKE = 1;
 const EMPHASIZED_STROKE = 1.2;
 const ELBOW_RADIUS = 8;
 const LABEL_GAP = 6;
+/** A chart may shrink this far to fit the chat; any further and its 12px node text drops under 9px. */
+const MIN_SCALE = 0.75;
 /** Wide (CJK, Hangul) glyphs switch the label register: 12px sans, no tracking, no capitals. */
 const WIDE_CHARACTER = /[\u1100-\u11ff\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]/;
 const PATH_NUMBER = /-?\d+(?:\.\d+)?/g;
@@ -351,11 +353,39 @@ function labelPosition(
 }
 
 /**
+ * A ref for a frame and whether that frame is narrower than `width`, kept current as it resizes.
+ * The answer is null until the first measurement, which lands before the first paint.
+ */
+function useNarrowerThan(width: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [narrower, setNarrower] = useState<boolean | null>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null) return;
+    const measure = () => setNarrower(element.clientWidth < width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [width]);
+  return [ref, narrower] as const;
+}
+
+/**
  * A mermaid flowchart drawn without mermaid: nodes pop in rank by rank and each arrow draws
  * itself after its source appears. While the block streams, new nodes join and the rest glide.
+ * It never scrolls sideways: a chart wider than the chat scales down, and one that would shrink
+ * past MIN_SCALE turns to the other direction when that is narrower by as much.
  */
 export function FlowchartView({ chart }: { chart: Flowchart }) {
-  const layout = useMemo(() => layoutFlowchart(chart), [chart]);
+  const authored = useMemo(() => layoutFlowchart(chart), [chart]);
+  const [frameRef, cramped] = useNarrowerThan(authored.width * MIN_SCALE);
+  const layout = useMemo(() => {
+    if (!cramped) return authored;
+    const turned = layoutFlowchart({ ...chart, direction: chart.direction === "LR" ? "TD" : "LR" });
+    // Turn only for a clear win, so a graph about as wide either way never flips back and forth.
+    return turned.width <= authored.width * MIN_SCALE ? turned : authored;
+  }, [authored, chart, cramped]);
   const uid = useId().replaceAll(/[^a-zA-Z0-9_-]/g, "");
   const arrowId = `flow-arrow-${uid}`;
   const strongArrowId = `flow-arrow-strong-${uid}`;
@@ -392,12 +422,21 @@ export function FlowchartView({ chart }: { chart: Flowchart }) {
       return { points, label, at };
     });
   }, [layout]);
+  // The frame is as wide as the authored chart or the chat, whichever is narrower, never as wide as
+  // what it draws, so a bubble that hugs its content still measures the room it has. Nothing is
+  // drawn until it is measured, so the first paint already has its final layout.
+  const frameStyle = { width: authored.width };
+  if (cramped === null)
+    return <div ref={frameRef} className="mx-auto max-w-full" style={frameStyle} />;
   return (
-    <div className="overflow-x-auto">
+    <div ref={frameRef} className="mx-auto max-w-full" style={frameStyle}>
       <svg
+        // A turn redraws the chart; gliding every node across would leave the arrows behind.
+        key={layout === authored ? "authored" : "turned"}
+        viewBox={`0 0 ${layout.width} ${layout.height}`}
         width={layout.width}
         height={layout.height}
-        className="mx-auto block font-sans"
+        className="mx-auto block h-auto max-w-full font-sans"
         role="img"
         aria-label="Flowchart"
       >

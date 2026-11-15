@@ -52,6 +52,7 @@ import {
 } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
+  makeAgentInstructionsReader,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
@@ -212,6 +213,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
+        agentInstructions: makeAgentInstructionsReader(serverSettings),
         onAvailableCommands: (commands, cwd) =>
           discoverCursorSkills(cwd, processEnv).pipe(
             Effect.provideService(FileSystem.FileSystem, fileSystem),

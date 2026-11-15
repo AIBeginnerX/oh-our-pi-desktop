@@ -186,6 +186,12 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
       Effect.gen(function* () {
         yield* Deferred.succeed(dispatchStarted, undefined);
         if (options?.holdDispatch) yield* Deferred.await(dispatchRelease);
+        // As in the real runtime, the caller's publish gate runs before anything is sent.
+        if (promptOptions?.admit && !promptOptions.admit()) {
+          return yield* AcpErrors.AcpRequestError.invalidRequest(
+            "The prompt was refused before it was sent.",
+          );
+        }
         const prompt: NativePrompt = {
           index: ++promptIndex,
           content: payload.prompt,
@@ -713,6 +719,36 @@ it.layer(layer)("AntigravityAdapter", (it) => {
       const recovered = yield* Fiber.join(later);
       expect(recovered.turnId).not.toBe(ended.turnId);
       expect((yield* h.adapter.listSessions())[0]?.status).toBe("ready");
+    }),
+  );
+
+  it.effect("ends the steered turn as cancelled when the steer's publish admission refuses", () =>
+    Effect.gen(function* () {
+      const h = yield* makeHarness();
+      yield* h.adapter.startSession({
+        threadId,
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+      });
+      const first = yield* h.adapter
+        .sendTurn({ threadId, input: "Keep working" })
+        .pipe(Effect.forkChild);
+      yield* h.nextPrompt;
+      const refused = yield* Effect.flip(
+        h.adapter.sendTurn({ threadId, input: "Steer with memory" }, { admit: () => false }),
+      );
+      expect(refused._tag).toBe("ProviderAdapterSessionClosedError");
+      yield* Fiber.join(first);
+      // The steer cancelled the running prompt before its gate refused, so no
+      // prompt is left to settle the turn; it must end rather than spin forever.
+      const ended = yield* h.waitForEvent((event) => event.type === "turn.completed");
+      expect(ended.payload.state).toBe("cancelled");
+      expect(h.seen.filter((event) => event.type === "turn.completed")).toHaveLength(1);
+      expect(h.calls.filter((call) => call.startsWith("prompt:"))).toEqual(["prompt:1"]);
+      expect((yield* h.adapter.listSessions())[0]).toMatchObject({
+        status: "ready",
+        activeTurnId: undefined,
+      });
     }),
   );
 

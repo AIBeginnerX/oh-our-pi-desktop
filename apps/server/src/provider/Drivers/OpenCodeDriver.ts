@@ -65,6 +65,7 @@ import {
 } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
+  makeAgentInstructionsReader,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
@@ -185,8 +186,13 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           environment: processEnv,
           ...(providerScope ? { providerScope } : {}),
           ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
+          agentInstructions: makeAgentInstructionsReader(serverSettings),
         }),
-        v2: yield* makeOpenCode2Adapter(effectiveConfig, { instanceId, environment: processEnv }),
+        v2: yield* makeOpenCode2Adapter(effectiveConfig, {
+          instanceId,
+          environment: processEnv,
+          agentInstructions: makeAgentInstructionsReader(serverSettings),
+        }),
         isV2: freshIsV2,
       });
       const openCode2ServerOwner = yield* OpenCodeServerOwner.make({

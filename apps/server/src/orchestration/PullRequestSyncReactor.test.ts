@@ -3,6 +3,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   PullRequestOperationError,
+  PullRequestUnavailableError,
   ThreadId,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -20,6 +21,7 @@ import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Logger from "effect/Logger";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -161,7 +163,7 @@ interface HarnessOptions {
   readonly snapshot: OrchestrationShellSnapshot;
   readonly summary?: (
     input: PullRequestRef,
-  ) => Effect.Effect<PullRequestSummary, PullRequestOperationError>;
+  ) => Effect.Effect<PullRequestSummary, PullRequestOperationError | PullRequestUnavailableError>;
   readonly stack?: (
     input: PullRequestRef,
   ) => Effect.Effect<PullRequestStack | null, PullRequestOperationError>;
@@ -296,6 +298,158 @@ function applySync(
 }
 
 describe("PullRequestSyncReactor", () => {
+  it.effect("warns once per cause and probes unsupported hosts only hourly", () => {
+    const warnings: string[] = [];
+    const logger = Logger.make(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(String(message));
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          summary: () =>
+            Effect.fail(new PullRequestUnavailableError({ reason: "provider-unsupported" })),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          for (let minute = 0; minute < 59; minute++) yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 1);
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+          assert.strictEqual(
+            warnings.filter((message) => message.includes("pull request sync skipped")).length,
+            1,
+          );
+          assert.deepStrictEqual(yield* Ref.get(fixture.syncCommands), []);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+  });
+
+  it.effect("an explicit refresh skips the failure backoff once", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          summary: () =>
+            Effect.fail(new PullRequestUnavailableError({ reason: "provider-unsupported" })),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 1);
+          yield* reactor.requestSync({
+            host: "github.com",
+            repository: "owner/repository",
+            number: 7,
+          });
+          yield* reactor.drain;
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+          // The refresh is spent once tried; the next sweep waits out the backoff again.
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("backs off repeated failures and resets after success or link changes", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        let failing = true;
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          summary: (input) =>
+            failing
+              ? Effect.fail(
+                  new PullRequestOperationError({ operation: "summary", detail: "host down" }),
+                )
+              : Effect.succeed(makeSummary(input)),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          yield* sweepAgain(fixture, reactor); // first retry after one minute
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+          failing = false;
+          yield* sweepAgain(fixture, reactor); // second retry after two minutes
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 3);
+          failing = true;
+          yield* sweepAgain(fixture, reactor);
+          yield* sweepAgain(fixture, reactor); // success reset the delay to one minute
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 5);
+          yield* Ref.set(
+            fixture.snapshots,
+            makeSnapshot([
+              makeThread("one", {
+                projectId: ProjectId.make("moved"),
+                pullRequests: [makeLink(7)],
+              }),
+            ]),
+          );
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 6);
+          assert.deepStrictEqual(
+            yield* Ref.get(fixture.syncCommands).pipe(
+              Effect.map((commands) => commands.map((command) => command.snapshot.state)),
+            ),
+            ["open"],
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("backs off a stack read that keeps failing", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          stack: () =>
+            Effect.fail(new PullRequestOperationError({ operation: "stack", detail: "host down" })),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          yield* sweepAgain(fixture, reactor); // first retry after one minute
+          assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 2);
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 2);
+          yield* sweepAgain(fixture, reactor); // second retry after two minutes
+          assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 3);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("backs a key off once when several of its links fail to persist", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("one", { pullRequests: [makeLink(7)] }),
+            makeThread("two", { pullRequests: [makeLink(7)] }),
+          ]),
+          onDispatch: (command) =>
+            command.type === "thread.pull-request-link.sync"
+              ? Effect.die("persistence down")
+              : Effect.void,
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          assert.strictEqual((yield* Ref.get(fixture.syncCommands)).length, 2);
+          yield* sweepAgain(fixture, reactor); // one failed sweep waits one minute, not two
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("syncs a newly linked merged PR without waiting for the periodic sweep", () =>
     Effect.scoped(
       Effect.gen(function* () {

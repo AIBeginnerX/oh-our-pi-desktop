@@ -113,6 +113,56 @@ describe("parseClaudeLine", () => {
     });
   });
 
+  describe("cache write TTL split", () => {
+    const line = (usage: Record<string, unknown>) =>
+      parseClaudeLine(
+        JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-08-07T04:05:13.944Z",
+          sessionId: "s",
+          message: { id: "msg_1", model: "claude-fable-5", usage },
+        }),
+      );
+
+    it("carries the 1h share out of cache_creation", () => {
+      const record = line({
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 800,
+        cache_creation: { ephemeral_5m_input_tokens: 300, ephemeral_1h_input_tokens: 500 },
+      });
+      expect(record?.totals.cacheCreationTokens).toBe(800);
+      expect(record?.cacheWriteOneHourTokens).toBe(500);
+    });
+
+    it("clamps a split beyond the legacy total, tolerates a missing object, keeps a reported zero", () => {
+      const over = line({
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_creation_input_tokens: 400,
+        cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: 900 },
+      });
+      expect(over?.cacheWriteOneHourTokens).toBe(400);
+      // Without the object, every write is 5m and no split is kept.
+      expect(
+        line({ input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 400 })
+          ?.cacheWriteOneHourTokens,
+      ).toBeUndefined();
+      // A reported zero is kept as an explicit 0 so cached rows carry the
+      // split whenever cache_creation was reported; it still prices every
+      // write at 5m.
+      expect(
+        line({
+          input_tokens: 10,
+          output_tokens: 5,
+          cache_creation_input_tokens: 400,
+          cache_creation: { ephemeral_5m_input_tokens: 400, ephemeral_1h_input_tokens: 0 },
+        })?.cacheWriteOneHourTokens,
+      ).toBe(0);
+    });
+  });
+
   it("gives every content block of one message the same dedupe key", () => {
     // T3 Code writes one record per content block, each repeating the parent
     // message's full usage. Summing them would overcount ~2.4x on real data.

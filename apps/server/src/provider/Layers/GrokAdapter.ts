@@ -48,10 +48,15 @@ import { isServerShuttingDown } from "../../serverShutdown.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
+  ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import { acpSignedOutDetail, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import {
+  acpSignedOutDetail,
+  judgePublishAdmission,
+  mapAcpToAdapterError,
+} from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import { acpTurnTokenUsageFromPromptResponses } from "../acp/AcpTurnTokenUsage.ts";
 import {
@@ -92,6 +97,7 @@ import {
 } from "../acp/XAiAcpExtension.ts";
 import { type GrokAdapterShape } from "../Services/GrokAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { settlePendingApprovalsAsCancelled } from "./pendingApprovals.ts";
 
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.fromJsonString(Schema.Unknown));
 
@@ -134,6 +140,11 @@ export interface GrokAdapterLiveOptions {
   readonly harnessLabel?: string;
   /** The agent's sign-in command, named in the error when its session reports it is signed out. */
   readonly signInCommand?: string;
+  /**
+   * The user's standing instructions from settings, read per turn so a change
+   * applies to the next turn. The driver supplies a fail-safe reader.
+   */
+  readonly agentInstructions?: Effect.Effect<string>;
   /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
   readonly isShuttingDown?: () => boolean;
 }
@@ -157,6 +168,8 @@ interface GrokTurnLivenessSignal {
 interface GrokSessionContext {
   readonly threadId: ThreadId;
   readonly acpSessionId: string;
+  /** Monotonic identity of this context; every recreation consumes the next. */
+  readonly generation: number;
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
@@ -183,6 +196,14 @@ interface GrokSessionContext {
    * cancels the in-flight prompt and continues the same turn. Only the last
    * remaining prompt settles the turn. */
   promptsInFlight: number;
+  /** A completion withheld while another prompt was still counted; emitted
+   * when the last prompt leaves without completing the turn itself (a refused
+   * steer), dropped when it completes the turn. */
+  pendingCompletion: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> | undefined;
+  /** The turn whose turn.started has been published. The send that first gets a
+   * turn admitted announces it, whether it opened the turn or joined it as a
+   * steer after the opening send was refused. */
+  announcedTurnId: TurnId | undefined;
   /** Monotonic id assigned to each sendTurn. Steers discard older epochs. */
   promptEpoch: number;
   /** Prompt epochs below this value must not start an ACP session/prompt. */
@@ -203,16 +224,6 @@ interface GrokSessionContext {
   stopped: boolean;
   /** Live monitor/shell identities and their originating turns. */
   readonly backgroundTasks: Map<string, GrokBackgroundTaskRecord>;
-}
-
-function settlePendingApprovalsAsCancelled(
-  pendingApprovals: ReadonlyMap<ApprovalRequestId, PendingApproval>,
-): Effect.Effect<void> {
-  return Effect.forEach(
-    Array.from(pendingApprovals.values()),
-    (pending) => Deferred.succeed(pending.decision, "cancel").pipe(Effect.ignore),
-    { discard: true },
-  );
 }
 
 function settlePendingUserInputsAsCancelled(
@@ -427,6 +438,12 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     };
 
     const sessions = new Map<ThreadId, GrokSessionContext>();
+    // Every context recreation — a fresh start, a resume, or a replacement of
+    // an open session — consumes the next generation; see
+    // GrokSessionContext.generation. Resume reuses the provider's session id in
+    // a new runtime, so the generation is the only identity that distinguishes
+    // the context a memory observation was captured on.
+    let nextSessionGeneration = 0;
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const requestedTurnInactivityTimeoutMs = options?.turnInactivityTimeoutMs;
@@ -636,6 +653,48 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       ctx.promptResponsesReady = Math.max(0, ctx.promptResponsesReady - 1);
     };
 
+    /** The turn.completed a settling prompt stands for, if its outcome ends a turn. */
+    const settledTurnCompletion = (
+      ctx: GrokSessionContext,
+      threadId: ThreadId,
+      turnId: TurnId,
+      options?: {
+        readonly errorMessage?: string;
+        readonly completedStopReason?: EffectAcpSchema.StopReason | null;
+      },
+    ) =>
+      Effect.gen(function* () {
+        if (options?.errorMessage !== undefined) {
+          return {
+            type: "turn.completed",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId,
+            turnId,
+            payload: { state: "failed", errorMessage: options.errorMessage },
+          } satisfies ProviderRuntimeEvent;
+        }
+        if (options?.completedStopReason === undefined) {
+          return undefined;
+        }
+        const tokenUsage = acpTurnTokenUsageFromPromptResponses(
+          ctx.turns.find((turn) => turn.id === turnId)?.items ?? [],
+          { hasSubagents: false, completed: options.completedStopReason !== "cancelled" },
+        );
+        return {
+          type: "turn.completed",
+          ...(yield* makeEventStamp()),
+          provider: PROVIDER,
+          threadId,
+          turnId,
+          payload: {
+            state: options.completedStopReason === "cancelled" ? "cancelled" : "completed",
+            stopReason: options.completedStopReason ?? null,
+            ...(tokenUsage ? { tokenUsage } : {}),
+          },
+        } satisfies ProviderRuntimeEvent;
+      });
+
     const settlePromptInFlight = (
       threadId: ThreadId,
       turnId: TurnId,
@@ -728,17 +787,31 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             liveCtx.session.activeTurnId !== settleTurnId
           ) {
             liveCtx.promptsInFlight = remainingPrompts;
+            // A send that completes nothing (refused, skipped, failed to
+            // prepare) must not replace what an earlier prompt left behind.
+            if (
+              remainingPrompts > 0 &&
+              options?.emitTurnCompletion !== false &&
+              liveCtx.activeTurnId === settleTurnId &&
+              liveCtx.session.activeTurnId === settleTurnId
+            ) {
+              liveCtx.pendingCompletion = yield* settledTurnCompletion(
+                liveCtx,
+                threadId,
+                settleTurnId,
+                options,
+              );
+            }
             return;
           }
           liveCtx.promptsInFlight = remainingPrompts;
         }
+        const pendingCompletion = liveCtx.pendingCompletion;
+        liveCtx.pendingCompletion = undefined;
         yield* clearTurnLiveness(liveCtx);
         const updatedAt = yield* nowIso;
         const canEmitTurnCompletion =
           liveCtx.session.status === "running" || liveCtx.session.status === "connecting";
-        const shouldEmitFailedTurn = options?.errorMessage !== undefined && canEmitTurnCompletion;
-        const shouldEmitCompletedTurn =
-          options?.completedStopReason !== undefined && canEmitTurnCompletion;
         const { activeTurnId: _activeTurnId, ...readySession } = liveCtx.session;
         liveCtx.activeTurnId = undefined;
         // Drop turn-scoped plan fallback so a later empty exit_plan cannot
@@ -749,43 +822,37 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           status: "ready",
           updatedAt,
         };
-        if (options?.emitTurnCompletion === false) {
+        if (!canEmitTurnCompletion) {
           return;
         }
-        if (shouldEmitFailedTurn) {
-          yield* offerRuntimeEvent({
-            type: "turn.completed",
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId,
-            turnId: settleTurnId,
-            payload: {
-              state: "failed",
-              errorMessage: options.errorMessage,
-            },
-          });
-        } else if (shouldEmitCompletedTurn) {
-          const tokenUsage = acpTurnTokenUsageFromPromptResponses(
-            liveCtx.turns.find((turn) => turn.id === settleTurnId)?.items ?? [],
-            {
-              hasSubagents: false,
-              completed: options.completedStopReason !== "cancelled",
-            },
-          );
-          yield* offerRuntimeEvent({
-            type: "turn.completed",
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId,
-            turnId: settleTurnId,
-            payload: {
-              state: options.completedStopReason === "cancelled" ? "cancelled" : "completed",
-              stopReason: options.completedStopReason ?? null,
-              ...(tokenUsage ? { tokenUsage } : {}),
-            },
-          });
+        // A refused send completes nothing of its own, so the turn it
+        // steered ends with the completion an earlier prompt left behind, or
+        // as cancelled when its start went out and nothing was left behind.
+        const completion =
+          options?.emitTurnCompletion === false
+            ? (pendingCompletion ??
+              (liveCtx.announcedTurnId === settleTurnId
+                ? yield* settledTurnCompletion(liveCtx, threadId, settleTurnId, {
+                    completedStopReason: "cancelled",
+                  })
+                : undefined))
+            : yield* settledTurnCompletion(liveCtx, threadId, settleTurnId, options);
+        if (completion) {
+          yield* offerRuntimeEvent(completion);
         }
       });
+
+    /** Publishes a turn's turn.started once, however many sends carry it. */
+    const announceTurnStarted = (
+      ctx: GrokSessionContext,
+      event: Extract<ProviderRuntimeEvent, { type: "turn.started" }>,
+    ) =>
+      ctx.announcedTurnId === event.turnId
+        ? Effect.void
+        : Effect.suspend(() => {
+            ctx.announcedTurnId = event.turnId;
+            return offerRuntimeEvent(event);
+          });
 
     const isLiveTurn = (ctx: GrokSessionContext, turnId: TurnId) =>
       ctx.promptsInFlight > 0 &&
@@ -1369,6 +1436,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const ctx: GrokSessionContext = {
             threadId: input.threadId,
             acpSessionId: started.sessionId,
+            generation: ++nextSessionGeneration,
             session,
             scope: sessionScope,
             acp,
@@ -1383,6 +1451,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             activeTurnId: undefined,
             interruptedTurnIds: new Set(),
             promptsInFlight: 0,
+            pendingCompletion: undefined,
+            announcedTurnId: undefined,
             promptEpoch: 0,
             discardBeforeEpoch: 0,
             promptLifecycle: yield* Semaphore.make(1),
@@ -1601,7 +1671,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         }).pipe(Effect.scoped),
       );
 
-    const sendTurn: GrokAdapterShape["sendTurn"] = (input) =>
+    const sendTurn: GrokAdapterShape["sendTurn"] = (input, admission) =>
       Effect.gen(function* () {
         if (/^\/always-approve(?:\s|$)/i.test(input.input?.trim() ?? "")) {
           return yield* new ProviderAdapterRequestError({
@@ -1632,6 +1702,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             // New turn: do not fall back to a previous turn's plan.md body when
             // exit_plan_mode omits planContent.
             if (steeringTurnId === undefined) {
+              ctx.pendingCompletion = undefined;
               clearProposedPlanFallback(ctx);
             }
             ctx.session = {
@@ -1740,13 +1811,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       harness: harnessLabel,
                       model: displayModel,
                       reasoningEffort: normalizeGrokReasoningEffort(requestedTurnReasoningEffort),
+                      projectMemory: true,
+                      agentInstructions: options?.agentInstructions
+                        ? yield* options.agentInstructions
+                        : undefined,
                     });
               const runtimeInstructions =
                 currentInstructions === ctx.sentRuntimeInstructions
                   ? undefined
                   : currentInstructions;
-              if (runtimeInstructions !== undefined)
-                ctx.sentRuntimeInstructions = runtimeInstructions;
               for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
                 yield* Effect.yieldNow;
               }
@@ -1778,16 +1851,20 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 yield* refreshSessionTurnLiveness(input.threadId, turnId);
               }
 
-              if (steeringTurnId === undefined) {
-                yield* offerRuntimeEvent({
-                  type: "turn.started",
-                  ...(yield* makeEventStamp()),
-                  provider: PROVIDER,
-                  threadId: input.threadId,
-                  turnId,
-                  payload: displayModel ? { model: displayModel } : {},
-                });
-              } else {
+              const turnStarted = {
+                type: "turn.started" as const,
+                ...(yield* makeEventStamp()),
+                provider: PROVIDER,
+                threadId: input.threadId,
+                turnId,
+                payload: displayModel ? { model: displayModel } : {},
+              };
+              // A memory-bearing send announces its turn only after admission,
+              // so a refusal cannot leave clients with an unfinished turn.
+              if (admission === undefined) {
+                yield* announceTurnStarted(ctx, turnStarted);
+              }
+              if (steeringTurnId !== undefined) {
                 // Discard the previous epoch only after this replacement is
                 // ready. A failed steer must not skip the live prompt, which
                 // settles without a terminal event when emitTurnCompletion is
@@ -1800,6 +1877,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               return {
                 acp: ctx.acp,
                 acpSessionId: ctx.acpSessionId,
+                generation: ctx.generation,
                 displayModel,
                 promptParts,
                 runtimeInstructions,
@@ -1807,6 +1885,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 promptEpoch,
                 promptLifecycle: ctx.promptLifecycle,
                 steeringTurnId,
+                turnStarted,
               };
             }).pipe(
               Effect.tapCause(() =>
@@ -1833,9 +1912,22 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         const promptFailureMessageRef = yield* Ref.make<string | undefined>(undefined);
 
         return yield* Effect.gen(function* () {
+          // Set by the publish gate below when it refuses this send; the gate
+          // runs inside the prompt fiber before any RPC leaves, so the verdict
+          // is settled by the time promptStart returns.
+          let publishRefused = false;
           const promptStart = yield* prepared.promptLifecycle.withPermit(
             Effect.gen(function* () {
               const liveCtx = sessions.get(input.threadId);
+              // A memory-bearing send refuses here when the context it bound at
+              // entry is no longer the one open for the thread — a stop or a
+              // concurrent startSession replacement while this prompt was
+              // preparing or queued. Publishing would put the memory on a
+              // session the admission never judged, so this fails closed
+              // instead of the quiet skip ordinary sends take.
+              if (admission !== undefined && liveCtx?.generation !== prepared.generation) {
+                return { _tag: "Skipped" as const, interrupted: false, refused: true };
+              }
               const interrupted = liveCtx?.interruptedTurnIds.has(prepared.turnId) === true;
               if (
                 !liveCtx ||
@@ -1843,7 +1935,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 prepared.promptEpoch < liveCtx.discardBeforeEpoch ||
                 interrupted
               ) {
-                return { _tag: "Skipped" as const, interrupted };
+                return { _tag: "Skipped" as const, interrupted, refused: false };
               }
               if (prepared.steeringTurnId !== undefined) {
                 yield* Effect.ignore(
@@ -1855,7 +1947,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 );
               }
               if (liveCtx.interruptedTurnIds.has(prepared.turnId)) {
-                return { _tag: "Skipped" as const, interrupted: true };
+                return { _tag: "Skipped" as const, interrupted: true, refused: false };
               }
               const dispatched = yield* Deferred.make<void>();
               const fiber = yield* liveCtx.acp
@@ -1868,7 +1960,52 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                         : []),
                     ],
                   },
-                  { dispatched },
+                  {
+                    dispatched,
+                    // The caller's last-word gate: the ACP runtime runs it
+                    // synchronously at its publish point — after the lifecycle,
+                    // serialization and dispatch semaphores a prompt waits on
+                    // are held, before any state mutation or the RPC fork — so
+                    // a send queued behind an in-flight turn is re-judged when
+                    // it actually publishes and a hold placed while it waited is
+                    // still seen. The context this send prepared on must still
+                    // be the one open for the thread; a refusal (or a throwing
+                    // gate) publishes and mutates nothing and fails the send the
+                    // way a closed session does. Without a caller admission the
+                    // gate still records the runtime note at the publish point
+                    // and publishes as before.
+                    admit: () => {
+                      if (
+                        !judgePublishAdmission(admission, {
+                          stale:
+                            liveCtx.stopped ||
+                            sessions.get(input.threadId)?.generation !== prepared.generation,
+                          sessionGeneration: prepared.generation,
+                          nativeSessionId: prepared.acpSessionId,
+                        })
+                      ) {
+                        publishRefused = true;
+                        return false;
+                      }
+                      // The prompt publishes with the note attached, so only
+                      // now does the session remember it; a refused send and a
+                      // skipped one leave no trace and the next send carries it.
+                      if (prepared.runtimeInstructions !== undefined) {
+                        liveCtx.sentRuntimeInstructions = prepared.runtimeInstructions;
+                      }
+                      // An interrupt may have settled the turn meanwhile; an
+                      // ended turn is not announced again.
+                      if (
+                        admission !== undefined &&
+                        liveCtx.activeTurnId === prepared.turnId &&
+                        liveCtx.announcedTurnId !== prepared.turnId
+                      ) {
+                        liveCtx.announcedTurnId = prepared.turnId;
+                        PubSub.publishUnsafe(runtimeEventPubSub, prepared.turnStarted);
+                      }
+                      return true;
+                    },
+                  },
                 )
                 .pipe(Effect.forkChild({ startImmediately: true }));
               // Hold the lifecycle permit until the runtime has registered this
@@ -1882,6 +2019,16 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             }),
           );
           if (promptStart._tag === "Skipped") {
+            // Only a turn that is still active is announced; one an interrupt
+            // already settled must not restart.
+            const skippedCtx = sessions.get(input.threadId);
+            if (
+              !promptStart.refused &&
+              admission !== undefined &&
+              skippedCtx?.activeTurnId === prepared.turnId
+            ) {
+              yield* announceTurnStarted(skippedCtx, prepared.turnStarted);
+            }
             // Settle after releasing promptLifecycle. Holding both locks
             // deadlocks the next sendTurn, which takes the thread lock first.
             yield* withThreadLock(
@@ -1899,12 +2046,35 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               ),
             );
             yield* Ref.set(promptSettled, true);
+            if (promptStart.refused) {
+              return yield* new ProviderAdapterSessionClosedError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+              });
+            }
             const liveCtx = sessions.get(input.threadId);
             return {
               threadId: input.threadId,
               turnId: prepared.turnId,
               resumeCursor: liveCtx?.session.resumeCursor,
             };
+          }
+          if (publishRefused) {
+            // The publish gate refused before the RPC was registered. Restore
+            // the turn the way a skipped prompt settles — no prompt, no turn
+            // boundary — and fail the send the way a closed session does,
+            // leaving steer, epoch and liveness state consistent.
+            yield* withThreadLock(
+              input.threadId,
+              settlePromptInFlight(input.threadId, prepared.turnId, prepared.acpSessionId, {
+                emitTurnCompletion: false,
+              }),
+            );
+            yield* Ref.set(promptSettled, true);
+            return yield* new ProviderAdapterSessionClosedError({
+              provider: PROVIDER,
+              threadId: input.threadId,
+            });
           }
 
           const result = yield* Fiber.join(promptStart.fiber).pipe(
@@ -2017,6 +2187,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     resumeCursor: ctx.session.resumeCursor,
                   };
                 }
+                ctx.pendingCompletion = undefined;
                 const completedAt = yield* nowIso;
                 const { activeTurnId: _completedTurnId, ...readySession } = ctx.session;
                 ctx.activeTurnId = undefined;
@@ -2047,6 +2218,12 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 ctx.interruptedTurnIds.delete(prepared.turnId);
                 yield* Ref.set(promptSettled, true);
               } else if (remainingPrompts > 0) {
+                ctx.pendingCompletion = yield* settledTurnCompletion(
+                  ctx,
+                  input.threadId,
+                  prepared.turnId,
+                  { completedStopReason: completedStopReasonFromPromptResponse(result) },
+                );
                 yield* Ref.set(promptSettled, true);
               }
 
@@ -2313,6 +2490,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       compaction: { type: "slash-command", command: "/compact" },
       startSession,
       sendTurn,
+      memoryAdmission: {
+        // Reports the identity of the context currently registered for the
+        // thread; a send observes the same values on the context it publishes.
+        sessionGeneration: (threadId) => {
+          const context = sessions.get(threadId);
+          return context !== undefined && !context.stopped ? context.generation : undefined;
+        },
+        nativeSessionId: (resumeCursor) => parseGrokResume(resumeCursor)?.sessionId,
+      },
       interruptTurn,
       readThread,
       rollbackThread,

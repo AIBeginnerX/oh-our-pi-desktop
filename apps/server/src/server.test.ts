@@ -16686,8 +16686,18 @@ it.live(
   120_000,
 );
 
-it.effect("production memory policy binds descriptor and gate to Claude and Codex only", () =>
+it.effect("production memory policy binds descriptor and gate to every built-in driver", () =>
   Effect.gen(function* () {
+    const builtInDrivers = [
+      "antigravity",
+      "claudeAgent",
+      "codex",
+      "cursor",
+      "grok",
+      "minimax",
+      "opencode",
+      "zcode",
+    ].map((driver) => ProviderDriverKind.make(driver));
     const fileSystem = yield* FileSystem.FileSystem;
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
       prefix: "t3-server-memory-policy-",
@@ -16707,7 +16717,7 @@ it.effect("production memory policy binds descriptor and gate to Claude and Code
       sentToThread: true,
       proposals: true,
       analyser: true,
-      sendDriverKinds: [ProviderDriverKind.make("claudeAgent"), ProviderDriverKind.make("codex")],
+      sendDriverKinds: builtInDrivers,
     });
     assert.deepEqual(descriptor.capabilities.projectSkills, {
       manage: true,
@@ -16720,11 +16730,10 @@ it.effect("production memory policy binds descriptor and gate to Claude and Code
     const gate = yield* ProjectMemorySendGate.pipe(
       Effect.provide(ProjectMemorySendGateLayerLive.pipe(Layer.provide(configLayer))),
     );
-    assert.isTrue(gate.driverAllowed(ProviderDriverKind.make("claudeAgent")));
-    assert.isTrue(gate.driverAllowed(ProviderDriverKind.make("codex")));
-    for (const driver of ["cursor", "grok", "opencode", "antigravity", "minimax", "zcode"]) {
-      assert.isFalse(gate.driverAllowed(ProviderDriverKind.make(driver)));
+    for (const driver of builtInDrivers) {
+      assert.isTrue(gate.driverAllowed(driver));
     }
+    assert.isFalse(gate.driverAllowed(ProviderDriverKind.make("some-new-driver")));
 
     const controlDescriptor = yield* Effect.gen(function* () {
       const environment = yield* ServerEnvironment.ServerEnvironment;

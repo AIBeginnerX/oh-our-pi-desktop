@@ -14,6 +14,21 @@ When memory_recall is available: at the start of non-trivial work, call it once 
 </project_memory>`;
 
 /**
+ * The user's standing instructions from `settings.agentInstructions`, wrapped
+ * for every provider. Empty or whitespace-only text adds nothing, so callers
+ * can pass the setting through untouched. The user's own newlines are kept.
+ */
+export function buildUserInstructionsBlock(agentInstructions: string | undefined): string {
+  const text = (agentInstructions ?? "").trim();
+  if (!text) return "";
+  return `<user_instructions>
+The user wrote these standing instructions for every agent they run in OOP. Follow them unless a message in this conversation says otherwise.
+
+${text}
+</user_instructions>`;
+}
+
+/**
  * Shared runtime context; omit model and effort when the harness manages them dynamically.
  * `modelName` is the display name users see in the model picker; `model` is the slug.
  */
@@ -24,6 +39,8 @@ export function buildRuntimeInstructions(runtime: {
   readonly reasoningEffort?: string | undefined;
   /** Adds the project memory pointer; only for harnesses that can reach the memory tools. */
   readonly projectMemory?: boolean | undefined;
+  /** The user's standing instructions from settings; read when the instructions are built. */
+  readonly agentInstructions?: string | undefined;
 }): string {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
@@ -33,7 +50,8 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in OOP through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${VISUAL_REPORT_INSTRUCTIONS}${runtime.projectMemory ? `\n\n${PROJECT_MEMORY_INSTRUCTIONS}` : ""}`;
+  const userInstructions = buildUserInstructionsBlock(runtime.agentInstructions);
+  return `<runtime_info>In case you're asked: you are running in OOP through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}\n\n${VISUAL_REPORT_INSTRUCTIONS}${runtime.projectMemory ? `\n\n${PROJECT_MEMORY_INSTRUCTIONS}` : ""}${userInstructions ? `\n\n${userInstructions}` : ""}`;
 }
 
 function toSingleLine(value: string): string {

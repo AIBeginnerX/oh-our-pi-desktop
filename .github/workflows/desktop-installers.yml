@@ -96,8 +96,13 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Use reliable Ubuntu mirrors
+        if: matrix.platform == 'linux'
+        uses: ./.github/actions/setup-apt-mirrors
+
       - name: Install Linux build libraries
         if: matrix.platform == 'linux'
+        timeout-minutes: 15
         shell: bash
         run: |
           sudo apt-get update
@@ -272,8 +277,13 @@ jobs:
           name: installer-${{ matrix.platform }}-${{ matrix.arch }}
           path: verify-input
 
+      - name: Use reliable Ubuntu mirrors
+        if: matrix.platform == 'linux'
+        uses: ./.github/actions/setup-apt-mirrors
+
       - name: Install Linux GUI runtime
         if: matrix.platform == 'linux'
+        timeout-minutes: 15
         shell: bash
         run: |
           sudo apt-get update

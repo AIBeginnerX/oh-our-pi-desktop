@@ -33,6 +33,7 @@ import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolv
 import * as RestartContinuations from "../restartContinuations.ts";
 import {
   clearPersistedServerRuntimeState,
+  isProcessAlive,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -209,7 +210,10 @@ const ProjectCliRuntimeLive = Layer.mergeAll(
 
 const PROJECT_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(1);
 const withProjectCliSessionToken = <A, E, R>(
-  environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"],
+  environmentAuth: Pick<
+    EnvironmentAuth.EnvironmentAuth["Service"],
+    "issueSession" | "revokeSession"
+  >,
   run: (token: string) => Effect.Effect<A, E, R>,
 ) =>
   Effect.acquireUseRelease(
@@ -343,10 +347,13 @@ const getOfflineSnapshot = Effect.fn("getOfflineSnapshot")(function* () {
   return yield* projectionSnapshotQuery.getCommandReadModel();
 });
 
-const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecutionMode")(
+export const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecutionMode")(
   function* (
-    environmentAuth: EnvironmentAuth.EnvironmentAuth["Service"],
-    config: ServerConfig.ServerConfig["Service"],
+    environmentAuth: Pick<
+      EnvironmentAuth.EnvironmentAuth["Service"],
+      "issueSession" | "revokeSession"
+    >,
+    config: Pick<ServerConfig.ServerConfig["Service"], "serverRuntimeStatePath">,
   ) {
     const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
     if (Option.isNone(runtimeState)) {
@@ -370,7 +377,11 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     });
-    yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    if (!isProcessAlive(runtimeState.value.pid)) {
+      yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath, {
+        ownerPid: runtimeState.value.pid,
+      });
+    }
     return Option.none<{ readonly origin: string }>();
   },
 );

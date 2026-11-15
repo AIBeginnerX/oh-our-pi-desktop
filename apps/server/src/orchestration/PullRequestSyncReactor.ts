@@ -1,6 +1,7 @@
 import { siblingPullRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import {
   CommandId,
+  PullRequestUnavailableError,
   type PullRequestSummary,
   type ThreadPullRequestKey,
   type ThreadPullRequestLink,
@@ -21,6 +22,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -29,6 +31,10 @@ import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as OrchestrationEngine from "./Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./Services/ProjectionSnapshotQuery.ts";
+
+// An hourly probe still discovers host-side recovery while bounding persistent failure work.
+const MAX_FAILURE_DELAY_MS = 60 * 60 * 1_000;
+const INITIAL_FAILURE_DELAY_MS = 60 * 1_000;
 
 const SLOW_SYNC_INTERVAL_MS = 15 * 60 * 1_000;
 
@@ -131,12 +137,41 @@ export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
 
   const lastSyncedAt = new Map<string, number>();
+  const failures = new Map<string, { fingerprint: string; delay: number; retryAt: number }>();
+  const keyProjects = new Map<string, ReadonlySet<string>>();
+  const linkIdentities = new Map<string, string>();
+  const isUnavailable = Schema.is(PullRequestUnavailableError);
+  const recordFailure = <E>(key: string, cause: Cause.Cause<E>) =>
+    Effect.gen(function* () {
+      if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause);
+      const error = Cause.squash(cause);
+      // Error messages identify the cause without including trace locations that change per call.
+      const fingerprint = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+      const previous = failures.get(key);
+      const delay =
+        isUnavailable(error) && error.reason === "provider-unsupported"
+          ? MAX_FAILURE_DELAY_MS
+          : Math.min(
+              MAX_FAILURE_DELAY_MS,
+              previous === undefined ? INITIAL_FAILURE_DELAY_MS : previous.delay * 2,
+            );
+      const now = yield* DateTime.now;
+      failures.set(key, { fingerprint, delay, retryAt: DateTime.toEpochMillis(now) + delay });
+      yield* (previous?.fingerprint === fingerprint ? Effect.logDebug : Effect.logWarning)(
+        "pull request sync skipped",
+        { key, reason: fingerprint },
+      );
+    });
   const requested = new Map<string, number>();
   let requestGeneration = 0;
   const retryStacks = new Set<string>();
 
   const isDue = (key: string, entries: ReadonlyArray<LinkEntry>, nowMs: number): boolean => {
-    if (requested.has(key) || retryStacks.has(key)) return true;
+    // An explicit refresh skips the failure backoff; the periodic sweep honors it.
+    if (requested.has(key)) return true;
+    const failure = failures.get(key);
+    if (failure !== undefined && nowMs < failure.retryAt) return false;
+    if (retryStacks.has(key)) return true;
     if (entries.some((entry) => entry.link.snapshot === null)) return true;
     if (entries.every((entry) => entry.link.snapshot?.state === "merged")) return false;
     if (entries.some((entry) => entry.link.snapshot?.state === "open" && isUnsettled(entry.thread)))
@@ -167,6 +202,23 @@ export const make = Effect.gen(function* () {
       }
     }
 
+    for (const [key, entries] of groups) {
+      const identity = entries
+        .map(({ thread, link }) =>
+          [thread.id, thread.projectId, link.url, link.source, link.linkedAt].join("\u0000"),
+        )
+        .sort()
+        .join("\n");
+      if (linkIdentities.get(key) !== identity) failures.delete(key);
+      linkIdentities.set(key, identity);
+      keyProjects.set(key, new Set(entries.map(({ thread }) => thread.projectId)));
+    }
+    for (const key of linkIdentities.keys())
+      if (!groups.has(key)) {
+        linkIdentities.delete(key);
+        keyProjects.delete(key);
+        failures.delete(key);
+      }
     for (const key of lastSyncedAt.keys()) if (!groups.has(key)) lastSyncedAt.delete(key);
     for (const key of retryStacks) if (!groups.has(key)) retryStacks.delete(key);
     for (const key of requested.keys()) if (!groups.has(key)) requested.delete(key);
@@ -242,7 +294,12 @@ export const make = Effect.gen(function* () {
         number: first.link.number,
       };
       const generation = requested.get(key);
-      if (generation !== undefined) yield* pullRequests.invalidate({ reference: ref });
+      if (generation !== undefined) {
+        // This attempt answers the refresh even if a read fails, so a failing key goes back to
+        // its backoff. A refresh requested while the reads are in flight gets a new generation.
+        requested.delete(key);
+        yield* pullRequests.invalidate({ reference: ref });
+      }
       const summary = yield* pullRequests.summary(ref, { recoverTransientFailure: false });
       const fields = snapshotFieldsOf(summary);
       const needsStack =
@@ -257,12 +314,10 @@ export const make = Effect.gen(function* () {
             Effect.map((stack) => ({
               stack: stack === null ? null : ({ kind: "native", ...stack } as const),
             })),
+            // A failing stack read backs off like any other failed read of this key.
             Effect.catchCauseIf(
               (cause) => !Cause.hasInterruptsOnly(cause),
-              () =>
-                Effect.logWarning("pull request stack lookup failed", {
-                  key,
-                }).pipe(Effect.as(null)),
+              (cause) => recordFailure(key, cause).pipe(Effect.as(null)),
             ),
           )
         : null;
@@ -275,31 +330,31 @@ export const make = Effect.gen(function* () {
       }
       // The host answered, so the cadence clock ticks even if a dispatch below is rejected.
       lastSyncedAt.set(key, nowMs);
-      // A refresh requested while the host read was in flight belongs to the next sweep.
-      if (requested.get(key) === generation) requested.delete(key);
+      // One failed sweep backs the key off once, however many of its links failed.
+      let persistenceFailure: Cause.Cause<Effect.Error<ReturnType<typeof syncEntry>>> | undefined;
       yield* Effect.forEach(
         entries,
         (entry) =>
           syncEntry(entry, fields, fetchedStack).pipe(
             persistence.withPermits(1),
             Effect.catchCause((cause) => {
-              if (!Cause.hasInterruptsOnly(cause)) retryStacks.add(key);
-              return logSkipped("pull request sync skipped", { threadId: entry.thread.id, key })(
-                cause,
-              );
+              if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+              retryStacks.add(key);
+              persistenceFailure ??= cause;
+              return Effect.void;
             }),
           ),
         { discard: true },
       );
+      if (persistenceFailure === undefined) failures.delete(key);
+      else yield* recordFailure(key, persistenceFailure);
     });
 
     yield* Effect.forEach(
       groups,
       ([key, entries]) =>
         (requestedKey === undefined || requestedKey === key) && isDue(key, entries, nowMs)
-          ? syncGroup(key, entries).pipe(
-              Effect.catchCause(logSkipped("pull request sync skipped", { key })),
-            )
+          ? syncGroup(key, entries).pipe(Effect.catchCause((cause) => recordFailure(key, cause)))
           : Effect.void,
       // As wide as one batched summary read, so the sweep's reads on a host arrive together and
       // GitHub answers them in one request rather than one `gh pr view` apiece.
@@ -316,9 +371,22 @@ export const make = Effect.gen(function* () {
   )(function* () {
     const events = yield* engine.subscribeDomainEvents;
     yield* forkParked(
-      Stream.runForEach(events, (event) =>
-        event.type === "thread.pull-request-linked" ? requestSync(event.payload.link) : Effect.void,
-      ),
+      Stream.runForEach(events, (event) => {
+        if (event.type === "thread.pull-request-linked") {
+          failures.delete(threadPullRequestKeyOf(event.payload.link));
+          return requestSync(event.payload.link);
+        }
+        if (
+          event.type === "project.meta-updated" &&
+          (event.payload.workspaceRoot !== undefined ||
+            event.payload.repositoryIdentity !== undefined)
+        ) {
+          for (const [key, projects] of keyProjects) {
+            if (projects.has(event.payload.projectId)) failures.delete(key);
+          }
+        }
+        return Effect.void;
+      }),
     );
     yield* forkParked(
       Effect.gen(function* () {

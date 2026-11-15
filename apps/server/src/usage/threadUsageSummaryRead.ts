@@ -149,6 +149,8 @@ export const deriveThreadUsageSummary = (
     return { threadId, status: "too-large", totals: emptyTotals, models: [] };
   const turnStarts = turnStartsByThread(modelEvents);
   const entries: Array<{
+    threadId: ThreadId;
+    createdAt: string;
     model: string;
     observation: OwnedTurnUsageObservationV1;
   }> = [];
@@ -159,7 +161,7 @@ export const deriveThreadUsageSummary = (
     const observation =
       model === null ? null : Option.getOrNull(decodeObservation(row.payloadJson));
     if (model === null || observation === null) continue;
-    entries.push({ model, observation });
+    entries.push({ threadId: row.threadId, createdAt: row.createdAt, model, observation });
   }
   return aggregateThreadUsage(threadId, entries, rates, overrides);
 };

@@ -1095,6 +1095,25 @@ describe("LocalPkgUpdates.openInstaller", () => {
 // ---------------------------------------------------------------------------
 
 describe("LocalPkgUpdates update folder candidates", () => {
+  it.effect("matches glob segments across case and Unicode normalization", () =>
+    Effect.gen(function* () {
+      const actual = "googledrive-fixture";
+      const korean = "내 드라이브".normalize("NFD");
+      const expanded = yield* LocalPkgUpdates.expandUpdateDirectories(
+        ["/fixture/GoogleDrive-*/내*/OoP/release/macos"],
+        {
+          home: "/fixture",
+          listDirectory: async (path) => {
+            if (path === "/fixture") return [actual];
+            if (path === `/fixture/${actual}`) return [korean];
+            return [];
+          },
+        },
+      );
+      assert.deepEqual(expanded, [`/fixture/${actual}/${korean}/OoP/release/macos`]);
+    }),
+  );
+
   it.effect("expands the home folder and the account segment of a Google Drive root", () =>
     Effect.scoped(
       Effect.gen(function* () {

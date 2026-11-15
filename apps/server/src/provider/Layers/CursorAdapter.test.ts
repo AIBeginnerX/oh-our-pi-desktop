@@ -29,6 +29,7 @@ import {
 
 import { ServerConfig } from "../../config.ts";
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import { makeAgentInstructionsReader } from "../providerUpdateSettings.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
@@ -153,8 +154,10 @@ const cursorAdapterTestLayer = it.layer(
     Effect.gen(function* () {
       const cursorConfig = decodeCursorSettings({});
       const resolveSettings = yield* makeResolveCursorSettings;
+      const serverSettings = yield* ServerSettingsService;
       return yield* makeCursorAdapter(cursorConfig, {
         resolveSettings,
+        agentInstructions: makeAgentInstructionsReader(serverSettings),
         isShuttingDown: () => serverShuttingDown,
       });
     }),
@@ -442,13 +445,59 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
           [
             [
               { type: "text", text: "please /review this" },
-              { type: "text", text: buildRuntimeInstructions({ harness: "Cursor" }) },
+              {
+                type: "text",
+                text: buildRuntimeInstructions({ harness: "Cursor", projectMemory: true }),
+              },
             ],
             [{ type: "text", text: "/copy-request-id" }],
             [{ type: "text", text: "and again" }],
           ],
         );
       }),
+  );
+
+  it.effect("appends the user's standing instructions to the ACP prompt", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-agent-instructions");
+      const workspace = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "cursor-agent-instructions-")),
+      );
+      const requestLogPath = NodePath.join(workspace, "requests.ndjson");
+      const argvLogPath = NodePath.join(workspace, "argv.txt");
+      yield* Effect.promise(() => NodeFSP.writeFile(requestLogPath, "", "utf8"));
+      const wrapperPath = yield* Effect.promise(() =>
+        makeProbeWrapper(requestLogPath, argvLogPath),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+      const text = "Always reply in Korean.\n\n- Prefer focused tests.";
+      yield* settings.updateSettings({ agentInstructions: `  ${text}  ` });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: workspace,
+        runtimeMode: "full-access",
+        modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "default" },
+      });
+      yield* adapter.sendTurn({ threadId, input: "hello", attachments: [] });
+      yield* adapter.stopSession(threadId);
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const instructions = (
+        requests.find((entry) => entry.method === "session/prompt")?.params as
+          | { prompt?: Array<{ type: string; text?: string }> }
+          | undefined
+      )?.prompt;
+      const sent = instructions?.at(-1)?.text ?? "";
+      assert.equal(instructions?.at(-1)?.type, "text");
+      assert.include(sent, "<user_instructions>");
+      assert.include(sent, "Follow them unless a message in this conversation says otherwise.");
+      // The user's own newlines reach the agent untouched.
+      assert.include(sent, `\n\n${text}\n</user_instructions>`);
+    }),
   );
 
   it.effect("steers a running turn instead of opening a new one on mid-turn sendTurn", () =>

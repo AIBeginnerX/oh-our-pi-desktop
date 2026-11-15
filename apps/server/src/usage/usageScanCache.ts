@@ -19,9 +19,13 @@ import type { UsageProviderKind } from "@t3tools/contracts";
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
 import type { CodexScanState, UsageRecord } from "./usageTranscripts.ts";
 
-// Rows may carry a 12th `cacheReport` slot; 11-slot rows predate cache
-// coverage and decode as unknown, so this stays v4 to keep retained history
-// for deleted transcripts across upgrade and downgrade.
+// Rows may carry a 12th `cacheReport` slot and a 13th 1h-cache-write slot;
+// 11-slot rows predate cache coverage and decode as unknown, so this stays v4
+// to keep retained history for deleted transcripts across upgrade and
+// downgrade. Both optional slots decode by row length, and a 12-slot Claude
+// row with cache writes predates the split: live parsing always writes a
+// numeric split (0 included) when the transcript reported cache_creation, so
+// such a row decodes as stale for one whole re-parse of its file.
 const USAGE_SCAN_CACHE_VERSION = 4 as const;
 
 export interface CachedFile {
@@ -38,9 +42,12 @@ export interface CachedFile {
   readonly tailRecords: readonly UsageRecord[];
   readonly position: TranscriptParsePosition;
   /**
-   * Set when any stored row predates cache coverage reporting (11-slot rows).
-   * Such an entry must not serve a warm hit or a resume offset: its records
-   * cannot say whether a provider reported a zero or nothing at all.
+   * Set when a stored row predates what live parsing would now produce, so
+   * the entry must not serve a warm hit or a resume offset: an 11-slot row
+   * cannot say whether a provider reported a zero or nothing at all, and a
+   * 12-slot Claude row with cache writes predates the 1h split, so its cached
+   * pricing is stale. A file that still exists is re-parsed whole once; rows
+   * for deleted transcripts keep serving as-is.
    */
   readonly cacheReportUnknown?: true;
 }
@@ -69,6 +76,13 @@ type SerializedRecord = readonly [
    * Absent on rows written before coverage tracking.
    */
   cacheReport?: number,
+  /**
+   * Cache-write tokens billed at the 1h TTL rate, inside the row's cache
+   * creation total. Rides behind the coverage slot, so a 12-slot Claude row
+   * with cache writes predates the split and decodes as stale. Absent and 0
+   * both price entirely at 5m.
+   */
+  cacheWriteOneHourTokens?: number,
 ];
 
 interface SerializedFile {
@@ -123,8 +137,15 @@ export function encodeScanCache(cache: ScanCache): SerializedCache {
       record.reportedCostUsd,
       record.fast ? 1 : 0,
     ] as const;
-    return record.cacheReport === undefined
-      ? row
+    if (record.cacheReport === undefined) return row;
+    // The 1h split decodes by row length, so it only rides behind a coverage
+    // slot. A record without coverage reporting has no split to keep.
+    return typeof record.cacheWriteOneHourTokens === "number"
+      ? [
+          ...row,
+          (record.cacheReport.read ? 1 : 0) | (record.cacheReport.write ? 2 : 0),
+          record.cacheWriteOneHourTokens,
+        ]
       : [...row, (record.cacheReport.read ? 1 : 0) | (record.cacheReport.write ? 2 : 0)];
   };
 
@@ -197,6 +218,7 @@ export function decodeScanCache(document: unknown): ScanCache {
         reportedCostUsd,
         fast,
         cacheReportMask,
+        cacheWriteOneHourSlot,
       ] = row as SerializedRecord;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -232,6 +254,25 @@ export function decodeScanCache(document: unknown): ScanCache {
         cacheReportUnknown = true;
       }
 
+      let cacheWriteOneHourTokens: number | undefined;
+      if (row.length >= 13) {
+        if (
+          typeof cacheWriteOneHourSlot !== "number" ||
+          !Number.isFinite(cacheWriteOneHourSlot) ||
+          cacheWriteOneHourSlot < 0
+        ) {
+          return null;
+        }
+        cacheWriteOneHourTokens = cacheWriteOneHourSlot;
+      } else if (provider === "claude" && cacheCreation > 0) {
+        // Predates the 1h split: live parsing writes a numeric split (0
+        // included) whenever the transcript reported cache_creation, so cache
+        // writes without a split slot priced the 1h share at 5m. Flagging
+        // costs one whole re-parse of a surviving file; rows kept for deleted
+        // transcripts continue to serve as-is.
+        cacheReportUnknown = true;
+      }
+
       records.push({
         provider,
         timestampMs,
@@ -246,6 +287,7 @@ export function decodeScanCache(document: unknown): ScanCache {
         },
         reportedCostUsd: typeof reportedCostUsd === "number" ? reportedCostUsd : null,
         ...(cacheReport === undefined ? {} : { cacheReport }),
+        ...(cacheWriteOneHourTokens === undefined ? {} : { cacheWriteOneHourTokens }),
         fast: fast === 1,
         dedupeKey: typeof dedupeKey === "string" ? dedupeKey : null,
       });

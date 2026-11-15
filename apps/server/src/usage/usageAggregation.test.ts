@@ -12,6 +12,7 @@ const rates: RateTable = new Map([
       outputCostPerToken: 5e-5,
       cacheReadCostPerToken: 1e-6,
       cacheCreationCostPerToken: 1.25e-5,
+      cacheCreation1hCostPerToken: 2e-5,
       fastMultiplier: 1,
     },
   ],
@@ -156,6 +157,21 @@ describe("UsageAggregator", () => {
     // 100*1e-5 + 1000*1e-6 + 10*1.25e-5 + 50*5e-5
     expect(result.buckets[0]?.costUsd).toBeCloseTo(0.004625, 9);
     expect(result.buckets[0]?.costSource).toBe("modelPriced");
+  });
+
+  it("prices the 1h share of cache writes at the above-1h rate", () => {
+    const result = aggregate([
+      record({ cacheWriteOneHourTokens: 4 }),
+      record({
+        dedupeKey: "msg_2:",
+        cacheWriteOneHourTokens: 6,
+        totals: { ...record().totals, cacheCreationTokens: 10 },
+      }),
+    ]);
+
+    // Per record: 100*1e-5 + 1000*1e-6 + writes + 50*5e-5, writes being
+    // 6*1.25e-5 + 4*2e-5 = 0.000155 and 4*1.25e-5 + 6*2e-5 = 0.00017.
+    expect(result.buckets[0]?.costUsd).toBeCloseTo(0.009325, 9);
   });
 
   it("counts tokens but not cost for a model with no rate", () => {

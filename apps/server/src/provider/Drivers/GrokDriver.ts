@@ -38,6 +38,7 @@ import {
 } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
+  makeAgentInstructionsReader,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
@@ -129,6 +130,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
+        agentInstructions: makeAgentInstructionsReader(serverSettings),
       });
       const textGeneration = yield* makeGrokTextGeneration(effectiveConfig, processEnv);
 

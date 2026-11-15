@@ -41,3 +41,20 @@ export function makeProviderSnapshotSettingsSource<Settings>(
     streamSettings: serverSettings.streamChanges.pipe(Stream.map(mapSettings)),
   };
 }
+
+/**
+ * Fail-safe read of the user's standing agent instructions for provider
+ * prompts. A settings read must never fail a session start or a turn, so a
+ * failure logs a warning and yields "" (which builds no instructions block).
+ */
+export function makeAgentInstructionsReader(
+  serverSettings: ServerSettingsModule.ServerSettingsService["Service"],
+): Effect.Effect<string> {
+  return serverSettings.getSettings.pipe(
+    Effect.map((settings) => settings.agentInstructions),
+    Effect.tapError((cause) =>
+      Effect.logWarning("Failed to read agent instructions from server settings.", { cause }),
+    ),
+    Effect.orElseSucceed(() => ""),
+  );
+}

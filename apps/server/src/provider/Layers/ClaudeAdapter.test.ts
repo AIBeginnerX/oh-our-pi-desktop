@@ -1,5 +1,6 @@
 // @effect-diagnostics abortControllerInEffect:off - Tests hand-built AbortSignals to the SDK query stub to exercise cancellation.
 import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import { makeAgentInstructionsReader } from "../providerUpdateSettings.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -286,6 +287,8 @@ function makeHarness(config?: {
   readonly forkSession?: ClaudeAdapterLiveOptions["forkSession"];
   readonly modelCatalog?: ClaudeAdapterLiveOptions["modelCatalog"];
   readonly isShuttingDown?: ClaudeAdapterLiveOptions["isShuttingDown"];
+  /** Wire the production settings reader, so tests can set `agentInstructions`. */
+  readonly readAgentInstructions?: boolean;
 }) {
   const query = new FakeClaudeQuery();
   const queries = [query];
@@ -326,7 +329,13 @@ function makeHarness(config?: {
       ClaudeAdapter,
       Effect.gen(function* () {
         const claudeConfig = decodeClaudeSettings(config?.claudeConfig ?? {});
-        return yield* makeClaudeAdapter(claudeConfig, adapterOptions);
+        const agentInstructions = config?.readAgentInstructions
+          ? makeAgentInstructionsReader(yield* ServerSettingsService)
+          : undefined;
+        return yield* makeClaudeAdapter(claudeConfig, {
+          ...adapterOptions,
+          ...(agentInstructions ? { agentInstructions } : {}),
+        });
       }),
     ).pipe(
       Layer.provideMerge(
@@ -2079,6 +2088,42 @@ describe("ClaudeAdapterLive", () => {
       });
       assert.equal(createInput?.options.permissionMode, "bypassPermissions");
       assert.equal(createInput?.options.allowDangerouslySkipPermissions, true);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("appends the user's standing instructions from server settings", () => {
+    // A fresh state dir: the shared /tmp default is not writable for all users.
+    const harness = makeHarness({
+      readAgentInstructions: true,
+      baseDir: NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "claude-agent-instructions-")),
+    });
+    return Effect.gen(function* () {
+      const settings = yield* ServerSettingsService;
+      const text = "Always reply in Korean.\n\n- Prefer focused tests.";
+      yield* settings.updateSettings({ agentInstructions: `  ${text}  ` });
+      const adapter = yield* ClaudeAdapter;
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      const systemPrompt = harness.getLastCreateQueryInput()?.options.systemPrompt;
+      const append =
+        typeof systemPrompt === "object" &&
+        !Array.isArray(systemPrompt) &&
+        systemPrompt.type === "preset"
+          ? (systemPrompt.append ?? "")
+          : "";
+      assert.include(append, "<user_instructions>");
+      assert.include(
+        append,
+        "The user wrote these standing instructions for every agent they run in OOP. Follow them unless a message in this conversation says otherwise.\n\n",
+      );
+      assert.include(append, `\n\n${text}\n</user_instructions>`);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

@@ -109,11 +109,9 @@ no longer works, shows that state on the phone. Turn the switch off to stop shar
 The phone checks the list when it opens or returns to the foreground, so reload
 the page after sharing a new device.
 
-The React Native app from the
-[App Store](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824) or
-[Google Play](https://play.google.com/store/apps/details?id=com.t3tools.t3code) is
-no longer the supported phone surface and gets no new features. Push notifications
-and background updates belong to that app only.
+The React Native app (`apps/mobile`) is no longer the supported phone surface and
+gets no new features; the mobile web above is. Push notifications and background
+updates belong to the React Native app only.
 
 If the native app crashes during launch, open Settings → Diagnostics on the next
 launch that succeeds. It lists startup crashes from the last 7 days with the error

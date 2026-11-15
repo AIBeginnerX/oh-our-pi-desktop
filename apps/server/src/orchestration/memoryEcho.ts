@@ -90,6 +90,54 @@ const isClaudeErrorAssistantSnapshot = (event: ProviderRuntimeEvent): boolean =>
  *   no provider-specific shape. `config.warning`, `deprecation.notice`,
  *   `thread.realtime.error`, `mcp.oauth.completed` and `turn.aborted.reason`
  *   are not persisted by ingestion (it ignores those types).
+ * - cursor: ACP errors are thrown adapter errors, not runtime events, and the
+ *   adapter emits no `runtime.error`/`runtime.warning`. Its persisted frames —
+ *   `turn.completed` (never carries `errorMessage`), `session.state.changed`
+ *   (only the fixed "ready" reason), assistant deltas and items, plan
+ *   proposals, tool calls and user-input questions/answers — are generic
+ *   cases or output produced on purpose, so Cursor needs no provider-specific
+ *   shape. Cursor's stderr reaches only adapter error details (sanitized
+ *   excerpts), which do not pass through ingestion.
+ * - grok, zcode, minimax: one shared ACP adapter (GrokAdapter) whose events
+ *   carry the driver kind as `provider`, so all three were audited together.
+ *   Provider error frames persist only as `turn.completed` `errorMessage`
+ *   (`settlePromptInFlight` relays `describeAcpPromptFailure`/
+ *   `mapAcpToAdapterError` text, including upstream pages relayed by a
+ *   runtime) — a generic case. The adapter emits no `runtime.error`/
+ *   `runtime.warning`, no error-state `session.state.changed` (only the fixed
+ *   "`Grok`/`ZCode`/`MiniMax Code` ACP session ready" reason) and no
+ *   `tool.denied`. Remaining persisted frames — session/turn boundaries,
+ *   assistant deltas and items, plan proposals, permission requests (the
+ *   agent's proposed command), user-input questions/answers and background
+ *   monitor/shell task events (command descriptions and output; failures land
+ *   in the generic `task.*` error/summary cases) — are generic cases or
+ *   output produced on purpose, so none needs a provider-specific shape.
+ *   stderr reaches only adapter error details (sanitized excerpts), which do
+ *   not pass through ingestion.
+ * - antigravity: provider error frames persist only as `turn.completed`
+ *   `errorMessage` (`finishTurn` relays `mapAntigravityError`/
+ *   `mapAcpToAdapterError` text, also fanned out to subagent
+ *   `task.updated` errors) and the generic `task.*` error/summary cases
+ *   (failed subagent batches, disconnected background commands). The adapter
+ *   emits no `runtime.error`/`runtime.warning`, no error-state
+ *   `session.state.changed` (only the fixed "Antigravity ACP session ready"
+ *   reason) and no `tool.denied`; `session.exited` carries only the fixed
+ *   "Antigravity process stopped." reason. Remaining persisted frames —
+ *   session/turn boundaries, assistant deltas and items, plan proposals,
+ *   permission requests and user-input questions/answers, tool calls, and
+ *   subagent/background-command task events (command descriptions and
+ *   output) — are generic cases or output produced on purpose, so none needs
+ *   a provider-specific shape.
+ * - opencode: the 1.x and v2 adapters share the driver kind and were audited
+ *   together. Provider error text persists as `runtime.error` (session errors
+ *   and transport failures), `runtime.warning`, `turn.completed`
+ *   `errorMessage`, the server-generated session title
+ *   (`thread.metadata.updated`) and the compaction `thread.state.changed`
+ *   detail — all generic cases. `session.exited` and `turn.aborted` reasons
+ *   are not persisted by ingestion. Remaining frames — turn boundaries,
+ *   assistant deltas and items, permission and question requests, tool calls
+ *   — are output produced on purpose, so OpenCode needs no provider-specific
+ *   shape.
  *
  * Output a driver produces on purpose (assistant text, tool commands and tool
  * output) is not masked for any driver; masking it would hide the agent's work.
@@ -101,6 +149,12 @@ interface MemoryEchoProviderCoverage {
 export const MEMORY_ECHO_PROVIDER_COVERAGE: Readonly<Record<string, MemoryEchoProviderCoverage>> = {
   claudeAgent: { errorAssistantSnapshot: isClaudeErrorAssistantSnapshot },
   codex: {},
+  cursor: {},
+  grok: {},
+  zcode: {},
+  minimax: {},
+  antigravity: {},
+  opencode: {},
 };
 
 const isErrorAssistantSnapshot = (event: ProviderRuntimeEvent): boolean =>

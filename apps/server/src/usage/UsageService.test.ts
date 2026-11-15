@@ -30,11 +30,13 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { encodeScanCache, type ScanCache } from "./usageScanCache.ts";
+import { decodeScanCache, encodeScanCache, type ScanCache } from "./usageScanCache.ts";
+import type { UsageRecord } from "./usageTranscripts.ts";
 import * as UsageService from "./UsageService.ts";
 
 const encodeUnknownJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
 function claudeLine(id: number, outputTokens: number, model = "claude-fable-5"): string {
   return `${JSON.stringify({
@@ -978,7 +980,7 @@ describe("UsageService", () => {
           ]);
           const scanCachePath = NodePath.join(config.stateDir, "usage-scan-cache.json");
           yield* Effect.promise(() =>
-            NodeFSP.writeFile(scanCachePath, JSON.stringify(encodeScanCache(seeded))),
+            NodeFSP.writeFile(scanCachePath, encodeUnknownJsonString(encodeScanCache(seeded))),
           );
 
           const service = yield* UsageService.make;
@@ -1016,7 +1018,7 @@ describe("UsageService", () => {
 
           // Re-parsed rows gain a coverage slot; the deleted file's row stays
           // 11-slot so the next restart still treats it as unknown.
-          const persisted = JSON.parse(
+          const persisted = decodeUnknownJsonString(
             yield* Effect.promise(() => NodeFSP.readFile(scanCachePath, "utf8")),
           ) as { files: Record<string, { r: number[][] }> };
           assert.strictEqual(persisted.files[transcriptKey]?.r[0]?.length, 12);
@@ -1045,6 +1047,195 @@ describe("UsageService", () => {
         );
       }).pipe(Effect.scoped),
   );
+
+  it.live("re-parses Claude rows that predate the 1h split and keeps deleted transcripts", () =>
+    Effect.gen(function* () {
+      const { transcript, settings, home } = yield* setup;
+      const claudeLineWithCacheWrite = (id: number, outputTokens: number) =>
+        `${JSON.stringify({
+          type: "assistant",
+          timestamp: "2026-08-01T10:00:00Z",
+          requestId: `req_${id}`,
+          sessionId: "session-1",
+          message: {
+            id: `msg_${id}`,
+            model: "claude-fable-5",
+            usage: {
+              input_tokens: 10,
+              output_tokens: outputTokens,
+              cache_read_input_tokens: 100,
+              cache_creation_input_tokens: 800,
+              cache_creation: { ephemeral_5m_input_tokens: 300, ephemeral_1h_input_tokens: 500 },
+            },
+          },
+        })}\n`;
+      yield* Effect.promise(() => NodeFSP.writeFile(transcript, claudeLineWithCacheWrite(1, 5)));
+      const [stat, transcriptKey] = yield* Effect.promise(() =>
+        Promise.all([NodeFSP.stat(transcript), NodeFSP.realpath(transcript)]),
+      );
+      const deletedKey = NodePath.join(NodePath.dirname(transcriptKey), "deleted.jsonl");
+
+      yield* Effect.gen(function* () {
+        const config = yield* ServerConfig.ServerConfig;
+        // Coverage without the 1h split: the cache this simulates was
+        // written before the split, so all 800 cache writes priced at 5m.
+        const preSplitRecord = (
+          outputTokens: number,
+          dedupeKey: string,
+          model = "claude-fable-5",
+        ) => ({
+          provider: "claude" as const,
+          timestampMs: Date.parse("2026-08-01T10:00:00Z"),
+          model,
+          sessionId: "session-1",
+          totals: {
+            uncachedInputTokens: 10,
+            cachedInputTokens: 100,
+            cacheCreationTokens: 800,
+            outputTokens,
+            reasoningTokens: 0,
+          },
+          reportedCostUsd: null,
+          cacheReport: { read: true, write: true },
+          fast: false,
+          dedupeKey,
+        });
+        const position = { guardLength: 0, guardHash: 0, codexState: null };
+        const seeded: ScanCache = new Map([
+          [
+            transcriptKey,
+            {
+              // Exact size and mtime: without the flag this is a warm hit
+              // and the stale row is served as-is.
+              size: stat.size,
+              mtimeMs: stat.mtimeMs,
+              provider: "claude",
+              records: [preSplitRecord(999, "msg_stale:")],
+              tailRecords: [],
+              position: { ...position, resumeOffset: stat.size },
+            },
+          ],
+          [
+            deletedKey,
+            {
+              size: 10,
+              mtimeMs: stat.mtimeMs,
+              provider: "claude",
+              records: [preSplitRecord(42, "msg_gone:", "claude-opus-5")],
+              tailRecords: [],
+              position: { ...position, resumeOffset: 10 },
+            },
+          ],
+        ]);
+        const scanCachePath = NodePath.join(config.stateDir, "usage-scan-cache.json");
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(scanCachePath, encodeUnknownJsonString(encodeScanCache(seeded))),
+        );
+        const seededDocument = decodeUnknownJsonString(
+          yield* Effect.promise(() => NodeFSP.readFile(scanCachePath, "utf8")),
+        ) as { files: Record<string, { r: number[][] }> };
+        assert.strictEqual(seededDocument.files[transcriptKey]?.r[0]?.length, 12);
+        assert.strictEqual(seededDocument.files[deletedKey]?.r[0]?.length, 12);
+
+        const service = yield* UsageService.make;
+        const summary = yield* service.readSummary(WINDOW);
+        // Real tokens land, never the stale 999; the deleted file's history
+        // still contributes.
+        assert.strictEqual(totalOutputTokens(summary), 47);
+
+        // The re-parsed row gained the split; the deleted file's row stays
+        // 12-slot so the next restart still treats it as predating the split.
+        const persisted = decodeUnknownJsonString(
+          yield* Effect.promise(() => NodeFSP.readFile(scanCachePath, "utf8")),
+        ) as { files: Record<string, { r: number[][] }> };
+        assert.strictEqual(persisted.files[transcriptKey]?.r[0]?.length, 13);
+        assert.strictEqual(persisted.files[transcriptKey]?.r[0]?.[12], 500);
+        assert.strictEqual(persisted.files[deletedKey]?.r[0]?.length, 12);
+
+        // After a restart the split-bearing row warm-hits and the deleted
+        // file's usage still contributes.
+        const restarted = yield* UsageService.make;
+        assert.strictEqual(totalOutputTokens(yield* restarted.readSummary(WINDOW)), 47);
+      }).pipe(
+        Effect.provide(
+          serviceLayers({
+            prefix: "usage-service-split-cache-test",
+            home,
+            settings,
+            ratesDocument: {
+              "claude-fable-5": {
+                input_cost_per_token: 1e-5,
+                output_cost_per_token: 5e-5,
+              },
+            },
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it("keeps the 1h cache-write split across the scan cache roundtrip", () => {
+    const record: UsageRecord = {
+      provider: "claude",
+      timestampMs: Date.parse("2026-08-01T10:00:00Z"),
+      model: "claude-opus-5-5",
+      sessionId: "session-1",
+      totals: {
+        uncachedInputTokens: 10,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 800,
+        outputTokens: 5,
+        reasoningTokens: 0,
+      },
+      reportedCostUsd: null,
+      cacheReport: { read: false, write: true },
+      cacheWriteOneHourTokens: 500,
+      fast: false,
+      dedupeKey: "msg_1:",
+    };
+    const cache: ScanCache = new Map([
+      [
+        "/transcripts/session.jsonl",
+        {
+          size: 10,
+          mtimeMs: 1,
+          provider: "claude",
+          records: [record],
+          tailRecords: [],
+          position: { resumeOffset: 10, guardLength: 0, guardHash: 0, codexState: null },
+        },
+      ],
+    ]);
+
+    const document = JSON.parse(JSON.stringify(encodeScanCache(cache))) as {
+      files: Record<string, { r: number[][] }>;
+    };
+    // The split rides as a 13th slot behind the coverage slot.
+    assert.strictEqual(document.files["/transcripts/session.jsonl"]?.r[0]?.length, 13);
+    assert.strictEqual(document.files["/transcripts/session.jsonl"]?.r[0]?.[12], 500);
+
+    const restored = decodeScanCache(document).get("/transcripts/session.jsonl")?.records[0];
+    assert.strictEqual(restored?.cacheWriteOneHourTokens, 500);
+
+    // A 12-slot row written before the split predates it: decode without one,
+    // so the record prices entirely at the 5-minute rate as it always did.
+    const truncated = {
+      ...document,
+      files: {
+        "/transcripts/session.jsonl": {
+          ...document.files["/transcripts/session.jsonl"]!,
+          r: [document.files["/transcripts/session.jsonl"]!.r[0]!.slice(0, 12)],
+        },
+      },
+    };
+    const legacyEntry = decodeScanCache(truncated).get("/transcripts/session.jsonl");
+    const legacy = legacyEntry?.records[0];
+    assert.strictEqual(legacy?.cacheWriteOneHourTokens, undefined);
+    assert.deepStrictEqual(legacy?.cacheReport, { read: false, write: true });
+    // With cache writes and no split slot, the row is flagged so its file
+    // re-parses whole once instead of serving the stale pricing.
+    assert.strictEqual(legacyEntry?.cacheReportUnknown, true);
+  });
 
   it.live("does not share an in-flight scan after custom prices change", () =>
     Effect.gen(function* () {

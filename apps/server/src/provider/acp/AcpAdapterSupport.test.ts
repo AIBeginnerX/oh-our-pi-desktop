@@ -4,9 +4,11 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 
 import {
   acpPermissionOutcome,
+  judgePublishAdmission,
   mapAcpToAdapterError,
   acpSignedOutDetail,
 } from "./AcpAdapterSupport.ts";
+import type { ProviderSendTurnAdmission } from "../Services/ProviderAdapter.ts";
 
 describe("AcpAdapterSupport", () => {
   it("maps ACP approval decisions to permission outcomes", () => {
@@ -64,6 +66,53 @@ describe("AcpAdapterSupport", () => {
     if (error._tag === "ProviderAdapterProcessError") {
       expect(error.detail).toContain("Unrecognized key(s): 'approvalMode', 'sandbox'");
     }
+  });
+});
+
+describe("judgePublishAdmission", () => {
+  const context = { stale: false, sessionGeneration: 7, nativeSessionId: "native-1" };
+
+  // `verdict` may return a non-boolean to exercise the `=== true` guard.
+  function recordingAdmission(verdict: () => unknown) {
+    const observed: unknown[] = [];
+    const admission: ProviderSendTurnAdmission = {
+      admit: (value) => {
+        observed.push(value);
+        return verdict() as boolean;
+      },
+    };
+    return { observed, admission };
+  }
+
+  it("publishes without a caller admission, even for a stale context", () => {
+    expect(judgePublishAdmission(undefined, context)).toBe(true);
+    expect(judgePublishAdmission(undefined, { ...context, stale: true })).toBe(true);
+  });
+
+  it("refuses a stale context without consulting the admission", () => {
+    const { observed, admission } = recordingAdmission(() => true);
+    expect(judgePublishAdmission(admission, { ...context, stale: true })).toBe(false);
+    expect(observed).toHaveLength(0);
+  });
+
+  it("refuses when the admission throws", () => {
+    const { admission } = recordingAdmission(() => {
+      throw new Error("gate failed");
+    });
+    expect(judgePublishAdmission(admission, context)).toBe(false);
+  });
+
+  it("refuses when the admission does not return exactly true", () => {
+    const { admission } = recordingAdmission(() => "yes");
+    expect(judgePublishAdmission(admission, context)).toBe(false);
+    const { admission: falsy } = recordingAdmission(() => false);
+    expect(judgePublishAdmission(falsy, context)).toBe(false);
+  });
+
+  it("publishes when the admission returns true, passing the session identity through", () => {
+    const { observed, admission } = recordingAdmission(() => true);
+    expect(judgePublishAdmission(admission, context)).toBe(true);
+    expect(observed).toEqual([{ sessionGeneration: 7, nativeSessionId: "native-1" }]);
   });
 });
 

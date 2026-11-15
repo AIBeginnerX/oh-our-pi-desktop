@@ -188,6 +188,11 @@ export interface CodexSessionRuntimeOptions {
   readonly models?: Effect.Effect<ReadonlyArray<ServerProviderModel>>;
   /** Capabilities the session's `t3-code` MCP credential grants; drives the prompt blocks. */
   readonly mcpCapabilities?: ReadonlySet<string>;
+  /**
+   * The user's standing instructions from settings, read per turn so a change
+   * applies to the next turn. The driver supplies a fail-safe reader.
+   */
+  readonly agentInstructions?: Effect.Effect<string>;
   /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
   readonly isShuttingDown?: () => boolean;
 }
@@ -614,6 +619,7 @@ function buildCodexTurnInstructions(input: {
   readonly modelName?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
+  readonly agentInstructions?: string;
 }): Pick<CodexTurnStartParamsWithCollaborationMode, "collaborationMode" | "additionalContext"> {
   if (input.interactionMode === undefined) {
     return {};
@@ -632,6 +638,7 @@ function buildCodexTurnInstructions(input: {
     additionalContext: buildCodexAdditionalContext(
       { model, modelName: input.modelName, reasoningEffort },
       input.browserToolsAvailable ?? true,
+      input.agentInstructions,
     ),
   };
 }
@@ -656,6 +663,8 @@ export function buildTurnStartParams(input: {
   readonly interactionMode?: ProviderInteractionMode;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
+  /** The user's standing instructions from settings, read per turn. */
+  readonly agentInstructions?: string;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -678,6 +687,7 @@ export function buildTurnStartParams(input: {
     ...(input.modelName ? { modelName: input.modelName } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
+    ...(input.agentInstructions ? { agentInstructions: input.agentInstructions } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2594,6 +2604,11 @@ export const makeCodexSessionRuntime = (
           );
           const models = options.models ? yield* options.models : [];
           const modelName = models.find((model) => model.slug === normalizedModel)?.name;
+          // Read per turn: Codex resends an additionalContext entry when its
+          // value changes, so an edit to the setting applies to the next turn.
+          const agentInstructions = options.agentInstructions
+            ? yield* options.agentInstructions
+            : undefined;
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -2604,6 +2619,7 @@ export const makeCodexSessionRuntime = (
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+            ...(agentInstructions ? { agentInstructions } : {}),
             // Derived from the session's own credential rather than the
             // setting, so the prompt describes the tools this turn actually
             // has even if the setting changed after the session started.

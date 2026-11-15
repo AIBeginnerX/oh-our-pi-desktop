@@ -30,6 +30,8 @@ export interface VcsProcessInput {
   readonly onStdoutChunk?: (chunk: Uint8Array) => void;
   readonly env?: NodeJS.ProcessEnv;
   readonly allowNonZeroExit?: boolean;
+  /** Succeeds on a non-zero exit whose complete stdout the caller can still use. */
+  readonly acceptExit?: (output: { readonly exitCode: number; readonly stdout: string }) => boolean;
   readonly timeoutMs?: number;
   readonly maxOutputBytes?: number;
   readonly outputMode?: ProcessRunner.ProcessRunInput["outputMode"];
@@ -180,7 +182,15 @@ export const make = Effect.gen(function* () {
       return yield* new VcsProcessMissingExitCodeError(baseError);
     }
 
-    if (!input.allowNonZeroExit && result.code !== 0) {
+    if (
+      !input.allowNonZeroExit &&
+      result.code !== 0 &&
+      !(
+        input.acceptExit !== undefined &&
+        !result.stdoutTruncated &&
+        input.acceptExit({ exitCode: result.code, stdout: result.stdout })
+      )
+    ) {
       const failureKind = classifyNonZeroExit(input.command, result.stderr);
       return yield* VcsProcessExitError.fromProcessExit(
         baseError,

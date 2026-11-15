@@ -26,6 +26,17 @@ export interface UsageRecord {
    */
   readonly cacheReport?: { readonly read: boolean; readonly write: boolean };
   /**
+   * Cache-write tokens billed at the 1-hour TTL rate, when the provider breaks
+   * the split out (Claude Code: `cache_creation.ephemeral_1h_input_tokens`,
+   * inside the legacy `cache_creation_input_tokens` total; LiteLLM prices that
+   * tier at 2x input, against the 5-minute tier's 1.25x). Kept as an explicit
+   * 0 whenever the transcript reported a `cache_creation` object, so a cached
+   * Claude row with cache writes and no split can only predate the split.
+   * Absent then and on rows restored from a scan cache that predates the
+   * split; both price entirely at the 5-minute rate.
+   */
+  readonly cacheWriteOneHourTokens?: number;
+  /**
    * Whether the request ran in fast mode, which bills at a model-specific
    * multiple of the standard rate. Only Claude Code records this.
    */
@@ -155,6 +166,16 @@ export function parseClaudeRecord(parsed: unknown): UsageRecord | null {
 
   const cost = record["costUSD"];
 
+  const cacheCreationTokens = int(usageRecord["cache_creation_input_tokens"]);
+  const cacheCreation = usageRecord["cache_creation"];
+  const cacheWriteOneHourTokens =
+    typeof cacheCreation === "object" && cacheCreation !== null
+      ? Math.min(
+          int((cacheCreation as Record<string, unknown>)["ephemeral_1h_input_tokens"]),
+          cacheCreationTokens,
+        )
+      : undefined;
+
   return {
     provider: "claude",
     timestampMs,
@@ -163,7 +184,7 @@ export function parseClaudeRecord(parsed: unknown): UsageRecord | null {
     totals: {
       uncachedInputTokens: int(usageRecord["input_tokens"]),
       cachedInputTokens: int(usageRecord["cache_read_input_tokens"]),
-      cacheCreationTokens: int(usageRecord["cache_creation_input_tokens"]),
+      cacheCreationTokens,
       outputTokens: int(usageRecord["output_tokens"]),
       // Anthropic folds thinking tokens into output and does not break them out.
       reasoningTokens: 0,
@@ -173,6 +194,10 @@ export function parseClaudeRecord(parsed: unknown): UsageRecord | null {
       read: isReportedTokenCount(usageRecord["cache_read_input_tokens"]),
       write: isReportedTokenCount(usageRecord["cache_creation_input_tokens"]),
     },
+    // An explicit 0 still prices every write at 5m; keeping it means cached
+    // rows carry the split whenever cache_creation was reported, so the scan
+    // cache can tell pre-split rows apart.
+    ...(cacheWriteOneHourTokens === undefined ? {} : { cacheWriteOneHourTokens }),
     fast: usageRecord["speed"] === "fast",
     dedupeKey,
   };

@@ -769,10 +769,21 @@ wait_for_service_runtime() {
   done
   return 1
 }
+fail_service_runtime() {
+  printf 'OOP background service is running but no runtime reachable on 127.0.0.1 was found. If the service binds one address (T3CODE_HOST), bind it to 127.0.0.1 or 0.0.0.0. Otherwise, when ongoing work has finished, restart the background service: ' >&2
+  if [ "$(uname -s 2>/dev/null || true)" = "Darwin" ]; then
+    printf 'launchctl kickstart -k gui/%s/com.t3tools.t3code.service\\n' "$(id -u)" >&2
+  else
+    printf 'systemctl --user restart t3code.service\\n' >&2
+  fi
+  exit 1
+}
 load_default_runtime
 if service_running; then
   if [ -z "$DEFAULT_REMOTE_PORT" ]; then
-    wait_for_service_runtime "" || true
+    if ! wait_for_service_runtime ""; then
+      fail_service_runtime
+    fi
   elif [ -n "$LAUNCH_VERSION" ] && version_older "$(service_active_version)" "$LAUNCH_VERSION"; then
     # The service runs an older server than this client. \`service install\`
     # repoints the unit at the runtime this launch uploaded, restarts the
@@ -788,7 +799,9 @@ REMOTE_PID="$(cat "$PID_FILE" 2>/dev/null || true)"
 REMOTE_PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
 REMOTE_MANAGED="$(cat "$MANAGED_FILE" 2>/dev/null || true)"
 load_default_runtime
-if [ -n "$DEFAULT_REMOTE_PORT" ]; then
+# A managed server writes the same runtime file as any other server, so a file
+# naming our own managed server is not a newer server to switch to.
+if [ -n "$DEFAULT_REMOTE_PORT" ] && [ "$DEFAULT_RUNTIME_PID" != "$REMOTE_PID" ]; then
   REMOTE_PORT="$DEFAULT_REMOTE_PORT"
   if wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then
     if [ "$REMOTE_MANAGED" = "managed" ]; then
@@ -841,6 +854,9 @@ else
   REMOTE_MANAGED=""
 fi
 if [ -z "$REMOTE_PORT" ]; then
+  if service_running; then
+    fail_service_runtime
+  fi
   REMOTE_PORT="$(pick_port)" || true
   if [ -z "$REMOTE_PORT" ]; then
     if [ "$T3_ARCHIVE_MODE" = "1" ]; then

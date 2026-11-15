@@ -2,9 +2,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it as effectIt } from "@effect/vitest";
 import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
+import * as Tracer from "effect/Tracer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -336,6 +338,31 @@ describe("resolveKnownWindowsCliDirs", () => {
 });
 
 effectIt.layer(NodeServices.layer)("isCommandAvailable", (it) => {
+  it.effect("answers false for a missing command without a failed span", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const empty = yield* fs.makeTempDirectoryScoped();
+      const spans: Array<Tracer.NativeSpan> = [];
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options);
+          spans.push(span);
+          return span;
+        },
+      });
+
+      const available = yield* isCommandAvailable("definitely-not-installed", {
+        env: { PATH: empty },
+      }).pipe(Effect.provideService(HostProcessPlatform, "linux"), Effect.withTracer(tracer));
+
+      expect(available).toBe(false);
+      expect(spans.length).toBeGreaterThan(0);
+      expect(
+        spans.filter((span) => span.status._tag === "Ended" && Exit.isFailure(span.status.exit)),
+      ).toEqual([]);
+    }),
+  );
+
   it.effect("returns false when PATH is empty", () =>
     Effect.gen(function* () {
       expect(

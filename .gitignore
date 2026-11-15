@@ -53,3 +53,5 @@ node_modules/
 .repos/
 # Local backups made before risky edits.
 .backup-*/
+# Scratch state the ZCode crew member writes in the workspace.
+.zcode/

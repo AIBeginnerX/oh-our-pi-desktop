@@ -137,9 +137,21 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const home = environment.HOME || environment.USERPROFILE || NodeOS.homedir();
   const read = Effect.gen(function* () {
-    const config = yield* fs
+    // Newer ZCode versions dropped `config.json` and keep every credential encrypted in
+    // `credentials.json`, which we do not decrypt. A missing file is that state, not a failure
+    // worth retrying, so it reports as unsupported.
+    const contents = yield* fs
       .readFileString(path.join(home, ".zcode", "v2", "config.json"))
-      .pipe(Effect.flatMap(decodeConfig));
+      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.void));
+    if (contents === undefined) {
+      return makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "unsupported",
+        message:
+          "This ZCode version does not keep a plan key OOP can read, so GLM limits are not shown.",
+      });
+    }
+    const config = yield* decodeConfig(contents);
     const plan = Object.entries(config.provider ?? {}).find(
       ([id, provider]) =>
         id.startsWith("builtin:") &&

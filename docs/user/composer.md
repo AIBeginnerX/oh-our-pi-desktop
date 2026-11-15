@@ -108,21 +108,28 @@ does nothing while a goal is open, on chats with Crew on, when something is wait
 background agents are running, or after a stopped or failed turn. A provider that does not report
 a plan or todo list is left alone.
 
+## Instructions for all agents
+
+In **Settings → Providers**, **Instructions for all agents** is text OOP adds to every agent
+session on that environment, whichever provider runs it. It saves when you leave the box. Claude
+uses a change in chats you start afterwards; other providers use it from your next message. Use it
+for personal habits, such as which language to reply in. Put project-specific rules in the
+repository's AGENTS.md or in project memories so they travel with the codebase.
+
 ## Project memories
 
-Project memories are sent to Claude and Codex chats. Other providers do not receive them yet, and
-the memory button says so.
+Project memories are sent to chats with every provider.
 
-When the selected provider can receive project memories, the memory button next to **Attach
-files** lists the project's saved memories. As you type, OOP suggests the memory whose title best
-matches your message next to the button; select it to add it to the message.
+The memory button next to **Attach files** lists the project's saved memories. As you type, OOP
+suggests the memory whose title best matches your message next to the button; select it to add it
+to the message.
 
 To see which memories this chat has already sent to the provider, open the memory button and select
 **Sent to this thread**. It also lists memories the agent recalled, and marks any you edited or
 deleted since. Content a provider already received cannot be taken back.
 
 In those chats the agent can also search the project's memories and propose new ones while it
-works. A proposal is not saved: it appears under **Proposed by agents** in the project's memory settings
+works. A proposal is not saved: it appears under **Proposed memories** in the project's memory settings
 with the agent's reason, and becomes a normal memory only when you select **Approve**. **Reject**
 deletes it.
 

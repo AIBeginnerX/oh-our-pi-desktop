@@ -126,10 +126,10 @@ describe("serverRuntimeState", () => {
       yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath);
       assert.isFalse(yield* fileSystem.exists(statePath));
 
-      // An unreadable file has no pid to protect, so an owner clears it too.
+      // Unknown ownership must preserve the file.
       yield* fileSystem.writeFileString(statePath, "{not json");
       yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, { ownerPid: 4_242 });
-      assert.isFalse(yield* fileSystem.exists(statePath));
+      assert.equal(yield* fileSystem.readFileString(statePath), "{not json");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
@@ -170,6 +170,7 @@ describe("serverRuntimeState", () => {
       const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath);
 
       assert.isTrue(Option.isNone(restored));
+      assert.equal(yield* fileSystem.readFileString(statePath), "{not json");
       assert.equal(logs[0]?.message, `Failed to decode server runtime state at ${statePath}.`);
       const error = logs[0]?.annotations.cause;
       assert.isTrue(isServerRuntimeStateError(error));
@@ -207,6 +208,8 @@ describe("serverRuntimeState", () => {
       const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath);
 
       assert.isTrue(Option.isNone(restored));
+      yield* ServerRuntimeState.clearPersistedServerRuntimeState(statePath, { ownerPid: 4242 });
+      assert.isTrue(yield* fileSystem.exists(statePath));
       assert.equal(logs[0]?.message, `Failed to read server runtime state at ${statePath}.`);
       const error = logs[0]?.annotations.cause;
       assert.isTrue(isServerRuntimeStateError(error));

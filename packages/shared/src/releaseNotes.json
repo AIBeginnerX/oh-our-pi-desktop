@@ -1,6 +1,36 @@
 {
   "versions": [
     {
+      "version": "0.0.158",
+      "date": "2026-11-16",
+      "highlights": [
+        {
+          "en": "Settings → Providers → Instructions for all agents is one box for personal rules, such as which language to reply in. OOP adds it to every agent session, whichever provider runs it, so switching providers no longer means restating them.",
+          "ko": "설정 → 공급자 → Instructions for all agents는 답변 언어 같은 개인 규칙을 한 번만 적는 칸입니다. 어느 공급자가 실행하든 모든 에이전트 세션에 들어가므로, 공급자를 바꿀 때마다 다시 적을 필요가 없습니다."
+        },
+        {
+          "en": "Project memories now work in Cursor, Grok, ZCode, MiniMax, Antigravity and OpenCode chats, not only Claude and Codex: you can send memories, and the agent can search them and propose new ones. A memory send the provider refuses no longer leaves a turn running.",
+          "ko": "프로젝트 메모리를 이제 Claude와 Codex뿐 아니라 Cursor, Grok, ZCode, MiniMax, Antigravity, OpenCode 대화에서도 쓸 수 있습니다. 메모리를 보낼 수 있고, 에이전트가 메모리를 찾아보고 새 메모리를 제안할 수 있습니다. 공급자가 거부한 메모리 전송이 턴을 실행 중인 채로 남기지 않습니다."
+        },
+        {
+          "en": "Claude costs are accurate again. The line at the end of a chat and crew task usage no longer add up Claude's running totals, which had shown its cost many times too high, and the Usage page prices 1-hour cache writes at the 1-hour rate, which had undercounted Claude cost by about a tenth.",
+          "ko": "Claude 비용이 다시 정확해졌습니다. 대화 끝의 한 줄과 크루 작업 사용량이 Claude의 누적 합계를 다시 더해 비용을 몇십 배로 부풀리던 문제를 고쳤고, 사용량 페이지는 1시간 캐시 쓰기를 1시간 요금으로 계산해 Claude 비용이 약 10% 적게 나오던 문제도 고쳤습니다."
+        },
+        {
+          "en": "Diagrams in chat fit the chat width instead of scrolling sideways, which matters most on a phone. A diagram that would get too small turns to its narrower direction.",
+          "ko": "대화 속 다이어그램이 옆으로 스크롤되지 않고 대화 폭에 맞춰집니다. 휴대폰에서 특히 달라집니다. 너무 작아질 다이어그램은 더 좁은 방향으로 다시 배치됩니다."
+        },
+        {
+          "en": "Opening a computer over SSH no longer stops the OOP server it started there earlier. When that computer's background service is running but cannot be reached, the connection says how to fix it instead of starting a second server on the same data.",
+          "ko": "SSH로 컴퓨터를 열 때 예전에 그곳에 띄운 OOP 서버를 더 이상 끄지 않습니다. 그 컴퓨터의 백그라운드 서비스가 실행 중인데 연결할 수 없으면, 같은 데이터로 서버를 하나 더 띄우는 대신 해결 방법을 알려 줍니다."
+        },
+        {
+          "en": "Pull request status is steadier: one pull request GitHub cannot find no longer hides the status of the others, and a project whose pull request reads keep failing retries less and less often, up to once an hour.",
+          "ko": "풀 리퀘스트 상태가 더 안정적입니다. GitHub에서 찾을 수 없는 풀 리퀘스트 하나 때문에 나머지 상태가 사라지지 않고, 조회가 계속 실패하는 프로젝트는 재시도 간격을 점점 늘려 최대 한 시간에 한 번만 다시 시도합니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.157",
       "date": "2026-11-11",
       "highlights": [

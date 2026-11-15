@@ -39,6 +39,7 @@ import {
 } from "../providerMaintenance.ts";
 import {
   haveProviderSnapshotSettingsChanged,
+  makeAgentInstructionsReader,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
@@ -129,6 +130,7 @@ export const ZCodeDriver: ProviderDriver<ZCodeSettings, ZCodeDriverEnv> = {
         launch: () => zcodeAcpLaunch(effectiveConfig),
         productModelSlug: ZCODE_DEFAULT_MODEL,
         harnessLabel: "ZCode",
+        agentInstructions: makeAgentInstructionsReader(serverSettings),
       });
       const textGeneration = yield* makeGrokTextGeneration(acpSettings, processEnv, {
         launch: zcodeAcpLaunch(effectiveConfig),

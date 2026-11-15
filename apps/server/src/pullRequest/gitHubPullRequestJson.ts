@@ -1486,6 +1486,17 @@ const decodeSummaries = decodeJsonResult(
         ),
       ),
     ),
+    errors: Schema.optional(
+      Schema.NullOr(
+        Schema.Array(
+          Schema.Struct({
+            path: Schema.optional(
+              Schema.NullOr(Schema.Array(Schema.Union([Schema.String, Schema.Number]))),
+            ),
+          }),
+        ),
+      ),
+    ),
   }),
 );
 const decodeSummaryEntry = Schema.decodeUnknownExit(RawSummarySchema);
@@ -1511,8 +1522,10 @@ export interface GitHubPullRequestSummary {
 }
 
 /**
- * Summaries by the position they were asked in. A pull request GitHub answered nothing for, or
- * one whose fields no longer decode, is absent rather than failing the rest of the batch.
+ * Summaries by the position they were asked in. A pull request GitHub answered nothing for, one
+ * it reported an error under (a field it could not read leaves a null that looks like a real
+ * value), or one whose fields no longer decode, is absent rather than failing the rest of the
+ * batch. An error that names no alias could be about any of them, so it leaves none.
  */
 export function decodePullRequestSummariesJson(
   raw: string,
@@ -1520,9 +1533,15 @@ export function decodePullRequestSummariesJson(
   const decoded = decodeSummaries(raw);
   if (!Result.isSuccess(decoded)) return Result.fail(decoded.failure);
   const summaries = new Map<number, GitHubPullRequestSummary>();
+  const failedAliases = new Set<string | number>();
+  for (const error of decoded.success.errors ?? []) {
+    const alias = error.path?.[0];
+    if (alias === undefined) return Result.succeed(summaries);
+    failedAliases.add(alias);
+  }
   for (const [alias, value] of Object.entries(decoded.success.data ?? {})) {
     const index = /^s(\d+)$/.exec(alias)?.[1];
-    if (index === undefined || value?.pullRequest == null) continue;
+    if (index === undefined || value?.pullRequest == null || failedAliases.has(alias)) continue;
     const entry = decodeSummaryEntry(value.pullRequest);
     if (!Exit.isSuccess(entry)) continue;
     const pr = entry.value;

@@ -972,6 +972,7 @@ exit 3
   const launch = Effect.fn("runServiceLaunch")(function* (
     host: Host,
     env: Record<string, string> = {},
+    expectedExitCode = 0,
   ) {
     const script = `${host.root}/launch.sh`;
     yield* host.fs.writeFileString(
@@ -1003,15 +1004,32 @@ exit 3
       [collect(child.stdout), collect(child.stderr), child.exitCode.pipe(Effect.map(Number))],
       { concurrency: "unbounded" },
     );
-    assert.equal(exitCode, 0, stderr);
+    assert.equal(exitCode, expectedExitCode, stderr);
     const calls = (yield* host.fs.exists(log)) ? (yield* host.fs.readFileString(log)).trim() : "";
     const summary = stdout.trim().split("\n").at(-1) ?? "";
     const result = {
       remotePort: Number(/"remotePort":(\d+)/u.exec(summary)?.[1]),
       serverKind: /"serverKind":"(\w+)"/u.exec(summary)?.[1],
     };
-    return { result, calls };
+    return { result, calls, stderr };
   });
+
+  it.effect.skipIf(windowsHost)("fails closed when an active service has no runtime", () =>
+    Effect.gen(function* () {
+      const host = yield* setup({
+        clientVersion: "0.0.144",
+        serviceVersion: "0.0.144",
+        runtimeFile: false,
+      });
+      yield* host.fs.writeFileString(`${host.bin}/sleep`, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      const { calls, stderr } = yield* launch(host, {}, 1);
+      assert.equal(calls, "");
+      assert.include(
+        stderr,
+        darwinHost ? "launchctl kickstart -k" : "systemctl --user restart t3code.service",
+      );
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+  );
 
   const activeVersion = (host: Host) =>
     host.fs
@@ -1096,6 +1114,39 @@ exit 3
         yield* Fiber.join(restart);
         assert.notInclude(calls, "serve");
         assert.deepEqual(result, { remotePort: SERVICE_PORT, serverKind: "external" });
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    30_000,
+  );
+
+  it.effect.skipIf(windowsHost)(
+    "reuses its own managed server instead of stopping it",
+    () =>
+      Effect.gen(function* () {
+        const host = yield* setup({
+          clientVersion: "0.0.144",
+          serviceVersion: null,
+          runtimeFile: false,
+        });
+        const first = yield* launch(host);
+        assert.equal(first.result.serverKind, "managed");
+        // That managed server is still running and, like every server, wrote the runtime file.
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const server = yield* spawner.spawn(ChildProcess.make("sleep", ["30"]));
+        const pid = Number(server.pid);
+        const port = first.result.remotePort;
+        yield* host.fs.writeFileString(`${host.base}/ssh-launch/target/pid`, `${pid}\n`);
+        yield* host.fs.writeFileString(
+          `${host.base}/userdata/server-runtime.json`,
+          `{"pid":${pid},"port":${port},"origin":"http://127.0.0.1:${port}"}`,
+        );
+        const second = yield* launch(host);
+        assert.deepEqual(second.result, { remotePort: port, serverKind: "managed" });
+        // Not stopped, and no replacement started: a new server would have rewritten the pid file.
+        assert.doesNotThrow(() => process.kill(pid, 0));
+        assert.equal(
+          (yield* host.fs.readFileString(`${host.base}/ssh-launch/target/pid`)).trim(),
+          String(pid),
+        );
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
     30_000,
   );

@@ -861,4 +861,222 @@ describe("memoryEcho per provider", () => {
       carriesMemoryEchoField({ ...claudeShaped, provider: ProviderDriverKind.make("claudeAgent") }),
     );
   });
+
+  for (const driver of ["grok", "zcode", "minimax"] as const) {
+    it(`withholds the Grok-family error frames of ${driver} and keeps its on-purpose output`, () => {
+      const thread = ThreadId.make(`thread-${driver}-echo`);
+      const driverMark = `${driver.toUpperCase()}-ECHO-MARK-7c41`;
+      const base = {
+        provider: ProviderDriverKind.make(driver),
+        threadId: thread,
+        createdAt: NOW,
+        turnId: TurnId.make(`turn-${driver}`),
+      };
+      // The one shape a provider error frame persists on this adapter family:
+      // turn.completed errorMessage (describeAcpPromptFailure /
+      // mapAcpToAdapterError relay text).
+      const failedTurn: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> = {
+        ...base,
+        type: "turn.completed",
+        eventId: EventId.make(`${driver}-turn`),
+        payload: { state: "failed", errorMessage: `request failed: ${driverMark}` },
+      };
+      assert.isTrue(carriesMemoryEchoField(failedTurn));
+      const withheldTurn = withholdMemoryEcho(failedTurn);
+      assert.notInclude(JSON.stringify(withheldTurn), driverMark);
+      assert(withheldTurn.type === "turn.completed");
+      assert.equal(withheldTurn.payload.errorMessage, MEMORY_ECHO_WITHHELD_ERROR);
+      // A failed background monitor/shell task lands in the generic cases too.
+      const failedTask: Extract<ProviderRuntimeEvent, { type: "task.completed" }> = {
+        ...base,
+        type: "task.completed",
+        eventId: EventId.make(`${driver}-task`),
+        payload: {
+          taskId: RuntimeTaskId.make(`task-${driver}`),
+          status: "failed",
+          summary: `child failed ${driverMark}`,
+        },
+      };
+      assert.isTrue(carriesMemoryEchoField(failedTask));
+      assert.notInclude(JSON.stringify(withholdMemoryEcho(failedTask)), driverMark);
+      // Assistant text, background task output and permission requests are
+      // output produced on purpose and stay untouched.
+      const answer: Extract<ProviderRuntimeEvent, { type: "content.delta" }> = {
+        ...base,
+        type: "content.delta",
+        eventId: EventId.make(`${driver}-answer`),
+        payload: { streamKind: "assistant_text", delta: `answer ${driverMark}` },
+      };
+      const taskOutput: Extract<ProviderRuntimeEvent, { type: "task.completed" }> = {
+        ...base,
+        type: "task.completed",
+        eventId: EventId.make(`${driver}-task-ok`),
+        payload: {
+          taskId: RuntimeTaskId.make(`task-${driver}`),
+          status: "completed",
+          summary: `output ${driverMark}`,
+        },
+      };
+      const permission: Extract<ProviderRuntimeEvent, { type: "request.opened" }> = {
+        ...base,
+        type: "request.opened",
+        eventId: EventId.make(`${driver}-permission`),
+        payload: {
+          requestType: "exec_command_approval",
+          detail: `approve ${driverMark}`,
+        },
+      };
+      for (const event of [answer, taskOutput, permission]) {
+        assert.isFalse(carriesMemoryEchoField(event), event.type);
+        assert.strictEqual(withholdMemoryEcho(event), event);
+      }
+    });
+  }
+
+  it("withholds Antigravity's persisted error frames and keeps its on-purpose output", () => {
+    const thread = ThreadId.make("thread-antigravity-echo");
+    const mark = "ANTIGRAVITY-ECHO-MARK-3b7d";
+    const base = {
+      provider: ProviderDriverKind.make("antigravity"),
+      threadId: thread,
+      createdAt: NOW,
+      turnId: TurnId.make("turn-antigravity"),
+    };
+    // The shapes a provider error frame persists on this adapter:
+    // turn.completed errorMessage (finishTurn relays mapAntigravityError /
+    // mapAcpToAdapterError text), the same message fanned out to subagent
+    // task.updated errors, and a failed subagent batch's task.completed
+    // summary (tool output).
+    const failedTurn: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> = {
+      ...base,
+      type: "turn.completed",
+      eventId: EventId.make("antigravity-turn"),
+      payload: { state: "failed", errorMessage: `request failed: ${mark}` },
+    };
+    const failedTaskUpdated: Extract<ProviderRuntimeEvent, { type: "task.updated" }> = {
+      ...base,
+      type: "task.updated",
+      eventId: EventId.make("antigravity-task-error"),
+      payload: {
+        taskId: RuntimeTaskId.make("task-antigravity"),
+        taskType: "subagent_batch",
+        toolUseId: "task-antigravity",
+        title: "Antigravity subagent batch",
+        status: "failed",
+        error: `turn failed: ${mark}`,
+      },
+    };
+    const failedTaskCompleted: Extract<ProviderRuntimeEvent, { type: "task.completed" }> = {
+      ...base,
+      type: "task.completed",
+      eventId: EventId.make("antigravity-task-done"),
+      payload: {
+        taskId: RuntimeTaskId.make("task-antigravity"),
+        taskType: "subagent_batch",
+        toolUseId: "task-antigravity",
+        status: "failed",
+        summary: `child failed ${mark}`,
+      },
+    };
+    for (const event of [failedTurn, failedTaskUpdated, failedTaskCompleted]) {
+      assert.isTrue(carriesMemoryEchoField(event), event.type);
+      const withheld = withholdMemoryEcho(event);
+      assert.notInclude(JSON.stringify(withheld), mark, event.type);
+      assert.equal(withheld.eventId, event.eventId);
+      assert.equal(withheld.threadId, event.threadId);
+    }
+    const withheldTurn = withholdMemoryEcho(failedTurn);
+    assert(withheldTurn.type === "turn.completed");
+    assert.equal(withheldTurn.payload.errorMessage, MEMORY_ECHO_WITHHELD_ERROR);
+    // Assistant text, the agent's proposed command and its task labels are
+    // output produced on purpose and stay untouched.
+    const answer: Extract<ProviderRuntimeEvent, { type: "content.delta" }> = {
+      ...base,
+      type: "content.delta",
+      eventId: EventId.make("antigravity-answer"),
+      payload: { streamKind: "assistant_text", delta: `answer ${mark}` },
+    };
+    const permission: Extract<ProviderRuntimeEvent, { type: "request.opened" }> = {
+      ...base,
+      type: "request.opened",
+      eventId: EventId.make("antigravity-permission"),
+      payload: {
+        requestType: "exec_command_approval",
+        detail: `approve ${mark}`,
+      },
+    };
+    const commandStarted: Extract<ProviderRuntimeEvent, { type: "task.started" }> = {
+      ...base,
+      type: "task.started",
+      eventId: EventId.make("antigravity-command"),
+      payload: {
+        taskId: RuntimeTaskId.make("task-antigravity-cmd"),
+        taskType: "local_bash",
+        toolUseId: "task-antigravity-cmd",
+        description: `run ${mark}`,
+      },
+    };
+    for (const event of [answer, permission, commandStarted]) {
+      assert.isFalse(carriesMemoryEchoField(event), event.type);
+      assert.strictEqual(withholdMemoryEcho(event), event);
+    }
+  });
+
+  it("withholds OpenCode's persisted error frames and keeps its on-purpose output", () => {
+    const mark = "OPENCODE-ECHO-MARK-5e2a";
+    const base = {
+      provider: ProviderDriverKind.make("opencode"),
+      threadId: ThreadId.make("thread-opencode-echo"),
+      createdAt: NOW,
+      turnId: TurnId.make("turn-opencode"),
+    };
+    // Session errors, retry notices, a failed turn and the server-generated
+    // session title are where OpenCode's provider text persists.
+    const sessionError: Extract<ProviderRuntimeEvent, { type: "runtime.error" }> = {
+      ...base,
+      type: "runtime.error",
+      eventId: EventId.make("opencode-error"),
+      payload: { message: `session error ${mark}`, class: "provider_error", detail: mark },
+    };
+    const warning: Extract<ProviderRuntimeEvent, { type: "runtime.warning" }> = {
+      ...base,
+      type: "runtime.warning",
+      eventId: EventId.make("opencode-warning"),
+      payload: { message: `retrying ${mark}`, detail: mark },
+    };
+    const failedTurn: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> = {
+      ...base,
+      type: "turn.completed",
+      eventId: EventId.make("opencode-turn"),
+      payload: { state: "failed", errorMessage: `request failed: ${mark}` },
+    };
+    const title: Extract<ProviderRuntimeEvent, { type: "thread.metadata.updated" }> = {
+      ...base,
+      type: "thread.metadata.updated",
+      eventId: EventId.make("opencode-title"),
+      payload: { name: `Title ${mark}`, metadata: { sessionID: "ses_1" } },
+    };
+    for (const event of [sessionError, warning, failedTurn, title]) {
+      assert.isTrue(carriesMemoryEchoField(event), event.type);
+      assert.notInclude(JSON.stringify(withholdMemoryEcho(event)), mark, event.type);
+    }
+    // Assistant text and the agent's proposed command are output produced on
+    // purpose and stay untouched.
+    const answer: Extract<ProviderRuntimeEvent, { type: "content.delta" }> = {
+      ...base,
+      type: "content.delta",
+      eventId: EventId.make("opencode-answer"),
+      payload: { streamKind: "assistant_text", delta: `answer ${mark}` },
+    };
+    const permission: Extract<ProviderRuntimeEvent, { type: "request.opened" }> = {
+      ...base,
+      type: "request.opened",
+      eventId: EventId.make("opencode-permission"),
+      payload: { requestType: "exec_command_approval", detail: `approve ${mark}` },
+    };
+    for (const event of [answer, permission]) {
+      assert.isFalse(carriesMemoryEchoField(event), event.type);
+      assert.strictEqual(withholdMemoryEcho(event), event);
+    }
+  });
 });

@@ -8,7 +8,7 @@ import {
   type CachedFile,
   type ScanCache,
 } from "./usageScanCache.ts";
-import type { UsageRecord } from "./usageTranscripts.ts";
+import { parseClaudeLine, type UsageRecord } from "./usageTranscripts.ts";
 
 function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
   return {
@@ -69,9 +69,21 @@ describe("scan cache round trip", () => {
       [
         "/a.jsonl",
         100,
-        [record(), record({ dedupeKey: "msg_2:", model: "claude-opus-5-5", fast: true })],
+        [
+          record({ cacheWriteOneHourTokens: 3 }),
+          record({
+            dedupeKey: "msg_2:",
+            model: "claude-opus-5-5",
+            fast: true,
+            cacheWriteOneHourTokens: 4,
+          }),
+        ],
       ],
-      ["/b.jsonl", 200, [record({ sessionId: "session-b", reportedCostUsd: 1.5 })]],
+      [
+        "/b.jsonl",
+        200,
+        [record({ sessionId: "session-b", reportedCostUsd: 1.5, cacheWriteOneHourTokens: 2 })],
+      ],
     ]);
     original.set("/grok.jsonl", {
       size: 40,
@@ -117,7 +129,19 @@ describe("scan cache round trip", () => {
       [false, true],
       [true, true],
     ] as const) {
-      const original = cacheWith([["/a.jsonl", 100, [record({ cacheReport: { read, write } })]]]);
+      // No cache writes: the row is 12-slot and unambiguous either way.
+      const original = cacheWith([
+        [
+          "/a.jsonl",
+          100,
+          [
+            record({
+              cacheReport: { read, write },
+              totals: { ...record().totals, cacheCreationTokens: 0 },
+            }),
+          ],
+        ],
+      ]);
       const restored = decodeScanCache(JSON.parse(JSON.stringify(encodeScanCache(original))));
 
       const entry = restored.get("/a.jsonl");
@@ -146,7 +170,11 @@ describe("scan cache round trip", () => {
   });
 
   it("flags an entry whose tail rows predate coverage", () => {
-    const cache = cacheWith([["/a.jsonl", 100, [record()]]]);
+    // Main rows without cache writes stay unambiguous, so the flag can only
+    // come from the tail.
+    const cache = cacheWith([
+      ["/a.jsonl", 100, [record({ totals: { ...record().totals, cacheCreationTokens: 0 } })]],
+    ]);
     cache.set("/a.jsonl", {
       ...cache.get("/a.jsonl")!,
       tailRecords: [legacyRecord({ dedupeKey: "msg_tail:" })],
@@ -155,6 +183,69 @@ describe("scan cache round trip", () => {
     const restored = decodeScanCache(JSON.parse(JSON.stringify(encodeScanCache(cache))));
 
     expect(restored.get("/a.jsonl")?.cacheReportUnknown).toBe(true);
+  });
+
+  it("flags a 12-slot Claude row with cache writes as predating the 1h split", () => {
+    // Live parsing keeps a numeric split (0 included) whenever the transcript
+    // reported cache_creation, so cache writes without a split slot were
+    // cached before the split and priced the 1h share at 5m. The entry must
+    // not serve a warm hit; a re-parse rewrites its rows with the split.
+    const original = cacheWith([["/a.jsonl", 100, [record()]]]);
+    const encoded = encodeScanCache(original);
+    expect(encoded.files["/a.jsonl"]?.r[0]).toHaveLength(12);
+
+    const restored = decodeScanCache(JSON.parse(JSON.stringify(encoded)));
+    const entry = restored.get("/a.jsonl");
+    expect(entry?.cacheReportUnknown).toBe(true);
+    // Rows for a deleted transcript keep their records; only the warm hit is
+    // vetoed.
+    expect(entry?.records).toEqual([record()]);
+  });
+
+  it("keeps a 12-slot Claude row without cache writes warm", () => {
+    // With nothing written there is no 1h share to misprice, so the row is
+    // unambiguous and stays a warm hit.
+    const original = cacheWith([
+      ["/a.jsonl", 100, [record({ totals: { ...record().totals, cacheCreationTokens: 0 } })]],
+    ]);
+    const encoded = encodeScanCache(original);
+    expect(encoded.files["/a.jsonl"]?.r[0]).toHaveLength(12);
+
+    const restored = decodeScanCache(JSON.parse(JSON.stringify(encoded)));
+    expect(restored.get("/a.jsonl")?.cacheReportUnknown).toBeUndefined();
+  });
+
+  it("round-trips a reported-zero 1h split as the 13th slot", () => {
+    // The explicit 0 is what keeps the 12-slot rule unambiguous, so it must
+    // survive the roundtrip without flagging the entry for a re-parse.
+    const parsed = parseClaudeLine(
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-08-07T04:05:13.944Z",
+        sessionId: "s",
+        message: {
+          id: "msg_1",
+          model: "claude-fable-5",
+          usage: {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_creation_input_tokens: 400,
+            cache_creation: { ephemeral_5m_input_tokens: 400, ephemeral_1h_input_tokens: 0 },
+          },
+        },
+      }),
+    );
+    expect(parsed?.cacheWriteOneHourTokens).toBe(0);
+
+    const original = cacheWith([["/a.jsonl", 100, [parsed!]]]);
+    const encoded = encodeScanCache(original);
+    expect(encoded.files["/a.jsonl"]?.r[0]).toHaveLength(13);
+    expect(encoded.files["/a.jsonl"]?.r[0]?.[12]).toBe(0);
+
+    const restored = decodeScanCache(JSON.parse(JSON.stringify(encoded)));
+    const entry = restored.get("/a.jsonl");
+    expect(entry?.cacheReportUnknown).toBeUndefined();
+    expect(entry?.records[0]?.cacheWriteOneHourTokens).toBe(0);
   });
 
   it("drops an entry whose coverage slot is out of range or not an integer", () => {

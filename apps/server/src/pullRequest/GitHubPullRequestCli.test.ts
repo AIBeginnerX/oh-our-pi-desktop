@@ -1,4 +1,6 @@
 import { afterEach, assert, expect, it, vi } from "@effect/vitest";
+import { VcsProcessExitError } from "@t3tools/contracts";
+import * as Result from "effect/Result";
 import * as Effect from "effect/Effect";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
@@ -524,6 +526,103 @@ layer("GitHubPullRequestCli.layer", (it) => {
       );
       assert.strictEqual(eight?.headBranch, "feat/8");
       expect(mockedExecute).toHaveBeenCalledOnce();
+      const document = callAt(0).args.at(-1) ?? "";
+      expect(document).toContain(
+        's0: repository(owner: "acme", name: "web") { pullRequest(number: 7)',
+      );
+      expect(document).toContain("pullRequest(number: 8)");
+    }),
+  );
+
+  it.effect("keeps two successful aliases when exit 1 includes one NOT_FOUND alias", () =>
+    Effect.gen(function* () {
+      const node = (number: number) => ({
+        number,
+        title: `Pull request ${number}`,
+        url: `https://github.com/acme/web/pull/${number}`,
+        author: { __typename: "User", login: "octocat", name: "Octo Cat", avatarUrl: null },
+        baseRefName: "main",
+        headRefName: `feat/${number}`,
+        state: "OPEN",
+        isDraft: false,
+        mergeable: "MERGEABLE",
+        reviewDecision: null,
+        latestReviews: { nodes: [{ state: "APPROVED", author: { login: "reviewer" } }] },
+        additions: 12,
+        deletions: 3,
+        changedFiles: 2,
+        updatedAt: "2026-08-24T12:34:56.000Z",
+        mergedAt: null,
+        closedAt: null,
+        commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+      });
+      const missing = new GitHubCli.GitHubPullRequestNotFoundError({
+        command: "gh",
+        cwd: "/w",
+        cause: new VcsProcessExitError({
+          operation: "GitHubCli.execute",
+          command: "gh",
+          cwd: "/w",
+          exitCode: 1,
+          detail: "Pull request not found.",
+          failureKind: "not-found",
+        }),
+      });
+      // `gh api graphql` prints the answer and exits 1 when any alias failed.
+      const partialAnswer = encodeJson({
+        data: { s0: { pullRequest: node(7) }, s1: { pullRequest: node(8) }, s2: null },
+        errors: [{ type: "NOT_FOUND", path: ["s2"], message: "Repository missing" }],
+      });
+      mockedExecute.mockImplementation((input) =>
+        input.acceptExit?.({ exitCode: 1, stdout: partialAnswer }) === true
+          ? Effect.succeed({ ...output(partialAnswer), exitCode: ChildProcessSpawner.ExitCode(1) })
+          : Effect.fail(missing),
+      );
+      const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+
+      const reads = yield* Effect.forEach(
+        [7, 8, 9],
+        (number) =>
+          cli
+            .getPullRequestSummary({
+              cwd: "/w",
+              repository: "acme/web",
+              host: "github.com",
+              number,
+            })
+            .pipe(Effect.result),
+        { concurrency: "unbounded" },
+      ).pipe(Effect.forkChild);
+      yield* TestClock.adjust("10 millis");
+      const results = yield* Fiber.join(reads);
+      expect(results.map(Result.isSuccess)).toEqual([true, true, false]);
+      const seven = Result.getOrThrow(results[0]!);
+      const eight = Result.getOrThrow(results[1]!);
+
+      assert.deepStrictEqual(
+        {
+          number: seven?.number,
+          state: seven?.state,
+          headBranch: seven?.headBranch,
+          author: seven?.author?.login,
+          changedFiles: seven?.changedFiles,
+          reviewDecision: seven?.reviewDecision,
+          checksState: seven?.checksState,
+          mergeability: seven?.mergeability,
+        },
+        {
+          number: 7,
+          state: "open",
+          headBranch: "feat/7",
+          author: "octocat",
+          changedFiles: 2,
+          reviewDecision: "approved",
+          checksState: "passing",
+          mergeability: "mergeable",
+        },
+      );
+      assert.strictEqual(eight?.headBranch, "feat/8");
+      expect(mockedExecute).toHaveBeenCalledTimes(2);
       const document = callAt(0).args.at(-1) ?? "";
       expect(document).toContain(
         's0: repository(owner: "acme", name: "web") { pullRequest(number: 7)',

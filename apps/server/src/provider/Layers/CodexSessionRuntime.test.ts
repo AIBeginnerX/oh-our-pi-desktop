@@ -331,6 +331,24 @@ describe("buildTurnStartParams", () => {
     }),
   );
 
+  it.effect("carries the user's standing instructions into additionalContext per turn", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        model: "gpt-5.3-codex",
+        effort: "high",
+        interactionMode: "default",
+        agentInstructions: "Always reply in Korean.",
+      });
+
+      NodeAssert.match(
+        params.additionalContext?.t3_code_user_instructions?.value ?? "",
+        /<user_instructions>.*Always reply in Korean\.\n<\/user_instructions>/s,
+      );
+    }),
+  );
+
   it.effect("routes approvals to the auto reviewer in auto mode", () =>
     Effect.gen(function* () {
       const params = yield* buildTurnStartParams({
@@ -632,6 +650,28 @@ describe("buildCodexAdditionalContext", () => {
     for (const entry of Object.values(context)) {
       // Codex estimates 4 bytes per token and truncates the middle of longer values.
       NodeAssert.ok(Buffer.byteLength(entry.value) < 4_000);
+    }
+  });
+
+  it("puts the user's standing instructions under their own key, newlines intact", () => {
+    const text = "Always reply in Korean.\n\n- Prefer focused tests.";
+    const context = buildCodexAdditionalContext(runtime, true, `  ${text}  `);
+
+    NodeAssert.match(
+      context.t3_code_user_instructions?.value ?? "",
+      new RegExp(
+        `^<user_instructions>\\nThe user wrote these standing instructions for every agent they run in OOP\\. Follow them unless a message in this conversation says otherwise\\.\\n\\n${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\n</user_instructions>$`,
+      ),
+    );
+    NodeAssert.equal(context.t3_code_user_instructions?.kind, "application");
+    // The user's text must not inflate the shared runtime entry.
+    NodeAssert.doesNotMatch(context.t3_code_runtime?.value ?? "", /user_instructions/);
+  });
+
+  it("omits the user instructions entry entirely when the setting is empty", () => {
+    for (const agentInstructions of [undefined, "", "   \n\t  "]) {
+      const context = buildCodexAdditionalContext(runtime, false, agentInstructions);
+      NodeAssert.deepStrictEqual(Object.keys(context), ["t3_code_runtime"]);
     }
   });
 });

@@ -11,6 +11,7 @@ import {
   ProviderAdapterRequestError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import type { ProviderSendTurnAdmission } from "../Services/ProviderAdapter.ts";
 const isAcpProcessExitedError = Schema.is(EffectAcpErrors.AcpProcessExitedError);
 const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
@@ -53,6 +54,31 @@ export function acpPermissionOutcome(decision: ProviderApprovalDecision): string
     case "decline":
     default:
       return "reject-once";
+  }
+}
+
+/** Judges a send at the ACP publish point, synchronously inside the prompt's
+ * `admit` hook: with no caller admission it publishes; a stale context, or an
+ * admission that throws or does not return `true`, refuses. */
+export function judgePublishAdmission(
+  admission: ProviderSendTurnAdmission | undefined,
+  context: {
+    readonly stale: boolean;
+    readonly sessionGeneration: number;
+    readonly nativeSessionId: string;
+  },
+): boolean {
+  if (admission === undefined) return true;
+  if (context.stale) return false;
+  try {
+    return (
+      admission.admit({
+        sessionGeneration: context.sessionGeneration,
+        nativeSessionId: context.nativeSessionId,
+      }) === true
+    );
+  } catch {
+    return false;
   }
 }
 

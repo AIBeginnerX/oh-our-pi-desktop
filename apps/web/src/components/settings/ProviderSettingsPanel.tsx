@@ -83,6 +83,7 @@ import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
 import { ExpandableText } from "./ExpandableText";
 import { ProviderInstanceCard } from "./ProviderInstanceCard";
 import { UsageProviderSettings } from "./UsageProviderSettings";
+import { AgentInstructionsSettingsSection } from "./AgentInstructionsSettingsSection";
 import { BundledSkillsSection } from "./BundledSkillsSection";
 import { ProviderSetupSection, readAntigravityAuthMethod } from "./ProviderSetupSection";
 import { CodexSetupSection, CodexManagedRuntimeFields } from "./CodexSetupSection";
@@ -341,7 +342,8 @@ function ProviderSettingsPanelContent(target: ProviderSettingsTarget) {
     }
     if (
       !target.scoped &&
-      (searchTargetId === searchableSetting("provider-health-check-interval").id ||
+      (searchTargetId === searchableSetting("agent-instructions").id ||
+        searchTargetId === searchableSetting("provider-health-check-interval").id ||
         searchTargetId === searchableSetting("usage-providers").id) &&
       !selectedEnvironmentCanRenderSettings &&
       searchableEnvironmentId !== undefined
@@ -1069,6 +1071,12 @@ export function EnvironmentProviderSettings({
 
   return (
     <>
+      <AgentInstructionsSettingsSection
+        environmentId={environmentId}
+        agentInstructions={settings.agentInstructions}
+        readOnly={readOnly}
+      />
+
       <SettingsSection
         {...searchableSetting("providers")}
         variant="plain"

@@ -164,6 +164,12 @@ export interface ClaudeAdapterLiveOptions {
   readonly modelCatalog?: Effect.Effect<ClaudeModelCatalog>;
   /** Scoped-bucket names the driver's status probe last saw; see `claudeUsageLimits`. */
   readonly scopedLimitNames?: Ref.Ref<ClaudeScopedLimitNames>;
+  /**
+   * The user's standing instructions from settings, read when the session's
+   * system prompt is built. The driver supplies a fail-safe reader; absent
+   * means no instructions block.
+   */
+  readonly agentInstructions?: Effect.Effect<string>;
   /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
   readonly isShuttingDown?: () => boolean;
 }
@@ -1054,7 +1060,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           type: "preset",
           preset: "claude_code",
           // Model and effort can change after this session-level prompt is set.
-          append: buildRuntimeInstructions({ harness: "Claude Code", projectMemory: true }),
+          append: buildRuntimeInstructions({
+            harness: "Claude Code",
+            projectMemory: true,
+            agentInstructions: options?.agentInstructions
+              ? yield* options.agentInstructions
+              : undefined,
+          }),
         },
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is

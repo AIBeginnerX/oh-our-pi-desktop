@@ -13,7 +13,6 @@
   "apps/server/src/orchestration/decider.memoryReference.test.ts TS377026": 3,
   "apps/server/src/orchestration/Layers/OrchestrationEngine.skillGate.test.ts TS377026": 2,
   "apps/server/src/orchestration/Layers/OrchestrationEngine.test.ts TS377030": 6,
-  "apps/server/src/orchestration/Layers/ProviderCommandReactor.memoryHandoff.test.ts TS377030": 12,
   "apps/server/src/orchestration/Layers/ProviderCommandReactor.preparationCancel.test.ts TS377030": 7,
   "apps/server/src/orchestration/Layers/ProviderCommandReactor.skillTrial.test.ts TS377026": 10,
   "apps/server/src/orchestration/Layers/ProviderCommandReactor.skillTrial.test.ts TS377030": 27,
@@ -102,6 +101,5 @@
   "apps/server/src/usage/ownedUsage.test.ts TS377026": 1,
   "apps/server/src/usage/ownedUsage.test.ts TS377030": 9,
   "apps/server/src/usage/ownedUsage.ts TS377049": 1,
-  "apps/server/src/usage/UsageService.test.ts TS377026": 2,
   "apps/server/src/ws.ts TS377042": 6
 }

@@ -7,14 +7,16 @@ const observation = (
   usage: Record<string, unknown>,
   costUsd?: number,
   terminal = "completed",
+  extras: { createdAt?: string; instanceId?: string } = {},
 ) => ({
   kind: "owned-usage",
+  ...(extras.createdAt === undefined ? {} : { createdAt: extras.createdAt }),
   payload: {
     v: 1,
     scope: "main-turn",
     source: {
       driver: "claudeAgent",
-      instanceId: "claudeAgent",
+      instanceId: extras.instanceId ?? "claudeAgent",
       turnId: "turn-1",
       runtimeEventId: eventId,
       nativeConversationId: null,
@@ -35,16 +37,67 @@ describe("crewThreadUsage", () => {
   it("sums tokens and the reported cost", () => {
     expect(
       crewThreadUsage([
-        observation("e1", { ...complete, cachedInputTokens: 300 }, 0.25),
-        observation("e2", complete, 0.5),
+        observation("e1", { ...complete, cachedInputTokens: 300 }, 0.25, "completed", {
+          instanceId: "session-a",
+        }),
+        observation("e2", complete, 0.5, "completed", { instanceId: "session-b" }),
         { kind: "tool.completed", payload: { itemType: "command_execution" } },
       ]),
     ).toEqual({ inputTokens: 2000, outputTokens: 400, cachedInputTokens: 300, costUsd: 0.75 });
   });
 
-  it("leaves the cost out when a counted turn reported none", () => {
+  it("totals session running totals as the chain's final step, not their sum", () => {
     expect(
-      crewThreadUsage([observation("e1", complete, 0.25), observation("e2", complete)]),
+      crewThreadUsage([
+        observation("e1", complete, 0.5, "completed", { createdAt: "2026-01-01T00:00:00.000Z" }),
+        observation("e2", complete, 1.2, "completed", { createdAt: "2026-01-01T00:01:00.000Z" }),
+        observation("e3", complete, 2.0, "completed", { createdAt: "2026-01-01T00:02:00.000Z" }),
+      ]),
+    ).toEqual({ inputTokens: 3000, outputTokens: 600, costUsd: 2.0 });
+  });
+
+  it("prices an unreported turn as zero once its chain reported", () => {
+    expect(
+      crewThreadUsage([
+        observation("e1", complete, 0.4, "completed", { createdAt: "2026-01-01T00:00:00.000Z" }),
+        observation("e2", complete, undefined, "completed", {
+          createdAt: "2026-01-01T00:01:00.000Z",
+        }),
+        observation("e3", complete, 1.0, "completed", { createdAt: "2026-01-01T00:02:00.000Z" }),
+      ]),
+    ).toEqual({ inputTokens: 3000, outputTokens: 600, costUsd: 1.0 });
+  });
+
+  it("omits cost when a chain never reports one", () => {
+    expect(
+      crewThreadUsage([
+        observation("e1", complete, undefined, "completed", {
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+        observation("e2", complete, undefined, "completed", {
+          createdAt: "2026-01-01T00:01:00.000Z",
+        }),
+      ]),
+    ).toEqual({ inputTokens: 2000, outputTokens: 400 });
+  });
+
+  it("leaves the cost out when a chain never reported one", () => {
+    expect(
+      crewThreadUsage([
+        observation("e1", complete, 0.25, "completed", { instanceId: "session-a" }),
+        observation("e2", complete, undefined, "completed", { instanceId: "session-b" }),
+      ]),
+    ).toEqual({ inputTokens: 2000, outputTokens: 400 });
+  });
+
+  it("omits cost when a trailing turn was never covered by a report", () => {
+    expect(
+      crewThreadUsage([
+        observation("e1", complete, 0.5, "completed", { createdAt: "2026-01-01T00:00:00.000Z" }),
+        observation("e2", complete, undefined, "completed", {
+          createdAt: "2026-01-01T00:01:00.000Z",
+        }),
+      ]),
     ).toEqual({ inputTokens: 2000, outputTokens: 400 });
   });
 

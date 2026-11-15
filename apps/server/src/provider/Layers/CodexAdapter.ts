@@ -105,6 +105,8 @@ export interface CodexAdapterLiveOptions {
     Scope.Scope
   >;
   readonly onManagedConnectionRevoked?: Effect.Effect<void>;
+  /** The user's standing instructions from settings; the driver supplies a fail-safe reader. */
+  readonly agentInstructions?: Effect.Effect<string>;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
 }
@@ -2323,6 +2325,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(options?.agentInstructions ? { agentInstructions: options.agentInstructions } : {}),
           ...(mcpSession
             ? {
                 environment: {

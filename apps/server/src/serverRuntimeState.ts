@@ -93,14 +93,14 @@ export const persistServerRuntimeState = (input: {
 /**
  * Remove the runtime state file. With `ownerPid`, only a file recording that
  * pid is removed: a server shutting down must not delete the file a newer
- * server wrote after taking over (an unreadable file is still removed).
+ * server wrote after taking over. Unknown ownership preserves the file.
  */
 export const clearPersistedServerRuntimeState = (path: string, options?: { ownerPid?: number }) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     if (options?.ownerPid !== undefined) {
       const current = yield* readPersistedServerRuntimeState(path);
-      if (Option.isSome(current) && current.value.pid !== options.ownerPid) {
+      if (Option.isNone(current) || current.value.pid !== options.ownerPid) {
         return;
       }
     }

@@ -52,6 +52,7 @@ import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
+  ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
@@ -59,6 +60,7 @@ import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
 import type { OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   OpenCodeRuntime,
+  nextOpenCodeSessionGeneration,
   openCodeRuntimeErrorDetail,
   parseOpenCodeModelSlug,
   runOpenCodeSdk,
@@ -180,8 +182,26 @@ interface TurnUsage {
   reasoning: number;
 }
 
+/**
+ * A memory-bearing fresh turn whose turn.started waits for the first publish
+ * its gate admits. Every send in the turn (the owner and any send that joins
+ * it meanwhile) counts in `sends` until it publishes or fails, so a refused
+ * owner leaves the turn alive for a joiner and a turn nobody publishes into
+ * is undone.
+ */
+interface TurnPreparation {
+  held: ProviderRuntimeEvent | undefined;
+  /** The start was published; before that an undone turn leaves no event. */
+  started: boolean;
+  sends: number;
+  /** The last request failure, reported if the turn ends with no send admitted. */
+  failure: string | undefined;
+  readonly sessionBefore: ProviderSession;
+}
+
 interface ActiveTurn {
   readonly turnId: TurnId;
+  readonly preparation?: TurnPreparation;
   readonly usage: TurnUsage;
   readonly toolNames: Map<string, string>;
   readonly text: Map<string, string>;
@@ -205,6 +225,12 @@ interface SessionContext {
   readonly server: OpenCodeServerConnection;
   readonly scope: Scope.Closeable;
   readonly sessionId: string;
+  /**
+   * Identity of this exact session context, drawn from the shared
+   * `nextOpenCodeSessionGeneration` sequence; a memory-bearing send's
+   * admission binds to it and the publish gate re-checks it.
+   */
+  readonly sessionGeneration: number;
   readonly directory: string;
   readonly mcp: boolean;
   /** This session and the subagent sessions it started. */
@@ -267,6 +293,11 @@ export interface OpenCode2AdapterOptions {
   readonly environment?: NodeJS.ProcessEnv;
   /** Tests replace the HTTP client; production always uses `makeOpenCode2Client`. */
   readonly makeClient?: typeof makeOpenCode2Client;
+  /**
+   * The user's standing instructions from settings, read per turn so a change
+   * applies to the next turn. The driver supplies a fail-safe reader.
+   */
+  readonly agentInstructions?: Effect.Effect<string>;
 }
 
 export function makeOpenCode2Adapter(
@@ -909,6 +940,7 @@ export function makeOpenCode2Adapter(
           server: started.server,
           scope,
           sessionId: started.sessionId,
+          sessionGeneration: nextOpenCodeSessionGeneration(),
           directory,
           mcp: started.mcp,
           sessionIds: new Set([started.sessionId]),
@@ -972,143 +1004,283 @@ export function makeOpenCode2Adapter(
       },
     );
 
-    const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("OpenCode2.sendTurn")(
-      function* (input) {
-        const context = yield* requireSession(input.threadId);
-        // Steering into a run that is being cancelled would silently drop the message.
-        if (context.active?.interrupted) {
-          return yield* new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "session.prompt",
-            detail: "The previous OpenCode turn is still stopping. Try again in a moment.",
+    type SendTurnArgs = Parameters<OpenCodeAdapterShape["sendTurn"]>;
+    const sendTurnBody = Effect.fn("OpenCode2.sendTurn")(function* (
+      input: SendTurnArgs[0],
+      admission: SendTurnArgs[1],
+      exit: { leave: Effect.Effect<void> },
+    ) {
+      const context = yield* requireSession(input.threadId);
+      // Steering into a run that is being cancelled would silently drop the message.
+      if (context.active?.interrupted) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "session.prompt",
+          detail: "The previous OpenCode turn is still stopping. Try again in a moment.",
+        });
+      }
+      const modelSelection =
+        input.modelSelection ??
+        (context.session.model
+          ? { instanceId: boundInstanceId, model: context.session.model }
+          : undefined);
+      if (modelSelection !== undefined && modelSelection.instanceId !== boundInstanceId) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "sendTurn",
+          issue:
+            "OpenCode model selection is bound to instance '" +
+            modelSelection.instanceId +
+            "', expected '" +
+            boundInstanceId +
+            "'.",
+        });
+      }
+      const parsed = parseOpenCodeModelSlug(modelSelection?.model);
+      if (!parsed) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "sendTurn",
+          issue: "OpenCode model selection must use the 'provider/model' format.",
+        });
+      }
+      const text = input.input?.trim() ?? "";
+      const files: Array<{ uri: string; name: string }> = [];
+      if (!context.server.external) {
+        for (const attachment of input.attachments ?? []) {
+          // Other files reach the agent through the path line in the prompt.
+          if (attachment.type !== "image") continue;
+          const path = resolveAttachmentPath({
+            attachmentsDir: serverConfig.attachmentsDir,
+            attachment,
           });
-        }
-        const modelSelection =
-          input.modelSelection ??
-          (context.session.model
-            ? { instanceId: boundInstanceId, model: context.session.model }
-            : undefined);
-        if (modelSelection !== undefined && modelSelection.instanceId !== boundInstanceId) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue:
-              "OpenCode model selection is bound to instance '" +
-              modelSelection.instanceId +
-              "', expected '" +
-              boundInstanceId +
-              "'.",
-          });
-        }
-        const parsed = parseOpenCodeModelSlug(modelSelection?.model);
-        if (!parsed) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue: "OpenCode model selection must use the 'provider/model' format.",
-          });
-        }
-        const text = input.input?.trim() ?? "";
-        const files: Array<{ uri: string; name: string }> = [];
-        if (!context.server.external) {
-          for (const attachment of input.attachments ?? []) {
-            // Other files reach the agent through the path line in the prompt.
-            if (attachment.type !== "image") continue;
-            const path = resolveAttachmentPath({
-              attachmentsDir: serverConfig.attachmentsDir,
-              attachment,
-            });
-            if (!path) continue;
-            // OpenCode rejects the whole prompt if an attached file is missing.
-            if (yield* fileSystem.exists(path).pipe(Effect.orElseSucceed(() => false))) {
-              files.push({ uri: NodeURL.pathToFileURL(path).href, name: attachment.name });
-            }
+          if (!path) continue;
+          // OpenCode rejects the whole prompt if an attached file is missing.
+          if (yield* fileSystem.exists(path).pipe(Effect.orElseSucceed(() => false))) {
+            files.push({ uri: NodeURL.pathToFileURL(path).href, name: attachment.name });
           }
         }
-        if (text.length === 0 && files.length === 0) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "sendTurn",
-            issue: "OpenCode turns require text input or at least one attachment.",
-          });
-        }
-        const sessionID = context.sessionId;
-        const client = context.client;
-
-        const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
-        const model = {
-          providerID: parsed.providerID,
-          id: parsed.modelID,
-          ...(variant ? { variant } : {}),
-        };
-        if (
-          context.model?.providerID !== model.providerID ||
-          context.model.id !== model.id ||
-          context.model.variant !== model.variant
-        ) {
-          yield* runOpenCodeSdk("session.switchModel", (signal) =>
-            client.session.switchModel({ sessionID, model }, { signal }),
-          ).pipe(Effect.mapError((cause) => requestError("session.switchModel", cause)));
-          context.model = model;
-        }
-        const agent =
-          getModelSelectionStringOptionValue(modelSelection, "agent") ??
-          (input.interactionMode === "plan" ? "plan" : "build");
-        if (context.agent !== agent) {
-          yield* runOpenCodeSdk("session.switchAgent", (signal) =>
-            client.session.switchAgent({ sessionID, agent }, { signal }),
-          ).pipe(Effect.mapError((cause) => requestError("session.switchAgent", cause)));
-          context.agent = agent;
-        }
-        const instructions = buildRuntimeInstructions({
-          harness: "OpenCode",
-          model: parsed.providerID + "/" + parsed.modelID,
+      }
+      if (text.length === 0 && files.length === 0) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "sendTurn",
+          issue: "OpenCode turns require text input or at least one attachment.",
         });
-        if (context.sentInstructions !== instructions) {
-          yield* runOpenCodeSdk("session.instructions.entry.put", (signal) =>
-            client.session.instructions.entry.put(
-              { sessionID, key: INSTRUCTIONS_KEY, value: instructions },
-              { signal },
-            ),
-          ).pipe(Effect.ignore);
-          context.sentInstructions = instructions;
-        }
+      }
+      const sessionID = context.sessionId;
+      const client = context.client;
 
-        // A send while a turn runs is a steer: OpenCode folds it into the running work.
-        const steering = context.active;
-        const turnId = steering?.turnId ?? TurnId.make("opencode-turn-" + (yield* randomUUIDv4));
-        if (steering === undefined) {
-          context.active = {
-            turnId,
-            usage: { steps: 0, input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 },
-            toolNames: new Map(),
-            text: new Map(),
-            interrupted: false,
-            interruptFiber: undefined,
-          };
-          yield* updateSession(context, {
-            status: "running",
-            activeTurnId: turnId,
-            model: modelSelection?.model ?? context.session.model,
-          });
+      const variant = getModelSelectionStringOptionValue(modelSelection, "variant");
+      const model = {
+        providerID: parsed.providerID,
+        id: parsed.modelID,
+        ...(variant ? { variant } : {}),
+      };
+      if (
+        context.model?.providerID !== model.providerID ||
+        context.model.id !== model.id ||
+        context.model.variant !== model.variant
+      ) {
+        yield* runOpenCodeSdk("session.switchModel", (signal) =>
+          client.session.switchModel({ sessionID, model }, { signal }),
+        ).pipe(Effect.mapError((cause) => requestError("session.switchModel", cause)));
+        context.model = model;
+      }
+      const agent =
+        getModelSelectionStringOptionValue(modelSelection, "agent") ??
+        (input.interactionMode === "plan" ? "plan" : "build");
+      if (context.agent !== agent) {
+        yield* runOpenCodeSdk("session.switchAgent", (signal) =>
+          client.session.switchAgent({ sessionID, agent }, { signal }),
+        ).pipe(Effect.mapError((cause) => requestError("session.switchAgent", cause)));
+        context.agent = agent;
+      }
+      // The server-side entry is resent only when the value changes, so a
+      // per-turn settings read is enough for an edit to reach the next turn.
+      const instructions = buildRuntimeInstructions({
+        harness: "OpenCode",
+        model: parsed.providerID + "/" + parsed.modelID,
+        projectMemory: true,
+        agentInstructions: options?.agentInstructions
+          ? yield* options.agentInstructions
+          : undefined,
+      });
+      if (context.sentInstructions !== instructions) {
+        yield* runOpenCodeSdk("session.instructions.entry.put", (signal) =>
+          client.session.instructions.entry.put(
+            { sessionID, key: INSTRUCTIONS_KEY, value: instructions },
+            { signal },
+          ),
+        ).pipe(Effect.ignore);
+        context.sentInstructions = instructions;
+      }
+
+      // A send while a turn runs is a steer: OpenCode folds it into the running work.
+      const steering = context.active;
+      const turnId = steering?.turnId ?? TurnId.make("opencode-turn-" + (yield* randomUUIDv4));
+      // Everything up to the publish point mutates turn state; a fresh send
+      // the publish gate refuses restores this snapshot so the session
+      // looks untouched. A steered running turn is left exactly as it was.
+      const sessionBeforeTurn = context.session;
+      // The fresh send's turn boundary. Without a memory admission it is
+      // emitted here as before; a memory-bearing fresh send holds it on the
+      // turn's preparation for the publish gate, so a refusal leaves no
+      // turn.started behind and an admitted start is published synchronously
+      // at the gate, ahead of every SSE event the prompt produces. A send
+      // that arrives while the turn is still preparing joins that
+      // preparation and may be the one that publishes the start.
+      const preparation: TurnPreparation | undefined =
+        steering === undefined
+          ? admission === undefined
+            ? undefined
+            : {
+                held: undefined,
+                started: false,
+                sends: 1,
+                failure: undefined,
+                sessionBefore: sessionBeforeTurn,
+              }
+          : steering.preparation;
+      if (steering?.preparation !== undefined) {
+        steering.preparation.sends += 1;
+      }
+      // Every send of a preparing turn ends here exactly once: a send that
+      // was accepted stays counted (`settled`), any other end (refusal,
+      // request failure, interrupt) leaves. The last one out with nothing
+      // accepted undoes the turn: silently while its start is still held,
+      // otherwise as an aborted turn, the way a lone send failing after its
+      // publish ends. It also runs when the send ends any other way
+      // (interrupt, defect) through `exit.leave`, which is armed before the
+      // turn is bound: a send that was published is only settled, its turn
+      // is left to interruptTurn. It is uninterruptible because nothing
+      // retries an undo once the send has settled.
+      let settled = false;
+      // Set once the gate let this send publish; an interrupt after that
+      // leaves the turn to interruptTurn instead of undoing it.
+      let published = false;
+      const leavePreparation = (failure?: string) =>
+        Effect.gen(function* () {
+          if (preparation === undefined || settled) return;
+          settled = true;
+          preparation.sends -= 1;
+          if (failure !== undefined) preparation.failure = failure;
+          const turn = context.active;
+          if (preparation.sends > 0 || turn?.preparation !== preparation) return;
+          context.active = undefined;
+          if (!preparation.started) {
+            context.session = preparation.sessionBefore;
+            return;
+          }
+          const reason = preparation.failure ?? "OpenCode did not accept the prompt.";
+          yield* updateSession(context, { status: "ready", lastError: reason }, true);
           yield* emit({
             ...(yield* base({ threadId: input.threadId, turnId })),
-            type: "turn.started",
-            payload: { model: modelSelection?.model ?? context.session.model },
+            type: "turn.aborted",
+            payload: { reason, tokenUsage: tokenUsage(turn.usage, false) },
           });
-        }
+        }).pipe(Effect.uninterruptible);
 
-        const command = text.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/);
-        const commandName = command
-          ? (yield* runOpenCodeSdk("command.list", (signal) =>
-              client.command.list({ location: { directory: context.directory } }, { signal }),
-            ).pipe(
-              Effect.orElseSucceed(() => ({ data: [] as ReadonlyArray<{ name: string }> })),
-            )).data.find((entry) => entry.name === command[1])?.name
-          : undefined;
-        const submitted = yield* (
-          commandName !== undefined
-            ? runOpenCodeSdk("session.command", (signal) =>
+      exit.leave = Effect.suspend(() =>
+        published
+          ? Effect.sync(() => {
+              settled = true;
+            })
+          : leavePreparation(),
+      );
+      if (steering === undefined) {
+        context.active = {
+          turnId,
+          ...(preparation ? { preparation } : {}),
+          usage: { steps: 0, input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 },
+          toolNames: new Map(),
+          text: new Map(),
+          interrupted: false,
+          interruptFiber: undefined,
+        };
+        yield* updateSession(context, {
+          status: "running",
+          activeTurnId: turnId,
+          model: modelSelection?.model ?? context.session.model,
+        });
+        const turnStarted: ProviderRuntimeEvent = {
+          ...(yield* base({ threadId: input.threadId, turnId })),
+          type: "turn.started",
+          payload: { model: modelSelection?.model ?? context.session.model },
+        };
+        if (preparation === undefined) {
+          yield* emit(turnStarted);
+        } else {
+          preparation.held = turnStarted;
+        }
+      }
+      // Publishes the preparing turn's start, once, at the first send of the
+      // turn that actually publishes.
+      const publishHeldStart = () => {
+        if (preparation?.held !== undefined) {
+          Queue.offerUnsafe(runtimeEvents, preparation.held);
+          preparation.held = undefined;
+          preparation.started = true;
+        }
+      };
+      const command = text.match(/^\/([^\s/]+)(?:\s+([\s\S]*))?$/);
+      const commandName = command
+        ? (yield* runOpenCodeSdk("command.list", (signal) =>
+            client.command.list({ location: { directory: context.directory } }, { signal }),
+          ).pipe(
+            Effect.orElseSucceed(() => ({ data: [] as ReadonlyArray<{ name: string }> })),
+          )).data.find((entry) => entry.name === command[1])?.name
+        : undefined;
+      // The caller's last-word gate: it runs synchronously inside the SDK
+      // request callback — after every await this send waits on, at the
+      // moment the HTTP request is about to leave — so a send is judged
+      // when it actually publishes, not when it was queued. The context
+      // this send resolved on must still be the one open for the thread —
+      // a stop or a concurrent startSession replacement refuses outright,
+      // so even a permissive gate cannot publish a stale context's prompt.
+      // A refusal (or a throwing gate) publishes and mutates nothing and
+      // fails the send the way a closed session does.
+      let publishRefused = false;
+      const judgePublish = (): Promise<never> | undefined => {
+        if (admission === undefined) {
+          published = true;
+          publishHeldStart();
+          return undefined;
+        }
+        let admitted = false;
+        if (!context.stopped && sessions.get(input.threadId) === context) {
+          try {
+            admitted =
+              admission.admit({
+                sessionGeneration: context.sessionGeneration,
+                nativeSessionId: context.sessionId,
+              }) === true;
+          } catch {
+            admitted = false;
+          }
+        }
+        if (admitted) {
+          // The gate admitted: publish the turn's deferred boundary
+          // synchronously, before the request promise is built, so the
+          // start stays ahead of every event the prompt produces.
+          published = true;
+          publishHeldStart();
+          return undefined;
+        }
+        publishRefused = true;
+        return Promise.reject(
+          new ProviderAdapterSessionClosedError({
+            provider: PROVIDER,
+            threadId: input.threadId,
+          }),
+        );
+      };
+      const submitted = yield* (
+        commandName !== undefined
+          ? runOpenCodeSdk(
+              "session.command",
+              (signal) =>
+                judgePublish() ??
                 client.session.command(
                   {
                     sessionID,
@@ -1119,8 +1291,11 @@ export function makeOpenCode2Adapter(
                   },
                   { signal },
                 ),
-              )
-            : runOpenCodeSdk("session.prompt", (signal) =>
+            )
+          : runOpenCodeSdk(
+              "session.prompt",
+              (signal) =>
+                judgePublish() ??
                 client.session.prompt(
                   {
                     sessionID,
@@ -1130,31 +1305,61 @@ export function makeOpenCode2Adapter(
                   },
                   { signal },
                 ),
-              )
-        ).pipe(Effect.timeout("15 seconds"), Effect.exit);
-        if (Exit.isFailure(submitted)) {
-          const failure = requestError("session.prompt", submitted.cause);
-          if (steering === undefined && context.active?.turnId === turnId) {
-            const turn = context.active;
-            context.active = undefined;
-            yield* updateSession(context, { status: "ready", lastError: failure.detail }, true);
-            yield* emit({
-              ...(yield* base({ threadId: input.threadId, turnId })),
-              type: "turn.aborted",
-              payload: {
-                reason: failure.detail || "OpenCode did not accept the prompt.",
-                tokenUsage: tokenUsage(turn.usage, false),
-              },
-            });
-          }
-          return yield* failure;
+            )
+      ).pipe(Effect.timeout("15 seconds"), Effect.exit);
+      if (Exit.isFailure(submitted)) {
+        if (publishRefused) {
+          // The publish gate refused this send: undo the fresh-turn state
+          // it touched — no prompt, no turn boundary (turn.started never
+          // went out), no turn.aborted, no lastError, no completion — and
+          // fail it the way a closed session does. The instruction entry
+          // above was already stored server-side and carries no memory
+          // content, so `sentInstructions` stays. A running turn, or a
+          // preparing turn another send still publishes into, is left alive.
+          yield* leavePreparation();
+          return yield* new ProviderAdapterSessionClosedError({
+            provider: PROVIDER,
+            threadId: input.threadId,
+          });
         }
-        const record = context.turns.find((turn) => turn.id === turnId);
-        if (record) record.items.push({ text, files });
-        else context.turns.push({ id: turnId, items: [{ text, files }] });
-        return { threadId: input.threadId, turnId, resumeCursor: context.session.resumeCursor };
-      },
-    );
+        const failure = requestError("session.prompt", submitted.cause);
+        yield* leavePreparation(failure.detail);
+        if (
+          preparation === undefined &&
+          steering === undefined &&
+          context.active?.turnId === turnId
+        ) {
+          const turn = context.active;
+          context.active = undefined;
+          yield* updateSession(context, { status: "ready", lastError: failure.detail }, true);
+          yield* emit({
+            ...(yield* base({ threadId: input.threadId, turnId })),
+            type: "turn.aborted",
+            payload: {
+              reason: failure.detail || "OpenCode did not accept the prompt.",
+              tokenUsage: tokenUsage(turn.usage, false),
+            },
+          });
+        }
+        return yield* failure;
+      }
+      settled = true;
+      const record = context.turns.find((turn) => turn.id === turnId);
+      if (record) record.items.push({ text, files });
+      else context.turns.push({ id: turnId, items: [{ text, files }] });
+      return { threadId: input.threadId, turnId, resumeCursor: context.session.resumeCursor };
+    });
+
+    // However a send ends (interrupt, defect included), a send of a preparing
+    // turn that was not accepted leaves it; `leave` stays a no-op until the
+    // body has armed it.
+    const sendTurn: OpenCodeAdapterShape["sendTurn"] = (input, admission) =>
+      Effect.suspend(() => {
+        const exit = { leave: Effect.void as Effect.Effect<void> };
+        return sendTurnBody(input, admission, exit).pipe(
+          Effect.onExit(() => Effect.suspend(() => exit.leave)),
+        );
+      });
 
     const interruptTurn: OpenCodeAdapterShape["interruptTurn"] = (threadId) =>
       Effect.gen(function* () {
@@ -1301,6 +1506,17 @@ export function makeOpenCode2Adapter(
       capabilities: { sessionModelSwitch: "in-session", supportsConversationRollback: false },
       startSession,
       sendTurn,
+      memoryAdmission: {
+        // Reports the identity of the context currently registered for the
+        // thread — the same lookup the publish gate re-checks, so a memory
+        // handoff binds to exactly the context that would publish its send.
+        // A stopped context is dropped from the map by `stopContext`.
+        sessionGeneration: (threadId) => {
+          const context = sessions.get(threadId);
+          return context !== undefined && !context.stopped ? context.sessionGeneration : undefined;
+        },
+        nativeSessionId: (resumeCursor) => parseResume(resumeCursor),
+      },
       interruptTurn,
       respondToRequest,
       respondToUserInput,

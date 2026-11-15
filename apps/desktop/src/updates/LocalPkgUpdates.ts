@@ -350,7 +350,8 @@ export const expandUpdateDirectories = (
           prefixes = prefixes.map((prefix) => NodePath.join(prefix, segment));
           continue;
         }
-        const [head = "", tail = ""] = segment.split("*");
+        // Drive folders can come back in another case or Unicode form than the pattern spells.
+        const [head = "", tail = ""] = segment.normalize("NFC").toLowerCase().split("*");
         const next: Array<string> = [];
         for (const prefix of prefixes) {
           const names = yield* Effect.promise(() =>
@@ -360,10 +361,11 @@ export const expandUpdateDirectories = (
             ),
           );
           for (const name of names) {
+            const comparable = name.normalize("NFC").toLowerCase();
             if (
-              name.length >= head.length + tail.length &&
-              name.startsWith(head) &&
-              name.endsWith(tail)
+              comparable.length >= head.length + tail.length &&
+              comparable.startsWith(head) &&
+              comparable.endsWith(tail)
             ) {
               next.push(NodePath.join(prefix, name));
             }

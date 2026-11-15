@@ -12,6 +12,11 @@ runs:
           https://mirror.math.princeton.edu/pub/ubuntu 3 \
           | sudo tee /etc/apt/blacksmith-ubuntu-mirrors.txt > /dev/null
 
+        # GitHub-hosted runners read apt-mirrors.txt and put azure.archive.ubuntu.com first.
+        if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+          sudo cp /etc/apt/blacksmith-ubuntu-mirrors.txt /etc/apt/apt-mirrors.txt
+        fi
+
         # APT's mirror transport retries each file against the next server.
         sudo find /etc/apt -maxdepth 2 -type f \( -name '*.list' -o -name '*.sources' \) \
           -exec sed -i -E \

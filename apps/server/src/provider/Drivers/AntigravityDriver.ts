@@ -59,6 +59,7 @@ import {
   type ProviderInstance,
 } from "../ProviderDriver.ts";
 import { makeProviderProcessEnvironment } from "../ProviderInstanceEnvironment.ts";
+import { makeAgentInstructionsReader } from "../providerUpdateSettings.ts";
 import { withInstanceIdentity } from "./instanceIdentity.ts";
 import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./AntigravitySkills.ts";
 
@@ -96,6 +97,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       const installation = yield* AntigravityInstallation;
       const loggers = yield* ProviderEventLoggers;
       const modelManifest = yield* ModelManifest.ModelManifest;
+      const serverSettings = yield* ServerSettingsService;
       const settings = { ...config, enabled } satisfies AntigravitySettings;
       const auth: AntigravityAuthConfig = {
         authMethod: settings.authMethod,
@@ -415,6 +417,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
         makeRuntime,
         withProcess: authFlow.withProcess,
         defaultModel,
+        agentInstructions: makeAgentInstructionsReader(serverSettings),
         onSessionStarted: provider.onSessionStarted,
         onConfigOptionsUpdated: provider.onConfigOptionsUpdated,
         onAvailableCommands: provider.onAvailableCommands,

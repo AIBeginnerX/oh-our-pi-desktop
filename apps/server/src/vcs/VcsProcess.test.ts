@@ -23,6 +23,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as VcsProcess from "./VcsProcess.ts";
 
 const encodeExitError = Schema.encodeEffect(Schema.fromJsonString(VcsProcessExitError));
+const isExitError = Schema.is(VcsProcessExitError);
 
 const run = (input: VcsProcess.VcsProcessInput) =>
   Effect.gen(function* () {
@@ -55,6 +56,47 @@ const captureProcessResult = (
   );
 
 describe("VcsProcess.run", () => {
+  it.effect("keeps a failed run whose whole output the caller accepts", () =>
+    Effect.gen(function* () {
+      const runWith = (stdoutTruncated: boolean) =>
+        VcsProcess.make.pipe(
+          Effect.provideService(
+            ProcessRunner.ProcessRunner,
+            ProcessRunner.ProcessRunner.of({
+              run: () =>
+                Effect.succeed({
+                  stdout: "partial answer",
+                  stderr: "failed",
+                  stdoutInvalidUtf8: false,
+                  stderrInvalidUtf8: false,
+                  code: ChildProcessSpawner.ExitCode(1),
+                  timedOut: false,
+                  stdoutTruncated,
+                  stderrTruncated: false,
+                }),
+            }),
+          ),
+          Effect.flatMap((service) =>
+            service.run({
+              ...baseInput,
+              acceptExit: ({ exitCode, stdout }) => exitCode === 1 && stdout === "partial answer",
+            }),
+          ),
+          Effect.exit,
+        );
+
+      const accepted = yield* runWith(false);
+      assert(Exit.isSuccess(accepted));
+      expect(accepted.value.exitCode).toBe(1);
+      expect(accepted.value.stdout).toBe("partial answer");
+
+      // Cut output is never a usable answer, whatever the caller would say about it.
+      const cut = yield* runWith(true);
+      assert(Exit.isFailure(cut));
+      expect(isExitError(Cause.squash(cut.cause))).toBe(true);
+    }),
+  );
+
   it.effect.each([
     { stderr: "fatal: Unable to create '/private/repo/index.lock': File exists", retryable: true },
     {

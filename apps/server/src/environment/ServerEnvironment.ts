@@ -260,7 +260,7 @@ export const make = Effect.gen(function* () {
       // Send support derives from the same ProjectMemorySendPolicy the gate
       // reads: `send` is true and `sendDriverKinds` is emitted only while the
       // allowlist is nonempty. The production server supplies the allowlist
-      // from PROJECT_MEMORY_SEND_DRIVER_KINDS (claudeAgent and codex), so
+      // from PROJECT_MEMORY_SEND_DRIVER_KINDS (every built-in driver), so
       // clients may offer memory references for those drivers only. Layer
       // graphs that do not opt in keep the empty default and emit no list.
       projectMemory: {

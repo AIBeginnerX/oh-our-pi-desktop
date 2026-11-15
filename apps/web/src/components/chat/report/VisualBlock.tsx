@@ -36,7 +36,20 @@ export function VisualBlock(props: {
     () => (isChart && props.complete ? parseChartSpec(props.code) : null),
     [isChart, props.code, props.complete],
   );
-  const flow = useMemo(() => (isChart ? null : parseFlowchart(props.code)), [isChart, props.code]);
+  // While the fence is open only whole lines are drawn, so a half-typed node never pops in and out.
+  // Markdown always ends the code with a newline, so the last line is whole only once another
+  // line has started.
+  const flow = useMemo(
+    () =>
+      isChart
+        ? null
+        : parseFlowchart(
+            props.complete
+              ? props.code
+              : props.code.slice(0, props.code.slice(0, -1).lastIndexOf("\n") + 1),
+          ),
+    [isChart, props.code, props.complete],
+  );
 
   if (chart === null && flow === null) {
     if (props.complete) return <>{props.fallback}</>;

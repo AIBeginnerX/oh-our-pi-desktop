@@ -1258,6 +1258,11 @@ export const StorageCleanupSettings = Schema.Struct({
 });
 export type StorageCleanupSettings = typeof StorageCleanupSettings.Type;
 
+export const AGENT_INSTRUCTIONS_MAX_LENGTH = 8000;
+export const AgentInstructions = TrimmedString.check(
+  Schema.isMaxLength(AGENT_INSTRUCTIONS_MAX_LENGTH),
+);
+
 export const ServerSettings = Schema.Struct({
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
@@ -1494,6 +1499,11 @@ export const ServerSettings = Schema.Struct({
    * goal active, the server sends up to two automatic continuations per user message.
    */
   continueUnfinishedPlans: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * The user's own standing instructions, added to every agent session in this
+   * environment whichever provider runs it. Empty adds nothing.
+   */
+  agentInstructions: AgentInstructions.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1794,6 +1804,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Record(UsageLimitSourceId, Schema.NullOr(UsageLimitSourceConfig)),
   ),
   cursorKeychainUsageEnabled: Schema.optionalKey(Schema.Boolean),
+  agentInstructions: Schema.optionalKey(AgentInstructions),
   /** Each entry replaces one model's rates; `null` restores automatic pricing. */
   usagePriceOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(UsageModelPriceOverride)),

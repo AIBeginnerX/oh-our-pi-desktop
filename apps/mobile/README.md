@@ -1,7 +1,10 @@
 # OOP Mobile
 
 > [!WARNING]
-> OOP Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> This React Native app is not the supported phone surface and gets no new features. The official
+> phone surface is the mobile web a phone opens through the relay (see
+> [`docs/user/install.md`](../../docs/user/install.md)). Build this app from source when you need to
+> work on it.
 
 ## Quickstart
 

@@ -301,6 +301,13 @@ export interface OpenCodeSessionContext {
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
+  /**
+   * Identity of this exact session context, drawn from the shared
+   * `nextOpenCodeSessionGeneration` sequence; a memory-bearing send's
+   * admission binds to it and the publish gate re-checks it. Bumped on a
+   * rollback too, since that swaps the native session id in place.
+   */
+  sessionGeneration: number;
   openCodeSessionId: string;
   readonly relatedSessionIds: Set<string>;
   readonly resolvedRequestIds: Set<string>;

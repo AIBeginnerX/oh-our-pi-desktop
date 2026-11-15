@@ -38,6 +38,20 @@ export function selectOpenCodeAdapter(input: {
         return started;
       }),
     sendTurn: (turn, admission) => ownerOf(turn.threadId).sendTurn(turn, admission),
+    // Memory handoffs follow the adapter that owns the thread: its publish
+    // gate re-checks the same owning adapter at the actual publish, so a
+    // generation bound through the selector can only be satisfied by the
+    // context that would really carry the prompt. Both adapters read the
+    // identical resume cursor shape, so either decoder names the session.
+    ...(v1.memoryAdmission !== undefined && v2.memoryAdmission !== undefined
+      ? {
+          memoryAdmission: {
+            sessionGeneration: (threadId: ThreadId) =>
+              ownerOf(threadId).memoryAdmission?.sessionGeneration(threadId),
+            nativeSessionId: v1.memoryAdmission.nativeSessionId,
+          },
+        }
+      : {}),
     ...(v1Compaction?.type === "native"
       ? {
           compaction: {

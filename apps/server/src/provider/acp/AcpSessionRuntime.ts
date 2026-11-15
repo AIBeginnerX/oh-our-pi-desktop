@@ -238,12 +238,19 @@ export class AcpSessionRuntime extends Context.Service<
     /**
      * Sends a prompt turn to the active session. `options.dispatched` settles once the
      * `session/prompt` RPC is registered as the active prompt, so a caller that forks this
-     * effect knows when a later `cancel` will target this prompt.
+     * effect knows when a later `cancel` will target this prompt. `options.admit` is a
+     * synchronous publish gate run inside the dispatch step — after the semaphores a
+     * prompt waits on are held and the started state is read, before any state mutation
+     * or the RPC fork — so a verdict is judged at the publish point itself; `false` (or
+     * a throw) publishes and mutates nothing and fails the prompt with `AcpRequestError`.
      * @see https://agentclientprotocol.com/protocol/schema#session/prompt
      */
     readonly prompt: (
       payload: Omit<EffectAcpSchema.PromptRequest, "sessionId">,
-      options?: { readonly dispatched?: Deferred.Deferred<void> },
+      options?: {
+        readonly dispatched?: Deferred.Deferred<void>;
+        readonly admit?: () => boolean;
+      },
     ) => Effect.Effect<EffectAcpSchema.PromptResponse, EffectAcpErrors.AcpError>;
     /**
      * Sends a real ACP `session/cancel` notification for the active session.
@@ -1035,6 +1042,25 @@ export const make = (
             promptDispatchSemaphore.withPermit(
               Effect.gen(function* () {
                 const started = yield* getStartedState;
+                // The caller's last-word publish gate: every semaphore this
+                // prompt waits on is held and nothing has been mutated yet,
+                // so the verdict is judged at the publish point itself and a
+                // hold placed while the prompt queued is still seen. A false
+                // verdict or a throw publishes and mutates nothing.
+                const admit = promptOptions?.admit;
+                if (admit !== undefined) {
+                  let admitted = false;
+                  try {
+                    admitted = admit() === true;
+                  } catch {
+                    admitted = false;
+                  }
+                  if (!admitted) {
+                    return yield* EffectAcpErrors.AcpRequestError.invalidRequest(
+                      "The prompt was refused before it was sent.",
+                    );
+                  }
+                }
                 yield* closeActiveAssistantSegment({ queue: eventQueue, assistantSegmentRef });
                 yield* Ref.set(assistantUpdatesOpenRef, true);
                 const requestPayload = {

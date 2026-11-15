@@ -48,10 +48,15 @@ import { isServerShuttingDown } from "../../serverShutdown.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
+  ProviderAdapterSessionClosedError,
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import { acpPermissionOutcome, mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import {
+  acpPermissionOutcome,
+  judgePublishAdmission,
+  mapAcpToAdapterError,
+} from "../acp/AcpAdapterSupport.ts";
 import type * as AcpSessionRuntime from "../acp/AcpSessionRuntime.ts";
 import { acpTurnTokenUsageFromPromptResponses } from "../acp/AcpTurnTokenUsage.ts";
 import {
@@ -81,6 +86,7 @@ import {
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { settlePendingApprovalsAsCancelled } from "./pendingApprovals.ts";
 import {
   discoverCursorSkills,
   hasCursorSkillMention,
@@ -120,6 +126,11 @@ export interface CursorAdapterLiveOptions {
    * the latest snapshot so the closure isn't stale.
    */
   readonly resolveSettings?: Effect.Effect<CursorSettings>;
+  /**
+   * The user's standing instructions from settings, read per turn so a change
+   * applies to the next turn. The driver supplies a fail-safe reader.
+   */
+  readonly agentInstructions?: Effect.Effect<string>;
   readonly onAvailableCommands?: (
     commands: ReadonlyArray<EffectAcpSchema.AvailableCommand>,
     cwd: string,
@@ -142,6 +153,10 @@ interface CursorSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
+  /** Monotonic identity of this context; every recreation consumes the next. */
+  readonly generation: number;
+  /** The ACP session id every prompt of this context publishes on. */
+  readonly acpSessionId: string;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -150,6 +165,15 @@ interface CursorSessionContext {
   /** The runtime note already in this session's conversation; resent only when it changes. */
   sentRuntimeInstructions?: string;
   activeTurnId: TurnId | undefined;
+  /** A fresh memory send's turn before it is admitted: steers join it, but
+   * notifications are not attributed to it until it binds. */
+  preparingTurnId: TurnId | undefined;
+  /** Prompts on `preparingTurnId` that have not bound yet; the turn stops
+   * being joinable once the last one binds or leaves. */
+  preparingPrompts: number;
+  /** A completion withheld while another prompt was still counted; emitted
+   * when the last prompt leaves without completing the turn itself. */
+  pendingCompletion: Extract<ProviderRuntimeEvent, { type: "turn.completed" }> | undefined;
   cursorSkillNames: ReadonlySet<string> | undefined;
   /** Number of sendTurn prompts currently in flight or being prepared.
    * >0 means a turn is actively running, so a new sendTurn is a steer that
@@ -157,19 +181,6 @@ interface CursorSessionContext {
   promptsInFlight: number;
   assistantReply: CursorTransportFailure;
   stopped: boolean;
-}
-
-function settlePendingApprovalsAsCancelled(
-  pendingApprovals: ReadonlyMap<ApprovalRequestId, PendingApproval>,
-): Effect.Effect<void> {
-  const pendingEntries = Array.from(pendingApprovals.values());
-  return Effect.forEach(
-    pendingEntries,
-    (pending) => Deferred.succeed(pending.decision, "cancel").pipe(Effect.ignore),
-    {
-      discard: true,
-    },
-  );
 }
 
 function settlePendingUserInputsAsEmptyAnswers(
@@ -353,6 +364,12 @@ export function makeCursorAdapter(
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory();
 
     const sessions = new Map<ThreadId, CursorSessionContext>();
+    // Every context recreation — a fresh start, a resume, or a replacement of
+    // an open session — consumes the next generation; see
+    // CursorSessionContext.generation. Resume and load reuse the provider's
+    // session id in a new runtime, so the generation is the only identity
+    // that distinguishes the context a memory observation was captured on.
+    let nextSessionGeneration = 0;
     const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
@@ -800,12 +817,17 @@ export function makeCursorAdapter(
             session,
             scope: sessionScope,
             acp,
+            generation: ++nextSessionGeneration,
+            acpSessionId: started.sessionId,
             notificationFiber: undefined,
             pendingApprovals,
             pendingUserInputs,
             turns: [],
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
+            preparingTurnId: undefined,
+            preparingPrompts: 0,
+            pendingCompletion: undefined,
             cursorSkillNames: undefined,
             promptsInFlight: 0,
             assistantReply: new CursorTransportFailure(),
@@ -971,18 +993,28 @@ export function makeCursorAdapter(
         }).pipe(Effect.scoped),
       );
 
-    const sendTurn: CursorAdapterShape["sendTurn"] = (input) =>
+    const sendTurn: CursorAdapterShape["sendTurn"] = (input, admission) =>
       Effect.gen(function* () {
         const ctx = yield* requireSession(input.threadId);
         // A sendTurn while a prompt is in flight is a steer: the agent folds
         // the new prompt into the ongoing work, so the active turn id is
         // reused instead of opening a new turn.
-        const steeringTurnId = ctx.promptsInFlight > 0 ? ctx.activeTurnId : undefined;
+        const steeringTurnId =
+          ctx.promptsInFlight > 0 ? (ctx.preparingTurnId ?? ctx.activeTurnId) : undefined;
         const turnId = steeringTurnId ?? TurnId.make(yield* randomUUIDv4);
         // Count this prompt immediately so a superseded in-flight prompt
         // resolving from here on does not settle the turn; the matching
         // decrement is the `ensuring` below.
         ctx.promptsInFlight += 1;
+        let preparing = false;
+        if (steeringTurnId === undefined && admission !== undefined) {
+          ctx.preparingTurnId = turnId;
+          ctx.preparingPrompts = 1;
+          preparing = true;
+        } else if (steeringTurnId !== undefined && ctx.preparingTurnId === steeringTurnId) {
+          ctx.preparingPrompts += 1;
+          preparing = true;
+        }
 
         return yield* Effect.gen(function* () {
           const turnModelSelection =
@@ -1003,28 +1035,37 @@ export function makeCursorAdapter(
             mapError: ({ cause, method }) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
           });
-          ctx.activeTurnId = turnId;
-          if (steeringTurnId === undefined) {
-            ctx.lastPlanFingerprint = undefined;
-            ctx.assistantReply = new CursorTransportFailure();
-          }
-          ctx.session = {
-            ...ctx.session,
-            status: "running",
-            activeTurnId: turnId,
-            updatedAt: yield* nowIso,
+          const updatedAt = yield* nowIso;
+          const turnStarted = {
+            type: "turn.started",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            turnId,
+            payload: { model: resolvedModel },
+          } satisfies ProviderRuntimeEvent;
+          // Whichever send first makes the turn active announces it, once. A
+          // steer joining a preparing memory send's turn therefore announces
+          // it when the original send is refused and the steer is admitted.
+          const bindTurn = () => {
+            const opensTurn = ctx.activeTurnId !== turnId;
+            if (opensTurn) {
+              ctx.pendingCompletion = undefined;
+              ctx.lastPlanFingerprint = undefined;
+              ctx.assistantReply = new CursorTransportFailure();
+            }
+            ctx.activeTurnId = turnId;
+            if (ctx.preparingTurnId === turnId) ctx.preparingTurnId = undefined;
+            preparing = false;
+            ctx.session = { ...ctx.session, status: "running", activeTurnId: turnId, updatedAt };
+            if (opensTurn) PubSub.publishUnsafe(runtimeEventPubSub, turnStarted);
           };
-
-          if (steeringTurnId === undefined) {
-            yield* offerRuntimeEvent({
-              type: "turn.started",
-              ...(yield* makeEventStamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: { model: resolvedModel },
-            });
-          }
+          // A memory send binds only once admitted, so notifications arriving
+          // while it prepares keep the previous binding. A steer joining such a
+          // preparing turn waits for its own publish point too, and carries the
+          // shared turn forward even if the original send is refused.
+          const bindAtPublish = admission !== undefined || ctx.preparingTurnId === turnId;
+          if (!bindAtPublish) bindTurn();
 
           const promptParts: Array<EffectAcpSchema.ContentBlock> = [];
           const rawPrompt = input.input?.trim() ?? "";
@@ -1100,20 +1141,70 @@ export function makeCursorAdapter(
           // every prompt in the conversation, so the runtime note goes out only when it changes.
           const runtimeInstructions = /^\/[^\s/]+(?:\s|$)/.test(rawPrompt)
             ? undefined
-            : buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel });
+            : buildRuntimeInstructions({
+                harness: "Cursor",
+                model: resolvedModel,
+                projectMemory: true,
+                agentInstructions: options?.agentInstructions
+                  ? yield* options.agentInstructions
+                  : undefined,
+              });
           const freshInstructions =
             runtimeInstructions === ctx.sentRuntimeInstructions ? undefined : runtimeInstructions;
-          if (freshInstructions !== undefined) ctx.sentRuntimeInstructions = freshInstructions;
+
+          // The caller's last-word gate: the ACP runtime runs it synchronously
+          // at its publish point — after the semaphores a prompt waits on are
+          // held — so a send queued behind an in-flight turn is re-judged when
+          // it actually publishes and a hold placed while it waited is still
+          // seen. The context this send resolved on must still be the one open
+          // for the thread — a stop or a concurrent startSession replacement
+          // since resolution refuses outright, so even a permissive gate
+          // cannot publish a stale context's prompt. A refusal (or a throwing
+          // gate) publishes and mutates nothing and fails the send the way
+          // Claude's closed session does. Without a caller admission the gate
+          // still records the runtime note at the publish point and publishes
+          // as before.
+          let refused = false;
           const result = yield* ctx.acp
-            .prompt({
-              prompt: freshInstructions
-                ? [...promptParts, { type: "text", text: freshInstructions }]
-                : promptParts,
-            })
+            .prompt(
+              {
+                prompt: freshInstructions
+                  ? [...promptParts, { type: "text", text: freshInstructions }]
+                  : promptParts,
+              },
+              {
+                admit: () => {
+                  if (
+                    !judgePublishAdmission(admission, {
+                      stale: ctx.stopped || sessions.get(input.threadId) !== ctx,
+                      sessionGeneration: ctx.generation,
+                      nativeSessionId: ctx.acpSessionId,
+                    })
+                  ) {
+                    refused = true;
+                    return false;
+                  }
+                  // The prompt publishes with the note attached, so only now
+                  // does the session remember it; a refused send leaves no
+                  // trace.
+                  if (freshInstructions !== undefined) {
+                    ctx.sentRuntimeInstructions = freshInstructions;
+                  }
+                  if (bindAtPublish) bindTurn();
+                  return true;
+                },
+              },
+            )
             .pipe(
-              Effect.mapError((error) =>
-                mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error),
-              ),
+              Effect.mapError((error) => {
+                if (refused) {
+                  return new ProviderAdapterSessionClosedError({
+                    provider: PROVIDER,
+                    threadId: input.threadId,
+                  });
+                }
+                return mapAcpToAdapterError(PROVIDER, input.threadId, "session/prompt", error);
+              }),
             );
 
           yield* ctx.acp.drainEvents;
@@ -1142,24 +1233,30 @@ export function makeCursorAdapter(
 
           // Only the last remaining prompt settles the turn — a steer-
           // superseded prompt resolving (usually cancelled) while another is
-          // in flight or pending must leave the merged turn running.
+          // in flight or pending must leave the merged turn running. Its
+          // completion is kept so the turn still ends if the remaining prompt
+          // leaves without completing it (a refused steer); see `ensuring`.
+          const tokenUsage = acpTurnTokenUsageFromPromptResponses(
+            ctx.turns.find((turn) => turn.id === turnId)?.items ?? [],
+            { hasSubagents: false, completed: result.stopReason !== "cancelled" },
+          );
+          const completion = {
+            type: "turn.completed",
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: input.threadId,
+            turnId,
+            payload: {
+              state: result.stopReason === "cancelled" ? "cancelled" : "completed",
+              stopReason: result.stopReason ?? null,
+              ...(tokenUsage ? { tokenUsage } : {}),
+            },
+          } satisfies ProviderRuntimeEvent;
           if (ctx.promptsInFlight === 1) {
-            const tokenUsage = acpTurnTokenUsageFromPromptResponses(
-              ctx.turns.find((turn) => turn.id === turnId)?.items ?? [],
-              { hasSubagents: false, completed: result.stopReason !== "cancelled" },
-            );
-            yield* offerRuntimeEvent({
-              type: "turn.completed",
-              ...(yield* makeEventStamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: {
-                state: result.stopReason === "cancelled" ? "cancelled" : "completed",
-                stopReason: result.stopReason ?? null,
-                ...(tokenUsage ? { tokenUsage } : {}),
-              },
-            });
+            ctx.pendingCompletion = undefined;
+            yield* offerRuntimeEvent(completion);
+          } else {
+            ctx.pendingCompletion = completion;
           }
 
           return {
@@ -1177,9 +1274,17 @@ export function makeCursorAdapter(
           ),
           Effect.ensuring(
             Effect.sync(() => {
+              if (preparing && ctx.preparingTurnId === turnId) {
+                ctx.preparingPrompts -= 1;
+                if (ctx.preparingPrompts <= 0) ctx.preparingTurnId = undefined;
+              }
               ctx.promptsInFlight = Math.max(0, ctx.promptsInFlight - 1);
               if (ctx.promptsInFlight === 0 && !isShuttingDown()) {
                 ctx.session = { ...ctx.session, status: "ready" };
+                if (ctx.pendingCompletion) {
+                  PubSub.publishUnsafe(runtimeEventPubSub, ctx.pendingCompletion);
+                  ctx.pendingCompletion = undefined;
+                }
               }
             }),
           ),
@@ -1298,6 +1403,15 @@ export function makeCursorAdapter(
       compaction: { type: "slash-command", command: "/compress" },
       startSession,
       sendTurn,
+      memoryAdmission: {
+        // Reports the identity of the context currently registered for the
+        // thread; a send observes the same values on the context it publishes.
+        sessionGeneration: (threadId) => {
+          const context = sessions.get(threadId);
+          return context !== undefined && !context.stopped ? context.generation : undefined;
+        },
+        nativeSessionId: (resumeCursor) => parseCursorResume(resumeCursor)?.sessionId,
+      },
       interruptTurn,
       readThread,
       rollbackThread,

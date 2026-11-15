@@ -1,6 +1,6 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
-import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
+import { buildRuntimeInstructions, buildUserInstructionsBlock } from "./RuntimeInstructions.ts";
 
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `## OOP collaborative browser
 
@@ -214,8 +214,11 @@ export function buildCodexAdditionalContext(
    * setting, so the prompt cannot claim tools the turn doesn't have.
    */
   toolsAvailable: boolean | T3CodeToolAvailability = true,
+  /** The user's standing instructions from settings; read per turn. */
+  agentInstructions?: string,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> {
   const tools = toolInstructions(toolsAvailable);
+  const userInstructions = buildUserInstructionsBlock(agentInstructions);
   // Separate keys keep each value under Codex's per-entry token cap.
   return {
     t3_code_runtime: {
@@ -223,5 +226,8 @@ export function buildCodexAdditionalContext(
       value: buildRuntimeInstructions({ harness: "Codex", projectMemory: true, ...runtime }),
     },
     ...(tools ? { t3_code_tools: { kind: "application", value: tools } } : {}),
+    ...(userInstructions
+      ? { t3_code_user_instructions: { kind: "application", value: userInstructions } }
+      : {}),
   };
 }
