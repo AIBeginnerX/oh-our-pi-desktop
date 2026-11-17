@@ -42,21 +42,14 @@ The offered action depends on how the server runs:
 | **Update the desktop app** | Update the desktop app on the machine running the server, then reopen it if needed.                                                                                                             |
 | **Copy update command**    | Stop the command-line server on its host and relaunch with the copied command, keeping your usual startup options.                                                                              |
 
-On the host, run:
+For a desktop-hosted server, update the desktop app on the host. macOS and
+Windows update automatically; on Linux, follow [the installation instructions](./install.md#desktop-app).
+For an SSH host, reconnect from the newer desktop app to update its background
+service. See [Running OOP in the background](./background-service.md).
 
-```sh
-t3 update <client-version>
-```
-
-Replace `<client-version>` with the version shown in the notice. The command
-asks before restarting the background service; if you decline, run
-`t3 service restart` when you are ready. For a server you started by hand,
-stop it and start it again afterwards with your usual options such as `--host`
-or `--tailscale-serve`.
-
-If you run the server with `npx` rather than an installed `t3`, there is
-nothing to update on the host: stop the server and relaunch it as
-`npx t3@<client-version>` with the same subcommand and options.
+For the terminal app, run `oop update` and follow its instructions. If you started
+a server by hand, stop it and run `oop server serve` again with your usual options
+such as `--host` or `--tailscale-serve` after updating.
 
 ## If an update fails
 
@@ -65,13 +58,12 @@ update can roll back to the previous version. If the update still fails:
 
 1. Retry the offered action once.
 2. Check that you updated the server's machine, not only the device you are using.
-3. For a command-line server, stop it and relaunch the exact version shown in the notice.
+3. For a command-line server, stop it and update the OOP terminal app and relaunch the server.
 
 ## Mobile updates
 
 To update an environment from your phone, open **Settings → Environments** and
-select it. **Check for updates** finds the latest release on that environment's
-current release channel. Keep the app open while the environment updates and
+select it. **Check for updates** checks for an available update. Keep the app open while the environment updates and
 reconnects. Hosts that cannot update remotely show instructions for updating on
 the machine instead.
 

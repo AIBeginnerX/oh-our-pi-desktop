@@ -21,6 +21,7 @@ import { projectMemory } from "../../state/projectMemory";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
 import { toastManager } from "../ui/toast";
 
 /**
@@ -103,7 +104,12 @@ export function ProjectMemoryProposals({
                 <p className="break-words text-xs text-muted-foreground">Why: {proposal.reason}</p>
               ) : (
                 <>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                    {proposal.analysis?.dreamed === true ? (
+                      <Badge variant="outline" size="sm">
+                        {t("Dreaming")}
+                      </Badge>
+                    ) : null}
                     {view.target === "skill"
                       ? t("A procedure seen in recent work. Save it from the thread's skill draft.")
                       : t(

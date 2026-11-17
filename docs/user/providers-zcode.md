@@ -14,4 +14,4 @@ use ZCode's tools and your ZCode sign-in instead of OpenCode.
 
 ZCode offers one model, **GLM (ZCode)**, which is whichever GLM model ZCode itself has selected.
 To use another GLM model, change it in ZCode. ZCode runs its own tools without asking for
-approval, regardless of the T3 permission mode.
+approval, regardless of the OOP permission mode.

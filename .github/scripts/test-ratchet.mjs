@@ -7,13 +7,19 @@
  *
  *   node .github/scripts/test-ratchet.mjs           # run tests, check the quarantine
  *   node .github/scripts/test-ratchet.mjs --update  # run tests, record the current failures
+ *   node .github/scripts/test-ratchet.mjs --quarantine .github/test-quarantine.linux.json
+ *                                                   # another OS keeps its own known failures
  */
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
 const repoRoot = NodePath.resolve(import.meta.dirname, "..", "..");
-const quarantinePath = NodePath.join(repoRoot, ".github", "test-quarantine.json");
+const quarantineFlag = process.argv.indexOf("--quarantine");
+const quarantinePath =
+  quarantineFlag === -1
+    ? NodePath.join(repoRoot, ".github", "test-quarantine.json")
+    : NodePath.resolve(process.argv[quarantineFlag + 1]);
 const update = process.argv.includes("--update");
 const ansiColor = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 

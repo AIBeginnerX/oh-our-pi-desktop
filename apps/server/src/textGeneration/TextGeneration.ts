@@ -16,6 +16,7 @@ import { TextGenerationError } from "@t3tools/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type { MemoryTidyResult } from "../memory/memoryTidy.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import { buildCommitMessagePrompt, buildPrContentPrompt } from "./TextGenerationPrompts.ts";
 import * as ThreadTitleLinks from "./ThreadTitleLinks.ts";
@@ -95,6 +96,9 @@ export interface WorkLessonsGenerationInput {
   modelSelection: ModelSelection;
 }
 
+export type MemoryTidyGenerationInput = WorkLessonsGenerationInput;
+export type MemoryTidyGenerationResult = MemoryTidyResult;
+
 export interface WorkLessonsGenerationResult {
   lessons: ReadonlyArray<{
     category: "fact" | "prohibition" | "preference" | "procedure";
@@ -136,6 +140,10 @@ export class TextGeneration extends Context.Service<
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
 
+    /** Suggest merges, fixes, and deletions for a project's saved memories. */
+    readonly generateMemoryTidy: (
+      input: MemoryTidyGenerationInput,
+    ) => Effect.Effect<MemoryTidyGenerationResult, TextGenerationError>;
     /** Propose reusable lessons from structured digests of recent work. */
     readonly generateWorkLessons: (
       input: WorkLessonsGenerationInput,
@@ -148,7 +156,8 @@ type TextGenerationOp =
   | "generatePrContent"
   | "generateBranchName"
   | "generateThreadTitle"
-  | "generateWorkLessons";
+  | "generateWorkLessons"
+  | "generateMemoryTidy";
 
 // ---------------------------------------------------------------------------
 // Generation cache
@@ -322,6 +331,10 @@ export const make = Effect.gen(function* () {
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
         ),
+      ),
+    generateMemoryTidy: (input) =>
+      resolveInstance(registry, "generateMemoryTidy", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.generateMemoryTidy(input)),
       ),
     generateWorkLessons: (input) =>
       resolveInstance(registry, "generateWorkLessons", input.modelSelection.instanceId).pipe(

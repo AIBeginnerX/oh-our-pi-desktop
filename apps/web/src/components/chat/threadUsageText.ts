@@ -12,6 +12,9 @@ export function formatThreadUsageFooter(
 ): string {
   const parts: string[] = [];
   if (summary?.status === "ok") {
+    // Only a server that answered for one turn says "this turn": a summary
+    // without the scope marker is a whole-chat total from an older server.
+    if (summary.scope === "turn") parts.push(t("This turn"));
     if (summary.totals.cacheRate !== null)
       parts.push(t("Cache {rate}", { rate: formatPercent(summary.totals.cacheRate) }));
   }

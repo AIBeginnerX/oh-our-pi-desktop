@@ -1,9 +1,7 @@
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Terminal from "effect/Terminal";
-import { Command, Flag, GlobalFlag, Prompt } from "effect/unstable/cli";
+import { Command, Flag, GlobalFlag } from "effect/unstable/cli";
 import { FetchHttpClient } from "effect/unstable/http";
 
 import * as BootService from "../cloud/bootService.ts";
@@ -71,7 +69,7 @@ export function formatServiceStatus(
     return "OOP service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd, macOS with launchd";
   }
   if (!status.installed) {
-    return "OOP service\n  Status: not installed\n  Next: Run `t3 service install`.";
+    return "OOP service\n  Status: not installed\n  Next: Connect to this machine from the OOP desktop app (Settings -> Connections -> SSH); it installs the service.";
   }
   const installedVersion = status.installedVersion ?? cliVersion;
   const problems = (status.problems ?? []).map(
@@ -88,7 +86,7 @@ export function formatServiceStatus(
       `  Unit: ${status.unitPath}`,
       `  Logs: ${status.logPath}`,
       ...problems,
-      `  Next: Run \`t3 update ${installedVersion}\` to match it, or pass \`--allow-downgrade\` to \`t3 service install\` explicitly.`,
+      "  Next: Update OOP to match it: the desktop app updates itself, and the terminal app uses `oop update`.",
     ].join("\n");
   }
   return [
@@ -97,7 +95,11 @@ export function formatServiceStatus(
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
     ...problems,
-    ...(status.current ? [] : ["  Next: Run `t3 service install` to repair it."]),
+    ...(status.current
+      ? []
+      : [
+          "  Next: Connect to this machine from the OOP desktop app again (Settings -> Connections -> SSH).",
+        ]),
   ].join("\n");
 }
 
@@ -140,7 +142,9 @@ const serviceInstallCommand = Command.make("install", serviceReconcileFlags).pip
 // Kept one release for muscle memory and old docs. It did what `t3 service
 // install` does; the way to move to a newer release is `t3 update`.
 const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
-  Command.withDescription("Deprecated. Run `t3 update` to move to a newer release."),
+  Command.withDescription(
+    "Unavailable through OOP: the desktop app installs the service over SSH.",
+  ),
   Command.unlisted,
   Command.withHandler((flags) =>
     runServiceCommand(
@@ -163,9 +167,7 @@ const serviceUpdateCommand = Command.make("update", serviceReconcileFlags).pipe(
 );
 
 const serviceRestartCommand = Command.make("restart", projectLocationFlags).pipe(
-  Command.withDescription(
-    "Restart the background service. Picks up a version installed by `t3 update` that was not restarted at the time.",
-  ),
+  Command.withDescription("Restart the installed background service."),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
@@ -209,79 +211,6 @@ const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
     ),
   ),
 );
-
-export const offerServiceDuringOnboarding = Effect.gen(function* () {
-  const service = yield* BootService.BootService;
-  const status = yield* service.status;
-  const { supported, installed, current } = status;
-  if (!supported) {
-    return false;
-  }
-  if (installed && current) {
-    yield* Console.log("OOP is already set up to run in the background on this machine.");
-    return true;
-  }
-  for (const problem of status.problems ?? []) {
-    yield* Console.warn(`[${problem}] ${BootService.formatBootServiceProblem(problem)}`);
-  }
-  if (
-    installed &&
-    status.installedVersion !== undefined &&
-    compareExactServiceVersions(status.installedVersion, CLI_VERSION) > 0
-  ) {
-    yield* Console.log(
-      `A newer t3@${status.installedVersion} background service is installed. Leaving it unchanged.`,
-    );
-    // This CLI cannot verify the newer service. Keep the manual fallback available.
-    return false;
-  }
-  // A LaunchAgent starts at login and dies at logout; there is no
-  // enable-linger equivalent on macOS. Do not promise more than that.
-  const platform = yield* HostProcessPlatform;
-  const wanted = yield* Prompt.run(
-    Prompt.Confirm({
-      message: installed
-        ? "The installed OOP service needs an update or repair. Update it now?"
-        : platform === "darwin"
-          ? "Run OOP in the background whenever you log in to this Mac? " +
-            "It stays reachable through OOP Connect while you are logged in."
-          : "Run OOP in the background whenever this machine boots? " +
-            "It stays reachable through OOP Connect even after you log out.",
-      initial: true,
-    }),
-  );
-  if (!wanted) {
-    return false;
-  }
-  const result = yield* reconcileService();
-  if (result.changed) {
-    yield* Console.log(
-      `Background service ${result.previouslyInstalled ? "updated" : "installed"}. Logs: ${result.plan.logPath}`,
-    );
-  }
-  return true;
-});
-
-export const recoverServiceOnboardingOffer = <R>(
-  offer: Effect.Effect<boolean, BootService.BootServiceError | Terminal.QuitError, R>,
-) =>
-  offer.pipe(
-    Effect.catchTags({
-      QuitError: () => Effect.succeed(false),
-      BootServiceUnsupportedError: (error) =>
-        Console.log(`Skipping background setup: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceCommandError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceInstallError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-      BootServicePrerequisiteError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceUpdatePendingError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-      BootServiceDowngradeRefusedError: (error) =>
-        Console.warn(`Background setup did not finish: ${error.message}`).pipe(Effect.as(false)),
-    }),
-  );
 
 export const serviceCommand = Command.make("service").pipe(
   Command.withDescription("Manage the OOP background service."),

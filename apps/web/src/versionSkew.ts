@@ -114,9 +114,9 @@ export function supportsServerUpdateThreadContinuation(
   return serverConfig?.environment.capabilities.serverUpdateThreadContinuation === true;
 }
 
-/** The command to hand users whose server cannot update itself. */
-export function manualServerUpdateCommand(targetVersion: string): string {
-  return `npx t3@${targetVersion}`;
+/** The command to hand users whose server cannot update itself: the OOP terminal app's update. */
+export function manualServerUpdateCommand(): string {
+  return "oop update";
 }
 
 export function serverUpdateGuidance(capability: ServerSelfUpdateCapability): string {

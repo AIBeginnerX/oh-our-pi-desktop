@@ -21,13 +21,13 @@ browser.
 You can add more computers before continuing:
 
 - **OOP Connect** connects computers that are signed in to your account.
-  [Install the CLI](./install.md#command-line) and run `t3 connect` on each
-  computer you want to add, then start OOP or run `t3 serve` so the
+  [Install the CLI](./install.md) and run `oop server connect` on each
+  computer you want to add, then start OOP or run `oop server serve` so the
   computer stays available.
 - **Add a computer** connects directly to a server on your network or tailnet.
-  Start the server with `t3 serve`, then run `t3 pair --tailscale` and paste
-  the pairing link. You can also run `t3 serve --host <address>` and use
-  `t3 pair` when the server is already reachable on your network.
+  Start the server with `oop server serve`, then run `oop server pair --tailscale` and paste
+  the pairing link. You can also run `oop server serve --host <address>` and use
+  `oop server pair` when the server is already reachable on your network.
 
 Saved computers and computers discovered through OOP Connect are selected by
 default. Uncheck any you do not want to set up; this does not disconnect them.

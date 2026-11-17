@@ -133,6 +133,13 @@ works. A proposal is not saved: it appears under **Proposed memories** in the pr
 with the agent's reason, and becomes a normal memory only when you select **Approve**. **Reject**
 deletes it.
 
+**Dreaming** automates this. Once a day at the hour you pick in Settings → General, OOP runs the
+work analyser for every project and files what it finds as suggestions under **Proposed memories**,
+where they wait for your approval. Dreaming needs the work analyser turned on, the hour is the
+server's local time, and an hour the computer is asleep or off at is skipped.
+
+**Memory tidy-up**, enabled in Settings → General with the work analyser on, suggests merging duplicate memories, updating contradictions and deleting outdated memories during manual analysis or Dreaming. It sends saved project memory titles and text to the text-generation model, excluding memories that look like secrets, and uses only models whose provider already receives project memory in chats. Suggestions wait for you to select **Apply**.
+
 ## Quote an assistant response
 
 On web and desktop, select text within one assistant response and choose

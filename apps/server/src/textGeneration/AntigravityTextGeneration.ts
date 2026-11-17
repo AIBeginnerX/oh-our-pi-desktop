@@ -27,6 +27,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -417,11 +418,23 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       });
     });
 
+  const generateMemoryTidy: TextGeneration.TextGeneration["Service"]["generateMemoryTidy"] =
+    Effect.fn("AntigravityTextGeneration.generateMemoryTidy")(function* (input) {
+      const { prompt, outputSchema } = buildMemoryTidyPrompt({ digest: input.digest });
+      return yield* runAntigravityJson({
+        operation: "generateMemoryTidy",
+        prompt,
+        outputSchema: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkLessons,
+    generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

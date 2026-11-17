@@ -54,6 +54,7 @@ import {
   resolvePrimaryOperateAccess,
   resolveRemoteOperateAccess,
 } from "./ProviderSettingsPanel.logic";
+import { ProjectMemoryTidies } from "./ProjectMemoryTidies";
 import { ProjectMemoryProposals } from "./ProjectMemoryProposals";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 
@@ -734,6 +735,7 @@ export function ProjectMemorySection({
     <ProjectMemorySectionInner
       environmentId={environmentId}
       projectId={projectId}
+      showTidies={memoryCapability.tidy === true}
       showProposals={memoryCapability.proposals === true}
       analyser={projectMemoryAnalyserState(config)}
     />
@@ -767,14 +769,19 @@ function ProjectMemoryAnalyserRow({
     try {
       const result = await analyse({ environmentId, input: { projectId } });
       if (result._tag === "Success") {
-        const { memoriesProposed, skillsSuggested } = result.value;
+        const { memoriesProposed, skillsSuggested, tidiesSuggested } = result.value;
         const found = memoriesProposed + skillsSuggested;
         toastManager.add({
           type: "success",
           title:
-            found === 0
-              ? t("Nothing new to suggest")
-              : t("{count} suggestion(s) added for review", { count: found }),
+            (tidiesSuggested ?? 0) > 0
+              ? t("{count} suggestion(s) and {tidies} tidy-up(s) added for review", {
+                  count: found,
+                  tidies: tidiesSuggested ?? 0,
+                })
+              : found === 0
+                ? t("Nothing new to suggest")
+                : t("{count} suggestion(s) added for review", { count: found }),
         });
         return;
       }
@@ -815,12 +822,14 @@ function ProjectMemorySectionInner({
   environmentId,
   projectId,
   showProposals,
+  showTidies,
   analyser,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   /** Older servers do not serve the proposal RPCs. */
   readonly showProposals: boolean;
+  readonly showTidies: boolean;
   /** Whether the work analyser is served, and if so whether the user turned it on. */
   readonly analyser: ReturnType<typeof projectMemoryAnalyserState>;
 }) {
@@ -887,6 +896,14 @@ function ProjectMemorySectionInner({
         {writeLock !== null ? <p className="text-xs text-muted-foreground">{writeLock}</p> : null}
         {showProposals ? (
           <ProjectMemoryProposals
+            environmentId={environmentId}
+            projectId={projectId}
+            writeLock={writeLock}
+          />
+        ) : null}
+        {showTidies ? (
+          <ProjectMemoryTidies
+            key={JSON.stringify([environmentId, projectId])}
             environmentId={environmentId}
             projectId={projectId}
             writeLock={writeLock}

@@ -12,6 +12,8 @@ import {
   clipCrewReport,
   clipLeadReport,
   crewFailureKind,
+  crewFallbackNote,
+  crewFallbackReason,
   crewLimitWindowName,
   crewReportStatus,
   followUpRound,
@@ -357,6 +359,42 @@ describe("crew fallback", () => {
     expect(report).toContain("do this task yourself");
     expect(report).toContain("- GLM-5.3 Flash (OpenCode): Insufficient balance");
     expect(report).toContain("- Haiku (Claude): failed");
+  });
+
+  it("reads a switch as a fallback, without the word failed and without the raw error", () => {
+    const error =
+      "Error: ZCode turn failed: 1310 [1310][Weekly/Monthly Limit Exhausted ...] (Turn execution failed) at decodeJsonError (file:///srv/index.ts:12:9)";
+    const note = crewFallbackNote({
+      from: "GLM-5.3 (ZCode)",
+      to: "GPT-6.1-Sol",
+      error,
+    });
+    expect(note).toBe("Fell back from GLM-5.3 (ZCode) to GPT-6.1-Sol (usage limit reached).");
+    expect(note.toLowerCase()).not.toContain("failed");
+    expect(note).not.toContain("Exhausted");
+    expect(note).not.toContain("decodeJsonError");
+  });
+
+  it("gives no reason it cannot classify plainly", () => {
+    expect(crewFallbackReason("Error: connection reset by peer")).toBeNull();
+    expect(crewFallbackReason(undefined)).toBeNull();
+    expect(crewFallbackReason("Weekly quota reached for this workspace.")).toBe(
+      "usage limit reached",
+    );
+    const note = crewFallbackNote({ from: "Haiku (Claude)", to: "GPT-5.4 mini (Codex)" });
+    expect(note).toBe("Fell back from Haiku (Claude) to GPT-5.4 mini (Codex).");
+  });
+
+  it("keeps the skip notes and the memory note on a switch", () => {
+    const note = crewFallbackNote({
+      from: "GLM-5.3 (ZCode)",
+      to: "GPT-6.1-Sol",
+      skips: ["model refused again", "Opus (Claude) is cooling until its weekly limit resets"],
+      memoryHeld: true,
+    });
+    expect(note).toBe(
+      "Fell back from GLM-5.3 (ZCode) to GPT-6.1-Sol. model refused again; Opus (Claude) is cooling until its weekly limit resets. Project memory is not sent to this model.",
+    );
   });
 });
 

@@ -1,3 +1,11 @@
+import * as Schema from "effect/Schema";
+import type {
+  ProjectMemoryTidyListInput,
+  ProjectMemoryTidyListResult,
+  ProjectMemoryTidyDecisionInput,
+  ProjectMemoryTidySuggestion,
+} from "@t3tools/contracts";
+import { tidyStore, type TidyRecord } from "./tidyStore.ts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -77,10 +85,12 @@ export interface ProjectMemoryProposeDerivedInput {
   readonly text: string;
   readonly evidence: ReadonlyArray<ProjectMemoryEvidence>;
   /**
-   * The evidence was picked because the lesson names its check. A stand-in signal
+   * The evidence was picked because the lesson named its check. A stand-in signal
    * (the thread's first) is shared by unrelated lessons, so it is not an identity.
    */
   readonly evidenceNamed: boolean;
+  /** Filed by the scheduled dreaming run rather than the Analyse action. */
+  readonly dreamed?: boolean;
 }
 
 /** Why a derived suggestion was not added. Values, not errors: the analyser just moves on. */
@@ -162,6 +172,15 @@ export class ProjectMemoryService extends Context.Service<
     readonly proposeDerived: (
       input: ProjectMemoryProposeDerivedInput,
     ) => Effect.Effect<ProjectMemoryProposeDerivedOutcome, ProjectMemoryStoreError>;
+    readonly listTidy: (
+      input: ProjectMemoryTidyListInput,
+    ) => Effect.Effect<ProjectMemoryTidyListResult, ProjectMemoryStoreError>;
+    readonly applyTidy: (
+      input: ProjectMemoryTidyDecisionInput,
+    ) => Effect.Effect<void, ProjectMemoryRejectedError | ProjectMemoryStoreError>;
+    readonly dismissTidy: (
+      input: ProjectMemoryTidyDecisionInput,
+    ) => Effect.Effect<void, ProjectMemoryRejectedError | ProjectMemoryStoreError>;
     readonly listProposals: (
       input: ProjectMemoryProposalListInput,
     ) => Effect.Effect<ProjectMemoryProposalListResult, ProjectMemoryStoreError>;
@@ -368,7 +387,7 @@ export const make = Effect.gen(function* () {
       }
     }).pipe(Effect.mapError(passThroughOrStore(isRejectedOrStore)));
 
-  const update: ProjectMemoryService["Service"]["update"] = (input) =>
+  const updateMemory = (input: ProjectMemoryUpdateInput, fenced = true) =>
     Effect.gen(function* () {
       const existing = yield* repository.getById(input).pipe(
         Effect.flatMap(
@@ -398,7 +417,9 @@ export const make = Effect.gen(function* () {
       }
       // Fenced: the epoch/inflight pair stays held until the repository's
       // outer transaction actually commits or rolls back.
-      const outcome = yield* ledger.withMemoryMutation(
+      const outcome = yield* (
+        fenced ? ledger.withMemoryMutation : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+      )(
         repository.update({
           projectId: input.projectId,
           memoryId: input.memoryId,
@@ -431,9 +452,11 @@ export const make = Effect.gen(function* () {
       }
     }).pipe(Effect.mapError(passThroughOrStore(isWriteError)));
 
-  const deleteMemory: ProjectMemoryService["Service"]["delete"] = (input) =>
+  const deleteMemoryInternal = (input: ProjectMemoryDeleteInput, fenced = true) =>
     Effect.gen(function* () {
-      const outcome = yield* ledger.withMemoryMutation(repository.delete(input));
+      const outcome = yield* (
+        fenced ? ledger.withMemoryMutation : <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
+      )(repository.delete(input));
       switch (outcome.status) {
         case "applied":
           return;
@@ -450,6 +473,10 @@ export const make = Effect.gen(function* () {
           });
       }
     }).pipe(Effect.mapError(passThroughOrStore(isDeleteError)));
+
+  const update: ProjectMemoryService["Service"]["update"] = (input) => updateMemory(input);
+  const deleteMemory: ProjectMemoryService["Service"]["delete"] = (input) =>
+    deleteMemoryInternal(input);
 
   const propose: ProjectMemoryService["Service"]["propose"] = (input) =>
     Effect.gen(function* () {
@@ -563,6 +590,7 @@ export const make = Effect.gen(function* () {
           evidence: input.evidence,
           evidenceNamed: input.evidenceNamed,
           relatedMemoryIds,
+          ...(input.dreamed === true ? { dreamed: true } : {}),
         },
       });
       switch (outcome.status) {
@@ -820,6 +848,131 @@ export const make = Effect.gen(function* () {
         }),
       );
 
+  const tidies = tidyStore(sql);
+  const currentTidyMemories = (row: TidyRecord) =>
+    Effect.gen(function* () {
+      const records: Array<ProjectMemory> = [];
+      for (const ref of row.memories) {
+        const current = yield* repository.getById({
+          projectId: row.projectId,
+          memoryId: ref.memoryId,
+        });
+        if (Option.isNone(current) || current.value.version !== ref.version) return null;
+        records.push(current.value);
+      }
+      return records;
+    });
+  const listTidy: ProjectMemoryService["Service"]["listTidy"] = ({ projectId }) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const items: Array<ProjectMemoryTidySuggestion> = [];
+          for (const row of yield* tidies.list(projectId)) {
+            const records = yield* currentTidyMemories(row);
+            if (records === null) {
+              yield* tidies.remove(projectId, row.tidyId);
+              continue;
+            }
+            items.push({
+              tidyId: row.tidyId,
+              projectId,
+              action: row.action,
+              reason: row.reason,
+              createdAt: row.createdAt,
+              dreamed: row.dreamed,
+              ...(row.title === null ? {} : { title: row.title }),
+              ...(row.body === null ? {} : { body: row.body }),
+              memories: records.map(({ memoryId, version, title, body }) => ({
+                memoryId,
+                version,
+                title,
+                body,
+              })),
+            });
+          }
+          return { items };
+        }),
+      )
+      .pipe(
+        Effect.mapError(
+          () => new ProjectMemoryStoreError({ message: "Project memory operation failed." }),
+        ),
+      );
+  const applyTidy: ProjectMemoryService["Service"]["applyTidy"] = (input) =>
+    ledger
+      .withMemoryMutation(
+        sql.withTransaction(
+          Effect.gen(function* () {
+            const row = (yield* tidies.list(input.projectId)).find(
+              (r) => r.tidyId === input.tidyId,
+            );
+            if (!row) return "proposal-missing" as const;
+            const records = yield* currentTidyMemories(row);
+            if (records === null) {
+              yield* tidies.remove(input.projectId, input.tidyId);
+              return "tidy-stale" as const;
+            }
+            const first = records[0]!;
+            if (row.action !== "delete") {
+              const validUntil =
+                row.action === "merge"
+                  ? records.some((m) => m.validUntil === null)
+                    ? null
+                    : records
+                        .map((m) => m.validUntil!)
+                        .sort()
+                        .at(-1)!
+                  : first.validUntil;
+              yield* updateMemory(
+                {
+                  projectId: input.projectId,
+                  memoryId: first.memoryId,
+                  expectedVersion: first.version,
+                  title: row.title!,
+                  body: row.body!,
+                  validUntil,
+                },
+                false,
+              );
+            }
+            for (const record of row.action === "delete" ? records : records.slice(1)) {
+              yield* deleteMemoryInternal(
+                {
+                  projectId: input.projectId,
+                  memoryId: record.memoryId,
+                  expectedVersion: record.version,
+                },
+                false,
+              );
+            }
+            yield* tidies.remove(input.projectId, input.tidyId);
+            return null;
+          }),
+        ),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          Schema.is(ProjectMemoryRejectedError)(error) ? error : toStoreError(),
+        ),
+        Effect.flatMap((reason) =>
+          reason === null ? Effect.void : Effect.fail(new ProjectMemoryRejectedError({ reason })),
+        ),
+      );
+  const dismissTidy: ProjectMemoryService["Service"]["dismissTidy"] = (input) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const row = (yield* tidies.list(input.projectId)).find((r) => r.tidyId === input.tidyId);
+          if (!row) return yield* new ProjectMemoryRejectedError({ reason: "proposal-missing" });
+          yield* tidies.remove(input.projectId, input.tidyId);
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) =>
+          Schema.is(ProjectMemoryRejectedError)(error) ? error : toStoreError(),
+        ),
+      );
+
   return {
     list,
     search,
@@ -829,6 +982,9 @@ export const make = Effect.gen(function* () {
     delete: deleteMemory,
     propose,
     proposeDerived,
+    listTidy,
+    applyTidy,
+    dismissTidy,
     listProposals,
     approveProposal,
     rejectProposal,

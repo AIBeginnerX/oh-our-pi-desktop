@@ -78,6 +78,9 @@ const SETTINGS_MUTATION_UI_ONLY_KEYS: ReadonlySet<keyof ServerSettings> = new Se
   "enableProviderUpdateChecks",
   "autoSelectProjectMemories",
   "projectMemoryAnalyser",
+  "projectMemoryDreaming",
+  "projectMemoryTidy",
+  "projectMemoryDreamingHour",
   "continueUnfinishedPlans",
 ]);
 

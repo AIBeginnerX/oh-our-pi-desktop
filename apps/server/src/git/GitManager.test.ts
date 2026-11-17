@@ -311,6 +311,7 @@ function createTextGeneration(
         title: "Update workflow",
       }),
     generateWorkLessons: () => Effect.succeed({ lessons: [] }),
+    generateMemoryTidy: () => Effect.succeed({ suggestions: [] }),
     ...overrides,
   };
 
@@ -360,6 +361,7 @@ function createTextGeneration(
         ),
       ),
     generateWorkLessons: () => Effect.die("unused generateWorkLessons"),
+    generateMemoryTidy: () => Effect.die("unused generateMemoryTidy"),
   };
 }
 

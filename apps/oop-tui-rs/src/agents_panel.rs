@@ -96,11 +96,23 @@ pub fn lines(
     for (kind, n, style) in [
         ("completed", c.done, ctx.dim()),
         ("failed", c.failed, ctx.error()),
-        ("stopped", c.stopped, ctx.dim()),
     ] {
         if n > 0 {
             pieces.push((count_word(kind, n), style));
         }
+    }
+    if c.unfinished > 0 {
+        // Handed back partway: work left for the lead, not a failure.
+        pieces.push((
+            fill(
+                s("{count} not finished", "{count}개 미완료"),
+                &[("count", c.unfinished.to_string())],
+            ),
+            ctx.warning(),
+        ));
+    }
+    if c.stopped > 0 {
+        pieces.push((count_word("stopped", c.stopped), ctx.dim()));
     }
     if c.tokens > 0 {
         let text = fill(
@@ -270,6 +282,7 @@ struct Counts {
     idle: usize,
     done: usize,
     failed: usize,
+    unfinished: usize,
     stopped: usize,
     tokens: u64,
 }
@@ -305,7 +318,9 @@ fn phase_mark(phase: CrewPhase) -> NodeState {
     match phase {
         CrewPhase::Running => NodeState::Running,
         CrewPhase::Completed => NodeState::Completed,
-        CrewPhase::Partial | CrewPhase::Blocked | CrewPhase::Failed => NodeState::Failed,
+        // Handed back to the lead to carry on, not a failure: drawn as stopped partway.
+        CrewPhase::Partial | CrewPhase::Blocked => NodeState::Paused,
+        CrewPhase::Failed => NodeState::Failed,
         CrewPhase::Stopped => NodeState::Cancelled,
     }
 }
@@ -670,10 +685,10 @@ fn group_of(group: &Group) -> GroupData {
     }
 }
 
-/// How the agents ended, so a failure never hides inside a total. A crew task the board has settled
-/// is counted by how the board says it ended (a `partial` or `blocked` one is a failure, not a
-/// success), whatever the roster still says and whether or not its row is shown; its agent is left
-/// out of the roster's own counts, so it is counted once.
+/// How the agents ended, so a failure never hides inside a total. A crew task the board has
+/// settled is counted by how the board says it ended — a `partial` or `blocked` one was handed
+/// back, so it is "not finished", not failed — whatever the roster still says and whether or not
+/// its row is shown; its agent is left out of the roster's own counts, so it is counted once.
 fn counts_of(model: &PanelModel, settled: &[&CrewTask]) -> Counts {
     // A workflow with members is a container for them, as in the model's own counts.
     let agents: Vec<&Subagent> = model
@@ -706,8 +721,8 @@ fn counts_of(model: &PanelModel, settled: &[&CrewTask]) -> Counts {
                 .count(),
         ),
         done: count(&[AgentStatus::Completed]) + ended(&[CrewPhase::Completed]),
-        failed: count(&[AgentStatus::Failed])
-            + ended(&[CrewPhase::Partial, CrewPhase::Blocked, CrewPhase::Failed]),
+        failed: count(&[AgentStatus::Failed]) + ended(&[CrewPhase::Failed]),
+        unfinished: ended(&[CrewPhase::Partial, CrewPhase::Blocked]),
         stopped: count(&[AgentStatus::Cancelled, AgentStatus::Interrupted])
             + ended(&[CrewPhase::Stopped]),
         tokens: model.total_tokens,
@@ -1219,6 +1234,94 @@ mod tests {
             .find(|s| s.content.contains('✗'))
             .expect("failed mark");
         assert_eq!(mark.style.fg, Some(LAVENDER.error));
+    }
+
+    #[test]
+    fn a_task_that_fell_back_reads_as_a_switch_still_in_progress() {
+        let thread = scenes::thread(
+            vec![
+                scenes::crew(
+                    "task.started",
+                    3,
+                    "w1",
+                    "worker",
+                    json!({"title": "Fix the parser", "model": "GLM-5.3"}),
+                ),
+                scenes::crew(
+                    "task.progress",
+                    8,
+                    "w1",
+                    "worker",
+                    json!({
+                        "status": "running",
+                        "model": "sonnet-5-5",
+                        "summary": "Fell back from GLM-5.3 (ZCode) to Sonnet 5.5 (usage limit reached).",
+                    }),
+                ),
+            ],
+            true,
+        );
+        let text = render(&input(&thread, &[], 45), 100, 60);
+        assert!(has(&text, "In progress"), "{text:?}");
+        assert!(
+            has(&text, "Fell back from GLM-5.3 (ZCode) to Sonnet 5.5"),
+            "{text:?}"
+        );
+        assert!(
+            !text
+                .iter()
+                .any(|line| line.to_lowercase().contains("failed")),
+            "{text:?}"
+        );
+    }
+
+    #[test]
+    fn a_task_handed_back_counts_as_not_finished_not_failed() {
+        let thread = scenes::thread(
+            vec![
+                scenes::crew(
+                    "task.started",
+                    3,
+                    "w1",
+                    "worker",
+                    json!({"title": "Build it"}),
+                ),
+                scenes::crew(
+                    "task.completed",
+                    8,
+                    "w1",
+                    "worker",
+                    json!({"title": "Build it", "status": "partial", "summary": "Half of it"}),
+                ),
+                scenes::crew(
+                    "task.started",
+                    4,
+                    "w2",
+                    "worker",
+                    json!({"title": "Test it"}),
+                ),
+                scenes::crew(
+                    "task.completed",
+                    9,
+                    "w2",
+                    "worker",
+                    json!({"title": "Test it", "status": "completed", "summary": "All green"}),
+                ),
+            ],
+            false,
+        );
+        let view = input(&thread, &[], 45);
+        let rendered = lines(&view, 100, 60, &LAVENDER, &UNICODE);
+        let text = plain(&rendered);
+        assert!(has(&text, "1 not finished"), "{text:?}");
+        assert!(!has(&text, "failed"), "{text:?}");
+        // Work left for the lead is a warning, not the error colour.
+        let span = rendered
+            .iter()
+            .flat_map(|l| l.spans.iter())
+            .find(|s| s.content.contains("not finished"))
+            .expect("not finished span");
+        assert_eq!(span.style.fg, Some(LAVENDER.warning));
     }
 
     #[test]

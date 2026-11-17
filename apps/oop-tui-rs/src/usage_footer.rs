@@ -1,12 +1,14 @@
-//! The thread usage footer: one dim line under the conversation saying what the thread has used, the
-//! same line the web chat shows (`formatThreadUsageFooter` in
+//! The thread usage footer: one dim line under the conversation saying what the latest turn used,
+//! the same line the web chat shows (`formatThreadUsageFooter` in
 //! apps/web/src/components/chat/threadUsageText.ts). The cache rate and the per-model costs come
-//! from the server's `thread.usageSummary`; the context part comes from the thread's own latest
-//! `context-window.updated` activity, so it needs no request.
+//! from the server's `thread.usageSummary`, asked for the thread's latest turn; the context part
+//! comes from the thread's own latest `context-window.updated` activity, so it needs no request.
 //!
 //! The summary is asked for when a thread opens and again when a turn settles, never while a turn
 //! runs (the numbers would be half a turn old). A server from before the method answers with a
-//! failure; the line is then simply left out, with nothing said about it.
+//! failure; the line is then simply left out, with nothing said about it. An answer that names no
+//! scope is a whole-thread total from a server older than turn scoping: the line then shows it
+//! without the "this turn" label rather than passing a chat total off as one turn's usage.
 //!
 //! `footer` and `context` are pure; the rest fetches, holds the answer and draws it.
 
@@ -44,6 +46,9 @@ pub struct Model {
 pub struct Summary {
     /// `ok`, or `too-large` when the thread is bigger than the server will total up.
     pub status: String,
+    /// `Some("turn")` when the numbers describe the asked-for turn. `None` is
+    /// what an older server answers with, for the whole thread.
+    pub scope: Option<String>,
     /// The share of input tokens that came from the cache, 0..1; `None` when nothing reported it.
     pub cache_rate: Option<f64>,
     pub models: Vec<Model>,
@@ -62,6 +67,7 @@ pub fn parse(value: &Value) -> Option<Summary> {
     }
     Some(Summary {
         status: value["status"].as_str().unwrap_or("ok").to_string(),
+        scope: value["scope"].as_str().map(str::to_string),
         cache_rate: value["totals"]["cacheRate"]
             .as_f64()
             .filter(|rate| rate.is_finite()),
@@ -103,11 +109,15 @@ pub fn context(thread: &Thread) -> Option<(f64, Option<f64>)> {
     Some((used, max))
 }
 
-/// The line, as the web chat has it: cache rate, context, then one part per model, joined by ` · `.
+/// The line, as the web chat has it: "this turn" when the server answered for
+/// one, then cache rate, context, and one part per model, joined by ` · `.
 /// Korean or English comes from the caller so the tests do not depend on the running language.
 pub fn footer(summary: Option<&Summary>, context: Option<(f64, Option<f64>)>, ko: bool) -> String {
     let usable = summary.filter(|s| s.usable());
     let mut parts: Vec<String> = Vec::new();
+    if usable.and_then(|s| s.scope.as_deref()) == Some("turn") {
+        parts.push(tr_in_lang("usage.thisTurn", ko).to_string());
+    }
     if let Some(rate) = usable.and_then(|s| s.cache_rate) {
         parts.push(fill(
             tr_in_lang("usage.cache", ko),
@@ -224,9 +234,22 @@ fn request(app: &mut App) {
     if tokio::runtime::Handle::try_current().is_err() {
         return;
     }
+    // The line is the latest turn's usage, so the request names the turn. An
+    // older server ignores the field and answers for the whole thread, whose
+    // scope-less answer the line leaves unlabelled.
+    let turn = app
+        .conv
+        .thread
+        .latest_turn
+        .as_ref()
+        .map(|turn| turn.turn_id.clone());
     let tx = app.sender();
     tokio::spawn(async move {
-        let result = rpc.call(SUMMARY_RPC, json!({"threadId": id})).await;
+        let payload = match turn {
+            Some(turn) => json!({"threadId": id, "turnId": turn}),
+            None => json!({"threadId": id}),
+        };
+        let result = rpc.call(SUMMARY_RPC, payload).await;
         let _ = tx.send(Msg::Ext(Box::new(move |app: &mut App| {
             answered(app, &id, result)
         })));
@@ -338,6 +361,7 @@ mod tests {
     fn summary(status: &str, cache_rate: Option<f64>) -> Summary {
         Summary {
             status: status.into(),
+            scope: None,
             cache_rate,
             models: vec![
                 Model {
@@ -376,6 +400,7 @@ mod tests {
         assert_eq!(text, ["$4.10", "≈$0.30", "Cost unknown"]);
         let unknown = Summary {
             status: "ok".into(),
+            scope: None,
             cache_rate: None,
             models: vec![Model {
                 model: "glm".into(),
@@ -443,6 +468,8 @@ mod tests {
             (summary.status.as_str(), summary.cache_rate),
             ("ok", Some(0.3))
         );
+        // No scope in the answer: a whole-thread total from an older server.
+        assert_eq!(summary.scope, None);
         assert_eq!(
             footer(Some(&summary), None, true),
             "캐시 30.0% · opus $4.12 · astra ≈$0.31 · glm 비용 알 수 없음"
@@ -451,6 +478,32 @@ mod tests {
         // A null cache rate and a missing cost both read as "nothing to say".
         let bare = parse(&json!({"status": "too-large"})).unwrap();
         assert_eq!((bare.cache_rate, bare.models.len()), (None, 0));
+    }
+
+    #[test]
+    fn a_turn_scoped_answer_leads_with_this_turn_and_a_whole_thread_one_does_not() {
+        let parsed =
+            parse(&json!({"status": "ok", "scope": "turn", "totals": {}, "models": []})).unwrap();
+        assert_eq!(parsed.scope.as_deref(), Some("turn"));
+        let per_turn = Summary {
+            scope: Some("turn".into()),
+            ..summary("ok", Some(0.978))
+        };
+        assert_eq!(
+            footer(Some(&per_turn), Some((118_000.0, Some(200_000.0))), false),
+            "This turn · Cache 97.8% · Context 118k / 200k (59%) · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 Cost unknown"
+        );
+        assert_eq!(
+            footer(Some(&per_turn), None, true),
+            "이번 턴 · 캐시 97.8% · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 비용 알 수 없음"
+        );
+        // A whole-thread answer, or an old server's scope-less one, stays unlabelled.
+        let whole = Summary {
+            scope: Some("thread".into()),
+            ..summary("ok", Some(0.978))
+        };
+        assert!(!footer(Some(&whole), None, false).contains("This turn"));
+        assert!(!footer(Some(&summary("ok", Some(0.978))), None, false).contains("This turn"));
     }
 
     #[test]
@@ -542,6 +595,16 @@ mod tests {
         next(&mut app, &mut rx).await;
         assert_eq!(seen.lock().unwrap().len(), asked + 1);
         assert!(text(&app).contains("opus $4.12"), "{:?}", text(&app));
+        // Each request names the turn it is about: the thread's latest at open,
+        // then the one that just settled.
+        let turns: Vec<Value> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(tag, _)| tag == SUMMARY_RPC)
+            .map(|(_, payload)| payload["turnId"].clone())
+            .collect();
+        assert_eq!(turns, [json!("turn-2"), json!("turn-3")]);
     }
 
     /// The drawn screen, a row per line.

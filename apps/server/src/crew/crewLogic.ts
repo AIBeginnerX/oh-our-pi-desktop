@@ -1001,7 +1001,7 @@ export function crewFailureKind(
   )
     return "auth";
   if (
-    /usage[ _-]?limit|rate[ _-]?limit|(?:5[ -]?hours?|five[ -]?hours?|weekly|session|daily|monthly) limit (?:reached|exceeded)|limit will reset|quota (exceeded|reached)|too many requests|(?:hit|reached) your (?:\w+ )?limit|(?:status|code|http|error)[ :=]*429\b/i.test(
+    /usage[ _-]?limit|rate[ _-]?limit|(?:5[ -]?hours?|five[ -]?hours?|weekly|session|daily|monthly) limit (?:reached|exceeded|exhausted)|limit will reset|quota (exceeded|reached)|too many requests|(?:hit|reached) your (?:\w+ )?limit|(?:status|code|http|error)[ :=]*429\b/i.test(
       text,
     )
   )
@@ -1025,6 +1025,38 @@ export function crewLimitWindowName(error: string | null | undefined): "5-hour" 
   if (/5[ -]?hours?\b|five hours?\b/i.test(text)) return "5-hour";
   if (/\bweek(?:ly)?\b|7[ -]?days?\b|seven days?\b/i.test(text)) return "weekly";
   return null;
+}
+
+/**
+ * The plain reason a model handed its task to the next one, when the error says one clearly
+ * enough to repeat: a usage or rate limit reads as "usage limit reached". Anything else stays
+ * unexplained rather than guessed at, and the error itself is never quoted.
+ */
+export function crewFallbackReason(error: string | null | undefined): string | null {
+  return crewFailureKind(error) === "limit" ? "usage limit reached" : null;
+}
+
+/**
+ * The switch note a task carries when one model hands the work to the next: a step on the way to
+ * the result, so it never says "failed" and never quotes the error. The final report of a task
+ * whose every model failed is where the real errors belong.
+ */
+export function crewFallbackNote(input: {
+  readonly from: string;
+  readonly to: string;
+  /** The previous attempt's error, only read for a plain reason. */
+  readonly error?: string | undefined;
+  /** Models left out of the chain since the last attempt, with why. */
+  readonly skips?: ReadonlyArray<string> | undefined;
+  /** Set when the next model does not receive the project memories. */
+  readonly memoryHeld?: boolean | undefined;
+}): string {
+  const reason = crewFallbackReason(input.error);
+  return [
+    `Fell back from ${input.from} to ${input.to}${reason === null ? "" : ` (${reason})`}.`,
+    ...((input.skips?.length ?? 0) > 0 ? [`${input.skips!.join("; ")}.`] : []),
+    ...(input.memoryHeld === true ? ["Project memory is not sent to this model."] : []),
+  ].join(" ");
 }
 
 /**

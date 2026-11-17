@@ -219,6 +219,11 @@ function FlowChip(props: { flow: WorkflowGraph; selected: boolean; onSelect: () 
           {t("{count} failed", { count: counts.failed })}
         </span>
       )}
+      {counts.unfinished === 0 ? null : (
+        <span className="text-warning tabular-nums">
+          {t("{count} not finished", { count: counts.unfinished })}
+        </span>
+      )}
     </button>
   );
 }
@@ -290,6 +295,10 @@ function FlowView(props: {
             <div
               className="h-full bg-destructive transition-[width] duration-500"
               style={{ width: percent(counts.failed) }}
+            />
+            <div
+              className="h-full bg-warning transition-[width] duration-500"
+              style={{ width: percent(counts.unfinished) }}
             />
             <div
               className="h-full bg-muted-foreground/40 transition-[width] duration-500"

@@ -216,6 +216,14 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
           still decides whether it runs. Absent on older servers means
           unsupported. */
       analyser: Schema.optionalKey(Schema.Boolean),
+      /** Server runs dreaming on the `projectMemoryDreaming` and
+          `projectMemoryDreamingHour` settings. Absent on older servers means
+          unsupported: clients hide those settings. */
+      dreaming: Schema.optionalKey(Schema.Boolean),
+      /** Server serves `projectMemory.listTidy`, `applyTidy` and `dismissTidy`
+          and runs the tidy-up on the `projectMemoryTidy` setting. Absent on
+          older servers means unsupported. */
+      tidy: Schema.optionalKey(Schema.Boolean),
     }),
   ),
   /** Server serves `crew.stopTasks`. Absent on older servers means unsupported: clients

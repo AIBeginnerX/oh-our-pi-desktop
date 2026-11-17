@@ -70,7 +70,7 @@ computer the terminal itself runs on.
 
 On a tailnet, either of these works from a Mac or Windows terminal to a host that runs OOP:
 
-- `oop pair https://<machine>.<tailnet>.ts.net/pair#token=...` with a link from `t3 pair --tailscale`
+- `oop pair https://<machine>.<tailnet>.ts.net/pair#token=...` with a link from `oop server pair --tailscale`
   on the host. A bare token works with `--server <machine>.<tailnet>.ts.net`. The connection is
   HTTPS, and `oop` trusts Tailscale's certificates without any setup.
 - `oop ssh <machine>.<tailnet>.ts.net` (or the `100.x` address), with the same prompts as any ssh.
@@ -137,12 +137,51 @@ whether each is installed for Claude Code and for Codex and Cursor. Pick a row, 
 skill with the same name is reported and left alone. Once a skill is installed, `/name` (or
 `$name`) followed by your request runs it, for example `/paper-analysis arxiv:1706.03762`.
 
+## Memory suggestions
+
+`/memory` lists memory suggestions and tidy-ups waiting for the open project, including
+ones from Dreaming. Pick one to review it and approve, apply or dismiss it.
+`/memory analyse` runs the work analyser now. The app mentions waiting suggestions once
+when you open a project. Turn on Dreaming and tidy-up in the desktop app's Settings.
+
+Use `/memory auto analyser` (or `oop config set memoryAutoApprove analyser`) to
+approve work-analyser and Dreaming memory suggestions automatically when you run
+`/memory` or open a project. `all` also approves suggestions agents make while they
+work, which can repeat text from files they read, so use it only for projects you
+trust. Skill ideas and tidy-ups always wait for you. Auto-approved titles appear
+in a note. `off`, the default, turns automatic approval off.
+
+`/memory saved` lists the project's saved memories. Pick one for **Edit** or
+**Delete**; **Delete** asks you to confirm. **Edit** opens the memory in the message
+box with the first line as the title and the rest as the body: Enter saves it, and the
+title and body both need text. Esc cancels and brings back what you had typed.
+Switching to another thread or project ends the edit without saving. This needs a
+server that can manage memories; without one, `oop` says so.
+
+## Attaching files
+
+`/attach <path>` adds a file from the computer `oop` runs on: a `~/…` path, an absolute
+path, or one relative to the project folder. For a project on another computer, whose
+folder is not here, a relative path starts in the folder `oop` was started in.
+
+Attached files show at the top of the message box and go with the next message. PNG,
+JPEG, GIF and WebP are sent as images; anything else is sent as a file. Each image can be
+up to 10 MiB and each other file up to 50 MiB, with at most 100 attachments and 80 MiB of
+images together.
+
+`/attach` with nothing after it offers to remove one file, or all of them. Attachments
+belong to the thread's draft, so switching threads leaves them with their thread. If an
+upload fails, the message is not sent and both the text and the files stay. A turn that
+is still running has to finish before you can send attachments.
+
 ## Pasting long text
 
-A long paste is kept whole but drawn in a window of at most ten rows; the rows above or below it
-are counted ("↑ N줄 더", "↓ N줄 더") and the window follows the cursor. A message can be at most
-120,000 characters, the limit of the server; a longer one is not sent, and `oop` says how many
-characters to cut.
+A paste of more than ten lines, or more than 2,000 characters, is not shown in the composer:
+it becomes a one-line chip such as `[Pasted 143 lines]`, or `[Pasted 2,345 chars]` for a single
+long line, so the message around it stays readable. The whole text is still sent. Backspace and
+Delete remove the chip as one unit, and the cursor and selection treat it as one too. A message
+can be at most 120,000 characters, the limit of the server; a longer one is not sent, and `oop`
+says how many characters to cut.
 
 ## Copying a command
 
@@ -249,7 +288,7 @@ needs no OOP Desktop. The Linux AppImage does not include the terminal app.
 the phone camera to open OOP in the phone's browser. It uses the relay address saved in the app, so
 it works away from home. Without one, the phone must be on the same network. Press Esc to close.
 
-If this computer publishes the server with Tailscale Serve (`t3 serve --tailscale-serve`), a
+If this computer publishes the server with Tailscale Serve (`oop server serve --tailscale-serve`), a
 **Tailscale HTTPS** route is offered too, for a phone with the Tailscale app on the same tailnet.
 The relay stays the first choice; press Tab to switch between routes. `oop mobile` prints the
 other routes' links under the code.

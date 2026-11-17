@@ -1551,7 +1551,7 @@ const makeWsRpcLayer = (
         [WS_METHODS.threadUsageSummary]: (input) =>
           observeRpcEffect(
             WS_METHODS.threadUsageSummary,
-            readThreadUsageSummary(input.threadId).pipe(
+            readThreadUsageSummary(input.threadId, input.turnId).pipe(
               Effect.provideService(SqlClient.SqlClient, sql),
               Effect.provideService(UsageService.UsageService, usage),
               Effect.catchCause((cause) =>
@@ -2076,6 +2076,18 @@ const makeWsRpcLayer = (
             projectMemory.acknowledgeThread(input),
             { "rpc.aggregate": "memory" },
           ),
+        [WS_METHODS.projectMemoryListTidy]: (input) =>
+          observeRpcEffect(WS_METHODS.projectMemoryListTidy, projectMemory.listTidy(input), {
+            "rpc.aggregate": "memory",
+          }),
+        [WS_METHODS.projectMemoryApplyTidy]: (input) =>
+          observeRpcEffect(WS_METHODS.projectMemoryApplyTidy, projectMemory.applyTidy(input), {
+            "rpc.aggregate": "memory",
+          }),
+        [WS_METHODS.projectMemoryDismissTidy]: (input) =>
+          observeRpcEffect(WS_METHODS.projectMemoryDismissTidy, projectMemory.dismissTidy(input), {
+            "rpc.aggregate": "memory",
+          }),
         [WS_METHODS.projectMemoryListProposals]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectMemoryListProposals,

@@ -11,16 +11,18 @@ import {
   TRIAGE_PLAYBOOK,
 } from "./triagePrompt.ts";
 
-it("stays byte-identical to .github/triage/PLAYBOOK.md", () => {
-  // Old releases fetch the repo copy from `main` and follow it when it differs
-  // from their bundled playbook. The two must say the same thing at HEAD, or a
-  // playbook edit silently changes behavior only for old (or only for new)
-  // installs. Edit both files together.
+it("matches the canonical playbook with OOP command guidance", () => {
+  // Keep the shared playbook intact except for OOP branding and the bundled invocation.
   const canonicalPath = NodePath.join(
     import.meta.dirname,
     "../../../../.github/triage/PLAYBOOK.md",
   );
-  assert.equal(TRIAGE_PLAYBOOK, NodeFS.readFileSync(canonicalPath, "utf8"));
+  assert.equal(
+    TRIAGE_PLAYBOOK,
+    NodeFS.readFileSync(canonicalPath, "utf8")
+      .replaceAll("T3 Code", "OOP")
+      .replace("npx t3 serve", "oop server serve"),
+  );
 });
 
 it("seed prompt names the context file and embeds the playbook", () => {

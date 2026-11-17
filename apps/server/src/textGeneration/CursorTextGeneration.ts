@@ -17,6 +17,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   sanitizeCommitSubject,
@@ -56,7 +57,8 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkLessons";
+      | "generateWorkLessons"
+      | "generateMemoryTidy";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -275,11 +277,24 @@ export const makeCursorTextGeneration = Effect.fn("makeCursorTextGeneration")(fu
       });
     });
 
+  const generateMemoryTidy: TextGeneration.TextGeneration["Service"]["generateMemoryTidy"] =
+    Effect.fn("CursorTextGeneration.generateMemoryTidy")(function* (input) {
+      const { prompt, outputSchema } = buildMemoryTidyPrompt({ digest: input.digest });
+      return yield* runCursorJson({
+        operation: "generateMemoryTidy",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkLessons,
+    generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

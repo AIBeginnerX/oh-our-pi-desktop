@@ -3,6 +3,7 @@ import {
   type EnvironmentId,
   type ThreadId,
   type ThreadUsageSummary,
+  type TurnId,
 } from "@t3tools/contracts";
 import {
   createEnvironmentRpcCommand,
@@ -75,7 +76,7 @@ export function decideThreadUsageFetch(input: {
 export function useThreadUsageSummary(input: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId | null;
-  readonly latestTurnId: string | null;
+  readonly latestTurnId: TurnId | null;
   readonly latestTurnSettled: boolean;
   readonly auditRunning?: boolean;
   readonly completedAuditCount?: number;
@@ -117,7 +118,13 @@ export function useThreadUsageSummary(input: {
     fetchedKeyRef.current = decision.key;
     fetchedThreadRef.current = threadId;
     const token = ++tokenRef.current;
-    void getSummary({ environmentId, input: { threadId } }).then((result) => {
+    // The footer is the latest turn's usage, so the fetch names the turn; an
+    // old server without the field answers for the whole thread instead, and
+    // the missing scope marker keeps the line unlabelled.
+    void getSummary({
+      environmentId,
+      input: { threadId, ...(latestTurnId === null ? {} : { turnId: latestTurnId }) },
+    }).then((result) => {
       if (!activeRef.current || tokenRef.current !== token) return;
       if (result._tag === "Success") {
         setSummary(result.value);

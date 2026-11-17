@@ -1,0 +1,17 @@
+{
+  "memory": {
+    "memoryId": "memory-1",
+    "projectId": "project-1",
+    "kind": "fact",
+    "title": "New title",
+    "body": "New body",
+    "version": 3,
+    "origin": {
+      "type": "manual"
+    },
+    "validUntil": null,
+    "estimatedTokens": 3,
+    "createdAt": "2026-11-16T03:00:00.000Z",
+    "updatedAt": "2026-11-16T03:00:00.000Z"
+  }
+}

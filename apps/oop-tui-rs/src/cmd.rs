@@ -6,6 +6,7 @@ use crate::app::{App, Pick};
 /// Runs `/name argument`; false when the name is none of ours.
 pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
     match name {
+        "attach" => crate::cmd_attach::run(app, argument),
         "implement" => crate::cmd_implement::run(app),
         "continue" => crate::cmd_continue::run(app),
         "copy" => crate::cmd_copy::run(app, argument),
@@ -23,6 +24,7 @@ pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
         "history" => crate::cmd_history::history(app, argument),
         "diff" => crate::cmd_history::diff(app, argument),
         "undo" => crate::cmd_history::undo(app),
+        "memory" => crate::cmd_memory::run(app, argument),
         "skills" => crate::cmd_skills::run(app, argument),
         "replay" => crate::replay::command(app),
         _ => return false,
@@ -33,9 +35,15 @@ pub fn run(app: &mut App, name: &str, argument: &str) -> bool {
 /// A list from `Modal::Pick` was answered with row `index`.
 pub fn picked(app: &mut App, pick: &Pick, index: usize) {
     match pick.id {
+        "attach" => crate::cmd_attach::picked(app, pick, index),
         "theme" => crate::cmd_misc::theme_picked(app, pick, index),
         "undo" => crate::cmd_history::undo_picked(app, pick, index),
         "crew" => crate::cmd_crew::picked(app, pick, index),
+        "memory"
+        | "memory-action"
+        | "memory-saved"
+        | "memory-saved-action"
+        | "memory-saved-confirm" => crate::cmd_memory::picked(app, pick, index),
         "skills" => crate::cmd_skills::picked(app, pick, index),
         crate::folder::ID => crate::folder::picked(app, pick, index),
         _ => {}

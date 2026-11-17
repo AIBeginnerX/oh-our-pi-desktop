@@ -20,6 +20,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
@@ -41,6 +42,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateBranchName",
   "generateThreadTitle",
   "generateWorkLessons",
+  "generateMemoryTidy",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
@@ -542,11 +544,24 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       });
     });
 
+  const generateMemoryTidy: TextGeneration.TextGeneration["Service"]["generateMemoryTidy"] =
+    Effect.fn("OpenCodeTextGeneration.generateMemoryTidy")(function* (input) {
+      const { prompt, outputSchema } = buildMemoryTidyPrompt({ digest: input.digest });
+      return yield* runOpenCodeJson({
+        operation: "generateMemoryTidy",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkLessons,
+    generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

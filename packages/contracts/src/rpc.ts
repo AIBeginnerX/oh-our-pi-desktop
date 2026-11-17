@@ -8,7 +8,7 @@ import {
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
-import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString, TurnId } from "./baseSchemas.ts";
 import {
   CodexAuthCallbackInput,
   CodexAuthCallbackState,
@@ -228,6 +228,9 @@ import {
   ProjectMemoryNotFoundError,
   ProjectMemoryAnalyseInput,
   ProjectMemoryAnalyseResult,
+  ProjectMemoryTidyDecisionInput,
+  ProjectMemoryTidyListInput,
+  ProjectMemoryTidyListResult,
   ProjectMemoryProposalDecisionInput,
   ProjectMemoryProposalListInput,
   ProjectMemoryProposalListResult,
@@ -568,6 +571,9 @@ export const WS_METHODS = {
   projectMemoryApproveProposal: "projectMemory.approveProposal",
   projectMemoryRejectProposal: "projectMemory.rejectProposal",
   projectMemoryAnalyse: "projectMemory.analyse",
+  projectMemoryListTidy: "projectMemory.listTidy",
+  projectMemoryApplyTidy: "projectMemory.applyTidy",
+  projectMemoryDismissTidy: "projectMemory.dismissTidy",
 
   // Project skill methods
   projectSkillList: "projectSkill.list",
@@ -858,9 +864,27 @@ const ThreadUsageTotals = Schema.Struct({
   cacheRate: Schema.NullOr(Schema.Number),
   cost: ThreadUsageCost,
 });
+/**
+ * One thread-usage-summary request. `turnId` narrows the summary to that
+ * turn's usage; without it the summary covers the whole thread family. Kept
+ * separate from `OwnedResultUsageInput`, which the per-result usage read owns.
+ */
+export const ThreadUsageSummaryInput = Schema.Struct({
+  threadId: ThreadId,
+  turnId: Schema.optional(TurnId),
+});
+export type ThreadUsageSummaryInput = typeof ThreadUsageSummaryInput.Type;
+
+/**
+ * How far the summary reached. `turn` means the numbers describe the
+ * requested turn only; `thread` means the whole thread family. Optional so a
+ * client facing a server from before turn scoping can tell the two apart and
+ * never label a whole-chat total as one turn's usage.
+ */
 export const ThreadUsageSummary = Schema.Struct({
   threadId: ThreadId,
   status: Schema.Literals(["ok", "too-large"]),
+  scope: Schema.optional(Schema.Literals(["turn", "thread"])),
   totals: ThreadUsageTotals,
   models: Schema.Array(
     Schema.Struct({ ...ThreadUsageTotals.fields, model: Schema.String, driver: Schema.String }),
@@ -868,7 +892,7 @@ export const ThreadUsageSummary = Schema.Struct({
 });
 export type ThreadUsageSummary = typeof ThreadUsageSummary.Type;
 export const WsThreadUsageSummaryRpc = Rpc.make(WS_METHODS.threadUsageSummary, {
-  payload: OwnedResultUsageInput,
+  payload: ThreadUsageSummaryInput,
   success: ThreadUsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, OwnedResultUsageReadError]),
 });
@@ -1285,6 +1309,37 @@ const WsProjectMemoryRejectProposalRpc = Rpc.make(WS_METHODS.projectMemoryReject
 const WsProjectMemoryAnalyseRpc = Rpc.make(WS_METHODS.projectMemoryAnalyse, {
   payload: ProjectMemoryAnalyseInput,
   success: ProjectMemoryAnalyseResult,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsProjectMemoryListTidyRpc = Rpc.make(WS_METHODS.projectMemoryListTidy, {
+  payload: ProjectMemoryTidyListInput,
+  success: ProjectMemoryTidyListResult,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+/** Applies a tidy suggestion to the memories it names, all or nothing. */
+const WsProjectMemoryApplyTidyRpc = Rpc.make(WS_METHODS.projectMemoryApplyTidy, {
+  payload: ProjectMemoryTidyDecisionInput,
+  success: Schema.Void,
+  error: Schema.Union([
+    ProjectMemoryRejectedError,
+    ProjectMemoryStoreError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
+const WsProjectMemoryDismissTidyRpc = Rpc.make(WS_METHODS.projectMemoryDismissTidy, {
+  payload: ProjectMemoryTidyDecisionInput,
+  success: Schema.Void,
   error: Schema.Union([
     ProjectMemoryRejectedError,
     ProjectMemoryStoreError,
@@ -2051,6 +2106,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsProjectMemoryApproveProposalRpc,
   WsProjectMemoryRejectProposalRpc,
   WsProjectMemoryAnalyseRpc,
+  WsProjectMemoryListTidyRpc,
+  WsProjectMemoryApplyTidyRpc,
+  WsProjectMemoryDismissTidyRpc,
   WsProjectSkillListRpc,
   WsProjectSkillGetRpc,
   WsProjectSkillCreateCandidateRpc,

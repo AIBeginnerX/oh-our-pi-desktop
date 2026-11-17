@@ -1,3 +1,5 @@
+import { ProviderInstanceId, ProviderDriverKind } from "@t3tools/contracts";
+import type { MemoryTidyResult } from "./memoryTidy.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -37,9 +39,13 @@ const NOW = "2026-10-09T00:00:00.000Z";
 const PROJECT = ProjectId.make("project-1");
 const THREAD_A = ThreadId.make("thread-a");
 const THREAD_B = ThreadId.make("thread-b");
+const THREAD_C = ThreadId.make("thread-c");
+const THREAD_D = ThreadId.make("thread-d");
 
 interface Fixture {
   readonly requests: Array<WorkLessonsGenerationInput>;
+  tidyRespond: () => Effect.Effect<MemoryTidyResult, TextGenerationError>;
+  readonly tidyRequests: Array<WorkLessonsGenerationInput>;
   /** What the fake model answers; a function so a test can fail it. */
   respond: (
     input: WorkLessonsGenerationInput,
@@ -48,7 +54,7 @@ interface Fixture {
 }
 
 const withAnalyser = <E>(
-  options: { readonly analyser: boolean },
+  options: { readonly analyser: boolean; readonly tidy?: boolean; readonly denied?: boolean },
   run: (
     fixture: Fixture,
   ) => Effect.Effect<
@@ -60,6 +66,19 @@ const withAnalyser = <E>(
   const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-memory-analyser-"));
   const fixture: Fixture = {
     requests: [],
+    tidyRequests: [],
+    tidyRespond: () =>
+      Effect.succeed({
+        suggestions: [
+          {
+            action: "merge",
+            memories: ["M1", "M2"],
+            title: "Combined",
+            body: "Combined body",
+            reason: "Duplicate",
+          },
+        ],
+      }),
     respond: () => Effect.succeed({ lessons: [] }),
     events: new Map(),
   };
@@ -76,6 +95,10 @@ const withAnalyser = <E>(
       Stream.fromIterable(fixture.events.get(aggregateId) ?? []),
   });
   const textGeneration = Layer.mock(TextGeneration, {
+    generateMemoryTidy: (input) => {
+      fixture.tidyRequests.push(input);
+      return fixture.tidyRespond();
+    },
     generateWorkLessons: (input) => {
       fixture.requests.push(input);
       return fixture.respond(input);
@@ -89,7 +112,17 @@ const withAnalyser = <E>(
     sendLedgerLayer,
     store,
     textGeneration,
-    ServerSettings.layerTest({ projectMemoryAnalyser: options.analyser }),
+    ServerSettings.layerTest({
+      projectMemoryAnalyser: options.analyser,
+      projectMemoryTidy: options.tidy ?? false,
+      providerInstances: {
+        [ProviderInstanceId.make("codex")]: {
+          driver: ProviderDriverKind.make(options.denied ? "denied" : "codex"),
+          enabled: true,
+          config: {},
+        },
+      },
+    }),
   ).pipe(Layer.provideMerge(sqlite));
   const service = memoryServiceLayer.pipe(
     Layer.provideMerge(dependencies),
@@ -111,7 +144,7 @@ const withAnalyser = <E>(
 
 const test = <E>(
   name: string,
-  options: { readonly analyser: boolean },
+  options: { readonly analyser: boolean; readonly tidy?: boolean; readonly denied?: boolean },
   run: (
     fixture: Fixture,
   ) => Effect.Effect<
@@ -181,26 +214,33 @@ const activity = (fixture: Fixture, threadId: ThreadId, kind: string, payload: u
     },
   });
 
-const receipt = (fixture: Fixture, threadId: ThreadId, attempt: string, status: string) =>
+const receipt = (
+  fixture: Fixture,
+  threadId: ThreadId,
+  attempt: string,
+  status: string,
+  scriptName = "test",
+) =>
   activity(fixture, threadId, "selected-check-receipt", {
     attemptId: attempt,
     revision: 1,
     phase: "completed",
-    planned: [{ scriptId: "s1", scriptName: "test" }],
+    planned: [{ scriptId: "s1", scriptName }],
     checks: [{ scriptId: "s1", status }],
   });
 
-const seedProject = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`
-    INSERT INTO projection_projects (
-      project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
-    )
-    VALUES (${PROJECT}, 'Project', '/tmp/project', '[]', ${NOW}, ${NOW}, NULL)
-  `;
-});
+const seedProject = (projectId: string = PROJECT) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO projection_projects (
+        project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+      )
+      VALUES (${projectId}, 'Project', '/tmp/project', '[]', ${NOW}, ${NOW}, NULL)
+    `;
+  });
 
-const seedThread = (threadId: ThreadId) =>
+const seedThread = (threadId: ThreadId, projectId: string = PROJECT) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql`
@@ -208,7 +248,7 @@ const seedThread = (threadId: ThreadId) =>
         thread_id, project_id, title, model_selection_json, runtime_mode, interaction_mode,
         created_at, updated_at, deleted_at
       )
-      VALUES (${threadId}, ${PROJECT}, 'Thread', '{"instanceId":"pi","model":"m"}', 'full-access', 'default', ${NOW}, ${NOW}, NULL)
+      VALUES (${threadId}, ${projectId}, 'Thread', '{"instanceId":"pi","model":"m"}', 'full-access', 'default', ${NOW}, ${NOW}, NULL)
     `;
   });
 
@@ -216,7 +256,7 @@ const seedThread = (threadId: ThreadId) =>
 const seedTwoThreads = (fixture: Fixture) =>
   Effect.gen(function* () {
     yield* runMigrations();
-    yield* seedProject;
+    yield* seedProject();
     for (const threadId of [THREAD_A, THREAD_B]) {
       yield* seedThread(threadId);
       yield* append(fixture, threadId, "thread.created", { threadId });
@@ -485,5 +525,191 @@ describe("ProjectMemoryAnalyser", () => {
         yield* analyser.analyse({ projectId: PROJECT });
         assert.equal(fixture.requests.length, 2);
       }),
+  );
+
+  test(
+    "dream files a suggestion for the project and marks it dreamed",
+    { analyser: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* seedTwoThreads(fixture);
+        fixture.respond = () =>
+          Effect.succeed({
+            lessons: [
+              {
+                category: "fact",
+                text: "Re-run the test check after fixing a failure",
+                threads: ["T1", "T2"],
+              },
+            ],
+          });
+        const analyser = yield* ProjectMemoryAnalyser;
+        const memory = yield* ProjectMemoryService;
+
+        const result = yield* analyser.dream;
+        assert.deepEqual(result, { projects: 1, failed: 0 });
+
+        const [proposal] = (yield* memory.listProposals({ projectId: PROJECT })).items;
+        assert.equal(proposal?.body, "Re-run the test check after fixing a failure");
+        assert.equal(proposal?.analysis?.dreamed, true);
+        assert.deepEqual((yield* memory.list({ projectId: PROJECT })).items, []);
+      }),
+  );
+
+  test(
+    "a failing project is skipped and the next one still dreams",
+    { analyser: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* seedTwoThreads(fixture);
+        yield* seedProject("project-2");
+        for (const threadId of [THREAD_C, THREAD_D]) {
+          yield* seedThread(threadId, "project-2");
+          yield* append(fixture, threadId, "thread.created", { threadId });
+          yield* append(fixture, threadId, "thread.message-sent", {
+            threadId,
+            role: "user",
+            text: "SECOND PROJECT WORK",
+            streaming: false,
+          });
+          yield* receipt(fixture, threadId, `${threadId}-1`, "failed", "dreamlint");
+          yield* receipt(fixture, threadId, `${threadId}-2`, "passed", "dreamlint");
+        }
+        // The first project's digest names no "dreamlint" check, so its model
+        // call fails; the second project's names it and must still be filed.
+        fixture.respond = (input) =>
+          input.digest.includes("dreamlint")
+            ? Effect.succeed({
+                lessons: [
+                  { category: "fact", text: "Lint before every commit", threads: ["T1", "T2"] },
+                ],
+              })
+            : Effect.fail(
+                new TextGenerationError({ operation: "generateWorkLessons", detail: "boom" }),
+              );
+        const analyser = yield* ProjectMemoryAnalyser;
+        const memory = yield* ProjectMemoryService;
+
+        const result = yield* analyser.dream;
+        assert.deepEqual(result, { projects: 2, failed: 1 });
+
+        assert.deepEqual((yield* memory.listProposals({ projectId: PROJECT })).items, []);
+        const [proposal] = (yield* memory.listProposals({ projectId: ProjectId.make("project-2") }))
+          .items;
+        assert.equal(proposal?.body, "Lint before every commit");
+        assert.equal(proposal?.analysis?.dreamed, true);
+        assert.equal(fixture.requests.length, 2);
+      }),
+  );
+
+  test("dream runs nothing while the analyser setting is off", { analyser: false }, (fixture) =>
+    Effect.gen(function* () {
+      yield* seedTwoThreads(fixture);
+      const analyser = yield* ProjectMemoryAnalyser;
+      const memory = yield* ProjectMemoryService;
+      const result = yield* analyser.dream;
+      assert.deepEqual(result, { projects: 0, failed: 0 });
+      assert.equal(fixture.requests.length, 0);
+      assert.deepEqual((yield* memory.listProposals({ projectId: PROJECT })).items, []);
+    }),
+  );
+});
+
+const seedTidyMemories = Effect.gen(function* () {
+  const service = yield* ProjectMemoryService;
+  for (const title of ["First", "Second"])
+    yield* service.create({
+      projectId: PROJECT,
+      kind: "fact",
+      title,
+      body: "Reusable body",
+      origin: { type: "manual" },
+    });
+});
+describe("guarded tidy analysis", () => {
+  test(
+    "runs without new threads, remembers fingerprint and marks dreamed suggestions",
+    { analyser: true, tidy: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* seedProject();
+        yield* seedTidyMemories;
+        const analyser = yield* ProjectMemoryAnalyser;
+        const result = yield* analyser.dream;
+        assert.equal(result.failed, 0);
+        assert.equal(fixture.tidyRequests.length, 1);
+        assert.equal(NodeFS.existsSync(fixture.tidyRequests[0]!.cwd), false);
+        const service = yield* ProjectMemoryService;
+        const items = (yield* service.listTidy({ projectId: PROJECT })).items;
+        assert.equal(items.length, 1);
+        assert.equal(items[0]!.dreamed, true);
+        yield* service.dismissTidy({ projectId: PROJECT, tidyId: items[0]!.tidyId });
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.equal(fixture.tidyRequests.length, 1);
+      }),
+  );
+  for (const options of [
+    { analyser: true, tidy: false },
+    { analyser: false, tidy: true },
+    { analyser: true, tidy: true, denied: true },
+  ]) {
+    test(
+      `does not call model with guard ${options.analyser}/${options.tidy}/${options.denied}`,
+      options,
+      (fixture) =>
+        Effect.gen(function* () {
+          yield* runMigrations();
+          yield* seedProject();
+          yield* seedTidyMemories;
+          const analyser = yield* ProjectMemoryAnalyser;
+          yield* analyser.dream;
+          assert.equal(fixture.tidyRequests.length, 0);
+        }),
+    );
+  }
+  test(
+    "excludes sensitive memories and skips fewer than two eligible memories",
+    { analyser: true, tidy: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* seedProject();
+        yield* seedTidyMemories;
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE project_memories SET body = '-----BEGIN PRIVATE KEY-----' WHERE title = 'First'`;
+        const analyser = yield* ProjectMemoryAnalyser;
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.equal(fixture.tidyRequests.length, 0);
+        const service = yield* ProjectMemoryService;
+        yield* service.create({
+          projectId: PROJECT,
+          kind: "fact",
+          title: "Third",
+          body: "Safe",
+          origin: { type: "manual" },
+        });
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.equal(fixture.tidyRequests.length, 1);
+        assert.equal(fixture.tidyRequests[0]!.digest.includes("PRIVATE KEY"), false);
+      }),
+  );
+  test("tidy failure does not fail lessons", { analyser: true, tidy: true }, (fixture) =>
+    Effect.gen(function* () {
+      yield* seedTwoThreads(fixture);
+      yield* seedTidyMemories;
+      fixture.tidyRespond = () =>
+        Effect.fail(
+          new TextGenerationError({
+            operation: "generateMemoryTidy",
+            detail: "Fixed test failure",
+          }),
+        );
+      const analyser = yield* ProjectMemoryAnalyser;
+      const result = yield* analyser.analyse({ projectId: PROJECT });
+      assert.equal(result.threadsAnalysed, 2);
+      assert.equal(fixture.requests.length, 1);
+      assert.equal(fixture.tidyRequests.length, 1);
+    }),
   );
 });

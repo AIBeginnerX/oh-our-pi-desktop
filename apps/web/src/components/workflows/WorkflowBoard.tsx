@@ -27,6 +27,7 @@ export const WORKFLOW_STATE_TONE: Record<WorkflowNodeState, string> = {
   cancelled: "text-muted-foreground/60",
   skipped: "text-muted-foreground/60",
   quiet: "text-muted-foreground",
+  unfinished: "text-warning",
 };
 
 const EVIDENCE_VARIANT = { reported: "outline", tested: "info", audited: "success" } as const;
@@ -115,6 +116,12 @@ export const WorkflowBoard = memo(function WorkflowBoard(props: {
                       {t("{count} failed", { count: wave.failed })}
                     </span>
                   ) : null}
+                  {wave.unfinished > 0 ? (
+                    <span className="text-warning">
+                      {" · "}
+                      {t("{count} not finished", { count: wave.unfinished })}
+                    </span>
+                  ) : null}
                   {wave.running > 0 ? ` · ${t("{count} running", { count: wave.running })}` : ""}
                 </span>
                 <span className="flex h-0.5 overflow-hidden rounded-full bg-border/60">
@@ -125,6 +132,10 @@ export const WorkflowBoard = memo(function WorkflowBoard(props: {
                   <span
                     className="h-full bg-destructive transition-[width] duration-500"
                     style={{ width: `${(wave.failed / Math.max(1, wave.total)) * 100}%` }}
+                  />
+                  <span
+                    className="h-full bg-warning transition-[width] duration-500"
+                    style={{ width: `${(wave.unfinished / Math.max(1, wave.total)) * 100}%` }}
                   />
                 </span>
               </div>
@@ -165,6 +176,7 @@ function isStarted(node: WorkflowCard["node"]): boolean {
     node.state === "running" ||
     node.state === "completed" ||
     node.state === "failed" ||
+    node.state === "unfinished" ||
     node.state === "quiet" ||
     node.state === "paused" ||
     node.info.startedAt !== undefined

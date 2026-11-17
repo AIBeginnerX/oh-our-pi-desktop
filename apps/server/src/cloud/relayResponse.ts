@@ -45,7 +45,7 @@ function recoveryHint(error: RelayProtectedError): string {
     case "RelayEnvironmentLinkLimitExceededError":
       return "Unlink an unused environment in OOP Connect, then restart OOP on this machine.";
     case "RelayAuthInvalidError":
-      return "Run `t3 connect login` to check this machine's authorization. If the stored credential was revoked, sign out with `t3 connect logout`, then run `t3 connect` again. Restart OOP after signing in.";
+      return "Run `oop server connect login` to check this machine's authorization. If the stored credential was revoked, sign out with `oop server connect logout`, then run `oop server connect` again. Restart OOP after signing in.";
     case "RelayEnvironmentLinkProofExpiredError":
     case "RelayEnvironmentLinkProofInvalidError":
       return "Check this machine's date and time, update OOP, then restart it.";

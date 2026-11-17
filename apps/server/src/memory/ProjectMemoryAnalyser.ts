@@ -1,3 +1,9 @@
+import * as Crypto from "effect/Crypto";
+import { PROJECT_MEMORY_TIDY_PENDING_MAX, ProjectMemoryTidyId } from "@t3tools/contracts";
+import { tidyStore } from "./tidyStore.ts";
+import { buildMemoryTidyInput, selectTidyMemories, selectMemoryTidies } from "./memoryTidy.ts";
+import { PROJECT_MEMORY_SEND_DRIVER_KINDS } from "./ProjectMemorySendProviders.ts";
+import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -36,6 +42,13 @@ import {
 /** Most recently active threads one run looks at. */
 export const ANALYSER_THREAD_WINDOW = 20;
 
+/** Summary of one dreaming pass over the server's live projects. */
+export interface ProjectMemoryDreamResult {
+  readonly projects: number;
+  /** Projects skipped after an error; the rest still ran. */
+  readonly failed: number;
+}
+
 /**
  * The work analyser: reads structured digests of a project's recent threads,
  * asks the one-shot text-generation service for reusable lessons, and files
@@ -52,6 +65,12 @@ export class ProjectMemoryAnalyser extends Context.Service<
       ProjectMemoryAnalyseResult,
       ProjectMemoryRejectedError | ProjectMemoryStoreError
     >;
+    /**
+     * One dreaming pass over every live project, under the same one-run gate
+     * as `analyse`, with suggestions filed as dreamed. Never fails: a project
+     * that errors is logged and skipped.
+     */
+    readonly dream: Effect.Effect<ProjectMemoryDreamResult, never>;
   }
 >()("t3/memory/ProjectMemoryAnalyser") {}
 
@@ -64,6 +83,7 @@ const toStoreError = () =>
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const crypto = yield* Crypto.Crypto;
   const store = yield* OrchestrationEventStore;
   const repository = yield* ProjectMemoryRepository;
   const memories = yield* ProjectMemoryService;
@@ -121,7 +141,8 @@ export const make = Effect.gen(function* () {
     });
 
   const run = (
-    input: ProjectMemoryAnalyseInput,
+    projectId: ProjectId,
+    dreamed: boolean,
   ): Effect.Effect<
     ProjectMemoryAnalyseResult,
     ProjectMemoryRejectedError | ProjectMemoryStoreError
@@ -131,15 +152,91 @@ export const make = Effect.gen(function* () {
       if (!settings.projectMemoryAnalyser) {
         return yield* new ProjectMemoryRejectedError({ reason: "analyser-disabled" });
       }
-      const project = yield* projects.getById({ projectId: input.projectId });
+      const project = yield* projects.getById({ projectId });
       if (Option.isNone(project) || project.value.deletedAt !== null) {
         return yield* new ProjectMemoryRejectedError({ reason: "project-missing" });
       }
-      const none = { threadsAnalysed: 0, memoriesProposed: 0, skillsSuggested: 0 } as const;
-      const cursor = yield* repository.getAnalysisCursor({ projectId: input.projectId });
-      const recent = yield* recentThreads(input.projectId, cursor);
+      const { textGenerationModelSelection: modelSelection } = resolveProjectSettings(
+        settings,
+        projectId,
+      ).settings;
+      const tidiesSuggested = yield* Effect.gen(function* () {
+        if (!settings.projectMemoryTidy) return 0;
+        const instance = settings.providerInstances[modelSelection.instanceId];
+        if (
+          !instance ||
+          !instance.enabled ||
+          !PROJECT_MEMORY_SEND_DRIVER_KINDS.has(instance.driver)
+        )
+          return 0;
+        const fingerprintRows = yield* sql<{ fingerprint: string }>`SELECT
+          CAST(COUNT(*) AS TEXT) || ':' || COALESCE(MAX(updated_at), '') || ':' || COALESCE(SUM(version), 0) AS fingerprint
+          FROM project_memories WHERE project_id = ${projectId}`;
+        const fingerprint = fingerprintRows[0]!.fingerprint;
+        const cursors = yield* sql<{
+          fingerprint: string | null;
+        }>`SELECT tidy_fingerprint AS fingerprint FROM project_memory_analysis_cursors WHERE project_id = ${projectId}`;
+        if (cursors[0]?.fingerprint === fingerprint) return 0;
+        const pending = yield* tidyStore(sql).list(projectId);
+        if (pending.length >= PROJECT_MEMORY_TIDY_PENDING_MAX) return 0;
+        const records = yield* repository.listForProject({ projectId, limit: 10000 });
+        const eligible = selectTidyMemories(
+          records.items,
+          new Set(pending.flatMap((p) => p.memories.map((m) => m.memoryId))),
+        );
+        if (eligible.length < 2) return 0;
+        const generated = yield* fileSystem
+          .makeTempDirectoryScoped({ prefix: "t3code-tidy-" })
+          .pipe(
+            Effect.flatMap((cwd) =>
+              textGeneration.generateMemoryTidy({
+                cwd,
+                digest: buildMemoryTidyInput(eligible),
+                modelSelection,
+              }),
+            ),
+            Effect.scoped,
+          );
+        const accepted = selectMemoryTidies(generated, eligible, pending.length);
+        const now = DateTime.formatIso(yield* DateTime.now);
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            for (const suggestion of accepted) {
+              yield* tidyStore(sql).insert({
+                tidyId: ProjectMemoryTidyId.make(yield* crypto.randomUUIDv4),
+                projectId,
+                action: suggestion.action,
+                title: suggestion.title ?? null,
+                body: suggestion.body ?? null,
+                reason: suggestion.reason,
+                memories: suggestion.memories.map(({ memoryId, version }) => ({
+                  memoryId,
+                  version,
+                })),
+                dreamed,
+                createdAt: now,
+              });
+            }
+            yield* sql`INSERT INTO project_memory_analysis_cursors (project_id, last_event_sequence, updated_at, tidy_fingerprint)
+            SELECT ${projectId}, 0, ${now}, ${fingerprint} WHERE EXISTS (SELECT 1 FROM projection_projects WHERE project_id = ${projectId} AND deleted_at IS NULL) ON CONFLICT(project_id) DO UPDATE SET tidy_fingerprint = excluded.tidy_fingerprint`;
+          }),
+        );
+        return accepted.length;
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause) ? Effect.failCause(cause) : Effect.succeed(0),
+        ),
+      );
+      const none = {
+        threadsAnalysed: 0,
+        memoriesProposed: 0,
+        skillsSuggested: 0,
+        ...(tidiesSuggested > 0 ? { tidiesSuggested } : {}),
+      } as const;
+      const cursor = yield* repository.getAnalysisCursor({ projectId });
+      const recent = yield* recentThreads(projectId, cursor);
       const advance = repository.advanceAnalysisCursor({
-        projectId: input.projectId,
+        projectId,
         sequence: recent.head,
         now: DateTime.formatIso(yield* DateTime.now),
       });
@@ -155,10 +252,6 @@ export const make = Effect.gen(function* () {
         return none;
       }
 
-      const { textGenerationModelSelection: modelSelection } = resolveProjectSettings(
-        settings,
-        input.projectId,
-      ).settings;
       // The model reads only the digest, so it runs in an empty directory rather than
       // the workspace, where it could pick up the project's files and instructions.
       const generated = yield* fileSystem
@@ -179,26 +272,72 @@ export const make = Effect.gen(function* () {
       let skillsSuggested = 0;
       for (const candidate of selectLessons(generated, digests, recent.leadOf)) {
         const outcome = yield* memories.proposeDerived({
-          projectId: input.projectId,
+          projectId,
           target: candidate.target,
           text: candidate.text,
           evidence: candidate.evidence,
           evidenceNamed: candidate.evidenceNamed,
+          ...(dreamed ? { dreamed: true } : {}),
         });
         if (outcome.status !== "proposed") continue;
         if (candidate.target === "skill") skillsSuggested += 1;
         else memoriesProposed += 1;
       }
       yield* advance;
-      return { threadsAnalysed: digests.length, memoriesProposed, skillsSuggested };
+      return { ...none, threadsAnalysed: digests.length, memoriesProposed, skillsSuggested };
     }).pipe(
       Effect.mapError((cause) =>
         isRejected(cause) || isStoreError(cause) ? cause : toStoreError(),
       ),
     );
 
+  // One pass over every live project, in a stable order so logs read the same
+  // way across runs. A project that errors is logged and skipped: one bad
+  // project must not starve the rest of the server of its pass.
+  const dream: Effect.Effect<ProjectMemoryDreamResult, never> = Effect.gen(function* () {
+    const settings = yield* settingsService.getSettings;
+    if (!settings.projectMemoryAnalyser) return { projects: 0, failed: 0 };
+    const rows = yield* sql<{ readonly projectId: ProjectId }>`
+      SELECT project_id AS "projectId"
+      FROM projection_projects
+      WHERE deleted_at IS NULL
+      ORDER BY project_id ASC
+    `;
+    let failed = 0;
+    for (const row of rows) {
+      // Both contract errors carry `_tag`; the result shape does not.
+      const outcome = yield* run(row.projectId, true).pipe(
+        Effect.catch((error) => Effect.succeed(error)),
+      );
+      if ("_tag" in outcome) {
+        failed += 1;
+        yield* Effect.logWarning("dreaming skipped a project", {
+          projectId: row.projectId,
+          reason: isRejected(outcome) ? outcome.reason : "store-failed",
+        });
+      }
+    }
+    return { projects: rows.length, failed };
+  }).pipe(
+    // A settings or store failure before any project ran ends the pass; the
+    // next wake re-plans. Nothing sensitive is on these errors.
+    Effect.catch(() =>
+      Effect.logWarning("project memory dreaming pass could not enumerate projects").pipe(
+        Effect.as({ projects: 0, failed: 0 }),
+      ),
+    ),
+    Effect.catchCause((cause) =>
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : Effect.logWarning("project memory dreaming pass failed", { cause }).pipe(
+            Effect.as({ projects: 0, failed: 0 }),
+          ),
+    ),
+  );
+
   return {
-    analyse: (input) => gate.withPermits(1)(run(input)),
+    analyse: (input) => gate.withPermits(1)(run(input.projectId, false)),
+    dream: gate.withPermits(1)(dream),
   } satisfies ProjectMemoryAnalyser["Service"];
 });
 

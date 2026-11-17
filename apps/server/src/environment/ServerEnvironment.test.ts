@@ -222,6 +222,8 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         sentToThread: true,
         proposals: true,
         analyser: true,
+        dreaming: true,
+        tidy: true,
       });
       // Same version-skew contract as memory: manage plus explicit trial, and older servers
       // leave the key absent instead of advertising a partial surface.
@@ -312,6 +314,8 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
         sentToThread: true,
         proposals: true,
         analyser: true,
+        dreaming: true,
+        tidy: true,
         sendDriverKinds: ["claudeAgent"],
       });
 

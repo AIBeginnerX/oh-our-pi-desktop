@@ -30,6 +30,10 @@ import {
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { createModelSelection } from "@t3tools/shared/model";
+import {
+  projectMemoryDreamingSupported,
+  projectMemoryTidySupported,
+} from "@t3tools/client-runtime/state/project-memory-proposals";
 import * as Equal from "effect/Equal";
 import { HOSTED_APP_CHANNEL } from "../../branding";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
@@ -110,6 +114,9 @@ const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, s
   pill: "Version pill",
   none: "None",
 };
+
+const DREAMING_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
+const dreamingHourLabel = (hour: number) => `${String(hour).padStart(2, "0")}:00`;
 
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
@@ -741,6 +748,12 @@ export function GeneralSettingsPanel() {
     connectedEnvironments.every(
       (target) => target.serverConfig?.environment.capabilities.threadRestartContinuation === true,
     );
+  const supportsProjectMemoryTidy =
+    connectedEnvironments.length > 0 &&
+    connectedEnvironments.every((target) => projectMemoryTidySupported(target.serverConfig));
+  const supportsProjectMemoryDreaming =
+    connectedEnvironments.length > 0 &&
+    connectedEnvironments.every((target) => projectMemoryDreamingSupported(target.serverConfig));
 
   const textGenerationProviders = serverProviders.filter(
     (provider) => provider.supportsTextGeneration !== false,
@@ -1643,6 +1656,119 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+
+        {supportsProjectMemoryDreaming && (
+          <SettingsRow
+            serverScoped
+            settingKeys={["projectMemoryDreaming", "projectMemoryDreamingHour"]}
+            {...searchableSetting("project-memory-dreaming")}
+            title={t(searchableSetting("project-memory-dreaming").title)}
+            description={t(
+              "Every day at the chosen hour (the server's local time), OOP analyses recent work in each project and adds suggestions under Proposed memories. Nothing is saved until you approve it. A day the computer is asleep or off at that hour is skipped.",
+            )}
+            status={
+              settings.projectMemoryAnalyser
+                ? undefined
+                : t("Turn on Work analyser in General settings first.")
+            }
+            resetAction={
+              settings.projectMemoryDreaming !== DEFAULT_UNIFIED_SETTINGS.projectMemoryDreaming ||
+              settings.projectMemoryDreamingHour !==
+                DEFAULT_UNIFIED_SETTINGS.projectMemoryDreamingHour ? (
+                <SettingResetButton
+                  label={t("dreaming")}
+                  onClick={() =>
+                    updateSettings({
+                      projectMemoryDreaming: DEFAULT_UNIFIED_SETTINGS.projectMemoryDreaming,
+                      projectMemoryDreamingHour: DEFAULT_UNIFIED_SETTINGS.projectMemoryDreamingHour,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div className="flex items-center gap-2">
+                {settings.projectMemoryDreaming ? (
+                  <Select
+                    value={String(settings.projectMemoryDreamingHour)}
+                    onValueChange={(value) => {
+                      const hour = Number(value);
+                      if (Number.isInteger(hour) && hour >= 0 && hour <= 23) {
+                        updateSettings({ projectMemoryDreamingHour: hour });
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      size="sm"
+                      className="w-auto min-w-0"
+                      aria-label={t("Dreaming hour")}
+                    >
+                      <SelectValue>
+                        {dreamingHourLabel(settings.projectMemoryDreamingHour)}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectPopup align="end" alignItemWithTrigger={false}>
+                      {DREAMING_HOURS.map((hour) => (
+                        <SelectItem key={hour} value={String(hour)}>
+                          {dreamingHourLabel(hour)}
+                        </SelectItem>
+                      ))}
+                    </SelectPopup>
+                  </Select>
+                ) : null}
+                <ScopedSwitch
+                  settingKeys={["projectMemoryDreaming"]}
+                  checked={settings.projectMemoryDreaming}
+                  disabled={!settings.projectMemoryAnalyser}
+                  onCheckedChange={(checked) =>
+                    updateSettings({ projectMemoryDreaming: Boolean(checked) })
+                  }
+                  aria-label={t("Dreaming")}
+                />
+              </div>
+            }
+          />
+        )}
+
+        {supportsProjectMemoryTidy && (
+          <SettingsRow
+            serverScoped
+            settingKeys={["projectMemoryTidy"]}
+            {...searchableSetting("project-memory-tidy")}
+            title={t("Memory tidy-up")}
+            description={t(
+              "Sends the titles and text of saved project memories to the text-generation model to find duplicates, contradictions and outdated memories. Memories that look like secrets are never sent. Uses only models whose provider already receives project memory in chats. Suggestions wait for you to apply them.",
+            )}
+            status={
+              settings.projectMemoryAnalyser
+                ? undefined
+                : t("Turn on Work analyser in General settings first.")
+            }
+            resetAction={
+              settings.projectMemoryTidy !== DEFAULT_UNIFIED_SETTINGS.projectMemoryTidy ? (
+                <SettingResetButton
+                  label={t("Memory tidy-up")}
+                  onClick={() =>
+                    updateSettings({
+                      projectMemoryTidy: DEFAULT_UNIFIED_SETTINGS.projectMemoryTidy,
+                    })
+                  }
+                />
+              ) : undefined
+            }
+            control={
+              <ScopedSwitch
+                settingKeys={["projectMemoryTidy"]}
+                checked={settings.projectMemoryTidy}
+                disabled={!settings.projectMemoryAnalyser}
+                onCheckedChange={(checked) =>
+                  updateSettings({ projectMemoryTidy: Boolean(checked) })
+                }
+                aria-label={t("Memory tidy-up")}
+              />
+            }
+          />
+        )}
 
         <SettingsRow
           {...searchableSetting("continue-threads-after-server-update")}

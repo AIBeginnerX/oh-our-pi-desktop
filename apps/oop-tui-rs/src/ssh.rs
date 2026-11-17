@@ -327,8 +327,8 @@ pub fn pair_runtime(
 fn no_runtime(host: &str) -> String {
     fill(
         s(
-            "No OOP server is running on {host} and no runtime is installed there. Connect to it once from the OOP desktop app (Settings -> Connections -> SSH), or install t3 under ~/.oop-desktop/runtime/versions/<version>/ on the host.",
-            "{host} 에서 실행 중인 OOP 서버도, 설치된 런타임도 없습니다. OOP 데스크톱 앱에서 한 번 연결하거나(설정 -> 연결 -> SSH), 호스트의 ~/.oop-desktop/runtime/versions/<버전>/ 에 t3 를 설치하세요.",
+            "No OOP server is running on {host} and no runtime is installed there. Connect to it once from the OOP desktop app (Settings -> Connections -> SSH), or install the OOP server runtime under ~/.oop-desktop/runtime/versions/<version>/ on the host.",
+            "{host} 에서 실행 중인 OOP 서버도, 설치된 런타임도 없습니다. OOP 데스크톱 앱에서 한 번 연결하거나(설정 -> 연결 -> SSH), 호스트의 ~/.oop-desktop/runtime/versions/<버전>/ 에 OOP 서버 런타임을 설치하세요.",
         ),
         &[("host", host.to_string())],
     )

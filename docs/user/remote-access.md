@@ -12,12 +12,12 @@ Connections**, sign in, and enable **OOP Connect** for that environment.
 For a command-line host, run:
 
 ```bash
-t3 connect
+oop server connect
 ```
 
-Follow the sign-in instructions. Setup offers a
-[background service](./background-service.md); if you decline it, start the
-server with `t3 serve`. Saving your sign-in alone does not make the machine
+Follow the sign-in instructions, then start the server with `oop server serve`.
+To run it as a [background service](./background-service.md), connect to the host
+from the desktop app over SSH. Saving your sign-in alone does not make the machine
 reachable.
 
 On your other device, sign in to the same OOP Connect account and choose the
@@ -58,13 +58,13 @@ For a command-line host, replace `<private-ip>` with the host's LAN or tailnet
 address:
 
 ```bash
-t3 serve --host <private-ip>
+oop server serve --host <private-ip>
 ```
 
 If a server is already running, generate a fresh link without restarting it:
 
 ```bash
-t3 pair
+oop server pair
 ```
 
 Scan the QR code on your phone or paste the pairing URL into **Add environment**
@@ -104,13 +104,13 @@ HTTPS** in **Settings → Connections**. Turn it off there to remove that route.
 To start a command-line server with Tailscale HTTPS:
 
 ```bash
-t3 serve --tailscale-serve
+oop server serve --tailscale-serve
 ```
 
 For an already-running server:
 
 ```bash
-t3 pair --tailscale
+oop server pair --tailscale
 ```
 
 The pairing link uses an address such as `https://machine.tailnet.ts.net/`.
@@ -123,7 +123,7 @@ tailscale serve --https=443 off
 ```
 
 If that port is already in use, choose another with
-`--tailscale-serve-port`. See `t3 pair --help` for other pairing options.
+`--tailscale-serve-port`. See `oop server pair --help` for other pairing options.
 
 ### Behind a reverse proxy
 
@@ -170,8 +170,8 @@ The remote server has its own provider settings and sign-ins. To turn a provider
 on there, open **Settings → Providers**, pick the remote environment at the top,
 and enable it; its CLI must be installed and signed in on the remote host.
 
-If the host runs OOP's background service for `~/.oop-desktop` (`t3 service
-install`), the desktop app uses that server. When the service is older than the
+The desktop app installs or reuses OOP's background service for `~/.oop-desktop`
+on the host. When the service is older than the
 app, the app switches it to the app's version and restarts it; it never moves
 the service to an older version. A server you started by hand is left alone.
 
@@ -187,7 +187,7 @@ For Antigravity's Google callback on a remote host, see
 On the host, **Settings → Connections** lets authorized administrators create
 pairing links and revoke client sessions. Revoking an unused link prevents new
 pairings; revoke a device's session to remove its existing access. Command-line
-management is available through `t3 auth --help`.
+management is available through `oop server auth --help`.
 
 A session with an open connection stays listed after its access credential
 expires.
@@ -204,8 +204,8 @@ and keeps the same address. When the host starts again or wakes, OOP Connect
 creates a replacement tunnel on its own. You do not need to pair again. Cleanup
 usually runs five to ten minutes after the tunnel goes down.
 
-On a command-line host, `t3 connect unlink` disables exposure while retaining
-your login; `t3 connect logout` also clears that login. Background-service
+On a command-line host, `oop server connect unlink` disables exposure while retaining
+your login; `oop server connect logout` also clears that login. Background-service
 [removal](./background-service.md#manage-the-service) is separate.
 
 Treat pairing URLs and authorization codes as passwords. Do not include them in
@@ -213,22 +213,22 @@ screenshots, logs, or bug reports.
 
 ## OOP Connect troubleshooting
 
-Run `t3 connect status` on the host to inspect saved authorization and link
+Run `oop server connect status` on the host to inspect saved authorization and link
 configuration. It is not a live reachability check. If the environment appears
-offline, run `t3 service status` and read the displayed log. If it disappears
+offline, run `oop server service status` and read the displayed log. If it disappears
 when SSH closes, see [background-service troubleshooting](./background-service.md#troubleshooting).
 
-| Error                                                     | Recovery                                                                                                                                    |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart OOP on the host.                                                                             |
-| `auth_invalid` or `invalid_bearer`                        | Run `t3 connect login`. If credentials were revoked, run `t3 connect logout`, then `t3 connect` again. Restart the server after signing in. |
-| Expired or invalid link proof                             | Check the host's date and time, update OOP, then restart it.                                                                                |
-| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                               |
-| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                             |
+| Error                                                     | Recovery                                                                                                                                                            |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment_link_limit_exceeded` or managed tunnel limit | Deregister an unused environment, then restart OOP on the host.                                                                                                     |
+| `auth_invalid` or `invalid_bearer`                        | Run `oop server connect login`. If credentials were revoked, run `oop server connect logout`, then `oop server connect` again. Restart the server after signing in. |
+| Expired or invalid link proof                             | Check the host's date and time, update OOP, then restart it.                                                                                                        |
+| HTTP 403 without a recognized error                       | Check relay access, proxies, and firewall rules. Keep any Cloudflare Ray ID for a bug report.                                                                       |
+| HTTP 408, 429, or 5xx                                     | Check network and relay availability. Startup retries temporary failures for up to ten minutes.                                                                     |
 
 After fixing a permanent rejection, restart the host's server. On Linux, use
 `systemctl --user restart t3code.service` for the background service. For a
-foreground server, stop it and run `t3 serve` again with your usual options.
+foreground server, stop it and run `oop server serve` again with your usual options.
 Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both

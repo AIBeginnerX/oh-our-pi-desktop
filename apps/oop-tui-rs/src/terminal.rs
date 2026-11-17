@@ -177,6 +177,9 @@ mod tests {
         }
     }
 
+    // Unix only: Windows never pushes the protocol (`supports_keyboard_enhancement` is false on its
+    // console), and crossterm refuses to write the pop there.
+    #[cfg(unix)]
     #[test]
     fn the_keyboard_protocol_is_popped_only_when_it_was_pushed() {
         let bytes = |kitty| {

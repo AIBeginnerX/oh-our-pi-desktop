@@ -248,6 +248,8 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
       protect("generateThreadTitle", nativeGeneration.generateThreadTitle(value)),
     generateWorkLessons: (value) =>
       protect("generateWorkLessons", nativeGeneration.generateWorkLessons(value)),
+    generateMemoryTidy: (value) =>
+      protect("generateMemoryTidy", nativeGeneration.generateMemoryTidy(value)),
   };
   return {
     instanceId,

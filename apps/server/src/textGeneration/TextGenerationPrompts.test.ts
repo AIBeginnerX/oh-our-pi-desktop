@@ -354,3 +354,11 @@ describe("normalizeCliError", () => {
     expect(result.message).not.toContain("secret-token");
   });
 });
+
+it("builds conservative memory tidy instructions with labelled data", async () => {
+  const { buildMemoryTidyPrompt } = await import("./TextGenerationPrompts.ts");
+  const { prompt } = buildMemoryTidyPrompt({ digest: '[{"label":"M1"}]' });
+  expect(prompt).toContain("When unsure suggest nothing");
+  expect(prompt).toContain('"label":"M1"');
+  expect(prompt).toContain("own language");
+});

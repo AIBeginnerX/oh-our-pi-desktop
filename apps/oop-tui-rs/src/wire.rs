@@ -23,6 +23,9 @@ use tokio_tungstenite::Connector;
 use tokio_tungstenite::tungstenite::Message;
 
 const PING_EVERY: Duration = Duration::from_secs(10);
+/// Three pings with nothing at all coming back means the socket is dead even if it never closed
+/// (sleep, a network switch, a dropped tunnel): the reader gives up and the link reconnects.
+const STALE_AFTER: Duration = PING_EVERY.saturating_mul(3);
 
 pub enum StreamMsg {
     Item(Value),
@@ -90,6 +93,13 @@ impl Rpc {
         .await
         .map_err(|_| "the WebSocket did not open in time".to_string())?
         .map_err(|e| format!("cannot open the WebSocket: {e}"))?;
+        Ok(Self::from_socket(socket))
+    }
+
+    fn from_socket<S>(socket: tokio_tungstenite::WebSocketStream<S>) -> Rpc
+    where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
         let (mut sink, mut source) = socket.split();
         let (out, mut out_rx) = mpsc::unbounded_channel::<Message>();
         let (closed, _) = watch::channel(None);
@@ -115,20 +125,31 @@ impl Rpc {
         tokio::spawn(async move {
             let mut ping =
                 tokio::time::interval_at(tokio::time::Instant::now() + PING_EVERY, PING_EVERY);
+            let mut last_inbound = tokio::time::Instant::now();
             let reason = loop {
                 tokio::select! {
-                    _ = ping.tick() => { let _ = reader.send(&json!({"_tag": "Ping"})); }
-                    frame = source.next() => match frame {
-                        Some(Ok(Message::Text(text))) => reader.handle_frame(text.as_str()),
-                        Some(Ok(Message::Close(_))) | None => break "the connection closed".to_string(),
-                        Some(Ok(_)) => {}
-                        Some(Err(e)) => break format!("the connection failed: {e}"),
+                    _ = ping.tick() => {
+                        if last_inbound.elapsed() > STALE_AFTER {
+                            break "the server stopped answering".to_string();
+                        }
+                        let _ = reader.send(&json!({"_tag": "Ping"}));
+                    }
+                    frame = source.next() => {
+                        last_inbound = tokio::time::Instant::now();
+                        match frame {
+                            Some(Ok(Message::Text(text))) => reader.handle_frame(text.as_str()),
+                            Some(Ok(Message::Close(_))) | None => {
+                                break "the connection closed".to_string();
+                            }
+                            Some(Ok(_)) => {}
+                            Some(Err(e)) => break format!("the connection failed: {e}"),
+                        }
                     }
                 }
             };
             reader.fail_all(&reason);
         });
-        Ok(rpc)
+        rpc
     }
 
     fn send(&self, message: &Value) -> Result<(), String> {
@@ -314,6 +335,57 @@ pub fn describe_cause(cause: Option<&Value>) -> String {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    async fn fake_socket() -> (
+        Rpc,
+        tokio_tungstenite::WebSocketStream<tokio::io::DuplexStream>,
+    ) {
+        use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
+        let (client, server) = tokio::io::duplex(8192);
+        let client = WebSocketStream::from_raw_socket(client, Role::Client, None).await;
+        let server = WebSocketStream::from_raw_socket(server, Role::Server, None).await;
+        (Rpc::from_socket(client), server)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn silent_server_closes_and_fails_pending_calls() {
+        let (rpc, _server) = fake_socket().await;
+        let call = rpc.call("never.answers", json!({}));
+        let closed = rpc.closed();
+        let (result, reason) = tokio::select! {
+            result = async { tokio::join!(call, closed) } => result,
+            _ = tokio::time::sleep(PING_EVERY * 6) => panic!("silent connection stayed open"),
+        };
+        assert_eq!(reason, "the server stopped answering");
+        assert_eq!(result.unwrap_err(), reason);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn answering_server_stays_open_past_stale_limit() {
+        let (rpc, mut server) = fake_socket().await;
+        let server_task = tokio::spawn(async move {
+            while let Some(Ok(Message::Text(text))) = server.next().await {
+                let message: Value = serde_json::from_str(&text).unwrap();
+                let response = match message["_tag"].as_str() {
+                    Some("Ping") => json!({"_tag": "Pong"}),
+                    Some("Request") => json!({"_tag": "Exit", "requestId": message["id"],
+                        "exit": {"_tag": "Success", "value": null}}),
+                    _ => continue,
+                };
+                server
+                    .send(Message::text(response.to_string()))
+                    .await
+                    .unwrap();
+            }
+        });
+        for _ in 0..12 {
+            tokio::time::advance(PING_EVERY).await;
+            // The reply receipt ensures all preceding Pong frames have reached the reader.
+            rpc.call("barrier", json!({})).await.unwrap();
+            assert!(rpc.inner.closed.borrow().is_none());
+        }
+        server_task.abort();
+    }
 
     #[test]
     fn failure_causes_read_as_messages() {

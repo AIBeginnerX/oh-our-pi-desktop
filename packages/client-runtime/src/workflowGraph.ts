@@ -34,7 +34,9 @@ export type WorkflowNodeState =
   | "cancelled"
   | "skipped"
   /** A failed command whose exit 1 only means "no" (grep no-match, false test): shown muted. */
-  | "quiet";
+  | "quiet"
+  /** A crew task that ended partial or blocked: it stopped moving, but the lead takes it over. */
+  | "unfinished";
 
 /** What a tool call did, in the terms a person uses: reading, editing, running, searching. */
 export type ToolCategory = "read" | "edit" | "run" | "search" | "web" | "other";
@@ -152,6 +154,7 @@ const SETTLED: ReadonlySet<WorkflowNodeState> = new Set([
   "cancelled",
   "skipped",
   "quiet",
+  "unfinished",
 ]);
 const LIVE: ReadonlySet<WorkflowNodeState> = new Set(["running", "blocked", "paused", "pending"]);
 
@@ -163,6 +166,8 @@ export interface WorkflowCounts {
   readonly failed: number;
   /** Cancelled or skipped: settled without a result either way. */
   readonly stopped: number;
+  /** Crew tasks that ended partial or blocked: stopped moving, but handed back, not failed. */
+  readonly unfinished: number;
   readonly running: number;
 }
 
@@ -171,14 +176,16 @@ export function workflowCounts(nodes: ReadonlyArray<Pick<WorkflowNode, "state">>
   let completed = 0;
   let failed = 0;
   let stopped = 0;
+  let unfinished = 0;
   let running = 0;
   for (const { state } of nodes) {
     if (state === "completed") completed += 1;
     else if (state === "failed") failed += 1;
     else if (state === "cancelled" || state === "skipped") stopped += 1;
+    else if (state === "unfinished") unfinished += 1;
     else if (state === "running") running += 1;
   }
-  return { total: nodes.length, completed, failed, stopped, running };
+  return { total: nodes.length, completed, failed, stopped, unfinished, running };
 }
 
 /**
@@ -251,6 +258,7 @@ export interface WorkflowWave {
   readonly settled: number;
   readonly completed: number;
   readonly failed: number;
+  readonly unfinished: number;
   readonly running: number;
   readonly x: number;
   readonly width: number;
@@ -485,6 +493,7 @@ export function layoutWorkflow(
       settled: column.filter((node) => isSettledState(node.state)).length,
       completed: column.filter((node) => node.state === "completed").length,
       failed: column.filter((node) => node.state === "failed").length,
+      unfinished: column.filter((node) => node.state === "unfinished").length,
       running: column.filter((node) => node.state === "running").length,
       x,
       width,

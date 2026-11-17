@@ -133,8 +133,15 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.autoSelectProjectMemories !== DEFAULT_UNIFIED_SETTINGS.autoSelectProjectMemories
         ? ["Auto-select related memories"]
         : []),
+      ...(settings.projectMemoryTidy !== DEFAULT_UNIFIED_SETTINGS.projectMemoryTidy
+        ? ["Memory tidy-up"]
+        : []),
       ...(settings.projectMemoryAnalyser !== DEFAULT_UNIFIED_SETTINGS.projectMemoryAnalyser
         ? ["Work analyser"]
+        : []),
+      ...(settings.projectMemoryDreaming !== DEFAULT_UNIFIED_SETTINGS.projectMemoryDreaming ||
+      settings.projectMemoryDreamingHour !== DEFAULT_UNIFIED_SETTINGS.projectMemoryDreamingHour
+        ? ["Dreaming"]
         : []),
       ...(settings.continueThreadsAfterServerUpdate !==
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
@@ -216,7 +223,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.responseStreamingMode,
       settings.enableProviderUpdateChecks,
       settings.autoSelectProjectMemories,
+      settings.projectMemoryTidy,
       settings.projectMemoryAnalyser,
+      settings.projectMemoryDreaming,
+      settings.projectMemoryDreamingHour,
       settings.continueThreadsAfterServerUpdate,
       settings.continueUnfinishedPlans,
       settings.sidebarAutoSettleAfterDays,
@@ -333,7 +343,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       autoSelectProjectMemories: DEFAULT_UNIFIED_SETTINGS.autoSelectProjectMemories,
+      projectMemoryTidy: DEFAULT_UNIFIED_SETTINGS.projectMemoryTidy,
       projectMemoryAnalyser: DEFAULT_UNIFIED_SETTINGS.projectMemoryAnalyser,
+      projectMemoryDreaming: DEFAULT_UNIFIED_SETTINGS.projectMemoryDreaming,
+      projectMemoryDreamingHour: DEFAULT_UNIFIED_SETTINGS.projectMemoryDreamingHour,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       continueUnfinishedPlans: DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,

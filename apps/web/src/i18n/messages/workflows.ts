@@ -145,6 +145,12 @@ export const WORKFLOWS_MESSAGES: MessageCatalog = {
   // Where it stands.
   Blocked: { ko: "막힘", ja: "ブロック", "zh-CN": "受阻", es: "Bloqueado" },
   Partial: { ko: "일부 완료", ja: "一部完了", "zh-CN": "部分完成", es: "Parcial" },
+  "Not finished": {
+    ko: "미완료",
+    ja: "未完了",
+    "zh-CN": "未完成",
+    es: "Sin terminar",
+  },
   Stopped: { ko: "중지됨", ja: "停止", "zh-CN": "已停止", es: "Detenido" },
   Waiting: { ko: "대기 중", ja: "待機中", "zh-CN": "等待中", es: "En espera" },
   Paused: { ko: "일시정지", ja: "一時停止", "zh-CN": "已暂停", es: "En pausa" },
@@ -172,6 +178,13 @@ export const WORKFLOWS_MESSAGES: MessageCatalog = {
     ja: "{count}件失敗",
     "zh-CN": "{count} 个失败",
     es: "{count} con error",
+  },
+  // A crew task handed back partway: work left, not a failure.
+  "{count} not finished": {
+    ko: "{count}개 미완료",
+    ja: "{count}件未完了",
+    "zh-CN": "{count} 个未完成",
+    es: "{count} sin terminar",
   },
   "{count} stopped": {
     ko: "{count}개 중지",
@@ -249,6 +262,13 @@ export const WORKFLOWS_MESSAGES: MessageCatalog = {
     ja: "{claimed}件は未証明",
     "zh-CN": "{claimed} 项未证实",
     es: "{claimed} sin comprobar",
+  },
+  // A check that fails while its task still runs is work left, not a failure.
+  "{count} not passing yet": {
+    ko: "{count}개 아직 미통과",
+    ja: "{count}件はまだ未合格",
+    "zh-CN": "{count} 项尚未通过",
+    es: "{count} aún sin pasar",
   },
   "{percent}% of the crew's items verified": {
     ko: "크루 항목 {percent}% 검증됨",

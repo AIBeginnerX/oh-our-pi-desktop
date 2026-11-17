@@ -28,6 +28,19 @@ describe("thread usage footer text", () => {
       "캐시 30.0% · opus $4.12 · astra ≈$0.31 · glm 비용 알 수 없음",
     );
   });
+  it("names the turn only when the server answered for one", () => {
+    changeLanguage("en");
+    expect(formatThreadUsageFooter({ ...summary, scope: "turn" }, null)).toBe(
+      "This turn · Cache 30.0% · opus $4.12 · astra ≈$0.31 · glm Cost unknown",
+    );
+    changeLanguage("ko");
+    expect(formatThreadUsageFooter({ ...summary, scope: "turn" }, null)).toBe(
+      "이번 턴 · 캐시 30.0% · opus $4.12 · astra ≈$0.31 · glm 비용 알 수 없음",
+    );
+    // A whole-thread answer (or an old server without a scope) stays unlabelled.
+    expect(formatThreadUsageFooter({ ...summary, scope: "thread" }, null)).not.toContain("턴");
+    expect(formatThreadUsageFooter(summary, null)).not.toContain("턴");
+  });
   it("hides absent cache reporting and overflow summaries", () => {
     expect(formatThreadUsageFooter(null, null)).toBe("");
     expect(formatThreadUsageFooter({ ...summary, status: "too-large" }, null)).toBe("");

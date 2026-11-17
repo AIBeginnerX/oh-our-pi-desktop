@@ -1,0 +1,7 @@
+{
+  "projectId": "project-1",
+  "memoryId": "memory-1",
+  "expectedVersion": 2,
+  "title": "New title",
+  "body": "New body"
+}

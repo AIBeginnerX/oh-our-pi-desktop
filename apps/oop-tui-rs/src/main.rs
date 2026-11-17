@@ -12,12 +12,14 @@ mod cli_text;
 mod cli_update;
 mod clipboard;
 mod cmd;
+mod cmd_attach;
 mod cmd_continue;
 mod cmd_copy;
 mod cmd_crew;
 mod cmd_goal;
 mod cmd_history;
 mod cmd_implement;
+mod cmd_memory;
 mod cmd_misc;
 mod cmd_provider;
 mod cmd_skills;
@@ -150,6 +152,10 @@ const COMMAND_WORDS: [&str; 8] = [
 ];
 
 enum Command {
+    Server {
+        home: Option<String>,
+        args: Vec<String>,
+    },
     Help,
     Version,
     Run {
@@ -210,6 +216,12 @@ fn parse_args(args: &[String]) -> Command {
         if literal {
             positional.push(arg.clone());
             continue;
+        }
+        if arg == "server" && positional.is_empty() {
+            return Command::Server {
+                home,
+                args: args[index..].to_vec(),
+            };
         }
         if arg == "--" {
             literal = true;
@@ -442,6 +454,7 @@ async fn main() {
     // The language comes first: even a usage error is printed in it.
     i18n::init(settings::startup_language(&settings::settings_path()).as_deref());
     let code = match parse_args(&args) {
+        Command::Server { home, args } => server::server_passthrough(home.as_deref(), &args),
         Command::Help => {
             print!("{}", cli_text::t("cli.help"));
             0
@@ -1119,5 +1132,20 @@ mod tests {
             panic!("not an error");
         };
         assert_eq!(message, "Unknown option: --bogus");
+    }
+}
+
+#[cfg(test)]
+mod server_passthrough_tests {
+    use super::*;
+    #[test]
+    fn server_passthrough_argument_parsing() {
+        let args = ["--home", "/sandbox", "server", "pair", "--help"].map(String::from);
+        assert!(
+            matches!(parse_args(&args), Command::Server { home: Some(h), args } if h == "/sandbox" && args == ["pair", "--help"])
+        );
+        assert!(
+            matches!(parse_args(&["server".into()]), Command::Server { args, .. } if args.is_empty())
+        );
     }
 }

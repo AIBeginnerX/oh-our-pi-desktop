@@ -158,13 +158,13 @@
       "name": "task.updated partial",
       "kind": "task.updated",
       "status": "partial",
-      "expected": "failed"
+      "expected": "unfinished"
     },
     {
       "name": "task.updated blocked",
       "kind": "task.updated",
       "status": "blocked",
-      "expected": "failed"
+      "expected": "unfinished"
     },
     {
       "name": "task.updated stopped",
@@ -229,13 +229,13 @@
       "name": "task.completed partial",
       "kind": "task.completed",
       "status": "partial",
-      "expected": "failed"
+      "expected": "unfinished"
     },
     {
       "name": "task.completed blocked",
       "kind": "task.completed",
       "status": "blocked",
-      "expected": "failed"
+      "expected": "unfinished"
     },
     {
       "name": "task.completed stopped",

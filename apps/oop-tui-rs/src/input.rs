@@ -307,15 +307,39 @@ impl Input {
             .unwrap_or(self.atoms.len())
     }
 
+    /// The cursor's column in cells from the start of its line: a wide character is two and a
+    /// chip is as wide as its label, so atoms are not cells.
+    fn column_at(&self, at: usize) -> usize {
+        self.atoms[self.line_start(at)..at]
+            .iter()
+            .map(Atom::cells)
+            .sum()
+    }
+
+    /// The atom boundary of the line `start..end` nearest `column` cells in: the last one that
+    /// still fits, so a wide character is never landed inside, or the line's end when the line is
+    /// narrower than the column.
+    fn index_in_column(&self, start: usize, end: usize, column: usize) -> usize {
+        let (mut used, mut at) = (0, start);
+        for atom in &self.atoms[start..end] {
+            used += atom.cells();
+            if used > column {
+                break;
+            }
+            at += 1;
+        }
+        at
+    }
+
     /// Moves to the line above, keeping the column; false when this is the first line.
     fn step_up(&mut self) -> bool {
         let start = self.line_start(self.cursor);
         if start == 0 {
             return false;
         }
-        let column = self.cursor - start;
+        let column = self.column_at(self.cursor);
         let previous = self.line_start(start - 1);
-        self.cursor = previous + column.min(start - 1 - previous);
+        self.cursor = self.index_in_column(previous, start - 1, column);
         true
     }
 
@@ -325,9 +349,9 @@ impl Input {
         if end >= self.atoms.len() {
             return false;
         }
-        let column = self.cursor - self.line_start(self.cursor);
+        let column = self.column_at(self.cursor);
         let next = end + 1;
-        self.cursor = next + column.min(self.line_end(next) - next);
+        self.cursor = self.index_in_column(next, self.line_end(next), column);
         true
     }
 
@@ -632,6 +656,61 @@ mod tests {
     }
 
     #[test]
+    fn down_keeps_the_display_column_across_wide_characters() {
+        // "가나" is four cells wide, so "abcd" is where the cursor's column is on the next line
+        let mut input = typed("가나다abc\nabcdef");
+        input.place(2);
+        assert_eq!(input.layout(40).1, (4, 0), "the cursor is four cells in");
+        assert!(input.mv(Move::Down, false));
+        assert_eq!(input.cursor(), 11, "after `abcd`");
+    }
+
+    #[test]
+    fn up_keeps_the_display_column_across_wide_characters() {
+        let mut input = typed("가나다abc\nabcdef");
+        input.mv(Move::End, false);
+        for _ in 0..2 {
+            input.mv(Move::Left, false);
+        }
+        assert_eq!(input.cursor(), 11, "after `abcd`");
+        assert_eq!(
+            input.layout(40).1,
+            (4, 1),
+            "four cells into the second line"
+        );
+        assert!(input.mv(Move::Up, false));
+        assert_eq!(input.cursor(), 2, "after `가나`");
+    }
+
+    #[test]
+    fn a_column_inside_a_wide_character_lands_before_it() {
+        // display column 3 on an ASCII line: 3 cells in, the Korean line stops at `가` (2 cells)
+        let mut input = typed("abcdef\n가나다");
+        input.place(0);
+        for _ in 0..3 {
+            input.mv(Move::Right, false);
+        }
+        assert_eq!(
+            input.layout(40).1,
+            (3, 0),
+            "three cells into the ASCII line"
+        );
+        assert!(input.mv(Move::Down, false));
+        assert_eq!(input.cursor(), 8, "after `가`, never inside it");
+    }
+
+    #[test]
+    fn a_shorter_line_clamps_to_its_end() {
+        let mut input = typed("abcdef\n가나");
+        input.place(6);
+        assert_eq!(input.layout(40).1, (6, 0), "the end of the ASCII line");
+        assert!(input.mv(Move::Down, false));
+        assert_eq!(input.cursor(), 9, "the end of `가나`, which is narrower");
+        assert!(input.mv(Move::Up, false));
+        assert_eq!(input.cursor(), 4, "back at the clamped column");
+    }
+
+    #[test]
     fn paste_normalises_line_ends_and_drops_escapes() {
         let input = typed("a\r\nb\rc\u{1b}[31m\td");
         assert_eq!(input.text(), "a\nb\nc[31m    d");
@@ -691,8 +770,8 @@ mod tests {
         let (_, cursor) = input.layout(6);
         assert_eq!(
             cursor,
-            (4, 0),
-            "up keeps the column in characters: before the third syllable"
+            (2, 0),
+            "up keeps the display column: two cells in, before the second syllable"
         );
         let (rows, cursor) = typed("abcd").layout(4);
         assert_eq!(

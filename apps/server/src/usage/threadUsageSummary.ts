@@ -4,6 +4,8 @@ import { lookupRate, type RateTable } from "./usagePricing.ts";
 
 type Entry = {
   readonly threadId: ThreadId;
+  /** The observation activity's `turn_id`; null when the activity named no turn. */
+  readonly turnId: string | null;
   readonly createdAt: string;
   readonly model: string;
   readonly observation: OwnedTurnUsageObservationV1;
@@ -67,12 +69,18 @@ export function chainStepCostsUsd(
   return out;
 }
 
-/** Sums tokens and computes cost for a thread family's usage observations. */
+/**
+ * Sums tokens and computes cost for a thread family's usage observations.
+ * `keep` narrows what the summary counts; the Claude running-total chains are
+ * always stepped over every entry first, so a kept turn's cost is its own
+ * step of the chain, never its provider's running total.
+ */
 export function aggregateThreadUsage(
   threadId: ThreadId,
   entries: ReadonlyArray<Entry>,
   rates: RateTable,
   overrides: RateTable,
+  keep?: (entry: Entry) => boolean,
 ): ThreadUsageSummary {
   const stepCosts = chainStepCostsUsd(
     entries.map((entry) => ({
@@ -85,6 +93,7 @@ export function aggregateThreadUsage(
   );
   const turnCost = new Map<Entry, number | null>();
   entries.forEach((entry, index) => turnCost.set(entry, stepCosts[index] ?? null));
+  const counted = keep === undefined ? entries : entries.filter(keep);
 
   const summarize = (items: ReadonlyArray<Entry>): ThreadUsageSummary["totals"] => {
     let inputTokens = 0,
@@ -148,7 +157,7 @@ export function aggregateThreadUsage(
     };
   };
   const groups = new Map<string, Entry[]>();
-  for (const entry of entries) {
+  for (const entry of counted) {
     const key = JSON.stringify([entry.model, entry.observation.source.driver]);
     const group = groups.get(key) ?? [];
     group.push(entry);
@@ -157,7 +166,7 @@ export function aggregateThreadUsage(
   return {
     threadId,
     status: "ok",
-    totals: summarize(entries),
+    totals: summarize(counted),
     models: [...groups.values()].map((items) => ({
       model: items[0]!.model,
       driver: items[0]!.observation.source.driver,

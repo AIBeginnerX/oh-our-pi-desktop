@@ -1,4 +1,8 @@
 import { useMemo } from "react";
+import {
+  projectMemoryDreamingSupported,
+  projectMemoryTidySupported,
+} from "@t3tools/client-runtime/state/project-memory-proposals";
 import { AuthAccessWriteScope } from "@t3tools/contracts";
 
 import { hasCloudPublicConfig } from "~/cloud/publicConfig";
@@ -59,6 +63,18 @@ export function useAvailableSettingsSearchItems(scopeSearch: SettingsScopeSearch
         }),
         hasThreadAutoSettlement:
           getThreadAutoSettlementSearchAvailability(environments).eligibleEnvironmentIds.length > 0,
+        // The Dreaming row renders only when every target with loaded config supports it, so
+        // a result here would point at an anchor that may be missing.
+        hasProjectMemoryTidy:
+          environments.some((environment) => environment.serverConfig !== null) &&
+          environments
+            .filter((environment) => environment.serverConfig !== null)
+            .every((environment) => projectMemoryTidySupported(environment.serverConfig)),
+        hasProjectMemoryDreaming:
+          environments.some((environment) => environment.serverConfig !== null) &&
+          environments
+            .filter((environment) => environment.serverConfig !== null)
+            .every((environment) => projectMemoryDreamingSupported(environment.serverConfig)),
       }),
     [
       canManageLocalBackend,

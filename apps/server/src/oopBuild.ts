@@ -29,4 +29,4 @@ export const CLI_VERSION = OOP_RELEASE_VERSION ?? packageJson.version;
 export const DEFAULT_HOME_DIR_NAME = OOP_RELEASE_VERSION === null ? ".t3" : ".oop-desktop";
 
 export const OOP_UPDATE_MESSAGE =
-  "OOP gets new versions on this machine from the OOP desktop app. Connect to this host from the updated desktop over SSH, which copies the new version into ~/.oop-desktop/runtime/versions, then run `t3 service install` from that version to switch the service.";
+  "OOP gets new versions on this machine from the OOP desktop app. Connect to this host from the updated desktop over SSH, which copies the new version into ~/.oop-desktop/runtime/versions and switches the service to it.";

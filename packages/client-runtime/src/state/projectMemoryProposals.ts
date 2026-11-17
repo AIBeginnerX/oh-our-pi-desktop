@@ -64,3 +64,40 @@ export function projectMemoryAnalyserState(
   if (config?.environment.capabilities.projectMemory?.analyser !== true) return "unsupported";
   return config.settings.projectMemoryAnalyser === true ? "on" : "off";
 }
+
+/**
+ * Whether the server runs dreaming itself, so the client may show the
+ * "Dreaming" settings at all: the capability is absent on older servers,
+ * which means the row stays hidden. Turning dreaming on additionally needs
+ * the work analyser, which `projectMemoryAnalyserState` already reports.
+ */
+export function projectMemoryDreamingSupported(
+  config:
+    | {
+        readonly environment: {
+          readonly capabilities: {
+            readonly projectMemory?: { readonly dreaming?: boolean | undefined } | undefined;
+          };
+        };
+      }
+    | null
+    | undefined,
+): boolean {
+  return config?.environment.capabilities.projectMemory?.dreaming === true;
+}
+
+/** Older servers omit this capability; never offer their tidy-up controls. */
+export function projectMemoryTidySupported(
+  config:
+    | {
+        readonly environment: {
+          readonly capabilities: {
+            readonly projectMemory?: { readonly tidy?: boolean | undefined } | undefined;
+          };
+        };
+      }
+    | null
+    | undefined,
+): boolean {
+  return config?.environment.capabilities.projectMemory?.tidy === true;
+}

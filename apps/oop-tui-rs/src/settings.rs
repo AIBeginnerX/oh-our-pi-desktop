@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// The keys of `settings.json`, in the order `oop config` lists them.
-pub const SETTING_KEYS: [&str; 11] = [
+pub const SETTING_KEYS: [&str; 12] = [
     "theme",
     "symbols",
     "animations",
@@ -21,6 +21,7 @@ pub const SETTING_KEYS: [&str; 11] = [
     "workflow",
     "pet",
     "usage",
+    "memoryAutoApprove",
     "language",
 ];
 
@@ -48,6 +49,7 @@ pub struct Settings {
     pub pet: bool,
     /// The provider usage panel at the foot of the thread list.
     pub usage: bool,
+    pub memory_auto_approve: String,
 }
 
 impl Default for Settings {
@@ -65,6 +67,7 @@ impl Default for Settings {
             workflow: true,
             pet: true,
             usage: true,
+            memory_auto_approve: "off".into(),
         }
     }
 }
@@ -165,6 +168,13 @@ pub fn read_file(path: &Path) -> SettingsFile {
             settings.status_line = value.to_string();
         }
         Some(_) => bad("statusLine", "auto | full | compact | minimal"),
+    }
+    match object.get("memoryAutoApprove").map(|v| v.as_str()) {
+        None => {}
+        Some(Some(value @ ("off" | "analyser" | "all"))) => {
+            settings.memory_auto_approve = value.to_string();
+        }
+        Some(_) => bad("memoryAutoApprove", "off | analyser | all"),
     }
     match object.get("language").map(|v| v.as_str()) {
         None => {}
@@ -389,6 +399,25 @@ mod tests {
         assert!(!file.settings.notify);
         assert!(file.settings.pet);
         assert_eq!(file.settings.symbols, "unicode");
+        cleanup(&path);
+    }
+
+    #[test]
+    fn memory_auto_approve_modes() {
+        let path = temp("memory-auto");
+        assert_eq!(Settings::default().memory_auto_approve, "off");
+        for mode in ["off", "analyser", "all"] {
+            std::fs::write(&path, json!({"memoryAutoApprove":mode}).to_string()).unwrap();
+            let file = read_file(&path);
+            assert_eq!(file.settings.memory_auto_approve, mode);
+            assert!(file.warnings.is_empty());
+        }
+        for value in [json!("yes"), json!(true)] {
+            std::fs::write(&path, json!({"memoryAutoApprove":value}).to_string()).unwrap();
+            let file = read_file(&path);
+            assert_eq!(file.settings.memory_auto_approve, "off");
+            assert!(file.warnings[0].contains("off | analyser | all"));
+        }
         cleanup(&path);
     }
 

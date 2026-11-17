@@ -158,8 +158,8 @@ pub fn pairing_url(base: &str, token: &str) -> String {
 
 fn setup_hint() -> &'static str {
     s(
-        "In the OOP app open Connect mobile, allow mobile connections, and under \"Use away from home\" save your relay address. Or publish the server on your tailnet with Tailscale Serve (t3 serve --tailscale-serve).",
-        "OOP 앱에서 모바일 연결을 열어 모바일 연결을 허용하고, \"외부에서 사용\"에 릴레이 주소를 저장하세요. 또는 Tailscale Serve 로 서버를 테일넷에 게시하세요 (t3 serve --tailscale-serve).",
+        "In the OOP app open Connect mobile, allow mobile connections, and under \"Use away from home\" save your relay address. Or publish the server on your tailnet with Tailscale Serve (oop server serve --tailscale-serve).",
+        "OOP 앱에서 모바일 연결을 열어 모바일 연결을 허용하고, \"외부에서 사용\"에 릴레이 주소를 저장하세요. 또는 Tailscale Serve 로 서버를 테일넷에 게시하세요 (oop server serve --tailscale-serve).",
     )
 }
 

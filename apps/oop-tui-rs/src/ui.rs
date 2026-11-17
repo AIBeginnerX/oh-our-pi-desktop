@@ -1205,7 +1205,10 @@ fn bottom_height(app: &App, main: Rect) -> u16 {
         }
     }
     let (rows, _) = app.input.layout(usize::from(main.width.saturating_sub(5)));
-    (rows.len().clamp(1, COMPOSER_MAX_ROWS) as u16 + 2).min(main.height.saturating_sub(2).max(3))
+    (rows.len().clamp(1, COMPOSER_MAX_ROWS) as u16
+        + 2
+        + u16::from(crate::cmd_attach::line(app).is_some()))
+    .min(main.height.saturating_sub(2).max(3))
 }
 
 fn draw_composer(frame: &mut Frame, area: Rect, app: &App) {
@@ -1220,8 +1223,16 @@ fn draw_composer(frame: &mut Frame, area: Rect, app: &App) {
         .borders(Borders::ALL)
         .border_style(border)
         .title(title);
-    let inner = block.inner(area);
+    let mut inner = block.inner(area);
     frame.render_widget(block, area);
+    if let Some(line) = crate::cmd_attach::line(app) {
+        frame.render_widget(
+            Paragraph::new(sanitize(&line)),
+            Rect::new(inner.x, inner.y, inner.width, inner.height.min(1)),
+        );
+        inner.y += 1;
+        inner.height = inner.height.saturating_sub(1);
+    }
     crate::composer::draw_input(frame, inner, app);
 }
 

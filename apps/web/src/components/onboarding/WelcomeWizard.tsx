@@ -666,7 +666,7 @@ function ConnectAccountOption({
             <p className="text-sm text-muted-foreground">
               {t("Run this on each computer you want to connect.")}
             </p>
-            <CommandBlock command="npx t3 connect" className="mt-3" />
+            <CommandBlock command="oop server connect" className="mt-3" />
             <p className="mt-3 text-xs text-muted-foreground">
               {t("Keep OOP running. Select the computers you want to set up above.")}
             </p>
@@ -785,9 +785,9 @@ function PairingForm({
             <p className="pt-3 text-sm text-muted-foreground">
               {t("Run this on the computer with your code.")}
             </p>
-            <CommandBlock command="npx t3 pair" className="mt-2" />
+            <CommandBlock command="oop server pair" className="mt-2" />
             <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-              {withCode(t("Start OOP first, or run {command}."), "npx t3 serve")}{" "}
+              {withCode(t("Start OOP first, or run {command}."), "oop server serve")}{" "}
               {withCode(t("Add {command} to use your tailnet."), "--tailscale")}
             </p>
           </CollapsiblePanel>

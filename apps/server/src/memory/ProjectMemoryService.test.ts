@@ -1,3 +1,5 @@
+import { ProjectMemoryTidyId } from "@t3tools/contracts";
+import { tidyStore } from "./tidyStore.ts";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -2100,6 +2102,24 @@ describe("ProjectMemoryService work-analyser suggestions", () => {
       );
     }));
 
+  test("a dreamed suggestion carries the mark and a plain one does not", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+
+      const dreamed = yield* service.proposeDerived({
+        ...derived("File the dreamed lesson for nightly review"),
+        dreamed: true,
+      });
+      if (dreamed.status !== "proposed") throw new Error(`got ${dreamed.status}`);
+      assert.equal(dreamed.proposal.analysis?.dreamed, true);
+
+      const plain = yield* service.proposeDerived(derived("Keep the plain lesson unmarked"));
+      if (plain.status !== "proposed") throw new Error(`got ${plain.status}`);
+      assert.equal(plain.proposal.analysis?.dreamed, undefined);
+    }));
+
   test("the analyser has its own cap, and agents are not starved by it", () =>
     Effect.gen(function* () {
       yield* runMigrations();
@@ -2271,5 +2291,109 @@ describe("ProjectMemoryService work-analyser suggestions", () => {
       assert.equal(error.reason, "proposal-not-memory");
       assert.equal((yield* service.list({ projectId: PROJECT })).items.length, 0);
       assert.equal((yield* service.listProposals({ projectId: PROJECT })).items.length, 1);
+    }));
+});
+
+describe("memory tidy decisions", () => {
+  const PROJECT = ProjectId.make("project-1");
+  for (const action of ["merge", "update", "delete"] as const) {
+    test(`applies ${action} atomically and removes its suggestion`, () =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* seedProject("project-1");
+        const service = yield* ProjectMemoryService;
+        const sql = yield* SqlClient.SqlClient;
+        const a = (yield* service.create({
+          projectId: PROJECT,
+          kind: "fact",
+          title: "First",
+          body: "First body",
+          origin: { type: "manual" },
+        })).memory;
+        const b = (yield* service.create({
+          projectId: PROJECT,
+          kind: "fact",
+          title: "Second",
+          body: "Second body",
+          origin: { type: "manual" },
+        })).memory;
+        const tidyId = ProjectMemoryTidyId.make("tidy-1");
+        yield* tidyStore(sql).insert({
+          tidyId,
+          projectId: PROJECT,
+          action,
+          title: action === "delete" ? null : "Revised",
+          body: action === "delete" ? null : "Revised body",
+          reason: "Duplicate or outdated",
+          memories: (action === "merge" ? [a, b] : [a]).map(({ memoryId, version }) => ({
+            memoryId,
+            version,
+          })),
+          dreamed: true,
+          createdAt: NOW,
+        });
+        const pending = (yield* service.listTidy({ projectId: PROJECT })).items;
+        assert.equal(pending.length, 1);
+        assert.equal(pending[0]!.memories[0]!.body, a.body);
+        assert.equal(pending[0]!.dreamed, true);
+        yield* service.applyTidy({ projectId: PROJECT, tidyId });
+        assert.equal((yield* service.listTidy({ projectId: PROJECT })).items.length, 0);
+        const page = yield* service.list({ projectId: PROJECT, includeBody: true });
+        assert.equal(page.items.length, action === "update" ? 2 : 1);
+        if (action !== "delete") {
+          const kept = (yield* service.get({ projectId: PROJECT, memoryId: a.memoryId })).memory;
+          assert.equal(kept.title, "Revised");
+          assert.equal(kept.version, 2);
+          assert.equal(kept.validUntil, null);
+        }
+        const error = yield* Effect.flip(service.applyTidy({ projectId: PROJECT, tidyId }));
+        assert.equal(error._tag, "ProjectMemoryRejectedError");
+      }));
+  }
+  test("stale apply commits suggestion removal and list drops stale rows", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const service = yield* ProjectMemoryService;
+      const sql = yield* SqlClient.SqlClient;
+      const a = (yield* service.create({
+        projectId: PROJECT,
+        kind: "fact",
+        title: "First",
+        body: "Body",
+        origin: { type: "manual" },
+      })).memory;
+      const row = {
+        tidyId: ProjectMemoryTidyId.make("stale"),
+        projectId: PROJECT,
+        action: "delete" as const,
+        title: null,
+        body: null,
+        reason: "Outdated",
+        memories: [{ memoryId: a.memoryId, version: a.version }],
+        dreamed: false,
+        createdAt: NOW,
+      };
+      yield* tidyStore(sql).insert(row);
+      yield* service.update({
+        projectId: PROJECT,
+        memoryId: a.memoryId,
+        expectedVersion: 1,
+        body: "Edited",
+      });
+      const error = yield* Effect.flip(
+        service.applyTidy({ projectId: PROJECT, tidyId: row.tidyId }),
+      );
+      assert.equal(error._tag, "ProjectMemoryRejectedError");
+      if (error._tag === "ProjectMemoryRejectedError") assert.equal(error.reason, "tidy-stale");
+      assert.equal((yield* tidyStore(sql).list(PROJECT)).length, 0);
+      yield* tidyStore(sql).insert(row);
+      assert.equal((yield* service.listTidy({ projectId: PROJECT })).items.length, 0);
+      yield* tidyStore(sql).insert({ ...row, memories: [{ memoryId: a.memoryId, version: 2 }] });
+      yield* service.dismissTidy({ projectId: PROJECT, tidyId: row.tidyId });
+      const missing = yield* Effect.flip(
+        service.dismissTidy({ projectId: PROJECT, tidyId: row.tidyId }),
+      );
+      assert.equal(missing._tag, "ProjectMemoryRejectedError");
     }));
 });

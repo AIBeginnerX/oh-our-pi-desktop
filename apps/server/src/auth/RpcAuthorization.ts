@@ -132,6 +132,9 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectMemoryAcknowledgeThread]: AuthOrchestrationOperateScope,
   // Approving turns an agent's proposal into active memory, so it needs the
   // same operate scope as creating one; rejecting just discards it.
+  [WS_METHODS.projectMemoryListTidy]: AuthOrchestrationReadScope,
+  [WS_METHODS.projectMemoryApplyTidy]: AuthOrchestrationOperateScope,
+  [WS_METHODS.projectMemoryDismissTidy]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectMemoryListProposals]: AuthOrchestrationReadScope,
   [WS_METHODS.projectMemoryApproveProposal]: AuthOrchestrationOperateScope,
   [WS_METHODS.projectMemoryRejectProposal]: AuthOrchestrationOperateScope,

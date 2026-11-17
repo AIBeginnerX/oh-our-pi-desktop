@@ -166,6 +166,8 @@ struct Counts {
     completed: usize,
     failed: usize,
     stopped: usize,
+    /// Crew tasks that ended partial or blocked: handed back to the lead, not failed.
+    unfinished: usize,
     running: usize,
 }
 
@@ -183,6 +185,7 @@ impl Counts {
             completed: of(NodeState::Completed),
             failed: of(NodeState::Failed),
             stopped: of(NodeState::Cancelled),
+            unfinished: of(NodeState::Unfinished),
             running: of(NodeState::Running),
         }
     }
@@ -192,6 +195,7 @@ impl Counts {
             ("completed", self.completed),
             ("failed", self.failed),
             ("stopped", self.stopped),
+            ("not finished", self.unfinished),
             ("running", self.running),
         ]
         .iter()
@@ -223,11 +227,13 @@ fn progress_bar(ctx: &Ctx, counts: &Counts, bar_width: usize) -> Row {
     let cells = |n: usize| (n * bar_width + counts.total.max(1) / 2) / counts.total.max(1);
     let done = cells(counts.completed).min(bar_width);
     let failed = cells(counts.failed).min(bar_width - done);
-    let stopped = cells(counts.stopped).min(bar_width - done - failed);
-    let rest = bar_width - done - failed - stopped;
+    let unfinished = cells(counts.unfinished).min(bar_width - done - failed);
+    let stopped = cells(counts.stopped).min(bar_width - done - failed - unfinished);
+    let rest = bar_width - done - failed - unfinished - stopped;
     vec![
         sp(ctx.g.full.repeat(done), ctx.success()),
         sp(ctx.g.full.repeat(failed), ctx.error()),
+        sp(ctx.g.full.repeat(unfinished), ctx.warning()),
         sp(ctx.g.full.repeat(stopped), ctx.dim()),
         sp(ctx.g.rule.repeat(rest), ctx.dim()),
     ]
@@ -285,7 +291,7 @@ fn node_name(node: &Node) -> String {
 
 /// Where a node stands; a crew task that stopped partway says how.
 fn node_state_word(node: &Node) -> &'static str {
-    if node.state == NodeState::Failed {
+    if node.state == NodeState::Unfinished {
         match node.outcome.as_deref() {
             Some("blocked") => return s("Blocked", "차단됨"),
             Some("partial") => return s("Partly done", "일부 완료"),
@@ -304,6 +310,7 @@ fn has_begun(node: &Node) -> bool {
             | NodeState::Failed
             | NodeState::Quiet
             | NodeState::Paused
+            | NodeState::Unfinished
     ) || node.started_at.is_some()
 }
 
@@ -531,6 +538,10 @@ fn wave_block(ctx: &Ctx, flow: &Graph, now_ms: i64, room: usize) -> (Vec<Row>, u
                 .iter()
                 .filter(|n| n.state == NodeState::Failed)
                 .count();
+            let unfinished = nodes
+                .iter()
+                .filter(|n| n.state == NodeState::Unfinished)
+                .count();
             let running = nodes
                 .iter()
                 .filter(|n| n.state == NodeState::Running)
@@ -560,6 +571,9 @@ fn wave_block(ctx: &Ctx, flow: &Graph, now_ms: i64, room: usize) -> (Vec<Row>, u
             }
             if failed > 0 {
                 extra(count_word("failed", failed), ctx.error());
+            }
+            if unfinished > 0 {
+                extra(count_word("not finished", unfinished), ctx.warning());
             }
             if running > 0 {
                 extra(count_word("running", running), ctx.accent());

@@ -9,7 +9,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { MessageId, ProjectId, ProjectMemoryId, ThreadId } from "@t3tools/contracts";
+import {
+  MessageId,
+  ProjectId,
+  ProjectMemoryId,
+  ProjectMemoryProposalId,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { runMigrations } from "./Migrations.ts";
@@ -551,5 +557,50 @@ describe("ProjectMemoryRepository", () => {
       assert.equal(yield* repository.getAnalysisCursor({ projectId }), 40);
       yield* sql`UPDATE projection_projects SET deleted_at = ${NOW} WHERE project_id = 'project-1'`;
       assert.equal(yield* repository.getAnalysisCursor({ projectId }), 0);
+    }));
+
+  test("round-trips a dreamed analyser suggestion and leaves plain ones unmarked", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject("project-1");
+      const repository = yield* ProjectMemoryRepository;
+      const projectId = ProjectId.make("project-1");
+      const analysis = {
+        target: "memory" as const,
+        evidence: [{ threadId: ThreadId.make("thread-1"), eventSeq: 4 }],
+        evidenceNamed: true,
+        relatedMemoryIds: [],
+      };
+
+      const dreamed = yield* repository.insertProposal({
+        proposalId: ProjectMemoryProposalId.make("proposal-dreamed"),
+        projectId,
+        threadId: ThreadId.make("thread-1"),
+        title: "Dreamed suggestion",
+        body: "Re-run the failing check after fixing it",
+        reason: "Derived from recurring signals in recent work.",
+        now: NOW,
+        analysis: { ...analysis, dreamed: true },
+      });
+      assert.equal(dreamed.status, "applied");
+      const plain = yield* repository.insertProposal({
+        proposalId: ProjectMemoryProposalId.make("proposal-plain"),
+        projectId,
+        threadId: ThreadId.make("thread-1"),
+        title: "Plain suggestion",
+        body: "Keep the lockfile committed",
+        reason: "Derived from recurring signals in recent work.",
+        now: NOW,
+        analysis,
+      });
+      assert.equal(plain.status, "applied");
+
+      const items = yield* repository.listProposals({ projectId });
+      assert.equal(items.length, 2);
+      const dreamedItem = items.find((item) => item.proposalId === "proposal-dreamed");
+      const plainItem = items.find((item) => item.proposalId === "proposal-plain");
+      assert.equal(dreamedItem?.analysis?.dreamed, true);
+      assert.equal(plainItem?.analysis?.dreamed, undefined);
+      assert.equal(plainItem?.analysis?.target, "memory");
     }));
 });

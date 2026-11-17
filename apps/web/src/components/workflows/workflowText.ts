@@ -77,7 +77,7 @@ export function doingText(doing: WorkflowDoing, t: Translate): string {
   return t(DOING_TEXT[doing]);
 }
 
-/** Where a node stands, in plain words; a crew task that stopped partway says how. */
+/** Where a node stands, in plain words; a crew task handed back says how. */
 export function stateText(node: Pick<WorkflowNode, "state" | "info">, t: Translate): string {
   switch (node.state) {
     case "running":
@@ -85,16 +85,19 @@ export function stateText(node: Pick<WorkflowNode, "state" | "info">, t: Transla
     case "completed":
       return t("Done");
     case "failed":
-      return node.info.crew?.outcome === "blocked"
-        ? t("Blocked")
-        : node.info.crew?.outcome === "partial"
-          ? t("Partial")
-          : t("Failed");
+      return t("Failed");
     case "quiet":
       // An exit code, not a verdict; left untranslated like the numbers and codes beside it.
       return "exit 1";
     case "cancelled":
       return t("Stopped");
+    case "unfinished":
+      // A crew task that stopped partway is handed back to the lead, not a failure.
+      return node.info.crew?.outcome === "blocked"
+        ? t("Blocked")
+        : node.info.crew?.outcome === "partial"
+          ? t("Partial")
+          : t("Not finished");
     case "blocked":
       return t("Waiting");
     case "paused":
@@ -164,13 +167,14 @@ export function waveTitleText(title: string, t: Translate): string {
 
 /** "3 done · 1 failed · 1 running", leaving out what is zero. */
 export function countsText(
-  counts: Pick<WorkflowCounts, "completed" | "failed" | "stopped" | "running">,
+  counts: Pick<WorkflowCounts, "completed" | "failed" | "stopped" | "unfinished" | "running">,
   t: Translate,
 ): string {
   return [
     counts.completed > 0 ? t("{count} done", { count: counts.completed }) : null,
     counts.failed > 0 ? t("{count} failed", { count: counts.failed }) : null,
     counts.stopped > 0 ? t("{count} stopped", { count: counts.stopped }) : null,
+    counts.unfinished > 0 ? t("{count} not finished", { count: counts.unfinished }) : null,
     counts.running > 0 ? t("{count} running", { count: counts.running }) : null,
   ]
     .filter((part) => part !== null)
@@ -187,21 +191,33 @@ export function nodeName(node: WorkflowNode, t: Translate): string {
 
 /**
  * A crew task's checklist as "40% · 2 of 5 verified", with " · 3 unproven" when members only
- * claimed items, or the crew's overall share on its brain node; undefined for a node without
- * items. The percent counts only what the server proved.
+ * claimed items, and " · 1 not passing yet" while a check fails on a task that still runs — the
+ * member is expected to fix it, so it is work left, not a failure. Once the task has ended its
+ * outcome, the same count reads as " · 1 failed". The percent counts only what the server proved.
  */
 export function todoText(
-  info: Pick<WorkflowNodeInfo, "todos" | "overall">,
+  info: Pick<WorkflowNodeInfo, "todos" | "overall" | "crew">,
   t: Translate,
 ): string | undefined {
   if (info.todos !== undefined) {
-    const { verified, claimed, total } = info.todos;
-    const label = t("{percent}% · {verified} of {total} verified", {
-      percent: crewPercent(crewTodosProven(info.todos), total),
-      verified,
-      total,
-    });
-    return claimed > 0 ? `${label} · ${t("{claimed} unproven", { claimed })}` : label;
+    const { verified, claimed, failed, total } = info.todos;
+    const parts = [
+      t("{percent}% · {verified} of {total} verified", {
+        percent: crewPercent(crewTodosProven(info.todos), total),
+        verified,
+        total,
+      }),
+      ...(claimed > 0 ? [t("{claimed} unproven", { claimed })] : []),
+      // A crew outcome only exists once task.completed has settled the task.
+      ...(failed > 0
+        ? [
+            info.crew?.outcome === undefined
+              ? t("{count} not passing yet", { count: failed })
+              : t("{count} failed", { count: failed }),
+          ]
+        : []),
+    ];
+    return parts.join(" · ");
   }
   return info.overall === undefined
     ? undefined

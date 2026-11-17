@@ -219,7 +219,7 @@ const withProjectCliSessionToken = <A, E, R>(
   Effect.acquireUseRelease(
     environmentAuth.issueSession({
       scopes: AuthAdministrativeScopes,
-      label: "t3 project cli",
+      label: "oop server project",
     }),
     (issued) => run(issued.token),
     (issued) => environmentAuth.revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),

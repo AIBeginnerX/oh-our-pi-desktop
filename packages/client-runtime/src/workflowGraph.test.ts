@@ -210,17 +210,50 @@ describe("failure counts", () => {
       completed: 2,
       failed: 1,
       stopped: 1,
+      unfinished: 0,
       running: 1,
     });
+  });
+
+  it("counts a handed-back crew task as not finished, never as failed", () => {
+    const crew = [
+      node("done", "completed"),
+      node("handed-back", "unfinished", {
+        crew: { taskId: "task-1", role: "worker", outcome: "partial" },
+      }),
+      node("blocked", "unfinished", {
+        crew: { taskId: "task-2", role: "worker", outcome: "blocked" },
+      }),
+    ];
+    expect(workflowCounts(crew)).toEqual({
+      total: 3,
+      completed: 1,
+      failed: 0,
+      stopped: 0,
+      unfinished: 2,
+      running: 0,
+    });
+  });
+
+  it("a failed crew task still counts as failed", () => {
+    expect(
+      workflowCounts([
+        node("failed", "failed", {
+          crew: { taskId: "task-1", role: "worker", outcome: "failed" },
+        }),
+      ]).failed,
+    ).toBe(1);
   });
 
   it("carries the split into every column", () => {
     const [wave] = layoutWorkflow({
       waveTitles: [],
-      nodes: mixed.map((entry) => ({ ...entry, wave: 0 })),
+      nodes: [...mixed, node("g", "unfinished")].map((entry) => ({ ...entry, wave: 0 })),
       edges: [],
     }).waves;
-    expect([wave?.settled, wave?.completed, wave?.failed, wave?.running]).toEqual([4, 2, 1, 1]);
+    expect([wave?.settled, wave?.completed, wave?.failed, wave?.unfinished, wave?.running]).toEqual(
+      [5, 2, 1, 1, 1],
+    );
   });
 });
 

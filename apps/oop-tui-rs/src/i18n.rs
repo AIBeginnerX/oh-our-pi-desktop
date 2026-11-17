@@ -115,6 +115,7 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "Auditor is reviewing this answer",
             "감사자가 이 답변을 검토하는 중",
         ),
+        "usage.thisTurn" => pick("This turn", "이번 턴"),
         "usage.cache" => pick("Cache {rate}", "캐시 {rate}"),
         "usage.context" => pick("Context {usage}", "컨텍스트 {usage}"),
         "usage.costUnknown" => pick("Cost unknown", "비용 알 수 없음"),

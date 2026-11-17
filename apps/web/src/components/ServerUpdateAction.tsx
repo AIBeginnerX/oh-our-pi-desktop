@@ -256,7 +256,7 @@ export function ServerUpdateAction({
     );
   }
 
-  const manualCommand = selfUpdate === null ? manualServerUpdateCommand(targetVersion) : null;
+  const manualCommand = selfUpdate === null ? manualServerUpdateCommand() : null;
   const actionLabel = manualCommand !== null ? "Copy update command" : label;
   const onClick =
     manualCommand !== null

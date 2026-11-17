@@ -422,7 +422,8 @@ describe("crew board evidence and usage", () => {
       crew: { taskId: "a", threadId: "thread-a", outcome: "completed" },
     });
     expect(crew.node("b")?.info.costUsd).toBeUndefined();
-    expect(crew.node("c")?.state).toBe("failed");
+    // A blocked task is handed back, not failed.
+    expect(crew.node("c")?.state).toBe("unfinished");
     expect(crew.node("c")?.info.evidence).toBeUndefined();
     expect(crew.brain?.info).toMatchObject({ tokens: 1834, costUsd: 0.42, unpriced: true });
   });
@@ -633,7 +634,7 @@ describe("agent flows", () => {
     expect(flow?.nodes.map((node) => [node.info.actor?.role, node.wave, node.state])).toEqual([
       ["main", 0, "completed"],
       ["worker", 1, "completed"],
-      ["worker", 1, "failed"],
+      ["worker", 1, "unfinished"],
       ["auditor", 2, "completed"],
     ]);
     expect(flow?.nodes[1]?.info.actor?.task).toBe("task a");
@@ -642,7 +643,8 @@ describe("agent flows", () => {
     expect(flow?.nodes[0]?.info.actor?.delegated).toBe(2);
     expect(flow?.waveTitles).toEqual(["Main agent", "Delegated work", "Review"]);
     expect(flow?.edges).toHaveLength(4);
-    expect(flow?.status).toBe("failed");
+    // A handed-back task is not a failure: the flow reads as not finished, never failed.
+    expect(flow?.status).toBe("unfinished");
     // Crew plumbing does not count as the main agent's own work.
     expect(flow?.nodes[0]?.info.actor?.tools?.map((count) => count.category)).toEqual([
       "read",

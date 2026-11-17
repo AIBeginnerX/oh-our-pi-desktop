@@ -16,7 +16,8 @@
 //!
 //! Each crew member also has a bar of its own. A task with a TODO list reports its items, so its
 //! bar is two-toned (verified cells, lighter claimed cells, empty for the rest) with the share of
-//! items verified or claimed, and failed or blocked items named in words as well as colour. For
+//! items verified or claimed, and failed or blocked items named in words as well as colour — a
+//! check that fails while the task still runs reads as work left, not as failed. For
 //! any other member no count exists in the data (a task's own thread is not held here), so a running
 //! member's bar is the indeterminate marker, a finished one is whole in success colour, a failed or
 //! blocked one whole in error colour, and one that stopped, ended partial or was never used is
@@ -525,16 +526,40 @@ fn label_cells(label: &[(String, bool)]) -> usize {
 
 /// The labels of an item bar, longest first: `50% 10/20 │ 3 unproven │ 2 failed`, then without
 /// what is unproven and the scope marker, then the share alone. The share and the count are of
-/// proven items. Failed and blocked are words as well as a colour.
+/// proven items. Failed and blocked are words as well as a colour; a check that fails while the
+/// task still runs reads as work left, not as failed.
 fn item_labels(ctx: &Ctx, items: Items) -> Vec<Label> {
     let todos = items.todos;
     let sep = ctx.g.separator;
     let head = format!("{}% {}/{}", items.percent(), todos.proven(), todos.total);
     let mut alarms: Label = Vec::new();
-    for (n, template) in [
-        (todos.failed, s("{n} failed", "실패 {n}")),
-        (todos.blocked, s("{n} blocked", "막힘 {n}")),
-    ] {
+    if todos.failed > 0 {
+        // The member is expected to fix a failing check and check the item again, so while the
+        // task runs it is not a failure; only an ended task's failing checks read as failed.
+        alarms.push(match items.end {
+            None => (
+                format!(
+                    " {sep} {}",
+                    fill(
+                        s("{n} not passing yet", "아직 미통과 {n}"),
+                        &[("n", todos.failed.to_string())]
+                    )
+                ),
+                false,
+            ),
+            Some(_) => (
+                format!(
+                    " {sep} {}",
+                    fill(
+                        s("{n} failed", "실패 {n}"),
+                        &[("n", todos.failed.to_string())]
+                    )
+                ),
+                true,
+            ),
+        });
+    }
+    for (n, template) in [(todos.blocked, s("{n} blocked", "막힘 {n}"))] {
         if n > 0 {
             alarms.push((
                 format!(" {sep} {}", fill(template, &[("n", n.to_string())])),
@@ -2372,7 +2397,26 @@ mod tests {
 
     #[test]
     fn failed_and_blocked_are_words_in_the_error_colour_and_scope_has_a_marker() {
-        let mut it = items(20, 10, 3, None);
+        // While the task still runs, a failing check is work left: its own words, no error colour.
+        let mut running = items(20, 10, 3, None);
+        running.todos.failed = 2;
+        running.todos.blocked = 1;
+        running.todos.out_of_scope = 4;
+        let row = status_bar(&ctx_of(0, false), Progress::Items(running), false, 80);
+        let text = text_of(&row);
+        assert!(
+            text.contains("2 not passing yet")
+                && text.contains("1 blocked")
+                && text.contains("4 out of scope"),
+            "{text}"
+        );
+        let not_passing = row
+            .iter()
+            .find(|c| c.content.contains("2 not passing yet"))
+            .unwrap();
+        assert_ne!(not_passing.style, ctx_of(0, false).error());
+        // Once the task ended, the same count reads as failed, in the error colour.
+        let mut it = items(20, 10, 3, Some(End::Failed));
         it.todos.failed = 2;
         it.todos.blocked = 1;
         it.todos.out_of_scope = 4;
@@ -2555,7 +2599,7 @@ mod tests {
         let rows = render(&input(&t, &[], 45), 70, 40);
         assert!(
             rows.iter()
-                .any(|l| l.contains("50% 10/20 │ 3 unproven │ 2 failed")),
+                .any(|l| l.contains("50% 10/20 │ 3 unproven │ 2 not passing yet")),
             "{rows:#?}"
         );
         assert!(rows.iter().any(|l| l.contains("crew items")));

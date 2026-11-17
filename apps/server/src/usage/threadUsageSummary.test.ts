@@ -17,7 +17,7 @@ function entry(
   model = "model",
   costUsd?: number,
   cachedInputTokens?: number,
-  extras: { at?: string; threadId?: ThreadId } = {},
+  extras: { at?: string; threadId?: ThreadId; turnId?: string | null } = {},
 ) {
   const observation: OwnedTurnUsageObservationV1 = {
     v: 1,
@@ -43,6 +43,7 @@ function entry(
   };
   return {
     threadId: extras.threadId ?? threadId,
+    turnId: extras.turnId ?? null,
     createdAt: extras.at ?? "2026-01-01T00:00:00.000Z",
     model,
     observation,
@@ -68,6 +69,21 @@ describe("thread usage aggregation", () => {
       entry("model", 6, undefined, { at: "2026-01-01T00:02:00.000Z" }),
     ]).totals.cost;
     expect(cost).toEqual({ kind: "reported", usd: 6 });
+  });
+  it("prices a kept turn as its own chain step, not the running total its report repeats", () => {
+    // Filtering to the turn before stepping would read its 5-report as a
+    // fresh chain and bill the whole session to one turn.
+    const cost = aggregateThreadUsage(
+      threadId,
+      [
+        entry("model", 2, undefined, { at: "2026-01-01T00:00:00.000Z", turnId: "turn-1" }),
+        entry("model", 5, undefined, { at: "2026-01-01T00:01:00.000Z", turnId: "turn-2" }),
+      ],
+      rates,
+      new Map(),
+      (kept) => kept.turnId === "turn-2",
+    ).totals.cost;
+    expect(cost).toEqual({ kind: "reported", usd: 3 });
   });
   it("splits a running total across the models its turns ran with", () => {
     const result = summarize([

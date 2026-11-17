@@ -1,6 +1,36 @@
 {
   "versions": [
     {
+      "version": "0.0.159",
+      "date": "2026-11-17",
+      "highlights": [
+        {
+          "en": "The usage line at the end of a chat now counts only the latest turn, including the crew tasks that turn started, instead of a total that keeps growing over the whole chat. It reads \"This turn\", so it finally answers what one turn cost.",
+          "ko": "대화 끝의 사용량 줄이 대화 전체에서 계속 커지는 합계가 아니라 가장 최근 턴만 계산하며, 그 턴이 시작한 크루 작업도 포함합니다. 줄에 \"이번 턴\"이라고 표시되므로 한 턴의 비용을 바로 알 수 있습니다."
+        },
+        {
+          "en": "A crew task that switches to another model now says it fell back instead of showing an error, and a check that has not passed yet says so while its task still runs. Work that ends partial or blocked shows as not finished rather than failed, in the web panels and in the terminal. Real failures still show as failed.",
+          "ko": "크루 작업이 다른 모델로 넘어가 이어질 때 오류가 아니라 모델 전환으로 표시되고, 작업이 아직 실행 중일 때 통과하지 못한 검사도 그렇게 표시됩니다. 일부만 끝났거나 막힌 작업은 실패가 아니라 미완료로 보이며, 웹 패널과 터미널이 같습니다. 실제 실패는 그대로 실패로 표시됩니다."
+        },
+        {
+          "en": "Settings → General → Dreaming runs the work analyser once a day at an hour you choose, 03:00 by default, over every project, and files what it finds under Proposed memories with a Dreaming badge; nothing is saved until you approve it, and a day the computer was asleep at that hour is skipped. Settings → General → Memory tidy-up also looks through saved memories for duplicates, contradictions and outdated entries and lists up to three merge, update or delete suggestions for you to apply or dismiss. Memories that look like secrets are never sent to the model.",
+          "ko": "설정 → 일반 → 드리밍을 켜면 매일 고른 시각(기본 03:00)에 모든 프로젝트에서 작업 분석기가 돌고, 찾은 내용을 Proposed memories 아래에 드리밍 표시를 달아 남깁니다. 승인할 때까지는 저장되지 않고, 그 시각에 컴퓨터가 절전 중이었던 날은 건너뜁니다. 설정 → 일반 → 메모리 정리를 켜면 저장된 메모리에서 중복, 모순, 오래된 내용을 찾아 합치기·고치기·지우기 제안을 최대 세 개까지 보여 주며, 적용하거나 무시할 수 있습니다. 비밀 정보로 보이는 메모리는 모델에 보내지 않습니다."
+        },
+        {
+          "en": "In the terminal app, /memory lists the memory suggestions and tidy-ups waiting for the current project and lets you approve, reject, apply or dismiss them, and /memory analyse runs the work analyser. Memory suggestions can be approved as they arrive with /memory auto analyser or /memory auto all, off by default, though skill ideas and tidy-ups always wait for you; /memory saved lists saved memories so you can edit or delete one.",
+          "ko": "터미널 앱에서 /memory로 지금 프로젝트에 대기 중인 메모리 제안과 메모리 정리 제안을 보고 승인·거절·적용·무시할 수 있고, /memory analyse는 작업 분석기를 실행합니다. /memory auto analyser나 /memory auto all로 메모리 제안을 도착하는 대로 자동 승인할 수 있으며(기본값은 꺼짐), 스킬 제안과 메모리 정리는 항상 사용자의 결정을 기다립니다. /memory saved는 저장된 메모리를 보여 주어 고치거나 지울 수 있습니다."
+        },
+        {
+          "en": "The terminal app sends files with a message through /attach <path>; a failed upload keeps both the text and the files. A connection that goes silent is now noticed and reconnected instead of waiting forever, up and down keep the on-screen column next to wide characters such as Korean, and an environment entry that is not valid UTF-8 no longer crashes oop at startup.",
+          "ko": "터미널 앱에서 /attach <경로>로 파일을 메시지와 함께 보낼 수 있고, 업로드가 실패해도 글과 파일이 그대로 남습니다. 아무 응답 없이 끊긴 연결을 알아채 다시 연결하고, 위·아래 이동이 한글 같은 넓은 문자 옆에서도 화면상의 칸을 유지하며, UTF-8이 아닌 환경 변수 항목이 있어도 oop가 시작하자마자 죽지 않습니다."
+        },
+        {
+          "en": "oop server <args> runs the server command that ships with OOP against the same home the terminal app uses. Setup and update messages in the app and the server now name oop server connect, oop server pair, oop server serve and oop update, instead of t3 commands OOP does not install.",
+          "ko": "oop server <명령>으로 OOP에 함께 들어 있는 서버 명령을 터미널 앱과 같은 홈에서 실행할 수 있습니다. 앱과 서버의 설정·업데이트 안내도 OOP에 설치되지 않는 t3 명령 대신 oop server connect, oop server pair, oop server serve, oop update를 알려 줍니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.158",
       "date": "2026-11-16",
       "highlights": [

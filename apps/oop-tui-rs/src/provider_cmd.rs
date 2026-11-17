@@ -531,7 +531,10 @@ impl Deps for Live {
     }
 
     fn env(&self) -> HashMap<String, String> {
-        std::env::vars().collect()
+        // Not `std::env::vars`, which panics on a name or value that is not UTF-8.
+        std::env::vars_os()
+            .filter_map(|(name, value)| Some((name.into_string().ok()?, value.into_string().ok()?)))
+            .collect()
     }
 
     fn interactive(&self) -> bool {

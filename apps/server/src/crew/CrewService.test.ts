@@ -13,6 +13,7 @@ import {
   TurnId,
   type CrewThreadOverride,
   type OrchestrationCommand,
+  type OrchestrationThreadActivity,
   ComposerContextId,
   type OrchestrationSession,
   type OrchestrationThread,
@@ -141,6 +142,9 @@ const makeHarness = Effect.gen(function* () {
   };
   const receipts = yield* OrchestrationCommandReceiptRepository;
   const shouldFail = yield* Ref.make(false);
+  // Set to an error string, every member turn started after that ends failed, carrying it.
+  const memberTurnError = yield* Ref.make<string | null>(null);
+  const failedMemberTurns = new Map<ThreadId, string>();
   const recordRejection = yield* Ref.make(false);
   const busy = yield* Ref.make(false);
   const crewOn = yield* Ref.make(false);
@@ -221,15 +225,34 @@ const makeHarness = Effect.gen(function* () {
             threadId === OTHER_LEAD
               ? Option.some({ ...lead, id: OTHER_LEAD })
               : threadId !== LEAD
-                ? keepRunning.current
+                ? failedMemberTurns.has(threadId)
                   ? Option.some({
                       ...lead,
                       id: threadId,
-                      latestTurn: { ...lead.latestTurn!, state: "running" as const },
+                      latestTurn: { ...lead.latestTurn!, state: "error" as const },
+                      session: {
+                        threadId,
+                        status: "interrupted",
+                        providerName: null,
+                        runtimeMode: "full-access",
+                        activeTurnId: null,
+                        lastError: failedMemberTurns.get(threadId)!,
+                        updatedAt: NOW,
+                      },
                     })
-                  : workerSessions.has(threadId)
-                    ? Option.some({ ...lead, id: threadId, session: workerSessions.get(threadId)! })
-                    : Option.none()
+                  : keepRunning.current
+                    ? Option.some({
+                        ...lead,
+                        id: threadId,
+                        latestTurn: { ...lead.latestTurn!, state: "running" as const },
+                      })
+                    : workerSessions.has(threadId)
+                      ? Option.some({
+                          ...lead,
+                          id: threadId,
+                          session: workerSessions.get(threadId)!,
+                        })
+                      : Option.none()
                 : Option.some(
                     running
                       ? {
@@ -268,6 +291,14 @@ const makeHarness = Effect.gen(function* () {
           yield* Ref.update(commands, (previous) => [...previous, command]);
           yield* Queue.offer(dispatched, command);
           if (command.type === "thread.turn.start") {
+            const memberError = yield* Ref.get(memberTurnError);
+            if (
+              memberError !== null &&
+              command.threadId !== LEAD &&
+              command.threadId !== OTHER_LEAD
+            ) {
+              failedMemberTurns.set(command.threadId, memberError);
+            }
             const rejected = yield* Ref.get(shouldFail);
             if (!rejected || (yield* Ref.get(recordRejection))) {
               yield* receipts.upsert({
@@ -352,6 +383,7 @@ const makeHarness = Effect.gen(function* () {
     pendingReads,
     receipts,
     shouldFail,
+    memberTurnError,
     recordRejection,
     busy,
     crewOn,
@@ -1758,5 +1790,169 @@ describe("Crew service project memory", () => {
         "OOP will not be able to verify",
       );
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+});
+
+describe("Crew fallback switch", () => {
+  const provider = (instanceId: string, driver: string, slugs: ReadonlyArray<string>) =>
+    ({
+      instanceId,
+      driver,
+      displayName: instanceId,
+      enabled: true,
+      installed: true,
+      availability: "available",
+      status: "ready",
+      auth: { status: "authenticated" },
+      models: slugs.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+    }) as unknown as ServerProvider;
+  const team = [
+    // The lead's brain runs worker-model on provider-1, which the chain never lists again.
+    provider("provider-1", "claudeAgent", ["worker-model", "claude-opus-5"]),
+    provider("codex", "codex", ["gpt-5.4-mini"]),
+  ];
+  // The raw provider error a real switch carried, stack trace and all.
+  const LIMIT_ERROR =
+    "Error: ZCode turn failed: 1310 [1310][Weekly/Monthly Limit Exhausted ...] (Turn execution failed) at decodeJsonError (file:///srv/index.ts:12:9)";
+
+  it.effect(
+    "a model switch says it fell back, with no failed and no raw error, and the last failure keeps its error",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness;
+        yield* Ref.set(harness.providers, team);
+        yield* Ref.set(harness.crewOn, true);
+        yield* Ref.set(harness.leadCrew, {
+          pinned: {
+            worker: {
+              instanceId: ProviderInstanceId.make("provider-1"),
+              model: "claude-opus-5",
+            },
+          },
+          fallbacks: {
+            worker: [{ instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4-mini" }],
+          },
+        });
+        yield* Ref.set(harness.memberTurnError, LIMIT_ERROR);
+        const service = yield* harness.start;
+        yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "change the thing" });
+        let switched: OrchestrationThreadActivity | undefined;
+        let completed: { summary: string; payload: Record<string, unknown> } | undefined;
+        for (let i = 0; i < 120 && completed === undefined; i += 1) {
+          yield* TestClock.adjust("50 millis");
+          const appends = (yield* Ref.get(harness.commands)).flatMap((command) =>
+            command.type === "thread.activity.append" && command.threadId === LEAD
+              ? [command.activity]
+              : [],
+          );
+          switched = appends.find(
+            (activity) =>
+              activity.kind === "task.progress" && activity.summary.includes(" switched to "),
+          );
+          const done = appends.find((activity) => activity.kind === "task.completed");
+          if (done !== undefined) {
+            completed = { summary: done.summary, payload: done.payload as Record<string, unknown> };
+          }
+        }
+        const seen = (yield* Ref.get(harness.commands))
+          .flatMap((command) =>
+            command.type === "thread.activity.append" && command.threadId === LEAD
+              ? [`${command.activity.kind}: ${command.activity.summary}`]
+              : [],
+          )
+          .join(" | ");
+        assert.exists(switched, `switch missing; activities: ${seen}`);
+        if (switched !== undefined) {
+          // The decision log spots a switch by this phrase; it must survive.
+          assert.include(switched.summary, " switched to ");
+          const note = (switched.payload as { summary?: string }).summary ?? "";
+          assert.equal(
+            note,
+            "Fell back from claude-opus-5 (provider-1) to gpt-5.4-mini (usage limit reached).",
+          );
+          assert.notInclude(note.toLowerCase(), "failed");
+          assert.notInclude(note, "Exhausted");
+          assert.notInclude(note, "decodeJsonError");
+        }
+        assert.exists(completed, "the task ended");
+        if (completed !== undefined) {
+          // Every model failed: this one really failed, and says so with the errors.
+          assert.include(completed.summary, "failed on every crew model");
+          const note = (completed.payload as { summary?: string }).summary ?? "";
+          assert.include(note, "failed");
+          assert.include(note, "Exhausted");
+        }
+        yield* service.close;
+      }).pipe(Effect.scoped, Effect.provide(testLayers)),
+  );
+
+  it.effect(
+    "a cooling skip reads as after an error in the switch note, while the roster keeps failed",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness;
+        yield* Ref.set(harness.providers, [
+          provider("provider-1", "claudeAgent", ["worker-model", "claude-opus-5"]),
+          provider("codex", "codex", ["gpt-5.4-mini", "gpt-5.4-mini-alt"]),
+          provider("gemini", "gemini", ["gemini-flash"]),
+        ]);
+        yield* Ref.set(harness.crewOn, true);
+        // A plain provider failure: no limit, no refused model, just an error.
+        yield* Ref.set(
+          harness.memberTurnError,
+          "Error: ZCode turn failed: 500 (Turn execution failed)",
+        );
+        // Two models on codex: once its first model's failure cools the provider, its second
+        // model is skipped with a note, and a fresh provider takes the task.
+        yield* Ref.set(harness.leadCrew, {
+          pinned: {
+            worker: {
+              instanceId: ProviderInstanceId.make("provider-1"),
+              model: "claude-opus-5",
+            },
+          },
+          fallbacks: {
+            worker: [
+              { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4-mini" },
+              { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4-mini-alt" },
+              { instanceId: ProviderInstanceId.make("gemini"), model: "gemini-flash" },
+            ],
+          },
+        });
+        const service = yield* harness.start;
+        yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "try it" });
+        const appends = yield* Effect.gen(function* () {
+          let activities: OrchestrationThreadActivity[] = [];
+          for (let i = 0; i < 200; i += 1) {
+            activities = (yield* Ref.get(harness.commands)).flatMap((command) =>
+              command.type === "thread.activity.append" && command.threadId === LEAD
+                ? [command.activity]
+                : [],
+            );
+            if (activities.some((activity) => activity.kind === "task.completed")) {
+              return activities;
+            }
+            yield* TestClock.adjust("50 millis");
+          }
+          return activities;
+        });
+        const note = appends
+          .filter((activity) => activity.kind === "task.progress")
+          .map((activity) => (activity.payload as { summary?: string }).summary ?? "")
+          .find((summary) => summary.includes("cooling codex"));
+        assert.exists(note, "no cooling skip note in the switch messages");
+        if (note !== undefined) {
+          assert.include(note, "cooling codex until");
+          assert.include(note, "(after an error)");
+          assert.notInclude(note.toLowerCase(), "failed");
+        }
+        // crew_roster stays literal: the crew reasons over the real reason.
+        const cooling = (yield* service.crew.roster(LEAD)).cooling;
+        assert.include(
+          cooling.map((entry) => `${entry.provider}: ${entry.reason}`),
+          "codex: failed",
+        );
+        yield* service.close;
+      }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 });

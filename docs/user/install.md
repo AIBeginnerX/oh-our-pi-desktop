@@ -8,67 +8,85 @@ desktop, web, or a phone browser. Set up the machine where the agents will work 
 You need an installed, authenticated provider before starting a thread. You can
 launch OOP and configure providers afterwards.
 
-## Command line
+## Terminal app
 
-```bash
-curl -fsSL https://t3.codes/install.sh | sh
+The terminal app runs the same threads in your own terminal window and starts its
+own background server, so the desktop app is not needed.
+
+macOS (Apple Silicon) and Linux (x64 or arm64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.sh | sh
 ```
 
 On Windows, in PowerShell:
 
 ```powershell
-irm https://t3.codes/install.ps1 | iex
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-terminal.ps1 | iex
 ```
 
-This puts `t3` in `~/.local/bin`. If your shell reports `command not found`
-afterwards, that directory is not on your `PATH` yet; the installer prints the
-line to add. Set `T3CODE_CHANNEL=nightly` to install the nightly train, or
-`T3CODE_VERSION` to pin an exact version.
+The installer checks the download's SHA-256 and installs everything in your user
+folder: the files in `~/.local/share/oop-terminal` and the `oop` command in
+`~/.local/bin` on macOS and Linux, or `%LOCALAPPDATA%\oop-terminal` on Windows.
+It does not edit your `PATH`; if the shell cannot find `oop`, the installer prints
+the line to add.
 
-| Task                                             | Command                                                   |
-| ------------------------------------------------ | --------------------------------------------------------- |
-| Start the server and open the web app            | `t3`                                                      |
-| Start the server without a browser               | `t3 serve`                                                |
-| Keep it running in the background (macOS, Linux) | `t3 service install` ([details](./background-service.md)) |
-| Move to the newest release                       | `t3 update`                                               |
-| Remove it again                                  | `t3 uninstall`                                            |
+| Task                                 | Command        |
+| ------------------------------------ | -------------- |
+| Pick a project and thread, then chat | `oop`          |
+| Check the terminal and your setup    | `oop doctor`   |
+| See which providers are ready        | `oop provider` |
+| See whether a newer release exists   | `oop update`   |
+| Stop the server the terminal started | `oop stop`     |
 
-Run `t3 --help` for the full reference.
-
-To try OOP once without installing it, run `npx t3@latest` instead (needs
-Node.js for `npx`).
-
-### Intel Macs
-
-There is no `t3` executable for Intel Macs (the desktop app is available). To
-run a server there, build it from source with Node.js 24 and `vp`
-([Install vp](https://github.com/pingdotgg/t3code#install-vp)):
-
-```bash
-git clone https://github.com/pingdotgg/t3code
-cd t3code && vp i && vp run build:desktop
-node apps/server/dist/bin.mjs
-```
-
-`t3 update` and the background service do not apply to a server run this way;
-update it with `git pull` and a rebuild.
+[The terminal app](./terminal-app.md) covers the window itself. To update, run the
+same install command again, then `oop stop` so the new server starts. To remove it,
+run `oop stop` and delete the folder and the command:
+`rm -rf ~/.local/share/oop-terminal ~/.local/bin/oop`, or on Windows
+`Remove-Item -Recurse -Force "$env:LOCALAPPDATA\oop-terminal"`. Your data in
+`~/.oop-desktop` stays.
 
 ## Desktop app
 
-Download a release from [GitHub Releases](https://github.com/pingdotgg/t3code/releases),
-or use a package manager:
+macOS (Apple Silicon):
 
-| Platform           | Install                            |
-| ------------------ | ---------------------------------- |
-| Windows            | `winget install T3Tools.T3Code`    |
-| macOS              | `brew install --cask t3-code`      |
-| Debian, Ubuntu     | `sudo apt install ./T3-Code-*.deb` |
-| Arch Linux         | `yay -S t3code-bin`                |
-| Arch Linux nightly | `yay -S t3code-nightly-bin`        |
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
 
-The `.deb` updates itself like the other desktop builds. It asks for your
-password to install each update. If your desktop has no password prompt, the
-update fails. Download the new `.deb` and install it the same way.
+On Windows (x64), in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.ps1 | iex
+```
+
+Linux (x64), which needs the GTK and NSS runtime libraries:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AIBeginnerX/oh-our-pi-desktop/main/scripts/install-desktop.sh | sh
+```
+
+The installers check the download's SHA-256 before installing. They do not bypass
+macOS quarantine or Windows SmartScreen, and the app is unsigned, so your system
+may warn you the first time you open it.
+
+The app goes to `~/Applications/OOP.app` on macOS, a per-user install with a Start
+menu entry on Windows, and `~/.local/bin/oop-desktop` with a menu entry on Linux.
+macOS and Windows also add the `oop` command for the bundled terminal app; see
+[Terminal app](#terminal-app) if it is not found. macOS and Windows update the app
+themselves; on Linux, quit OOP and run the install command again. Your data is
+kept.
+
+[INSTALL.md](https://github.com/AIBeginnerX/oh-our-pi-desktop/blob/main/INSTALL.md)
+has the install locations, the release assets, and what each installer needs.
+
+### Unsupported platforms
+
+There are no builds for Intel Macs, Windows on ARM, 32-bit systems, or musl Linux
+such as Alpine; the installers stop with a message. To run OOP on an Intel Mac,
+build it from source from
+[this repository](https://github.com/AIBeginnerX/oh-our-pi-desktop), whose README
+covers the build.
 
 ### Windows Subsystem for Linux
 
@@ -82,11 +100,11 @@ take longer.
 With the desktop app already running on the same machine:
 
 ```bash
-t3 app
+oop server app
 ```
 
 This opens a new thread for the current directory, adding the project if needed.
-Pass a path, such as `t3 app ../my-project`, to open another directory. It requires
+Pass a path, such as `oop server app ../my-project`, to open another directory. It requires
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 

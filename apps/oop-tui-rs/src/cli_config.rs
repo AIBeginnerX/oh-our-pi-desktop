@@ -30,6 +30,7 @@ fn expected(key: &str) -> String {
         "symbols" => "auto | unicode | ascii".into(),
         "statusLine" => "auto | full | compact | minimal".into(),
         "language" => "en | ko".into(),
+        "memoryAutoApprove" => "off | analyser | all".into(),
         _ => "true | false".into(),
     }
 }
@@ -51,6 +52,7 @@ fn show(key: &str, settings: &Settings) -> String {
         "workflow" => flag(settings.workflow),
         "pet" => flag(settings.pet),
         "usage" => flag(settings.usage),
+        "memoryAutoApprove" => settings.memory_auto_approve.clone(),
         _ => settings
             .language
             .clone()
@@ -76,6 +78,7 @@ fn validate(key: &str, raw: &str) -> Option<Value> {
     }
     let accepted = match key {
         "theme" => theme::is_safe_name(raw),
+        "memoryAutoApprove" => matches!(raw, "off" | "analyser" | "all"),
         "symbols" => matches!(raw, "auto" | "unicode" | "ascii"),
         "statusLine" => matches!(raw, "auto" | "full" | "compact" | "minimal"),
         _ => matches!(raw, "en" | "ko"),
@@ -232,6 +235,24 @@ mod tests {
     }
 
     #[test]
+    fn memory_auto_approve_config() {
+        let home = dir("memory-auto");
+        assert_eq!(run_in(&home, set("memoryAutoApprove", "all"), &[]).code, 0);
+        assert_eq!(
+            run_in(&home, ConfigAction::Get("memoryAutoApprove".into()), &[]).out,
+            ["all"]
+        );
+        let bad = run_in(&home, set("memoryAutoApprove", "yes"), &[]);
+        assert_eq!(bad.code, 2);
+        assert!(bad.err[0].contains("off | analyser | all"));
+        assert_eq!(
+            run_in(&home, ConfigAction::Get("memoryAutoApprove".into()), &[]).out,
+            ["all"]
+        );
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn prints_the_settings_file_path() {
         let home = dir("path");
         let ran = run_in(&home, ConfigAction::Path, &[]);
@@ -260,6 +281,7 @@ mod tests {
                 "workflow = true",
                 "pet = true",
                 "usage = true",
+                "memoryAutoApprove = off",
                 "language = (default)",
             ]
         );
@@ -295,7 +317,7 @@ mod tests {
             assert_eq!(
                 ran.err,
                 [
-                    "Unknown setting: colour (theme, symbols, animations, banner, statusLine, notify, sidebar, workflow, pet, usage, language)"
+                    "Unknown setting: colour (theme, symbols, animations, banner, statusLine, notify, sidebar, workflow, pet, usage, memoryAutoApprove, language)"
                 ]
             );
         }

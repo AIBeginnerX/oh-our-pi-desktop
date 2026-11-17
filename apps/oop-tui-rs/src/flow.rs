@@ -102,13 +102,15 @@ pub enum NodeState {
     Cancelled,
     /// A failed command whose exit 1 only answers "no": shown dim as "exit 1", never failed.
     Quiet,
+    /// A crew task that ended partial or blocked; handed back to the lead, not a failure.
+    Unfinished,
 }
 
 impl NodeState {
     pub fn settled(self) -> bool {
         matches!(
             self,
-            Self::Completed | Self::Failed | Self::Cancelled | Self::Quiet
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Quiet | Self::Unfinished
         )
     }
 }
@@ -506,7 +508,9 @@ fn task_state(kind: &str, status: Option<&Value>) -> Option<NodeState> {
     if kind == "task.completed" || (kind == "task.updated" && status.is_some()) {
         return Some(match status.and_then(Value::as_str) {
             Some("completed") => NodeState::Completed,
-            Some("failed" | "partial" | "blocked") => NodeState::Failed,
+            Some("failed") => NodeState::Failed,
+            // A crew report that stopped partway (partial, blocked) is handed back, not a failure.
+            Some("partial" | "blocked") => NodeState::Unfinished,
             _ => NodeState::Cancelled,
         });
     }
@@ -1480,9 +1484,9 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
             task.state = NodeState::Cancelled;
         }
         if activity.kind == "task.completed" {
-            // A crew report that stopped partway (partial, blocked) did not finish its task.
+            // A crew report that stopped partway (partial, blocked) is handed back, not a failure.
             task.state = match payload["status"].as_str() {
-                Some("partial" | "blocked") => NodeState::Failed,
+                Some("partial" | "blocked") => NodeState::Unfinished,
                 _ => tool_state(&payload["status"]),
             };
             task.completed_at = Some(activity.created_at.clone());
@@ -1720,6 +1724,8 @@ fn graph_status(nodes: &[Node], own: Option<NodeState>) -> NodeState {
     if !nodes.is_empty() && nodes.iter().all(|n| n.state.settled()) {
         return if any(NodeState::Failed) {
             NodeState::Failed
+        } else if any(NodeState::Unfinished) {
+            NodeState::Unfinished
         } else if any(NodeState::Cancelled) {
             NodeState::Cancelled
         } else {

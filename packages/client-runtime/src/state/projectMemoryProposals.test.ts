@@ -1,7 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 import type { ProjectMemoryProposal } from "@t3tools/contracts";
 
-import { projectMemoryAnalyserState, projectMemoryProposalView } from "./projectMemoryProposals.ts";
+import {
+  projectMemoryAnalyserState,
+  projectMemoryDreamingSupported,
+  projectMemoryTidySupported,
+  projectMemoryProposalView,
+} from "./projectMemoryProposals.ts";
 
 const base = {
   proposalId: "p1",
@@ -55,5 +60,35 @@ describe("projectMemoryAnalyserState", () => {
     expect(projectMemoryAnalyserState(config(true, undefined))).toBe("off");
     expect(projectMemoryAnalyserState(config(true, false))).toBe("off");
     expect(projectMemoryAnalyserState(config(true, true))).toBe("on");
+  });
+});
+
+describe("projectMemoryDreamingSupported", () => {
+  const config = (dreaming: boolean | undefined) => ({
+    environment: { capabilities: { projectMemory: { dreaming } } },
+  });
+
+  it("needs the server to advertise the dreaming capability", () => {
+    expect(projectMemoryDreamingSupported(null)).toBe(false);
+    expect(projectMemoryDreamingSupported(undefined)).toBe(false);
+    expect(projectMemoryDreamingSupported({ environment: { capabilities: {} } })).toBe(false);
+    expect(projectMemoryDreamingSupported(config(undefined))).toBe(false);
+    expect(projectMemoryDreamingSupported(config(false))).toBe(false);
+    expect(projectMemoryDreamingSupported(config(true))).toBe(true);
+  });
+});
+
+describe("projectMemoryTidySupported", () => {
+  const config = (tidy: boolean | undefined) => ({
+    environment: { capabilities: { projectMemory: { tidy } } },
+  });
+
+  it("needs the server to advertise the tidy capability", () => {
+    expect(projectMemoryTidySupported(null)).toBe(false);
+    expect(projectMemoryTidySupported(undefined)).toBe(false);
+    expect(projectMemoryTidySupported({ environment: { capabilities: {} } })).toBe(false);
+    expect(projectMemoryTidySupported(config(undefined))).toBe(false);
+    expect(projectMemoryTidySupported(config(false))).toBe(false);
+    expect(projectMemoryTidySupported(config(true))).toBe(true);
   });
 });

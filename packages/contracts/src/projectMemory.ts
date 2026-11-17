@@ -21,6 +21,10 @@ export const PROJECT_MEMORY_PENDING_PROPOSALS_MAX = 20;
 export const PROJECT_MEMORY_ANALYSER_PENDING_MAX = 5;
 /** Most suggestions one analyser run may add. */
 export const PROJECT_MEMORY_ANALYSER_RUN_MAX = 3;
+/** Tidy suggestions waiting for review, per project. */
+export const PROJECT_MEMORY_TIDY_PENDING_MAX = 5;
+/** Most tidy suggestions one run may add. */
+export const PROJECT_MEMORY_TIDY_RUN_MAX = 3;
 /** Distinct threads a derived lesson must be seen in. */
 export const PROJECT_MEMORY_EVIDENCE_MIN_THREADS = 2;
 /** Derived memories expire unless the user keeps them alive. */
@@ -38,6 +42,9 @@ export const ProjectMemoryProposalId = TrimmedNonEmptyString.pipe(
   Schema.brand("ProjectMemoryProposalId"),
 );
 export type ProjectMemoryProposalId = typeof ProjectMemoryProposalId.Type;
+
+export const ProjectMemoryTidyId = TrimmedNonEmptyString.pipe(Schema.brand("ProjectMemoryTidyId"));
+export type ProjectMemoryTidyId = typeof ProjectMemoryTidyId.Type;
 
 export const ProjectMemoryKind = Schema.Literals(["fact", "procedure", "work-log"]);
 export type ProjectMemoryKind = typeof ProjectMemoryKind.Type;
@@ -243,6 +250,8 @@ export const ProjectMemoryProposalAnalysis = Schema.Struct({
       body: ProjectMemoryBody,
     }),
   ),
+  /** Filed by a scheduled dreaming run, not the Analyse action. Absent otherwise and on older servers. */
+  dreamed: Schema.optionalKey(Schema.Boolean),
 });
 export type ProjectMemoryProposalAnalysis = typeof ProjectMemoryProposalAnalysis.Type;
 
@@ -281,6 +290,56 @@ export const ProjectMemoryProposalDecisionInput = Schema.Struct({
 });
 export type ProjectMemoryProposalDecisionInput = typeof ProjectMemoryProposalDecisionInput.Type;
 
+/**
+ * A change to existing memories the tidy-up suggests: `merge` folds every
+ * listed memory into the first, rewritten as `title`/`body`, and deletes the
+ * rest; `update` rewrites the one listed memory; `delete` removes it. Kept
+ * apart from proposals, which only ever add a memory. Nothing changes until
+ * the user applies it, and a suggestion whose memories were edited or deleted
+ * since it was made no longer applies.
+ */
+export const ProjectMemoryTidyAction = Schema.Literals(["merge", "update", "delete"]);
+export type ProjectMemoryTidyAction = typeof ProjectMemoryTidyAction.Type;
+
+export const ProjectMemoryTidySuggestion = Schema.Struct({
+  tidyId: ProjectMemoryTidyId,
+  projectId: ProjectId,
+  action: ProjectMemoryTidyAction,
+  /** The memories it changes as they are now; the first is the one kept on merge. */
+  memories: Schema.Array(
+    Schema.Struct({
+      memoryId: ProjectMemoryId,
+      version: PositiveInt,
+      title: ProjectMemoryTitle,
+      body: ProjectMemoryBody,
+    }),
+  ).check(Schema.isMinLength(1)),
+  /** The rewritten memory for `merge` and `update`; absent for `delete`. */
+  title: Schema.optionalKey(ProjectMemoryTitle),
+  body: Schema.optionalKey(ProjectMemoryBody),
+  /** Why: the duplication, contradiction or staleness the model saw. */
+  reason: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_MEMORY_REASON_MAX_LENGTH)),
+  /** Filed by a scheduled dreaming run rather than the Analyse action. */
+  dreamed: Schema.optionalKey(Schema.Boolean),
+  createdAt: IsoDateTime,
+});
+export type ProjectMemoryTidySuggestion = typeof ProjectMemoryTidySuggestion.Type;
+
+export const ProjectMemoryTidyListInput = Schema.Struct({ projectId: ProjectId });
+export type ProjectMemoryTidyListInput = typeof ProjectMemoryTidyListInput.Type;
+
+export const ProjectMemoryTidyListResult = Schema.Struct({
+  items: Schema.Array(ProjectMemoryTidySuggestion),
+});
+export type ProjectMemoryTidyListResult = typeof ProjectMemoryTidyListResult.Type;
+
+/** Shared by apply and dismiss. */
+export const ProjectMemoryTidyDecisionInput = Schema.Struct({
+  projectId: ProjectId,
+  tidyId: ProjectMemoryTidyId,
+});
+export type ProjectMemoryTidyDecisionInput = typeof ProjectMemoryTidyDecisionInput.Type;
+
 export const ProjectMemoryAnalyseInput = Schema.Struct({ projectId: ProjectId });
 export type ProjectMemoryAnalyseInput = typeof ProjectMemoryAnalyseInput.Type;
 
@@ -290,6 +349,8 @@ export const ProjectMemoryAnalyseResult = Schema.Struct({
   memoriesProposed: NonNegativeInt,
   /** Procedures nominated as skill-draft sources by this run. */
   skillsSuggested: NonNegativeInt,
+  /** Tidy suggestions added by this run; absent on older servers. */
+  tidiesSuggested: Schema.optionalKey(NonNegativeInt),
 });
 export type ProjectMemoryAnalyseResult = typeof ProjectMemoryAnalyseResult.Type;
 
@@ -385,6 +446,7 @@ export const ProjectMemoryRejectedReason = Schema.Literals([
   "analyser-disabled",
   "analyser-failed",
   "proposal-not-memory",
+  "tidy-stale",
 ]);
 export type ProjectMemoryRejectedReason = typeof ProjectMemoryRejectedReason.Type;
 
@@ -402,6 +464,8 @@ const REJECTED_REASON_MESSAGES: Record<ProjectMemoryRejectedReason, string> = {
   "analyser-disabled": "The work analyser is turned off.",
   "analyser-failed": "The work analyser could not produce suggestions.",
   "proposal-not-memory": "This suggestion is saved from its thread's skill draft, not as a memory.",
+  "tidy-stale":
+    "The memories this suggestion changes were edited or deleted since it was made, so it no longer applies.",
 };
 
 type ProjectMemoryErrorContext = {

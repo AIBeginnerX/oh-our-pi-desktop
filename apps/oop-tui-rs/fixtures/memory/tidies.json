@@ -1,0 +1,43 @@
+{
+  "items": [
+    {
+      "tidyId": "tidy-merge",
+      "projectId": "project-1",
+      "action": "merge",
+      "memories": [
+        {
+          "memoryId": "memory-1",
+          "version": 2,
+          "title": "Use vp test",
+          "body": "Run tests with vp."
+        },
+        {
+          "memoryId": "memory-2",
+          "version": 1,
+          "title": "Run single tests",
+          "body": "Prefer one test file."
+        }
+      ],
+      "title": "Run one test file with vp",
+      "body": "Use `vp test run <file>`.",
+      "reason": "Both memories say the same thing.",
+      "dreamed": true,
+      "createdAt": "2026-11-16T03:00:00.000Z"
+    },
+    {
+      "tidyId": "tidy-delete",
+      "projectId": "project-1",
+      "action": "delete",
+      "memories": [
+        {
+          "memoryId": "memory-3",
+          "version": 1,
+          "title": "Node 18 is required",
+          "body": "Install Node 18."
+        }
+      ],
+      "reason": "The repo now needs Node 22.",
+      "createdAt": "2026-11-16T03:00:00.000Z"
+    }
+  ]
+}

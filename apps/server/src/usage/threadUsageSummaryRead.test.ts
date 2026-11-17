@@ -61,12 +61,33 @@ const insertUsageActivity = Effect.fn("test.insertUsageActivity")(function* (
   thread: string,
   payloadJson: string,
   at: string = createdAt,
+  turnId: string | null = null,
 ) {
   yield* sql`
     INSERT INTO projection_thread_activities (
-      activity_id, thread_id, tone, kind, summary, payload_json, created_at
+      activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
     ) VALUES (
-      ${id}, ${thread}, 'neutral', 'owned-usage', '', ${payloadJson}, ${at}
+      ${id}, ${thread}, ${turnId}, 'neutral', 'owned-usage', '', ${payloadJson}, ${at}
+    )
+  `;
+});
+
+/** A crew task's board row on the lead, naming the attempt thread it runs. */
+const insertCrewTaskActivity = Effect.fn("test.insertCrewTaskActivity")(function* (
+  sql: SqlClient.SqlClient,
+  id: string,
+  lead: string,
+  kind: string,
+  turnId: string | null,
+  attemptThreadId: string,
+) {
+  yield* sql`
+    INSERT INTO projection_thread_activities (
+      activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+    ) VALUES (
+      ${id}, ${lead}, ${turnId}, 'neutral', ${kind}, '',
+      ${`{"taskId":"${id}","threadId":"${attemptThreadId}","status":"running"}`},
+      ${createdAt}
     )
   `;
 });
@@ -276,6 +297,112 @@ describe("readThreadUsageSummary", () => {
       }).pipe(Effect.provide(testLayers)),
   );
 
+  it.effect(
+    "reads one turn: the lead's rows of the turn plus, in full, the crew child the turn started",
+    () =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* insertThread(sql, "lead", null);
+        yield* insertThread(sql, "crew-child-1", "lead");
+        yield* insertThread(sql, "crew-child-2", "lead");
+        yield* insertThread(sql, "crew-child-3", "lead");
+        yield* insertUsageActivity(sql, "lead-t1", "lead", observationJson(), createdAt, "turn-1");
+        yield* insertUsageActivity(
+          sql,
+          "lead-t2",
+          "lead",
+          observationJson(),
+          "2026-01-01T00:02:01.000Z",
+          "turn-2",
+        );
+        // The second turn delegates a crew task; the lead's turn-scoped task
+        // activity names its attempt thread, which reports two usage rows of
+        // its own turns.
+        yield* insertCrewTaskActivity(
+          sql,
+          "task-start-2",
+          "lead",
+          "task.started",
+          "turn-2",
+          "crew-child-2",
+        );
+        yield* insertUsageActivity(
+          sql,
+          "child2-a",
+          "crew-child-2",
+          observationJson(),
+          "2026-01-01T00:02:02.000Z",
+          "child-turn-a",
+        );
+        yield* insertUsageActivity(
+          sql,
+          "child2-b",
+          "crew-child-2",
+          observationJson(),
+          "2026-01-01T00:02:03.000Z",
+          "child-turn-b",
+        );
+        // The first turn's own child task, a child no turn started, and a
+        // lead row that names no turn: all stay out of the turn's summary.
+        yield* insertCrewTaskActivity(
+          sql,
+          "task-start-1",
+          "lead",
+          "task.started",
+          "turn-1",
+          "crew-child-1",
+        );
+        yield* insertUsageActivity(
+          sql,
+          "child1",
+          "crew-child-1",
+          observationJson(),
+          createdAt,
+          "child-turn-1",
+        );
+        yield* insertUsageActivity(sql, "child3", "crew-child-3", observationJson(), createdAt);
+        yield* insertUsageActivity(
+          sql,
+          "lead-null",
+          "lead",
+          observationJson(),
+          "2026-01-01T00:02:04.000Z",
+        );
+
+        const read = yield* readThreadUsageSummary(threadId, "turn-2");
+        assert.strictEqual(read.status, "ok");
+        assert.strictEqual(read.scope, "turn");
+        expect(read.totals.turns).toBe(3);
+
+        // Without a turn the same store still counts the whole family.
+        const whole = yield* readThreadUsageSummary(threadId);
+        assert.strictEqual(whole.scope, "thread");
+        expect(whole.totals.turns).toBe(7);
+      }).pipe(Effect.provide(testLayers)),
+  );
+
+  it.effect("prices the asked-for turn as its own step of the provider's running total", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* insertThread(sql, "lead", null);
+      // One Claude chain across both turns: the second report repeats the
+      // session's running total (5), not the turn's own cost (3).
+      yield* insertUsageActivity(sql, "lead-t1", "lead", observationJson(2), createdAt, "turn-1");
+      yield* insertUsageActivity(
+        sql,
+        "lead-t2",
+        "lead",
+        observationJson(5),
+        "2026-01-01T00:01:01.000Z",
+        "turn-2",
+      );
+      const read = yield* readThreadUsageSummary(threadId, "turn-2");
+      assert.strictEqual(read.status, "ok");
+      expect(read.totals.turns).toBe(1);
+      expect(read.totals.cost).toEqual({ kind: "reported", usd: 3 });
+    }).pipe(Effect.provide(testLayers)),
+  );
+
   it.effect("reports too-large without numbers when the bounded query exceeds the row cap", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
@@ -292,6 +419,7 @@ describe("readThreadUsageSummary", () => {
       expect(yield* readThreadUsageSummary(threadId)).toEqual({
         threadId,
         status: "too-large",
+        scope: "thread",
         totals: {
           inputTokens: 0,
           outputTokens: 0,
@@ -314,8 +442,10 @@ describe("deriveThreadUsageSummary", () => {
     modelSelectionJson = '{"model":"claude-opus-4-5"}',
     at = createdAt,
     rowThreadId: ThreadId = threadId,
+    turnId: string | null = null,
   ) => ({
     threadId: rowThreadId,
+    turnId,
     modelSelectionJson,
     payloadJson,
     createdAt: at,

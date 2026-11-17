@@ -153,7 +153,7 @@ impl<'a> Ctx<'a> {
             NodeState::Failed => self.error(),
             NodeState::Quiet => self.muted(),
             NodeState::Running => self.accent(),
-            NodeState::Blocked | NodeState::Paused => self.warning(),
+            NodeState::Blocked | NodeState::Paused | NodeState::Unfinished => self.warning(),
             _ => self.dim(),
         }
     }
@@ -170,7 +170,7 @@ impl<'a> Ctx<'a> {
                     self.g.flow[2]
                 };
             }
-            NodeState::Paused => 3,
+            NodeState::Paused | NodeState::Unfinished => 3,
             NodeState::Completed => 4,
             NodeState::Failed => 5,
             NodeState::Cancelled => 6,
@@ -506,6 +506,7 @@ pub fn state_word(state: NodeState) -> &'static str {
         NodeState::Paused => s("Paused", "일시 중지"),
         NodeState::Completed => s("Done", "완료"),
         NodeState::Failed => s("Failed", "실패"),
+        NodeState::Unfinished => s("Not finished", "미완료"),
         NodeState::Cancelled => s("Stopped", "중단됨"),
         // An exit code, not a verdict; left untranslated like the numbers beside it.
         NodeState::Quiet => "exit 1",
@@ -542,6 +543,7 @@ pub fn count_word(kind: &str, count: usize) -> String {
         "completed" => s("{count} done", "완료 {count}"),
         "failed" => s("{count} failed", "실패 {count}"),
         "stopped" => s("{count} stopped", "중단 {count}"),
+        "not finished" => s("{count} not finished", "미완료 {count}"),
         _ => s("{count} running", "진행 {count}"),
     };
     fill(template, &[("count", count.to_string())])

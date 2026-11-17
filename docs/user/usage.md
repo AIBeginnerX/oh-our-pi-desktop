@@ -16,18 +16,18 @@ Totals depend on the history available on each server. Grok turns without a save
 record are missing from the totals.
 
 OpenCode reads its SQLite database and older JSON history. Antigravity reads local conversation
-databases, including T3-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the
+databases, including OOP-managed profiles. Set `OPENCODE_DATA_DIR` or `ANTIGRAVITY_DATA_DIR` on the
 server to read a different data directory; comma-separated paths read multiple directories.
 
 ZCode (GLM) and MiniMax Code read their own local usage databases, so they include work done in
-their desktop apps and CLIs as well as in T3. Set `ZCODE_DATA_BASE_DIR` or `MINIMAX_DATA_DIR` on the
+their desktop apps and CLIs as well as in OOP. Set `ZCODE_DATA_BASE_DIR` or `MINIMAX_DATA_DIR` on the
 server to read a different directory.
 
 Cursor reads account usage from Cursor's dashboard API using the CLI login saved on the server.
-This includes headless T3 sessions and desktop usage across machines; the same account counts
-once across connected environments. Without an accessible CLI login, T3 shows a
-notice instead of incomplete local totals. T3 does not estimate missing tokens from conversation text.
-On macOS, choose **Enable Cursor usage** on Usage to allow T3 to read your existing CLI login
+This includes headless OOP sessions and desktop usage across machines; the same account counts
+once across connected environments. Without an accessible CLI login, OOP shows a
+notice instead of incomplete local totals. OOP does not estimate missing tokens from conversation text.
+On macOS, choose **Enable Cursor usage** on Usage to allow OOP to read your existing CLI login
 from Keychain. You can turn it off in **Settings → Providers → Usage providers**. macOS may ask
 you to allow access on the server Mac.
 
@@ -97,7 +97,7 @@ closes when you dismiss it or send your next message. It uses the same snapshot 
 anything. The command is offered only for providers that appear under **Usage → Limits**.
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in
-the environment. T3 cannot report limits for external OpenCode servers because their credentials
+the environment. OOP cannot report limits for external OpenCode servers because their credentials
 belong to the remote server. Cursor reports
 its monthly allowance, including separate Auto and API usage, using the CLI login or
 `CURSOR_AUTH_TOKEN`. On macOS, this includes the default Keychain login after you enable Cursor
@@ -134,7 +134,7 @@ settings section when you no longer need it.
 
 Add **Subscription usage** from your iOS or Android widget gallery to see remaining Codex and
 Claude quotas. Tap it to open **Usage → Limits**. On iOS, use **Edit Widget** to choose Session,
-Weekly, or both for each provider. Reopen T3 to refresh expired readings. The Android widget
+Weekly, or both for each provider. Reopen OOP to refresh expired readings. The Android widget
 requires Android 12L or later.
 
 ## Keyboard shortcuts

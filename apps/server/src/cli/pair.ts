@@ -1,5 +1,5 @@
 /**
- * `t3 pair` - mint a pairing token for an already-running server and print it
+ * `oop server pair` - mint a pairing token for an already-running server and print it
  * as a QR code, without restarting anything.
  *
  * Discovery reads the `server-runtime.json` a live server persists next to its
@@ -82,7 +82,7 @@ export class NoRunningServerError extends Schema.TaggedError<NoRunningServerErro
     return [
       "No running OOP server found.",
       ...this.checkedStatePaths.map((statePath) => `  checked ${statePath}`),
-      "Start one with `npx t3 serve`, or connect this machine with OOP Connect: `npx t3 connect`.",
+      "Start one with `oop server serve`, or connect this machine with OOP Connect: `oop server connect`.",
     ].join("\n");
   }
 }
@@ -219,7 +219,7 @@ const probeEnvironmentDescriptor = (
     );
     // Bad-gateway family means a proxy (Tailscale Serve) answered for a
     // backend that is gone — a stale mapping, not a live occupant. Treating
-    // it as unreachable lets `t3 pair --tailscale` repair its own mapping
+    // it as unreachable lets `oop server pair --tailscale` repair its own mapping
     // after the server's port changed.
     if (response.status === 502 || response.status === 503 || response.status === 504) {
       return { _tag: "unreachable" } as const;
@@ -249,7 +249,7 @@ const discoverPairTarget = Effect.fn("pair.discoverPairTarget")(function* (
     bases.push(yield* resolveBaseDir(explicitBaseDir));
   } else {
     // Same precedence as dev-runner: inside a linked worktree its own `.t3`
-    // outranks the shared home, so `t3 pair` in a worktree pairs with the dev
+    // outranks the shared home, so `oop server pair` in a worktree pairs with the dev
     // server under test rather than the daily-driver install.
     const worktreeHome = yield* resolveWorktreeT3Home(process.cwd());
     if (worktreeHome !== undefined) {
@@ -467,7 +467,7 @@ const mintPairingLink = Effect.fn("pair.mintPairingLink")(function* (input: {
     return yield* environmentAuth.createPairingLink({
       scopes: AuthStandardClientScopes,
       subject: "one-time-token",
-      label: Option.getOrElse(input.label, () => "t3 pair"),
+      label: Option.getOrElse(input.label, () => "oop server pair"),
       ...(Option.isSome(input.ttl) ? { ttl: input.ttl.value } : {}),
     });
   }).pipe(

@@ -6,19 +6,12 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Terminal from "effect/Terminal";
 import { Command } from "effect/unstable/cli";
 import { afterEach, vi } from "vite-plus/test";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as BootService from "../cloud/bootService.ts";
-import {
-  formatServiceStatus,
-  offerServiceDuringOnboarding,
-  reconcileService,
-  recoverServiceOnboardingOffer,
-  serviceCommand,
-} from "./service.ts";
+import { formatServiceStatus, reconcileService, serviceCommand } from "./service.ts";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -45,7 +38,7 @@ it("reports the installed service version and host paths", () => {
 it("gives a direct repair command for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `t3 service install` to repair it.",
+    "Next: Connect to this machine from the OOP desktop app again (Settings -> Connections -> SSH).",
   );
 });
 
@@ -64,7 +57,7 @@ it("explains an incomplete nightly installation and keeps repair on its installe
   expect(output).toContain("last login session ends");
   expect(output).toContain('sudo loginctl enable-linger "$(id -un)"');
   expect(output).toContain("[service-stopped]");
-  expect(output).toContain("Run `t3 service install` to repair it.");
+  expect(output).toContain("Connect to this machine from the OOP desktop app again");
   expect(output).not.toContain("npx");
 });
 
@@ -73,7 +66,7 @@ it("points an older service at a repair, never at npx", () => {
     { ...status, current: false, installedVersion: "0.0.28" },
     "0.0.29",
   );
-  expect(output).toContain("Run `t3 service install` to repair it.");
+  expect(output).toContain("Connect to this machine from the OOP desktop app again");
   expect(output).not.toContain("npx");
 });
 
@@ -91,7 +84,10 @@ it("reports a newer installed service and tells the CLI to catch up to it", () =
   );
 
   assert.include(output, "t3@0.0.32-nightly.1 (newer than this t3@0.0.31 CLI)");
-  assert.include(output, "Run `t3 update 0.0.32-nightly.1` to match it");
+  assert.include(
+    output,
+    "Update OOP to match it: the desktop app updates itself, and the terminal app uses `oop update`.",
+  );
   assert.notInclude(output, "npx");
 });
 
@@ -226,51 +222,5 @@ it.effect.each([
 
     expect(result.changed).toBe(true);
     expect(installOptions).toEqual([undefined]);
-  }),
-);
-
-it.effect("leaves a newer service unchanged during onboarding without prompting", () =>
-  Effect.gen(function* () {
-    const { service, installOptions } = makeTestService(newerServiceStatus);
-    const terminal = Terminal.make({
-      columns: Effect.succeed(80),
-      rows: Effect.succeed(24),
-      readInput: Effect.die("Onboarding must not prompt to replace a newer service."),
-      readLine: Effect.die("Onboarding must not prompt to replace a newer service."),
-      display: () => Effect.die("Onboarding must not prompt to replace a newer service."),
-    });
-
-    const ready = yield* offerServiceDuringOnboarding.pipe(
-      Effect.provideService(BootService.BootService, service),
-      Effect.provideService(Terminal.Terminal, terminal),
-      Effect.provide(NodeServices.layer),
-    );
-
-    expect(ready).toBe(false);
-    expect(installOptions).toEqual([]);
-  }),
-);
-
-it.effect("keeps onboarding successful when a newer version appears before install", () =>
-  Effect.gen(function* () {
-    const ready = yield* recoverServiceOnboardingOffer(
-      Effect.fail(
-        new BootService.BootServiceDowngradeRefusedError({
-          installedVersion: "999.0.0",
-          targetVersion: packageJson.version,
-        }),
-      ),
-    );
-
-    expect(ready).toBe(false);
-  }),
-);
-
-it.effect("keeps the manual-server fallback when background prerequisites fail", () =>
-  Effect.gen(function* () {
-    const ready = yield* recoverServiceOnboardingOffer(
-      Effect.fail(new BootService.BootServicePrerequisiteError({ problem: "linger-disabled" })),
-    );
-    expect(ready).toBe(false);
   }),
 );

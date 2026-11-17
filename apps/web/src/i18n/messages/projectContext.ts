@@ -20,6 +20,12 @@ export const PROJECT_CONTEXT_MESSAGES: MessageCatalog = {
     "zh-CN": "审核员正在审查此回答 · {model}",
     es: "El auditor está revisando esta respuesta · {model}",
   },
+  "This turn": {
+    ko: "이번 턴",
+    ja: "このターン",
+    "zh-CN": "本轮",
+    es: "Este turno",
+  },
   "Cache {rate}": {
     ko: "캐시 {rate}",
     ja: "キャッシュ {rate}",

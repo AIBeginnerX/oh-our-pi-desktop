@@ -32,6 +32,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -114,7 +115,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkLessons",
+      | "generateWorkLessons"
+      | "generateMemoryTidy",
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -134,7 +136,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkLessons",
+      | "generateWorkLessons"
+      | "generateMemoryTidy",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError> {
     if (!attachments || attachments.length === 0) {
@@ -177,7 +180,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkLessons";
+      | "generateWorkLessons"
+      | "generateMemoryTidy";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -458,11 +462,25 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       });
     });
 
+  const generateMemoryTidy: TextGeneration.TextGeneration["Service"]["generateMemoryTidy"] =
+    Effect.fn("CodexTextGeneration.generateMemoryTidy")(function* (input) {
+      const { prompt, outputSchema } = buildMemoryTidyPrompt({ digest: input.digest });
+      return yield* runCodexJson({
+        operation: "generateMemoryTidy",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        imagePaths: [],
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkLessons,
+    generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

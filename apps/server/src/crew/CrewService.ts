@@ -145,6 +145,7 @@ import {
   type CrewTaskOutcome,
   type CrewTaskStatus,
   crewFailureKind,
+  crewFallbackNote,
   CANDIDATE_CHECKOUT_PROMPT,
   ISOLATED_CHECKOUT_PROMPT,
 } from "./crewLogic.ts";
@@ -522,10 +523,10 @@ export const make = Effect.gen(function* () {
         ...(shown.until === undefined ? {} : { until: isoOf(shown.until) }),
         reason: shown.reason,
       });
-      notes.set(
-        instanceId,
-        `cooling ${provider}${span(shown.until, shown.probing)} (${shown.reason})`,
-      );
+      // The note rides in a task's switch message, so a plain failure reads as workflow state;
+      // the roster's entries stay literal for the crew to reason over.
+      const reason = shown.reason === "failed" ? "after an error" : shown.reason;
+      notes.set(instanceId, `cooling ${provider}${span(shown.until, shown.probing)} (${reason})`);
     }
     const models: ModelSelection[] = [];
     const modelNotes = new Map<string, string>();
@@ -2287,13 +2288,13 @@ export const make = Effect.gen(function* () {
               ? {}
               : {
                   summary: reportExcerpt(
-                    `${previous.model} failed (${previous.error ?? "failed"}); retrying with ${option.label}.${
-                      skipped.length === 0 ? "" : ` ${skipped.join("; ")}.`
-                    }${
-                      memoryBlocked(record, option)
-                        ? " Project memory is not sent to this model."
-                        : ""
-                    }`,
+                    crewFallbackNote({
+                      from: previous.model,
+                      to: option.label,
+                      error: previous.error,
+                      skips: skipped,
+                      memoryHeld: memoryBlocked(record, option),
+                    }),
                   ),
                 }),
           },

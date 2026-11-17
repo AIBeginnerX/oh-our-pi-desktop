@@ -826,6 +826,205 @@ fn find_app_program() -> Option<AppProgram> {
     None
 }
 
+/// The indexes in `args` that may name the command. The server CLI opens a subcommand with its
+/// first value that is not a flag's value; which flags take a value is the server's business, so a
+/// value right after a flag counts too, up to the first value that surely names the command.
+fn command_positions(args: &[String]) -> Vec<usize> {
+    let mut positions = Vec::new();
+    let mut after_flag = false;
+    for (index, arg) in args.iter().enumerate() {
+        if arg.starts_with('-') {
+            after_flag = !arg.contains('=');
+            continue;
+        }
+        positions.push(index);
+        if !after_flag {
+            break;
+        }
+        after_flag = false;
+    }
+    positions
+}
+
+/// Why `oop server <args>` refuses to run, or `None` when it runs. `update` and `service
+/// install`/`update` would download the upstream release over this OOP install, and `uninstall`
+/// removes a launcher OOP never installed; checked before the server program is looked for. Only
+/// command positions count: `oop server app update` opens a project directory named `update`.
+fn server_passthrough_refusal(args: &[String]) -> Option<&'static str> {
+    let commands = command_positions(args);
+    let is = |word: &str| commands.iter().any(|&index| args[index] == word);
+    // Each `service` candidate's own subcommand is named in the arguments right after it.
+    let service_installs = commands.iter().any(|&index| {
+        let rest = &args[index + 1..];
+        args[index] == "service"
+            && command_positions(rest)
+                .into_iter()
+                .any(|sub| rest[sub] == "install" || rest[sub] == "update")
+    });
+    if commands.iter().any(|&index| args[index].starts_with("__")) {
+        Some(s(
+            "Internal server commands cannot be run with `oop server`.",
+            "내부 서버 명령은 `oop server` 로 실행할 수 없습니다.",
+        ))
+    } else if service_installs {
+        Some(s(
+            "The OOP desktop app installs the background service when it connects to this machine (Settings -> Connections -> SSH).",
+            "백그라운드 서비스는 OOP 데스크톱 앱이 이 컴퓨터에 연결할 때 설치합니다 (설정 -> 연결 -> SSH).",
+        ))
+    } else if is("update") {
+        Some(s(
+            "The OOP desktop app updates itself; the terminal app updates with `oop update`.",
+            "OOP 데스크톱 앱은 스스로 업데이트하고, 터미널 앱은 `oop update` 로 업데이트합니다.",
+        ))
+    } else if is("uninstall") {
+        Some(s(
+            "To remove OOP, follow the uninstall steps in the OOP install guide.",
+            "OOP 를 제거하려면 OOP 설치 안내의 제거 절차를 따르세요.",
+        ))
+    } else {
+        None
+    }
+}
+
+fn server_passthrough_command(
+    program: &AppProgram,
+    home: &Path,
+    args: &[String],
+    env_names: impl IntoIterator<Item = String>,
+) -> std::process::Command {
+    let mut command = std::process::Command::new(&program.executable);
+    command.arg(&program.script);
+    if args.is_empty() {
+        command.arg("--help");
+    } else {
+        command.args(args);
+        if args.first().is_some_and(|a| a == "pair")
+            && !args
+                .iter()
+                .any(|a| a == "--base-dir" || a.starts_with("--base-dir="))
+        {
+            command.arg("--base-dir").arg(home);
+        }
+    }
+    for (name, value) in daemon_environment(env_names, program.electron) {
+        if let Some(value) = value {
+            command.env(name, value);
+        } else {
+            command.env_remove(name);
+        }
+    }
+    // Other location-aware commands honor T3CODE_HOME; pair needs a flag to bypass worktree discovery.
+    command.env("T3CODE_HOME", home);
+    command
+}
+
+pub fn server_passthrough(home: Option<&str>, args: &[String]) -> i32 {
+    if let Some(refusal) = server_passthrough_refusal(args) {
+        eprintln!("{refusal}");
+        return 2;
+    }
+    let Some(program) = find_app_program() else {
+        eprintln!(
+            "{}",
+            s(
+                "Bundled OOP server not found. Install the OOP desktop app or terminal app.",
+                "번들 OOP 서버를 찾지 못했습니다. OOP 데스크톱 앱 또는 터미널 앱을 설치하세요."
+            )
+        );
+        return 1;
+    };
+    let (home, _) = server_home(home);
+    match server_passthrough_command(&program, &home, args, env_names()).status() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(error) => {
+            eprintln!("OOP server: {error}");
+            1
+        }
+    }
+}
+
+#[cfg(test)]
+mod server_passthrough_tests {
+    use super::*;
+    #[test]
+    fn server_passthrough_blocked_commands() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        for words in [
+            &["update"][..],
+            &["uninstall"],
+            &["__service-launcher"],
+            &["--base-dir=/x", "__ssh-helper"],
+            &["--port", "3000", "update"],
+            &["--no-browser", "update"],
+            &["--", "update"],
+            &["service", "install"],
+            &["service", "update"],
+            &["service", "--quiet", "install"],
+            &["--no-browser", "service", "install"],
+            &["--no-browser", "service", "update"],
+            &["--mode", "web", "service", "install"],
+        ] {
+            assert!(
+                server_passthrough_refusal(&args(words)).is_some(),
+                "{words:?}"
+            );
+        }
+        // The words are values here, not commands: a project path, a sub-subcommand.
+        for words in [
+            &["app", "update"][..],
+            &["app", "__notes"],
+            &["app", "uninstall"],
+            &["project", "add", "update"],
+            &["pair", "--base-dir", "update"],
+            &["service", "status"],
+            &["service", "restart"],
+            &["service", "uninstall"],
+        ] {
+            assert_eq!(server_passthrough_refusal(&args(words)), None, "{words:?}");
+        }
+    }
+    #[test]
+    fn server_passthrough_programs() {
+        for electron in [true, false] {
+            let program = AppProgram {
+                executable: if electron { "electron" } else { "node" }.into(),
+                script: "bundle/bin.mjs".into(),
+                explicit: false,
+                electron,
+            };
+            let command = server_passthrough_command(
+                &program,
+                Path::new("/sandbox"),
+                &["pair".into()],
+                ["T3CODE_PORT".into()],
+            );
+            assert_eq!(command.get_program(), program.executable.as_str());
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                ["bundle/bin.mjs", "pair", "--base-dir", "/sandbox"]
+            );
+            let env = command.get_envs().collect::<Vec<_>>();
+            assert!(env.contains(&(
+                std::ffi::OsStr::new("T3CODE_HOME"),
+                Some(std::ffi::OsStr::new("/sandbox"))
+            )));
+            assert!(env.contains(&(
+                std::ffi::OsStr::new("ELECTRON_RUN_AS_NODE"),
+                if electron {
+                    Some(std::ffi::OsStr::new("1"))
+                } else {
+                    None
+                }
+            )));
+            let help = server_passthrough_command(&program, Path::new("/sandbox"), &[], []);
+            assert_eq!(
+                help.get_args().collect::<Vec<_>>(),
+                ["bundle/bin.mjs", "--help"]
+            );
+        }
+    }
+}
+
 /// The program `oop doctor` reports as what this terminal would start a server with: the script
 /// it would run itself, or `None` where there is no usable program.
 pub fn standalone_script() -> Option<String> {
@@ -1017,6 +1216,12 @@ fn launcher() -> std::sync::MutexGuard<'static, Cooldown> {
     LAUNCHER.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// The names of this process' environment. `std::env::vars` panics on a name or value that is not
+/// UTF-8 (a path on a volume with a legacy-encoded name, say); such a name cannot be `T3CODE_*`.
+fn env_names() -> impl Iterator<Item = String> {
+    std::env::vars_os().filter_map(|(name, _)| name.into_string().ok())
+}
+
 /// What the server's environment changes from this one: nothing of the app's own settings
 /// (`T3CODE_*`) goes through, and the switch that makes the app's executable run a script as plain
 /// Node is set for that executable only. (`name`, `Some(value)`) sets, (`name`, `None`) removes.
@@ -1115,7 +1320,7 @@ async fn attempt_daemon(program: &AppProgram, home: &Path) -> Daemon {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    for (name, value) in daemon_environment(std::env::vars().map(|(n, _)| n), program.electron) {
+    for (name, value) in daemon_environment(env_names(), program.electron) {
         match value {
             Some(value) => command.env(name, value),
             None => command.env_remove(name),

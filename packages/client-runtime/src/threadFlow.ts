@@ -205,6 +205,7 @@ function graphStatus(
   if (nodes.some((node) => node.state === "blocked")) return "blocked";
   if (nodes.length > 0 && nodes.every((node) => isSettledState(node.state))) {
     if (nodes.some((node) => node.state === "failed")) return "failed";
+    if (nodes.some((node) => node.state === "unfinished")) return "unfinished";
     if (nodes.some((node) => node.state === "cancelled")) return "cancelled";
     return "completed";
   }
@@ -392,12 +393,14 @@ function toolStepState(payload: Readonly<Record<string, unknown>>): WorkflowNode
 
 function taskState(kind: string, status: unknown): WorkflowNodeState | undefined {
   if (kind === "task.completed" || (kind === "task.updated" && status !== undefined)) {
-    // A crew report that stopped partway (partial, blocked) did not finish its task.
+    // A crew report that stopped partway (partial, blocked) is handed back, not a failure.
     return status === "completed"
       ? "completed"
-      : status === "failed" || status === "partial" || status === "blocked"
+      : status === "failed"
         ? "failed"
-        : "cancelled";
+        : status === "partial" || status === "blocked"
+          ? "unfinished"
+          : "cancelled";
   }
   return kind === "task.started" || kind === "task.progress" ? "running" : undefined;
 }
@@ -617,9 +620,9 @@ export function turnGraphs(
   return collectToolSteps(activities).map(turnGraphOf);
 }
 
-/** A crew report that stopped partway (partial, blocked) did not finish its task. */
+/** A crew report that stopped partway (partial, blocked) is handed back, not a failure. */
 function crewTaskState(status: unknown): WorkflowNodeState {
-  return status === "partial" || status === "blocked" ? "failed" : toolState(status);
+  return status === "partial" || status === "blocked" ? "unfinished" : toolState(status);
 }
 
 /** The usage a crew task's completion carries: tokens always, a cost only when it was reported. */

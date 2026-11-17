@@ -53,6 +53,7 @@ import { layer as ProjectMemorySendLedgerLayer } from "./persistence/ProjectMemo
 import { ProjectionProjectRepositoryLive } from "./persistence/Layers/ProjectionProjects.ts";
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads.ts";
 import * as ProjectMemoryAnalyser from "./memory/ProjectMemoryAnalyser.ts";
+import * as ProjectMemoryDreaming from "./memory/ProjectMemoryDreaming.ts";
 import * as ProjectMemoryService from "./memory/ProjectMemoryService.ts";
 import * as SelectedChecks from "./selectedChecks/SelectedChecks.ts";
 import * as TaskResult from "./selectedChecks/TaskResult.ts";
@@ -784,6 +785,13 @@ export const makeRoutesLayer = Layer.mergeAll(
   Layer.provide(CrewService.layer),
   // The work analyser reads the project memory repository directly for its cursor.
   Layer.provide(ProjectMemoryAnalyser.layer.pipe(Layer.provide(ProjectMemories.layer))),
+  // The dreaming scheduler joins the same memoized analyser instance, so a
+  // scheduled pass and a manual analyse share the one-run gate.
+  Layer.provide(
+    ProjectMemoryDreaming.layer.pipe(
+      Layer.provide(ProjectMemoryAnalyser.layer.pipe(Layer.provide(ProjectMemories.layer))),
+    ),
+  ),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

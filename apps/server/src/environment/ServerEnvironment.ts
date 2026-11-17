@@ -270,6 +270,8 @@ export const make = Effect.gen(function* () {
         sentToThread: true,
         proposals: true,
         analyser: true,
+        dreaming: true,
+        tidy: true,
         ...(memorySendDriverKinds.length > 0 ? { sendDriverKinds: memorySendDriverKinds } : {}),
       },
       crew: { stopTasks: true },

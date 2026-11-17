@@ -107,7 +107,7 @@ fn active(app: &App) -> bool {
 
 /// The commands the list shows now; empty when it is closed.
 fn items(app: &App) -> Vec<&'static Command> {
-    if !active(app) {
+    if !active(app) || app.memory_edit.is_some() {
         return Vec::new();
     }
     match app.input.slash_query() {
@@ -207,6 +207,10 @@ pub fn ctrl_c(app: &mut App) {
 /// Keys that belong to the box's list, selection and clipboard. True when one was taken; the rest
 /// (typing, plain cursor keys, Enter, Esc) are `app.rs`'s as before.
 pub fn key(app: &mut App, key: KeyEvent) -> bool {
+    if app.memory_edit.is_some() && key.code == KeyCode::Esc {
+        crate::cmd_memory::cancel_edit(app);
+        return true;
+    }
     let mods = key.modifiers;
     let ctrl = mods.contains(KeyModifiers::CONTROL);
     let sup = mods.contains(KeyModifiers::SUPER);
@@ -445,6 +449,16 @@ pub fn draw_input(frame: &mut Frame, inner: Rect, app: &App) {
 pub fn draw_list(frame: &mut Frame, above: Rect, bottom: Rect, app: &App) {
     let slash = &app.composer.slash;
     slash.rows.set(Rect::default());
+    if app.memory_edit.is_some() {
+        frame.render_widget(
+            Paragraph::new(s(
+                "Editing memory — first line is the title · Enter saves · Esc cancels",
+                "메모리 편집 — 첫 줄은 제목 · Enter 저장 · Esc 취소",
+            )),
+            Rect::new(bottom.x, bottom.y.saturating_sub(1), bottom.width, 1),
+        );
+        return;
+    }
     let items = items(app);
     let room = usize::from(bottom.y.saturating_sub(above.y)).saturating_sub(2);
     let shown = items.len().min(LIST_ROWS).min(room);

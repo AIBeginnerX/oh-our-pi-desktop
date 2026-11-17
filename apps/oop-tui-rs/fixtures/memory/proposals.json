@@ -1,0 +1,58 @@
+{
+  "items": [
+    {
+      "proposalId": "proposal-agent",
+      "projectId": "project-1",
+      "threadId": "thread-1",
+      "title": "Run one test file",
+      "body": "Use `vp test run <file>` instead of the whole suite.",
+      "reason": "The user asked for targeted tests.",
+      "createdAt": "2026-11-16T03:00:00.000Z"
+    },
+    {
+      "proposalId": "proposal-dreamed",
+      "projectId": "project-1",
+      "threadId": "thread-2",
+      "title": "Fixtures follow contract changes",
+      "body": "Run export-fixtures after changing packages/contracts.",
+      "reason": "Seen in recent work.",
+      "createdAt": "2026-11-16T03:00:00.000Z",
+      "analysis": {
+        "target": "memory",
+        "evidence": [
+          {
+            "threadId": "thread-1",
+            "eventSeq": 12
+          }
+        ],
+        "related": [
+          {
+            "memoryId": "memory-1",
+            "title": "Old fixture note",
+            "body": "Fixtures are written by hand."
+          }
+        ],
+        "dreamed": true
+      }
+    },
+    {
+      "proposalId": "proposal-skill",
+      "projectId": "project-1",
+      "threadId": "thread-3",
+      "title": "Release checklist",
+      "body": "Bump the version, write notes, tag, publish.",
+      "reason": "A procedure repeated in recent work.",
+      "createdAt": "2026-11-16T03:00:00.000Z",
+      "analysis": {
+        "target": "skill",
+        "evidence": [
+          {
+            "threadId": "thread-1",
+            "eventSeq": 12
+          }
+        ],
+        "related": []
+      }
+    }
+  ]
+}

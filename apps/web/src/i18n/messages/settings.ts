@@ -1,6 +1,66 @@
 import type { MessageCatalog } from "./types";
 
 export const SETTINGS_MESSAGES: MessageCatalog = {
+  "Sends the titles and text of saved project memories to the text-generation model to find duplicates, contradictions and outdated memories. Memories that look like secrets are never sent. Uses only models whose provider already receives project memory in chats. Suggestions wait for you to apply them.":
+    {
+      ko: "저장된 프로젝트 메모리의 제목과 본문을 텍스트 생성 모델로 보내 중복, 모순, 오래된 메모리를 찾습니다. 비밀 정보로 보이는 메모리는 보내지 않습니다. 대화에서 이미 프로젝트 메모리를 받는 제공자의 모델만 사용합니다. 제안은 적용할 때까지 기다립니다.",
+      ja: "保存済みプロジェクトメモリのタイトルと本文をテキスト生成モデルに送り、重複、矛盾、古いメモリを探します。秘密情報と思われるメモリは送信しません。チャットですでにプロジェクトメモリを受け取るプロバイダーのモデルのみ使用します。提案は適用するまで反映されません。",
+      "zh-CN":
+        "将已保存项目记忆的标题和正文发送给文本生成模型，查找重复、矛盾和过时内容。疑似机密的记忆绝不会发送。仅使用其提供商已在聊天中接收项目记忆的模型。建议等待你应用。",
+      es: "Envía los títulos y el texto de las memorias guardadas al modelo de generación de texto para detectar duplicados, contradicciones y memorias obsoletas. Nunca envía memorias que parezcan secretos. Solo usa modelos cuyo proveedor ya recibe memoria del proyecto en los chats. Las sugerencias esperan a que las apliques.",
+    },
+  "{count} suggestion(s) and {tidies} tidy-up(s) added for review": {
+    ko: "검토할 제안 {count}개와 메모리 정리 제안 {tidies}개가 추가되었습니다",
+    ja: "レビュー待ちの提案 {count} 件と整理案 {tidies} 件を追加しました",
+    "zh-CN": "已添加 {count} 条建议和 {tidies} 条整理建议待审阅",
+    es: "Se añadieron {count} sugerencia(s) y {tidies} limpieza(s) para revisar",
+  },
+  "The memory request failed.": {
+    ko: "메모리 요청에 실패했습니다.",
+    ja: "メモリのリクエストに失敗しました。",
+    "zh-CN": "记忆请求失败。",
+    es: "La solicitud de memoria falló.",
+  },
+  "These memories changed since this tidy-up was suggested. Review the refreshed memories.": {
+    ko: "정리 제안 이후 메모리가 바뀌었습니다. 새로 불러온 메모리를 확인하세요.",
+    ja: "提案後にメモリが変更されました。再読み込みしたメモリを確認してください。",
+    "zh-CN": "这些记忆在建议后已更改。请查看刷新的记忆。",
+    es: "Estas memorias cambiaron desde la sugerencia. Revisa las memorias actualizadas.",
+  },
+  "Tidy-up applied": {
+    ko: "메모리 정리를 적용했습니다",
+    ja: "メモリ整理を適用しました",
+    "zh-CN": "已应用记忆整理",
+    es: "Limpieza aplicada",
+  },
+  "Suggested replacement": {
+    ko: "새 내용 제안",
+    ja: "置き換え案",
+    "zh-CN": "建议替换内容",
+    es: "Contenido propuesto",
+  },
+  "Kept after merge": {
+    ko: "합친 뒤 유지할 메모리",
+    ja: "統合後に残すメモリ",
+    "zh-CN": "合并后保留",
+    es: "Se conserva al combinar",
+  },
+  Apply: { ko: "적용", ja: "適用", "zh-CN": "应用", es: "Aplicar" },
+  Delete: { ko: "지우기", ja: "削除", "zh-CN": "删除", es: "Eliminar" },
+  Update: { ko: "고치기", ja: "更新", "zh-CN": "更新", es: "Actualizar" },
+  Merge: { ko: "합치기", ja: "統合", "zh-CN": "合并", es: "Combinar" },
+  "Suggested tidy-ups": {
+    ko: "메모리 정리 제안",
+    ja: "メモリ整理の提案",
+    "zh-CN": "记忆整理建议",
+    es: "Sugerencias de limpieza",
+  },
+  "Memory tidy-up": {
+    ko: "메모리 정리",
+    ja: "メモリ整理",
+    "zh-CN": "记忆整理",
+    es: "Limpieza de memoria",
+  },
   "Link icons": {
     ko: "링크 아이콘",
     ja: "リンクアイコン",
@@ -332,6 +392,32 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "工作分析器",
     es: "analizador de trabajo",
   },
+  Dreaming: {
+    ko: "드리밍",
+    ja: "ドリーミング",
+    "zh-CN": "做梦",
+    es: "Ensueño",
+  },
+  dreaming: {
+    ko: "드리밍",
+    ja: "ドリーミング",
+    "zh-CN": "做梦",
+    es: "ensueño",
+  },
+  "Dreaming hour": {
+    ko: "드리밍 시각",
+    ja: "ドリーミング時刻",
+    "zh-CN": "做梦时间",
+    es: "Hora del ensueño",
+  },
+  "Every day at the chosen hour (the server's local time), OOP analyses recent work in each project and adds suggestions under Proposed memories. Nothing is saved until you approve it. A day the computer is asleep or off at that hour is skipped.":
+    {
+      ko: "매일 지정한 시각(서버의 현지 시간)에 OOP가 각 프로젝트의 최근 작업을 분석하고 제안을 Proposed memories 아래에 추가합니다. 승인할 때까지는 아무것도 저장되지 않습니다. 그 시각에 컴퓨터가 절전 중이거나 꺼져 있으면 그날은 건너뜁니다.",
+      ja: "毎日選択した時刻(サーバーの現地時間)に、OOP が各プロジェクトの最近の作業を分析し、提案を Proposed memories の下に追加します。承認するまで何も保存されません。その時刻にコンピューターがスリープ中または電源オフの場合、その日はスキップされます。",
+      "zh-CN":
+        "每天在所选时刻(服务器本地时间)，OOP 会分析每个项目的近期工作，并把建议添加到 Proposed memories 下。在你批准之前不会保存任何内容。若那个时刻计算机处于睡眠或关机状态，当天将跳过。",
+      es: "Cada día a la hora elegida (hora local del servidor), OOP analiza el trabajo reciente de cada proyecto y añade sugerencias bajo Proposed memories. No se guarda nada hasta que lo apruebes. Si el equipo está dormido o apagado a esa hora, ese día se omite.",
+    },
   'Lets "Analyse recent work" in a project\'s memory settings send structured summaries of recent work (check results, review verdicts, reverts; no chat text) to the text-generation model. Suggestions wait for your approval.':
     {
       ko: '프로젝트 기억 설정의 "최근 작업 분석"이 최근 작업의 구조화된 요약(검사 결과, 리뷰 판정, 되돌리기, 대화 내용 제외)을 텍스트 생성 모델로 보내도록 허용합니다. 제안은 승인을 기다립니다.',
@@ -428,7 +514,7 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     es: "Sugerencia descartada",
   },
   Dismiss: {
-    ko: "닫기",
+    ko: "무시",
     ja: "却下",
     "zh-CN": "忽略",
     es: "Descartar",

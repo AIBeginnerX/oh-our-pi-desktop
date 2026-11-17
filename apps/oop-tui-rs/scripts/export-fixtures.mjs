@@ -40,6 +40,28 @@ const roundTrip = (schema, value, what) => {
   }
 };
 
+// Signed attachment upload RPC request/response.
+put(
+  "rpc/attachments.createUploadUrl.request.json",
+  roundTrip(
+    contracts.AttachmentCreateUploadUrlInput,
+    { type: "file", name: "log.txt", mimeType: "text/plain", sizeBytes: 3 },
+    "attachments.createUploadUrl request",
+  ),
+);
+put(
+  "rpc/attachments.createUploadUrl.response.json",
+  roundTrip(
+    contracts.AttachmentCreateUploadUrlResult,
+    {
+      attachmentId: "upload-1",
+      relativeUrl: "/api/attachments/upload/signed",
+      expiresAt: 1767226200000,
+    },
+    "attachments.createUploadUrl response",
+  ),
+);
+
 // --- constants shared with the Rust tests (fixtures/constants.json) -----------------------------
 
 const T0 = "2026-01-01T00:00:00.000Z";
@@ -856,6 +878,174 @@ put("config/server-config.json", {
   threadResumeCompletionMarker: true,
   environment: { serverVersion: "0.0.43" },
 });
+
+// --- memory: the project-memory RPC answers the terminal's /memory command reads ---------------
+//
+// Each file is one result payload as the server sends it. The three shapes a panel has to tell
+// apart are all here: an agent proposal with no `analysis`, a work-analyser memory suggestion
+// (`dreamed: true`), a skill idea (no `dreamed`), and a tidy that only deletes.
+
+const MEMORY_AT = "2026-11-16T03:00:00.000Z";
+const savedMemory = {
+  memoryId: "memory-1",
+  projectId: "project-1",
+  kind: "fact",
+  title: "Saved title",
+  body: "Saved body",
+  version: 2,
+  origin: { type: "manual" },
+  validUntil: null,
+  estimatedTokens: 3,
+  createdAt: MEMORY_AT,
+  updatedAt: MEMORY_AT,
+};
+for (const [method, inputSchema, request, outputSchema, response] of [
+  [
+    "projectMemory.list",
+    contracts.ProjectMemoryListInput,
+    { projectId: "project-1", includeBody: true, limit: 100 },
+    contracts.ProjectMemoryListResult,
+    { items: [savedMemory], truncated: false },
+  ],
+  [
+    "projectMemory.update",
+    contracts.ProjectMemoryUpdateInput,
+    {
+      projectId: "project-1",
+      memoryId: "memory-1",
+      expectedVersion: 2,
+      title: "New title",
+      body: "New body",
+    },
+    contracts.ProjectMemoryWriteResult,
+    { memory: { ...savedMemory, title: "New title", body: "New body", version: 3 } },
+  ],
+  [
+    "projectMemory.delete",
+    contracts.ProjectMemoryDeleteInput,
+    { projectId: "project-1", memoryId: "memory-1", expectedVersion: 2 },
+    Schema.Void,
+    undefined,
+  ],
+]) {
+  const name = method.split(".")[1];
+  put(`memory/${name}-request.json`, roundTrip(inputSchema, request, method));
+  put(`memory/${name}.json`, roundTrip(outputSchema, response, method) ?? null);
+}
+
+const evidence = { threadId: "thread-1", eventSeq: 12 };
+
+put(
+  "memory/proposals.json",
+  roundTrip(
+    contracts.ProjectMemoryProposalListResult,
+    {
+      items: [
+        {
+          proposalId: "proposal-agent",
+          projectId: PROJECT,
+          threadId: "thread-1",
+          title: "Run one test file",
+          body: "Use `vp test run <file>` instead of the whole suite.",
+          reason: "The user asked for targeted tests.",
+          createdAt: MEMORY_AT,
+        },
+        {
+          proposalId: "proposal-dreamed",
+          projectId: PROJECT,
+          threadId: "thread-2",
+          title: "Fixtures follow contract changes",
+          body: "Run export-fixtures after changing packages/contracts.",
+          reason: "Seen in recent work.",
+          createdAt: MEMORY_AT,
+          analysis: {
+            target: "memory",
+            evidence: [evidence],
+            related: [
+              {
+                memoryId: "memory-1",
+                title: "Old fixture note",
+                body: "Fixtures are written by hand.",
+              },
+            ],
+            dreamed: true,
+          },
+        },
+        {
+          proposalId: "proposal-skill",
+          projectId: PROJECT,
+          threadId: "thread-3",
+          title: "Release checklist",
+          body: "Bump the version, write notes, tag, publish.",
+          reason: "A procedure repeated in recent work.",
+          createdAt: MEMORY_AT,
+          analysis: { target: "skill", evidence: [evidence], related: [] },
+        },
+      ],
+    },
+    "memory/proposals.json",
+  ),
+);
+
+put(
+  "memory/tidies.json",
+  roundTrip(
+    contracts.ProjectMemoryTidyListResult,
+    {
+      items: [
+        {
+          tidyId: "tidy-merge",
+          projectId: PROJECT,
+          action: "merge",
+          memories: [
+            {
+              memoryId: "memory-1",
+              version: 2,
+              title: "Use vp test",
+              body: "Run tests with vp.",
+            },
+            {
+              memoryId: "memory-2",
+              version: 1,
+              title: "Run single tests",
+              body: "Prefer one test file.",
+            },
+          ],
+          title: "Run one test file with vp",
+          body: "Use `vp test run <file>`.",
+          reason: "Both memories say the same thing.",
+          dreamed: true,
+          createdAt: MEMORY_AT,
+        },
+        {
+          tidyId: "tidy-delete",
+          projectId: PROJECT,
+          action: "delete",
+          memories: [
+            {
+              memoryId: "memory-3",
+              version: 1,
+              title: "Node 18 is required",
+              body: "Install Node 18.",
+            },
+          ],
+          reason: "The repo now needs Node 22.",
+          createdAt: MEMORY_AT,
+        },
+      ],
+    },
+    "memory/tidies.json",
+  ),
+);
+
+put(
+  "memory/analyse.json",
+  roundTrip(
+    contracts.ProjectMemoryAnalyseResult,
+    { threadsAnalysed: 4, memoriesProposed: 2, skillsSuggested: 1, tidiesSuggested: 1 },
+    "memory/analyse.json",
+  ),
+);
 
 // --- vectors: named inputs and what packages/client-runtime answers --------------------------------
 //

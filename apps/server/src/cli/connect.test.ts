@@ -8,15 +8,12 @@ import * as Exit from "effect/Exit";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
 import * as References from "effect/References";
-import * as Terminal from "effect/Terminal";
 
-import * as BootService from "../cloud/bootService.ts";
 import {
   acquireRelayClientForLink,
   headlessSessionConfig,
   reportCloudDisconnectResults,
 } from "./connect.ts";
-import { recoverServiceOnboardingOffer } from "./service.ts";
 
 const readHeadlessSessionConfig = (env: Record<string, string>) =>
   headlessSessionConfig.pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))));
@@ -34,22 +31,6 @@ it.effect("detects headless operation from individual SSH config values", () =>
     assert.isFalse(yield* readHeadlessSessionConfig({ CI: "true" }));
     assert.isTrue(yield* readHeadlessSessionConfig({ SSH_CONNECTION: "client server" }));
     assert.isTrue(yield* readHeadlessSessionConfig({ SSH_TTY: "/dev/pts/1" }));
-  }),
-);
-
-it.effect("treats cancelling optional background setup as a successful skip", () =>
-  Effect.gen(function* () {
-    const result = yield* recoverServiceOnboardingOffer(Effect.fail(new Terminal.QuitError({})));
-    assert.isFalse(result);
-  }),
-);
-
-it.effect("keeps a successful connection when a remote service update is pending", () =>
-  Effect.gen(function* () {
-    const result = yield* recoverServiceOnboardingOffer(
-      Effect.fail(new BootService.BootServiceUpdatePendingError()),
-    );
-    assert.isFalse(result);
   }),
 );
 

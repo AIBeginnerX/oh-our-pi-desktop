@@ -66,6 +66,8 @@ export interface SettingsSearchItem {
    */
   readonly secondary?: boolean;
   readonly requiresThreadAutoSettlement?: boolean;
+  readonly requiresProjectMemoryTidy?: boolean;
+  readonly requiresProjectMemoryDreaming?: boolean;
 }
 
 export interface SettingsSearchAvailability {
@@ -77,6 +79,8 @@ export interface SettingsSearchAvailability {
   readonly canManageLocalBackend: boolean;
   readonly isWslSettingsRowVisible: boolean;
   readonly hasThreadAutoSettlement: boolean;
+  readonly hasProjectMemoryTidy: boolean;
+  readonly hasProjectMemoryDreaming: boolean;
 }
 
 /**
@@ -462,6 +466,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: ["project memory analyse recent work lessons suggestions text generation"],
     scope: "environment-defaults",
+  },
+  {
+    id: "project-memory-tidy",
+    title: "Memory tidy-up",
+    to: "/settings/general",
+    searchTerms: ["project memory merge update delete duplicates contradictions outdated tidy"],
+    scope: "environment-defaults",
+    requiresProjectMemoryTidy: true,
+  },
+  {
+    id: "project-memory-dreaming",
+    title: "Dreaming",
+    to: "/settings/general",
+    searchTerms: [
+      "project memory dream daily nightly scheduled hour automatic analyser suggestions",
+    ],
+    scope: "environment-defaults",
+    requiresProjectMemoryDreaming: true,
   },
   {
     id: "continue-threads-after-server-update",
@@ -1073,7 +1095,9 @@ export function filterAvailableSettingsSearchItems(
       (!item.localBackendManagementOnly || availability.canManageLocalBackend) &&
       (!item.localEnvironmentOnly || !availability.localEnvironmentDisabled) &&
       (!item.wslAvailableOnly || availability.isWslSettingsRowVisible) &&
-      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement),
+      (!item.requiresThreadAutoSettlement || availability.hasThreadAutoSettlement) &&
+      (!item.requiresProjectMemoryDreaming || availability.hasProjectMemoryDreaming) &&
+      (!item.requiresProjectMemoryTidy || availability.hasProjectMemoryTidy),
   );
 }
 

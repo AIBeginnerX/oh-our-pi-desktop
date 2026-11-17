@@ -386,6 +386,8 @@ mod tests {
         );
     }
 
+    // Unix only: the stand-in tool is a `#!/bin/sh` script.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_read_tool_prints_text_and_a_missing_or_failing_one_is_told_apart() {
         let dir = std::env::temp_dir().join(format!("oop-rs-clip-read-{}", std::process::id()));
@@ -449,6 +451,8 @@ mod tests {
         assert_eq!(encode("가", false), "가".as_bytes());
     }
 
+    // Unix only: the stand-in tool is a `#!/bin/sh` script.
+    #[cfg(unix)]
     #[tokio::test]
     async fn a_tool_receives_the_text_on_stdin_and_nothing_else() {
         let dir = std::env::temp_dir().join(format!("oop-rs-clip-{}", std::process::id()));

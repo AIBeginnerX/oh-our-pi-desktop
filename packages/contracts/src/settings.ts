@@ -98,6 +98,12 @@ const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3;
 /** Days a settled thread stays in the sidebar before it is archived; same bounds as settling. */
 export const SidebarAutoArchiveAfterDays = SidebarAutoSettleAfterDays;
 export type SidebarAutoArchiveAfterDays = typeof SidebarAutoArchiveAfterDays.Type;
+/** Hour of the day, in the server's local time, that dreaming runs. */
+export const ProjectMemoryDreamingHour = Schema.Int.check(
+  Schema.isBetween({ minimum: 0, maximum: 23 }),
+);
+export type ProjectMemoryDreamingHour = typeof ProjectMemoryDreamingHour.Type;
+export const DEFAULT_PROJECT_MEMORY_DREAMING_HOUR: ProjectMemoryDreamingHour = 3;
 const DEFAULT_SIDEBAR_AUTO_ARCHIVE_AFTER_DAYS: SidebarAutoArchiveAfterDays = 7;
 export const MIN_GLASS_OPACITY = 40;
 export const MAX_GLASS_OPACITY = 100;
@@ -1291,6 +1297,26 @@ export const ServerSettings = Schema.Struct({
    * checks on every run. Environment-wide: the action itself is per project.
    */
   projectMemoryAnalyser: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Dreaming: the server runs the work analyser for every project once a day
+   * at `projectMemoryDreamingHour`, filing what it finds as pending
+   * suggestions like the manual action. Runs only while
+   * `projectMemoryAnalyser` is on too. An hour the server missed (asleep or
+   * off) is skipped, not caught up later.
+   */
+  projectMemoryDreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  projectMemoryDreamingHour: ProjectMemoryDreamingHour.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROJECT_MEMORY_DREAMING_HOUR)),
+  ),
+  /**
+   * Memory tidy-up: each analyser run (manual or dreaming) may also send the
+   * project's saved memory titles and bodies to the text-generation model to
+   * suggest merging duplicates, fixing contradictions and deleting outdated
+   * memories. Off by default and needs `projectMemoryAnalyser` on. Only a
+   * model whose driver may receive project memory is used, and memories that
+   * look like secrets are never sent.
+   */
+  projectMemoryTidy: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   // Retain the update-era key; recovery now needs an environment-owned opt-in.
   continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
@@ -1707,6 +1733,9 @@ export const ServerSettingsPatch = Schema.Struct({
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   autoSelectProjectMemories: Schema.optionalKey(Schema.Boolean),
   projectMemoryAnalyser: Schema.optionalKey(Schema.Boolean),
+  projectMemoryDreaming: Schema.optionalKey(Schema.Boolean),
+  projectMemoryDreamingHour: Schema.optionalKey(ProjectMemoryDreamingHour),
+  projectMemoryTidy: Schema.optionalKey(Schema.Boolean),
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   enableAgentBrowserAccess: Schema.optionalKey(Schema.Boolean),
   projectAgentBrowserAccessOverrides: Schema.optionalKey(

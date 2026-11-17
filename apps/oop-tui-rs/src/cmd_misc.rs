@@ -29,7 +29,7 @@ pub struct State {
     shown: bool,
 }
 
-fn config_dir(app: &App) -> PathBuf {
+pub(crate) fn config_dir(app: &App) -> PathBuf {
     app.misc
         .config_dir
         .clone()

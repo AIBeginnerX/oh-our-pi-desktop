@@ -158,6 +158,8 @@ describe("searchSettings", () => {
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: false,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
     });
 
     const gatedIds = new Set<string>([
@@ -188,6 +190,8 @@ describe("searchSettings", () => {
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: false,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
     };
     const itemIds = (macAvailable: boolean) =>
       filterAvailableSettingsSearchItems({
@@ -207,6 +211,8 @@ describe("searchSettings", () => {
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: false,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
     };
     const remoteOnly = filterAvailableSettingsSearchItems({
       ...availability,
@@ -230,6 +236,8 @@ describe("searchSettings", () => {
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: true,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
     });
 
     expect(searchSettings("auto-settle", available).map((item) => item.id)).toEqual([
@@ -237,6 +245,48 @@ describe("searchSettings", () => {
       "auto-settle-merged-threads",
       "days-before-auto-settle",
     ]);
+  });
+
+  it("offers Dreaming only when every loaded server supports it", () => {
+    const availability = {
+      hasCloudPublicConfig: false,
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: false,
+      hasMacProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
+    };
+    const dreamingIds = (hasProjectMemoryDreaming: boolean) =>
+      searchSettings(
+        "dreaming",
+        filterAvailableSettingsSearchItems({ ...availability, hasProjectMemoryDreaming }),
+      ).map((item) => item.id);
+    expect(dreamingIds(false)).not.toContain("project-memory-dreaming");
+    expect(dreamingIds(true)).toContain("project-memory-dreaming");
+  });
+
+  it("offers Tidy only when every loaded server supports it", () => {
+    const availability = {
+      hasCloudPublicConfig: false,
+      hasEnvironment: true,
+      hasProviderSettingsEnvironment: false,
+      hasMacProviderSettingsEnvironment: false,
+      canManageLocalBackend: false,
+      isWslSettingsRowVisible: false,
+      hasThreadAutoSettlement: false,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
+    };
+    const tidyIds = (hasProjectMemoryTidy: boolean) =>
+      searchSettings(
+        "tidy",
+        filterAvailableSettingsSearchItems({ ...availability, hasProjectMemoryTidy }),
+      ).map((item) => item.id);
+    expect(tidyIds(false)).not.toContain("project-memory-tidy");
+    expect(tidyIds(true)).toContain("project-memory-tidy");
   });
 
   it("finds keybinding commands by label, command id, and default key", () => {
@@ -357,6 +407,8 @@ describe("searchSettings", () => {
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: true,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
     });
     expect(searchSettings("writing style", available)[0]?.id).toBe("source-control-writing-style");
     expect(searchSettings("auto-settle", available)).toHaveLength(3);
@@ -452,6 +504,8 @@ describe("auto-settlement search availability", () => {
       canManageLocalBackend: false,
       isWslSettingsRowVisible: false,
       hasThreadAutoSettlement: availability.eligibleEnvironmentIds.length > 0,
+      hasProjectMemoryTidy: false,
+      hasProjectMemoryDreaming: false,
     });
     expect(searchSettings("auto-settle", items).map((item) => item.id)).toEqual([
       "auto-settle-inactive-threads",

@@ -31,9 +31,11 @@ import type { RateTable } from "./usagePricing.ts";
  */
 export const THREAD_USAGE_MAX_ROWS = 20_000;
 
-/** One owned-usage projection row with its thread and row timestamp. */
+/** One owned-usage projection row with its thread, turn, and row timestamp. */
 export type ThreadUsageActivityRow = {
   readonly threadId: ThreadId;
+  /** The activity's `turn_id`; null when the activity named no turn. */
+  readonly turnId: string | null;
   readonly modelSelectionJson: string | null;
   readonly payloadJson: string;
   readonly createdAt: string;
@@ -57,6 +59,10 @@ const emptyTotals: ThreadUsageSummary["totals"] = {
   cacheRate: null,
   cost: { kind: "unknown" },
 };
+
+/** How far a summary reached: one turn, or the whole thread family. */
+const summaryScope = (turnId: string | undefined): "turn" | "thread" =>
+  turnId === undefined ? "thread" : "turn";
 
 const decodeObservation = Schema.decodeUnknownOption(
   Schema.fromJsonString(OwnedTurnUsageObservationV1),
@@ -136,6 +142,13 @@ const modelAt = (
  * payload and aggregates the rest. `maxRows` is test-injected; callers pass
  * `THREAD_USAGE_MAX_ROWS` for both queries. Past the cap the summary reports
  * "too-large" with empty totals and models — no numbers is not zero usage.
+ *
+ * `turnId` narrows the counted rows to that turn: the lead thread's rows of
+ * the turn plus every row of the family's other threads (the crew children of
+ * the turn). The cost chains still step over the whole family first, so the
+ * turn's cost is its own step of its provider chain, not the running total.
+ * The response says which scope it counted, and thread scope is also what an
+ * omitted `turnId` reports.
  */
 export const deriveThreadUsageSummary = (
   threadId: ThreadId,
@@ -144,12 +157,16 @@ export const deriveThreadUsageSummary = (
   overrides: RateTable,
   maxRows: number,
   modelEvents: ReadonlyArray<ThreadUsageModelEventRow> = [],
+  turnId?: string,
+  turnChildren: ReadonlySet<ThreadId> = NO_TURN_CHILDREN,
 ): ThreadUsageSummary => {
+  const scope = summaryScope(turnId);
   if (rows.length > maxRows || modelEvents.length > maxRows)
-    return { threadId, status: "too-large", totals: emptyTotals, models: [] };
+    return { threadId, status: "too-large", scope, totals: emptyTotals, models: [] };
   const turnStarts = turnStartsByThread(modelEvents);
   const entries: Array<{
     threadId: ThreadId;
+    turnId: string | null;
     createdAt: string;
     model: string;
     observation: OwnedTurnUsageObservationV1;
@@ -161,17 +178,36 @@ export const deriveThreadUsageSummary = (
     const observation =
       model === null ? null : Option.getOrNull(decodeObservation(row.payloadJson));
     if (model === null || observation === null) continue;
-    entries.push({ threadId: row.threadId, createdAt: row.createdAt, model, observation });
+    entries.push({
+      threadId: row.threadId,
+      turnId: row.turnId,
+      createdAt: row.createdAt,
+      model,
+      observation,
+    });
   }
-  return aggregateThreadUsage(threadId, entries, rates, overrides);
+  const counted =
+    turnId === undefined
+      ? undefined
+      : (entry: { threadId: ThreadId; turnId: string | null }) =>
+          entry.threadId !== threadId ? turnChildren.has(entry.threadId) : entry.turnId === turnId;
+  return { ...aggregateThreadUsage(threadId, entries, rates, overrides, counted), scope };
 };
+
+/** An empty set is the turn-children set of a thread-scoped read. */
+const NO_TURN_CHILDREN: ReadonlySet<ThreadId> = new Set();
 
 /**
  * Reads the summary for one thread and its crew child threads
  * (`projection_threads.parent_thread_id`) through the real projection store.
+ * With `turnId`, only that turn is counted: the lead thread's observations of
+ * the turn plus, in full, the crew child threads started during it — the
+ * threads the lead's turn-scoped `task.*` activities name — including the
+ * turn's auditor, which starts the same way. Children of other turns stay out.
  */
 export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(function* (
   threadId: ThreadId,
+  turnId?: string,
 ) {
   const sql = yield* SqlClient.SqlClient;
   const usage = yield* UsageService;
@@ -179,6 +215,7 @@ export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(funct
   const rows = yield* sql<ThreadUsageActivityRow>`
     SELECT
       a.thread_id AS "threadId",
+      a.turn_id AS "turnId",
       t.model_selection_json AS "modelSelectionJson",
       a.payload_json AS "payloadJson",
       a.created_at AS "createdAt"
@@ -208,6 +245,25 @@ export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(funct
     ORDER BY sequence
     LIMIT ${THREAD_USAGE_MAX_ROWS + 1}
   `;
+  // The crew child threads the turn started, read straight off the lead's
+  // turn-scoped task activities; the whole family read above feeds the cost
+  // chains, and the filter keeps only the turn's share of it.
+  const turnChildren =
+    turnId === undefined
+      ? NO_TURN_CHILDREN
+      : new Set(
+          (yield* sql<{ readonly childThreadId: ThreadId }>`
+              SELECT DISTINCT json_extract(a.payload_json, '$.threadId') AS "childThreadId"
+              FROM projection_thread_activities AS a
+              WHERE a.thread_id = ${threadId}
+                AND a.turn_id = ${turnId}
+                AND a.kind IN ('task.started', 'task.progress', 'task.completed')
+                AND json_extract(a.payload_json, '$.threadId') IN (
+                  SELECT thread_id FROM projection_threads
+                  WHERE parent_thread_id = ${threadId}
+                )
+            `).map((row) => row.childThreadId),
+        );
   return deriveThreadUsageSummary(
     threadId,
     rows,
@@ -215,5 +271,7 @@ export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(funct
     overrides,
     THREAD_USAGE_MAX_ROWS,
     modelEvents,
+    turnId,
+    turnChildren,
   );
 });

@@ -38,7 +38,7 @@ it("treats stable installs as direct invocations", () => {
   ]) {
     assert.equal(
       formatCliCommand({ subcommand: "serve", entryPath, version: "0.0.31" }),
-      "t3 serve",
+      "oop server serve",
     );
   }
 });
@@ -84,6 +84,6 @@ it("formats serve suggestions to match the launching command", () => {
       entryPath: "/usr/local/lib/node_modules/t3/dist/bin.mjs",
       version: "0.0.31-nightly.20260729",
     }),
-    "t3 serve",
+    "oop server serve",
   );
 });

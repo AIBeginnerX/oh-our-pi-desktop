@@ -1804,7 +1804,7 @@
           "id": "turn:turn-1",
           "kind": "crew",
           "name": "Turn 1",
-          "status": "failed",
+          "status": "unfinished",
           "turnIndex": 1,
           "startedAt": "2026-01-01T00:00:01.000Z",
           "updatedAt": "2026-01-01T00:00:06.000Z",
@@ -1838,7 +1838,7 @@
             },
             {
               "id": "w2",
-              "state": "failed",
+              "state": "unfinished",
               "wave": 2,
               "role": "worker",
               "task": "Two",
@@ -1849,7 +1849,7 @@
             },
             {
               "id": "w3",
-              "state": "failed",
+              "state": "unfinished",
               "wave": 3,
               "role": "worker",
               "task": "Three",

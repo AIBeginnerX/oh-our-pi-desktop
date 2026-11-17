@@ -108,6 +108,8 @@ export const InsertProjectMemoryProposalInput = Schema.Struct({
       /** The evidence was chosen because the lesson named its check, not as a stand-in. */
       evidenceNamed: Schema.Boolean,
       relatedMemoryIds: Schema.Array(ProjectMemoryId),
+      /** Filed by the scheduled dreaming run rather than the Analyse action. */
+      dreamed: Schema.optionalKey(Schema.Boolean),
     }),
   ),
 });
@@ -218,6 +220,7 @@ const ProjectMemoryProposalDbRow = Schema.Struct({
   target: Schema.Literals(["memory", "skill"]),
   evidenceJson: Schema.NullOr(Schema.String),
   relatedMemoryIdsJson: Schema.NullOr(Schema.String),
+  dreamed: Schema.Literals([0, 1]),
 });
 
 const EvidenceFromJson = Schema.fromJsonString(Schema.Array(ProjectMemoryEvidence));
@@ -757,7 +760,8 @@ export const make = Effect.gen(function* () {
     source AS "source",
     target AS "target",
     evidence_json AS "evidenceJson",
-    related_memory_ids_json AS "relatedMemoryIdsJson"
+    related_memory_ids_json AS "relatedMemoryIdsJson",
+    dreamed AS "dreamed"
   `;
 
   const decodeProposalRow = Schema.decodeUnknownEffect(ProjectMemoryProposalDbRow);
@@ -795,9 +799,16 @@ export const make = Effect.gen(function* () {
           });
         }
       }
+      // `dreamed` marks a scheduled dreaming run; the key is omitted for
+      // manual-run and agent suggestions so they read exactly as before.
       return {
         ...base,
-        analysis: { target: row.target, evidence, related },
+        analysis: {
+          target: row.target,
+          evidence,
+          related,
+          ...(row.dreamed === 1 ? { dreamed: true } : {}),
+        },
       };
     });
 
@@ -816,7 +827,7 @@ export const make = Effect.gen(function* () {
           const rows = yield* sql`
             INSERT INTO project_memory_proposals (
               proposal_id, project_id, thread_id, title, body, reason, created_at,
-              source, target, evidence_json, related_memory_ids_json, evidence_named
+              source, target, evidence_json, related_memory_ids_json, evidence_named, dreamed
             )
             SELECT
               ${input.proposalId}, ${input.projectId}, ${input.threadId}, ${input.title},
@@ -825,7 +836,8 @@ export const make = Effect.gen(function* () {
               ${input.analysis?.target ?? "memory"},
               ${evidenceJson},
               ${relatedMemoryIdsJson},
-              ${input.analysis?.evidenceNamed === true ? 1 : 0}
+              ${input.analysis?.evidenceNamed === true ? 1 : 0},
+              ${input.analysis?.dreamed === true ? 1 : 0}
             WHERE ${liveProjectFor(input.projectId)}
               AND (
                 SELECT COUNT(*) FROM project_memory_proposals

@@ -149,6 +149,13 @@ pub const COMMANDS: &[Command] = &[
         "Step through the last finished turn",
         "마지막으로 끝난 작업을 단계별로 보기",
     ),
+    cmd(
+        "attach",
+        &[],
+        Some("<path>"),
+        "Attach a file or remove attachments",
+        "파일 첨부·첨부 제거",
+    ),
     cmd("new", &[], None, "Start a new thread", "새 스레드 시작"),
     cmd(
         "continue",
@@ -171,6 +178,13 @@ pub const COMMANDS: &[Command] = &[
         None,
         "Work on another computer",
         "다른 컴퓨터에서 작업",
+    ),
+    cmd(
+        "memory",
+        &[],
+        Some("[saved | analyse | auto off|analyser|all]"),
+        "Review memory suggestions, dreaming too",
+        "메모리 제안 검토 (드리밍 포함)",
     ),
     cmd("stats", &[], None, "Usage statistics", "사용 통계"),
     cmd(
@@ -320,7 +334,7 @@ mod tests {
 
     #[test]
     fn a_word_narrows_by_name_start_alias_and_inner_text() {
-        assert_eq!(names("mo"), ["model", "mode", "mobile", "mouse"]);
+        assert_eq!(names("mo"), ["model", "mode", "mobile", "mouse", "memory"]);
         assert_eq!(
             names("MODE"),
             ["mode", "model"],

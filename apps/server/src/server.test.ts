@@ -869,6 +869,7 @@ const buildAppUnderTest = (options?: {
       getSettings: Effect.succeed(DEFAULT_SERVER_SETTINGS),
       updateSettings: () => Effect.succeed(DEFAULT_SERVER_SETTINGS),
       streamChanges: Stream.empty,
+      subscribeChanges: Effect.succeed(Stream.empty),
       ...options?.layers?.serverSettings,
     });
     const projectSetupScriptRunnerLayer = Layer.mock(
@@ -16717,6 +16718,8 @@ it.effect("production memory policy binds descriptor and gate to every built-in 
       sentToThread: true,
       proposals: true,
       analyser: true,
+      dreaming: true,
+      tidy: true,
       sendDriverKinds: builtInDrivers,
     });
     assert.deepEqual(descriptor.capabilities.projectSkills, {
@@ -16753,6 +16756,8 @@ it.effect("production memory policy binds descriptor and gate to every built-in 
       sentToThread: true,
       proposals: true,
       analyser: true,
+      dreaming: true,
+      tidy: true,
     });
     assert.deepEqual(controlDescriptor.capabilities.projectSkills, {
       manage: true,

@@ -264,6 +264,7 @@ pub struct App {
     /// belongs to the thread on screen, so it is saved here when the thread changes and put back
     /// when it is returned to. Only messages with something in them are kept.
     drafts: HashMap<String, crate::input::Saved>,
+    pub(crate) attachments: crate::cmd_attach::State,
     /// The panel's setting of each thread (and draft) that is not on screen, by `draft_key`.
     side_settings: HashMap<String, SideSetting>,
     pub settings: Settings,
@@ -379,6 +380,10 @@ pub struct App {
     pub(crate) sent: Option<(String, usize)>,
     /// What `/undo`, `/diff` and `/history` are waiting for (see `cmd_history.rs`).
     pub(crate) threadops: crate::cmd_history::State,
+    /// Last memory suggestion check per project; opening a project asks at most hourly.
+    pub(crate) memory_asked: std::collections::HashMap<String, i64>,
+    /// The saved memory the composer is editing instead of a message (see `cmd_memory.rs`).
+    pub(crate) memory_edit: Option<crate::cmd_memory::Edit>,
     /// The thread usage line under the conversation (see `usage_footer.rs`).
     pub(crate) usage: crate::usage_footer::State,
     cache: RefCell<Option<Cached>>,
@@ -416,7 +421,7 @@ fn forward(
     })
 }
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     parse_iso_ms(&iso_now()).unwrap_or(0)
 }
 
@@ -437,6 +442,7 @@ impl App {
             conv: Conversation::default(),
             input: Input::default(),
             drafts: HashMap::new(),
+            attachments: Default::default(),
             side_settings: HashMap::new(),
             settings: Settings::default(),
             bell_pending: false,
@@ -511,6 +517,8 @@ impl App {
             awaiting: None,
             sent: None,
             threadops: Default::default(),
+            memory_asked: Default::default(),
+            memory_edit: None,
             usage: Default::default(),
             cache: RefCell::new(None),
             blocks: RefCell::new(Default::default()),
@@ -823,6 +831,7 @@ impl App {
                     self.conv.apply(&item);
                     if self.conv.deleted {
                         // Its draft goes with it: there is no thread left to return to.
+                        crate::cmd_memory::leave_edit(self);
                         self.input.take(false);
                         self.side_settings.remove(&id);
                         self.pinned_flow = None;
@@ -1050,9 +1059,11 @@ impl App {
     /// list, everything drafted and every pending question go, and the new computer's project
     /// list opens as soon as its snapshot arrives.
     fn reset_for_computer(&mut self) {
+        crate::cmd_memory::leave_edit(self);
         self.leave_thread();
         self.recent.clear();
         self.drafts.clear();
+        self.attachments = Default::default();
         self.side_settings.clear();
         self.visited.clear();
         self.answered.clear();
@@ -1113,6 +1124,7 @@ impl App {
         self.draft_project = Some(project_id.to_string());
         self.conv = Conversation::default();
         self.focus = Focus::Composer;
+        crate::cmd_memory::opened(self);
     }
 
     pub(crate) fn open_thread(&mut self, id: &str) {
@@ -1135,6 +1147,7 @@ impl App {
         };
         self.focus = Focus::Composer;
         self.subscribe_thread(id);
+        crate::cmd_memory::opened(self);
     }
 
     /// Makes `next` the thread on screen, and the message box goes with it: what is half-typed is
@@ -1142,6 +1155,7 @@ impl App {
     /// if it has none). With no thread on screen the box has no owner, so what is typed there
     /// follows into whatever opens next, unless that has a draft of its own.
     fn switch_to(&mut self, next: Active) {
+        crate::cmd_memory::leave_edit(self);
         if let Some(key) = draft_key(&self.active) {
             match self.input.stash_draft() {
                 Some(saved) => {
@@ -2363,6 +2377,10 @@ impl App {
     }
 
     pub(crate) fn submit(&mut self) {
+        if self.memory_edit.is_some() {
+            crate::cmd_memory::save_edit(self);
+            return;
+        }
         let text = self.input.text();
         let mut trimmed = text.trim().to_string();
         if trimmed.is_empty() {
@@ -2382,6 +2400,16 @@ impl App {
                 return;
             };
             trimmed = format!("${name} {argument}").trim_end().to_string();
+        }
+        if crate::cmd_attach::line(self).is_some() && self.conv.busy() {
+            self.notice = Some(
+                crate::panels_common::s(
+                    "Wait for the current turn before sending attachments.",
+                    "현재 작업이 끝난 뒤 첨부를 전송하세요.",
+                )
+                .into(),
+            );
+            return;
         }
         match &self.active {
             Active::None => self.notice = Some(tr("notice.pickFirst").into()),
@@ -2542,7 +2570,10 @@ impl App {
     }
 
     /// Builds and sends one user message to the open thread or, from a draft, starts the thread.
-    fn send(&mut self, text: &str) -> bool {
+    pub(crate) fn send(&mut self, text: &str) -> bool {
+        if crate::cmd_attach::before_send(self, text) {
+            return false;
+        }
         if let Some(refusal) = crate::cmd_history::sending_blocked(self) {
             self.notice = Some(refusal);
             return false;
@@ -2551,7 +2582,7 @@ impl App {
         let interaction_mode = self.interaction_mode();
         let message_id = new_id();
         let ctx = Ctx::fresh();
-        let command = match self.active.clone() {
+        let mut command = match self.active.clone() {
             Active::None => {
                 self.notice = Some(tr("notice.pickFirst").into());
                 return false;
@@ -2567,7 +2598,7 @@ impl App {
                 };
                 let thread_id = self.draft_id.take().unwrap_or_else(new_id);
                 let crew = self.draft_crew.clone();
-                let command = commands::turn_start(
+                let mut command = commands::turn_start(
                     &ctx,
                     &Turn {
                         thread_id: &thread_id,
@@ -2582,6 +2613,7 @@ impl App {
                         }),
                     },
                 );
+                command["message"]["attachments"] = json!(self.attachments.ready);
                 self.notice = None;
                 self.dispatch(command, Some(thread_id), None);
                 return true;
@@ -2599,6 +2631,7 @@ impl App {
                 },
             ),
         };
+        command["message"]["attachments"] = json!(self.attachments.ready);
         self.notice = None;
         self.scroll.set(0);
         self.sent = Some((message_id, self.tick));

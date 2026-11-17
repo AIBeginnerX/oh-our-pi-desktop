@@ -313,6 +313,7 @@ const unusedTextGeneration: TextGeneration["Service"] = {
   generateBranchName: () => Effect.die("unused generateBranchName"),
   generateThreadTitle: () => Effect.die("unused generateThreadTitle"),
   generateWorkLessons: () => Effect.die("unused generateWorkLessons"),
+  generateMemoryTidy: () => Effect.die("unused generateMemoryTidy"),
 };
 
 const makeInstance = (

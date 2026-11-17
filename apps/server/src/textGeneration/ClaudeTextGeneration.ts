@@ -26,6 +26,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
@@ -104,7 +105,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkLessons",
+      | "generateWorkLessons"
+      | "generateMemoryTidy",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -135,7 +137,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
-      | "generateWorkLessons";
+      | "generateWorkLessons"
+      | "generateMemoryTidy";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -188,9 +191,12 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     );
 
     const runClaudeCommand = Effect.fn("runClaudeJson.runClaudeCommand")(function* () {
-      // Titles and work lessons need only the supplied prompt, not configuration from the checkout.
+      // Titles, work lessons, and memory tidy-ups need only the supplied prompt, not
+      // configuration from the checkout.
       const workingDirectory =
-        operation === "generateThreadTitle" || operation === "generateWorkLessons"
+        operation === "generateThreadTitle" ||
+        operation === "generateWorkLessons" ||
+        operation === "generateMemoryTidy"
           ? yield* fileSystem
               .makeTempDirectoryScoped({ prefix: "t3code-claude-title-" })
               .pipe(
@@ -425,11 +431,24 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       });
     });
 
+  const generateMemoryTidy: TextGeneration.TextGeneration["Service"]["generateMemoryTidy"] =
+    Effect.fn("ClaudeTextGeneration.generateMemoryTidy")(function* (input) {
+      const { prompt, outputSchema } = buildMemoryTidyPrompt({ digest: input.digest });
+      return yield* runClaudeJson({
+        operation: "generateMemoryTidy",
+        cwd: input.cwd,
+        prompt,
+        outputSchemaJson: outputSchema,
+        modelSelection: input.modelSelection,
+      });
+    });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
     generateWorkLessons,
+    generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -176,7 +176,7 @@ describe("t3 pair", () => {
         // @effect-diagnostics-next-line preferSchemaOverJson:off - CLI JSON output is decoded as a presentation DTO.
         const credentials = JSON.parse(listed) as ReadonlyArray<{ readonly label?: string }>;
         assert.equal(credentials.length, 1);
-        assert.equal(credentials[0]?.label, "t3 pair");
+        assert.equal(credentials[0]?.label, "oop server pair");
       }),
     ).pipe(
       Effect.provide(NodeServices.layer),
@@ -229,8 +229,8 @@ describe("t3 pair", () => {
         typeof error === "object" && error !== null && "cause" in error ? error.cause : error,
       );
       assert.include(rendered, "No running OOP server found.");
-      assert.include(rendered, "npx t3 serve");
-      assert.include(rendered, "npx t3 connect");
+      assert.include(rendered, "oop server serve");
+      assert.include(rendered, "oop server connect");
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
