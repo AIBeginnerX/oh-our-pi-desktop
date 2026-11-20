@@ -21,6 +21,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
@@ -47,7 +48,8 @@ import { ProcessRunner } from "../processRunner.ts";
 import { ProjectMemorySendGate } from "../memory/ProjectMemorySendGate.ts";
 import { ProviderRegistry } from "../provider/Services/ProviderRegistry.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
-import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
+import * as GitVcs from "../vcs/GitVcsDriver.ts";
+import * as VcsProcess from "../vcs/VcsProcess.ts";
 import { CREW_AUDIT_SKIPPED_ACTIVITY } from "@t3tools/shared/threadGoal";
 import * as CrewService from "./CrewService.ts";
 import { CrewTaskRecoveryJson, type CrewTaskRecoveryState } from "./crewRecoveryState.ts";
@@ -164,6 +166,11 @@ const TestLayer = Layer.mergeAll(
   Layer.provideMerge(OrchestrationCommandReceiptRepositoryLive, SqlitePersistenceMemory),
   NodeServices.layer,
 );
+const GitTestLayer = GitVcs.layer.pipe(
+  Layer.provideMerge(serverConfigLayerTest(process.cwd(), { prefix: "t3-crew-stop-git-" })),
+  Layer.provideMerge(VcsProcess.layer),
+  Layer.provideMerge(TestLayer),
+);
 
 /**
  * `interruptEnds` is how the provider reports a turn the server interrupted: a clean interrupt,
@@ -177,6 +184,7 @@ const makeWorld = (
   ignoreInterrupt = false,
   /** Crew settings beyond the crew being on, such as pinned and fallback models. */
   crew: Partial<CrewSettings> = {},
+  git?: GitVcs.GitVcsDriver["Service"],
 ) =>
   Effect.gen(function* () {
     const store = yield* CrewRuntimeStateLive.make;
@@ -253,7 +261,9 @@ const makeWorld = (
       Layer.mock(CheckpointDiffQuery)({
         getFullThreadDiff: () => Effect.succeed({ diff: "+const a = 1;\n" } as never),
       }),
-      Layer.mock(GitVcsDriver)({}),
+      git === undefined
+        ? Layer.mock(GitVcs.GitVcsDriver)({})
+        : Layer.succeed(GitVcs.GitVcsDriver, git),
       Layer.mock(ProcessRunner)({}),
       // Memory is allowed for every member, so a stopped task also carries the lead's memory refs.
       Layer.mock(ProjectMemorySendGate)({
@@ -739,6 +749,114 @@ describe("crew stop: on request", () => {
       assert.isNull((yield* world.saved(foreign.taskId)).report);
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+});
+
+const editIsolatedTask = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const git = yield* GitVcs.GitVcsDriver;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "t3-crew-stop-repo-" });
+  const run = (args: ReadonlyArray<string>) =>
+    git.execute({ operation: "crew.stop.test", cwd: root, args });
+  yield* run(["init"]);
+  yield* run([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.test",
+    "commit",
+    "--allow-empty",
+    "-m",
+    "initial",
+  ]);
+
+  const world = yield* makeWorld("error", new Set(), false, {}, git);
+  yield* world.setShell(LEAD, { worktreePath: root });
+  const service = yield* world.start;
+  const task = yield* service.crew.delegate({
+    threadId: LEAD,
+    role: "worker",
+    task: "Write work.txt",
+    isolation: "worktree",
+  });
+  const memberId = yield* Queue.take(world.memberTurns);
+  const { worktree } = yield* world.saved(task.taskId);
+  if (worktree === undefined) return assert.fail("expected an isolated worktree");
+  yield* fs.writeFileString(`${worktree.path}/work.txt`, "member edit\n");
+  return { fs, root, run, world, service, task, memberId, worktree };
+});
+
+describe("isolated crew tasks", () => {
+  it.effect.each(["crew stop", "member interruption"] as const)(
+    "keeps partial edits after %s",
+    (ending) =>
+      Effect.gen(function* () {
+        const { fs, root, run, world, service, task, memberId, worktree } = yield* editIsolatedTask;
+        const { crew } = service;
+        if (ending === "crew stop") {
+          const stopped = yield* crew.stop({ threadId: LEAD, taskId: task.taskId });
+          assert.deepStrictEqual(stopped.stopped, [task.taskId]);
+        } else {
+          yield* world.setShell(memberId, {
+            latestTurn: {
+              ...leadShell(LEAD).latestTurn!,
+              turnId: TurnId.make("member-turn-1"),
+              state: "interrupted",
+              completedAt: NOW,
+            },
+          });
+          yield* world.releaseIdle(memberId);
+        }
+        const [report] = yield* crew.wait({ threadId: LEAD, taskIds: [task.taskId] });
+
+        assert.isFalse(yield* fs.exists(`${root}/work.txt`));
+        const patch = `${worktree.path}.patch`;
+        assert.strictEqual(report?.status, "interrupted");
+        assert.strictEqual(report?.proof?.verdict, "not-verified");
+        assert.include(report?.result, "Task was stopped. Changes were not applied.");
+        assert.include(report?.result, worktree.path);
+        assert.include(
+          report?.result,
+          `git -C '${worktree.repoRoot}' apply --binary -- '${patch}'`,
+        );
+        assert.include(yield* fs.readFileString(patch), "+member edit");
+        yield* run(["apply", "--binary", "--", patch]);
+        assert.strictEqual(yield* fs.readFileString(`${root}/work.txt`), "member edit\n");
+        yield* run(["worktree", "remove", "--force", "--", worktree.path]);
+        yield* fs.remove(patch);
+        assert.isFalse(yield* fs.exists(worktree.path));
+        yield* service.close;
+      }).pipe(Effect.scoped, Effect.provide(GitTestLayer)),
+  );
+
+  it.effect.each(["first attempt", "fallback"] as const)(
+    "applies isolated edits after completion on the %s",
+    (attempt) =>
+      Effect.gen(function* () {
+        const { fs, root, world, service, task, memberId, worktree } = yield* editIsolatedTask;
+        let completedMember = memberId;
+        if (attempt === "fallback") {
+          yield* world.setShell(memberId, {
+            latestTurn: {
+              ...leadShell(LEAD).latestTurn!,
+              turnId: TurnId.make("member-turn-1"),
+              state: "error",
+              completedAt: NOW,
+            },
+          });
+          yield* world.releaseIdle(memberId);
+          completedMember = yield* Queue.take(world.memberTurns);
+          assert.notStrictEqual(completedMember, memberId);
+        }
+
+        yield* world.completeMember(completedMember, true);
+        const [report] = yield* service.crew.wait({ threadId: LEAD, taskIds: [task.taskId] });
+        assert.strictEqual(report?.status, "completed");
+        assert.strictEqual(yield* fs.readFileString(`${root}/work.txt`), "member edit\n");
+        assert.isFalse(yield* fs.exists(worktree.path));
+        assert.isFalse(yield* fs.exists(`${worktree.path}.patch`));
+        yield* service.close;
+      }).pipe(Effect.scoped, Effect.provide(GitTestLayer)),
   );
 });
 

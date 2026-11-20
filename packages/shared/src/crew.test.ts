@@ -17,7 +17,7 @@ import {
 const provider = (
   instanceId: string,
   driver: string,
-  models: ReadonlyArray<{ slug: string; legacy?: boolean }>,
+  models: ReadonlyArray<{ slug: string; legacy?: boolean; isDefault?: boolean }>,
   overrides: Record<string, unknown> = {},
 ): ServerProvider =>
   ({
@@ -32,6 +32,7 @@ const provider = (
       name: model.slug,
       isCustom: false,
       isLegacy: model.legacy === true,
+      isDefault: model.isDefault === true,
       capabilities: null,
     })),
     ...overrides,
@@ -75,6 +76,38 @@ describe("crew models", () => {
 });
 
 describe("recommendCrew", () => {
+  it.each([
+    ["gpt-6.1-sol", "gpt-6.2-sol"],
+    ["claude-opus-5", "claude-opus-5-5"],
+    ["gpt-6.9-sol", "gpt-6.10-sol"],
+  ])("picks %s's newer version %s over the default", (older, newer) => {
+    const options = crewModelOptions([
+      provider("cursor", "cursor", [{ slug: older, isDefault: true }, { slug: newer }]),
+    ]);
+    expect(recommendCrew(options, null, "quality").worker?.selection.model).toBe(newer);
+  });
+
+  it.each(["claude-opus-7", "gpt-sol-pro", "gpt-7-mini"])(
+    "keeps the default when %s is outside the version tiebreak",
+    (other) => {
+      const options = crewModelOptions([
+        provider("cursor", "cursor", [{ slug: "gpt-6.1-sol", isDefault: true }, { slug: other }]),
+      ]);
+      expect(recommendCrew(options, null, "quality").worker?.selection.model).toBe("gpt-6.1-sol");
+    },
+  );
+
+  it.each([
+    ["composer-2", "grok", "grok-4.6"],
+    ["custom-1", "codex", "custom-2"],
+  ])("keeps cursor's default %s over %s's unrelated %s", (fallback, driver, other) => {
+    const options = crewModelOptions([
+      provider("cursor", "cursor", [{ slug: fallback, isDefault: true }]),
+      provider(driver, driver, [{ slug: other }]),
+    ]);
+    expect(recommendCrew(options, null, "quality").worker?.selection.model).toBe(fallback);
+  });
+
   it("gives the worker a fast model from the brain's provider and the audit to another provider", () => {
     const crew = recommendCrew(crewModelOptions(providers), brain, "recommended");
     expect(crew.worker?.selection.model).toBe("claude-haiku-5");

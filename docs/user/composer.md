@@ -131,12 +131,23 @@ deleted since. Content a provider already received cannot be taken back.
 In those chats the agent can also search the project's memories and propose new ones while it
 works. A proposal is not saved: it appears under **Proposed memories** in the project's memory settings
 with the agent's reason, and becomes a normal memory only when you select **Approve**. **Reject**
-deletes it.
+deletes it. Approval saves a procedure suggestion as a procedure memory that is sent like other
+memories, and **Save as skill candidate** is still available from its source thread.
+
+The saved memory list shows how many threads received the current version and how many had a
+good, bad, or unknown outcome based on signals the work analyser found after sending. A bad
+outcome does not prove the memory caused it. When at least three threads had bad outcomes and
+they outnumber the good ones, OOP marks the memory **Worth reviewing**. Choose **Hold memory**
+to pause new chat sends and agent recall for that memory. Choose **Resume memory** to allow
+them again. OOP leaves that decision to you. In the terminal, open the same controls with
+`/memory saved`.
 
 **Dreaming** automates this. Once a day at the hour you pick in Settings → General, OOP runs the
 work analyser for every project and files what it finds as suggestions under **Proposed memories**,
 where they wait for your approval. Dreaming needs the work analyser turned on, the hour is the
-server's local time, and an hour the computer is asleep or off at is skipped.
+server's local time, and an hour the computer is asleep or off at is skipped. When too many
+suggestions are waiting, the work analyser stops until you approve or reject one, then reads the
+same work again, so nothing it would have suggested is lost.
 
 **Memory tidy-up**, enabled in Settings → General with the work analyser on, suggests merging duplicate memories, updating contradictions and deleting outdated memories during manual analysis or Dreaming. It sends saved project memory titles and text to the text-generation model, excluding memories that look like secrets, and uses only models whose provider already receives project memory in chats. Suggestions wait for you to select **Apply**.
 

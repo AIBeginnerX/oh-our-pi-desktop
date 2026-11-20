@@ -18,7 +18,6 @@ import { useState } from "react";
 import { useT } from "../../i18n";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { projectMemory } from "../../state/projectMemory";
-import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -33,23 +32,21 @@ import { toastManager } from "../ui/toast";
 export function ProjectMemoryProposals({
   environmentId,
   projectId,
+  items,
   writeLock,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
+  readonly items: ReadonlyArray<ProjectMemoryProposal>;
   /** Why decisions are unavailable, or null when the user may decide. */
   readonly writeLock: string | null;
 }) {
   const t = useT();
-  const proposals = useEnvironmentQuery(
-    projectMemory.proposals({ environmentId, input: { projectId } }),
-  );
   const approve = useAtomCommand(projectMemory.approveProposal, { reportFailure: false });
   const reject = useAtomCommand(projectMemory.rejectProposal, { reportFailure: false });
   const [busyId, setBusyId] = useState<ProjectMemoryProposalId | null>(null);
   const navigate = useNavigate();
 
-  const items = proposals.data?.items ?? [];
   if (items.length === 0) return null;
 
   const decide = async (
@@ -110,12 +107,15 @@ export function ProjectMemoryProposals({
                         {t("Dreaming")}
                       </Badge>
                     ) : null}
-                    {view.target === "skill"
-                      ? t("A procedure seen in recent work. Save it from the thread's skill draft.")
-                      : t(
-                          "Suggested from recent work. If approved, it expires {days} days later unless you change that.",
-                          { days: PROJECT_MEMORY_DERIVED_VALID_DAYS },
-                        )}
+                    {view.target === "skill" ? (
+                      <Badge variant="outline" size="sm">
+                        {t("Procedure")}
+                      </Badge>
+                    ) : null}
+                    {t(
+                      "Suggested from recent work. If approved, it expires {days} days later unless you change that.",
+                      { days: PROJECT_MEMORY_DERIVED_VALID_DAYS },
+                    )}
                   </p>
                   <p className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                     {t("Seen in:")}
@@ -166,26 +166,10 @@ export function ProjectMemoryProposals({
                 >
                   {view.source === "agent" ? "Reject" : t("Dismiss")}
                 </Button>
-                {view.canApprove ? (
+                {view.target === "skill" ? (
                   <Button
                     size="xs"
-                    variant="outline"
-                    disabled={disabled}
-                    title={writeLock ?? undefined}
-                    onClick={() =>
-                      void decide(
-                        proposal,
-                        () => approve(input(proposal)),
-                        "Saved to project memory",
-                      )
-                    }
-                  >
-                    Approve
-                  </Button>
-                ) : (
-                  <Button
-                    size="xs"
-                    variant="outline"
+                    variant="ghost"
                     onClick={() =>
                       void navigate({
                         to: "/$environmentId/$threadId",
@@ -200,7 +184,18 @@ export function ProjectMemoryProposals({
                   >
                     {t("Open thread")}
                   </Button>
-                )}
+                ) : null}
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={disabled}
+                  title={writeLock ?? undefined}
+                  onClick={() =>
+                    void decide(proposal, () => approve(input(proposal)), "Saved to project memory")
+                  }
+                >
+                  Approve
+                </Button>
               </div>
             </li>
           );

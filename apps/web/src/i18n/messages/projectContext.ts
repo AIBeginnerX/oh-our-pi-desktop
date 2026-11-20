@@ -20,29 +20,29 @@ export const PROJECT_CONTEXT_MESSAGES: MessageCatalog = {
     "zh-CN": "审核员正在审查此回答 · {model}",
     es: "El auditor está revisando esta respuesta · {model}",
   },
-  "This turn": {
-    ko: "이번 턴",
-    ja: "このターン",
-    "zh-CN": "本轮",
-    es: "Este turno",
+  "This request": {
+    ko: "이번 요청",
+    ja: "このリクエスト",
+    "zh-CN": "本次请求",
+    es: "Esta solicitud",
   },
-  "Cache {rate}": {
+  "cache {rate}": {
     ko: "캐시 {rate}",
     ja: "キャッシュ {rate}",
     "zh-CN": "缓存 {rate}",
-    es: "Caché {rate}",
-  },
-  "Context {usage}": {
-    ko: "컨텍스트 {usage}",
-    ja: "コンテキスト {usage}",
-    "zh-CN": "上下文 {usage}",
-    es: "Contexto {usage}",
+    es: "caché {rate}",
   },
   "Cost unknown": {
     ko: "비용 알 수 없음",
     ja: "費用不明",
     "zh-CN": "费用未知",
     es: "Coste desconocido",
+  },
+  "Usage not reported": {
+    ko: "사용량 미보고",
+    ja: "使用量未報告",
+    "zh-CN": "用量未报告",
+    es: "Uso sin informar",
   },
   "Estimates use API list prices, not your subscription bill. Cache rate includes cache writes.": {
     ko: "추정 비용은 구독 청구액이 아닌 API 공개 요금 기준입니다. 캐시 비율의 입력 합계에는 캐시 쓰기가 포함됩니다.",

@@ -23,6 +23,7 @@ import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { runtimeModeConfig, runtimeModeOptions } from "../chat/runtimeModeConfig";
 import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { TraitsPicker } from "../chat/TraitsPicker";
+import { CrewScorecardSetting } from "./CrewScorecardSetting";
 import { DefaultCrewSetting } from "./DefaultCrewSetting";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
@@ -279,6 +280,13 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <>
           {modelRow}
           <DefaultCrewSetting providers={providers} />
+          {representative && (
+            <CrewScorecardSetting
+              key={representative.environmentId}
+              environmentId={representative.environmentId}
+              environmentLabel={representative.label}
+            />
+          )}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}

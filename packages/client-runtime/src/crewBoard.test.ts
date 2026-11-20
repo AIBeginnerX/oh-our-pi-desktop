@@ -45,6 +45,16 @@ describe("crewEvidence", () => {
     );
   });
 
+  it("keeps a member's own word that tests passed apart from a run OOP saw", () => {
+    const at = "2026-10-14T01:00:00.000Z";
+    expect(crewEvidence([worker("a", at, { testsReported: true })]).get("a")).toBe(
+      "tests reported",
+    );
+    expect(crewEvidence([worker("a", at, { tested: true, testsReported: true })]).get("a")).toBe(
+      "tested",
+    );
+  });
+
   it("calls a task audited only when an approving audit finished after it", () => {
     const evidence = crewEvidence([
       audit("early", "2026-10-14T00:59:00.000Z", "approve"),

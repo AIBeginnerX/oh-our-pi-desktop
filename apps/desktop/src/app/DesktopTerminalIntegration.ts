@@ -8,7 +8,11 @@ import * as Effect from "effect/Effect";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopObservability from "./DesktopObservability.ts";
-import { isOurLauncher, terminalLauncherScript } from "./TerminalLauncher.ts";
+import {
+  isOurLauncher,
+  terminalLauncherScript,
+  windowsTerminalLauncherScript,
+} from "./TerminalLauncher.ts";
 
 /**
  * macOS only. OOP.app carries the terminal program (`OOP Terminal.app`) and the `oop-rs` client in
@@ -18,6 +22,10 @@ import { isOurLauncher, terminalLauncherScript } from "./TerminalLauncher.ts";
  * OOP.app and `oop` kept running the TypeScript client. Every start therefore checks, from the app
  * itself, that `OOP Terminal.app` sits beside OOP.app and that an `oop` command of ours runs oop-rs.
  * Anything that is not ours (a symlink, another app of that name, a user's own `oop`) is left alone.
+ *
+ * On macOS and Windows a separately installed terminal app (install-terminal.sh/.ps1) that is older
+ * than this app also gives its `oop` command to the app's own copy, so the two never differ. Its
+ * folder is kept; an equal or newer one stays, and this app's update check offers that release.
  */
 
 const { logInfo, logWarning } = DesktopObservability.makeComponentLogger("desktop-terminal");
@@ -154,6 +162,8 @@ export async function ensureTerminalApp(input: {
 
 export type TerminalCommandOutcome =
   | "no-terminal-client" // this app has no oop-rs to run
+  | "terminal-install"
+  | "replaced-older-terminal"
   | "created"
   | "updated"
   | "current"
@@ -161,17 +171,45 @@ export type TerminalCommandOutcome =
   | "removed-by-user" // we made one once and it is gone; not recreated
   | "failed";
 
+const olderTerminalInstall = async (root: string | undefined, appVersion: string | undefined) => {
+  if (!root || !appVersion || !/^\d+\.\d+\.\d+$/.test(appVersion)) return false;
+  const text = await NodeFSP.readFile(NodePath.join(root, ".oop-terminal-install"), "utf8").catch(
+    () => "",
+  );
+  const version = text.split(/\r?\n/)[0] ?? "";
+  if (!/^\d+\.\d+\.\d+$/.test(version)) return false;
+  const installed = version.split(".").map(BigInt);
+  const desktop = appVersion.split(".").map(BigInt);
+  for (let i = 0; i < 3; i++) {
+    if (installed[i] !== desktop[i]) return installed[i]! < desktop[i]!;
+  }
+  return false;
+};
+
+const terminalShellRoot = (text: string) => {
+  const lines = text.split("\n");
+  if (
+    lines[0] !== "#!/bin/sh" ||
+    lines[1] !== "# oop-terminal-launcher (written by install-terminal.sh; safe to delete)"
+  )
+    return undefined;
+  const value = lines.find((line) => line.startsWith("root="))?.slice(5);
+  if (!value || !/^'(?:[^']|'\\'')*'$/.test(value)) return undefined;
+  return value.slice(1, -1).replaceAll("'\\''", "'");
+};
+
 /**
  * Keeps `<binDir>/oop` pointing at this app and running oop-rs. A launcher with our mark is
  * rewritten when its text differs (this is how a launcher written by an older release moves to the
  * current one). A missing file is created once; `markerFile` remembers that, so deleting the
- * launcher (the mark says that is safe) is respected. A file without our mark, or a symlink, is
- * never touched, whatever it contains.
+ * launcher (the mark says that is safe) is respected. An older terminal-only install is replaced;
+ * foreign files and symlinks are left alone.
  */
 export async function ensureTerminalCommand(input: {
   readonly appBundle: string;
   readonly binDirectory: string;
   readonly markerFile: string;
+  readonly appVersion?: string;
 }): Promise<TerminalCommandOutcome> {
   const target = NodePath.join(input.binDirectory, "oop");
   const script = terminalLauncherScript(input.appBundle);
@@ -180,19 +218,25 @@ export async function ensureTerminalCommand(input: {
     if (!(await lstatOrUndefined(client))?.isFile()) return "no-terminal-client";
 
     const targetStat = await lstatOrUndefined(target);
-    let outcome: "created" | "updated";
+    let outcome: "created" | "updated" | "replaced-older-terminal";
     if (targetStat === undefined) {
       if ((await lstatOrUndefined(input.markerFile)) !== undefined) return "removed-by-user";
       outcome = "created";
     } else {
       if (!targetStat.isFile()) return "foreign";
       const existing = await NodeFSP.readFile(target, "utf8");
-      if (!isOurLauncher(existing)) return "foreign";
+      if (!isOurLauncher(existing)) {
+        const root = terminalShellRoot(existing);
+        if (root === undefined) return "foreign";
+        if (!(await olderTerminalInstall(root, input.appVersion))) return "terminal-install";
+        outcome = "replaced-older-terminal";
+      } else {
+        outcome = "updated";
+      }
       if (existing === script) {
         await rememberLauncher(input.markerFile);
         return "current";
       }
-      outcome = "updated";
     }
     await NodeFSP.mkdir(input.binDirectory, { recursive: true });
     const temporary = NodePath.join(input.binDirectory, `.oop.${NodeCrypto.randomUUID()}`);
@@ -205,6 +249,57 @@ export async function ensureTerminalCommand(input: {
     }
     await rememberLauncher(input.markerFile);
     return outcome;
+  } catch {
+    return "failed";
+  }
+}
+
+/** Only migrates an older terminal-only command; missing and desktop commands are left alone. */
+export async function ensureWindowsTerminalCommand(input: {
+  readonly executable: string;
+  readonly resourcesPath: string;
+  readonly appVersion: string;
+  readonly localAppData: string | undefined;
+  readonly programFiles: string | undefined;
+}): Promise<TerminalCommandOutcome> {
+  if (!input.localAppData) return "foreign";
+  const directory = NodePath.join(input.localAppData, "oop-terminal");
+  const target = NodePath.join(directory, "oop.cmd");
+  try {
+    if (!(await lstatOrUndefined(target))?.isFile()) return "foreign";
+    const text = await NodeFSP.readFile(target, "utf8");
+    const lines = text.split(/\r?\n/);
+    if (lines[1] !== "rem oop-terminal-launcher (written by install-terminal.ps1; safe to delete)")
+      return "foreign";
+    const encoded = lines
+      .map((line) => /^"(.+)\\oop-rs\.exe" %\*$/.exec(line)?.[1])
+      .find((root) => root !== undefined);
+    if (!encoded) return "terminal-install";
+    const root = encoded.replace(/%%|%LOCALAPPDATA%|%ProgramFiles%/gi, (token) =>
+      token === "%%"
+        ? "%"
+        : token.toLowerCase() === "%localappdata%"
+          ? input.localAppData!
+          : (input.programFiles ?? token),
+    );
+    if (!(await olderTerminalInstall(root, input.appVersion))) return "terminal-install";
+    const client = NodePath.join(input.resourcesPath, "oop", "oop-rs.exe");
+    if (!(await lstatOrUndefined(client))?.isFile()) return "no-terminal-client";
+    const script = windowsTerminalLauncherScript(
+      input.executable,
+      client,
+      input.localAppData,
+      input.programFiles,
+    );
+    if (script === undefined) return "terminal-install";
+    const temporary = NodePath.join(directory, `.oop.${NodeCrypto.randomUUID()}.tmp`);
+    try {
+      await NodeFSP.writeFile(temporary, script, { flag: "wx" });
+      await NodeFSP.rename(temporary, target);
+    } finally {
+      await NodeFSP.rm(temporary, { force: true });
+    }
+    return "replaced-older-terminal";
   } catch {
     return "failed";
   }
@@ -230,12 +325,28 @@ const appBundleFromPath = (path: string) => {
 };
 
 /**
- * Runs both steps on every start of a packaged macOS app that is installed in a standard place.
+ * Checks macOS integration and migrates older Windows terminal-only commands at packaged startup.
  * Never fails the start: each step reports its outcome and the worst case is a log line.
  */
 export const ensureTerminalIntegration = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  if (environment.platform !== "darwin" || !environment.isPackaged) return;
+  if (!environment.isPackaged) return;
+  if (environment.platform === "win32") {
+    const command = yield* Effect.promise(() =>
+      ensureWindowsTerminalCommand({
+        executable: process.execPath,
+        resourcesPath: environment.resourcesPath,
+        appVersion: environment.appVersion,
+        localAppData: process.env.LOCALAPPDATA,
+        programFiles: process.env.ProgramFiles,
+      }),
+    );
+    yield* (command === "failed" ? logWarning : logInfo)("terminal integration checked", {
+      command,
+    });
+    return;
+  }
+  if (environment.platform !== "darwin") return;
   const bundle = appBundleFromPath(environment.appPath);
   const appBundle =
     bundle === undefined ? undefined : installedAppBundle(bundle, environment.homeDirectory);
@@ -247,6 +358,7 @@ export const ensureTerminalIntegration = Effect.gen(function* () {
   const command = yield* Effect.promise(() =>
     ensureTerminalCommand({
       appBundle,
+      appVersion: environment.appVersion,
       binDirectory: NodePath.join(environment.homeDirectory, ".local", "bin"),
       markerFile: NodePath.join(environment.stateDir, "terminal-command-installed"),
     }),

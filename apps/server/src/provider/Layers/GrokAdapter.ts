@@ -67,6 +67,7 @@ import {
   makeAcpRequestResolvedEvent,
   makeAcpToolCallEvent,
 } from "../acp/AcpCoreRuntimeEvents.ts";
+import { applyAcpReasoningOption } from "../acp/AcpReasoningOption.ts";
 import { parsePermissionRequest } from "../acp/AcpRuntimeModel.ts";
 import { makeAcpNativeLoggerFactory } from "../acp/AcpNativeLogging.ts";
 import {
@@ -1416,6 +1417,14 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
               });
 
+          if (configOptionModel) {
+            yield* applyAcpReasoningOption({
+              runtime: acp,
+              requested: requestedStartReasoningEffort,
+              mapError: (cause) =>
+                mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_config_option", cause),
+            });
+          }
           const now = yield* nowIso;
           const session: ProviderSession = {
             provider: PROVIDER,
@@ -1795,6 +1804,19 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                     mapError: (cause) =>
                       mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
                   });
+              if (ctx.configOptionModel) {
+                yield* applyAcpReasoningOption({
+                  runtime: ctx.acp,
+                  requested: requestedTurnReasoningEffort,
+                  mapError: (cause) =>
+                    mapAcpToAdapterError(
+                      PROVIDER,
+                      input.threadId,
+                      "session/set_config_option",
+                      cause,
+                    ),
+                });
+              }
               ctx.currentModelId = currentModelId;
               if (requestedTurnReasoningEffort !== undefined) {
                 ctx.currentReasoningEffort = normalizeGrokReasoningEffort(

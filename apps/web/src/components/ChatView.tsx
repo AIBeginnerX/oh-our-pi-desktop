@@ -614,6 +614,7 @@ export default function ChatView(props: ChatViewProps) {
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
         activities={threadActivities}
+        backgroundLiveness={routeServerThreadShell?.backgroundLiveness ?? null}
         activeTurnId={latestTurnSettled ? null : (activeLatestTurn?.turnId ?? null)}
         activeTurnStartedAt={
           latestTurnSettled
@@ -630,6 +631,7 @@ export default function ChatView(props: ChatViewProps) {
         lead={agentPanelLead}
         environmentId={activeThreadRef?.environmentId ?? null}
         threadId={activeThreadRef?.threadId ?? null}
+        backgroundLiveness={routeServerThreadShell?.backgroundLiveness ?? null}
         activeTurnId={latestTurnSettled ? null : (activeLatestTurn?.turnId ?? null)}
         activeTurnStartedAt={
           latestTurnSettled

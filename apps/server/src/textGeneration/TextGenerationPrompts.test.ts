@@ -236,8 +236,9 @@ describe("buildWorkLessonsPrompt", () => {
       "- Propose at most 3 lessons. Return an empty list when nothing repeats.",
     );
     expect(result.prompt).toContain(
-      "- A lesson must be supported by at least two different threads; list their labels in threads.",
+      "Every lesson, including a procedure, must be supported by at least two different threads",
     );
+    expect(result.prompt).toContain("passing checks, accepted results, approved audits");
     expect(result.prompt).toContain(
       "write one lesson for that cause and list all of those threads",
     );

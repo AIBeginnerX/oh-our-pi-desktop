@@ -100,4 +100,53 @@ export const CHAT_MESSAGES: MessageCatalog = {
     "zh-CN": "所有值均为 0",
     es: "Todos los valores son 0",
   },
+  "Monitoring in the background": {
+    ko: "백그라운드에서 모니터링 중",
+    ja: "バックグラウンドで監視中",
+    "zh-CN": "正在后台监控",
+    es: "Supervisando en segundo plano",
+  },
+  "Working in the background": {
+    ko: "백그라운드에서 작업 중",
+    ja: "バックグラウンドで作業中",
+    "zh-CN": "正在后台工作",
+    es: "Trabajando en segundo plano",
+  },
+  "1 agent working in the background": {
+    ko: "에이전트 1개가 백그라운드에서 작업 중",
+    ja: "エージェント 1 件がバックグラウンドで作業中",
+    "zh-CN": "1 个智能体正在后台工作",
+    es: "1 agente trabajando en segundo plano",
+  },
+  "{count} agents working in the background": {
+    ko: "에이전트 {count}개가 백그라운드에서 작업 중",
+    ja: "エージェント {count} 件がバックグラウンドで作業中",
+    "zh-CN": "{count} 个智能体正在后台工作",
+    es: "{count} agentes trabajando en segundo plano",
+  },
+  "You can keep chatting or start other work meanwhile.": {
+    ko: "그동안에도 대화하거나 다른 일을 맡길 수 있습니다.",
+    ja: "その間もチャットを続けたり、別の作業を任せたりできます。",
+    "zh-CN": "期间你可以继续对话或安排其他工作。",
+    es: "Puedes seguir conversando o empezar otro trabajo mientras tanto.",
+  },
+  "You can keep chatting meanwhile. Stop ends the background work.": {
+    ko: "그동안에도 대화할 수 있습니다. 중지하면 백그라운드 작업도 끝납니다.",
+    ja: "その間もチャットを続けられます。停止するとバックグラウンド作業も終了します。",
+    "zh-CN": "期间你可以继续对话。停止会结束后台工作。",
+    es: "Puedes seguir conversando mientras tanto. Detener termina el trabajo en segundo plano.",
+  },
+  View: { ko: "보기", ja: "表示", "zh-CN": "查看", es: "Ver" },
+  "View agents": {
+    ko: "에이전트 보기",
+    ja: "エージェントを表示",
+    "zh-CN": "查看智能体",
+    es: "Ver agentes",
+  },
+  "Stopping...": {
+    ko: "중지 중…",
+    ja: "停止中…",
+    "zh-CN": "正在停止…",
+    es: "Deteniendo…",
+  },
 };

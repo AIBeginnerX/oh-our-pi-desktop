@@ -7,6 +7,7 @@ import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -15,11 +16,13 @@ import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
+  PROJECT_MEMORY_ANALYSER_PENDING_MAX,
   type ProjectId,
   type ProjectMemoryAnalyseInput,
   type ProjectMemoryAnalyseResult,
   ProjectMemoryRejectedError,
   ProjectMemoryStoreError,
+  type ServerSettings as ServerSettingsValue,
   type ThreadId,
 } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -27,11 +30,11 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { lookupMemoryEchoThreadState } from "../orchestration/memoryEcho.ts";
 import { ProjectMemoryRepository } from "../persistence/ProjectMemories.ts";
 import { ProjectionProjectRepository } from "../persistence/Services/ProjectionProjects.ts";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { TextGeneration } from "../textGeneration/TextGeneration.ts";
-import { buildDigestPromptInput, isAnalysable, selectLessons } from "./derivedLessons.ts";
+import { buildDigestPromptInput, selectDigestInputs, selectLessons } from "./derivedLessons.ts";
 import { ProjectMemoryService } from "./ProjectMemoryService.ts";
+import { recordMemoryOutcomes } from "./memoryOutcomeStore.ts";
 import { readThreadWorkDigest } from "./workDigestReader.ts";
 import {
   type ThreadWorkDigest,
@@ -84,7 +87,6 @@ const toStoreError = () =>
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
-  const store = yield* OrchestrationEventStore;
   const repository = yield* ProjectMemoryRepository;
   const memories = yield* ProjectMemoryService;
   const projects = yield* ProjectionProjectRepository;
@@ -122,10 +124,12 @@ export const make = Effect.gen(function* () {
       })),
     );
 
-  const digestOf = (threadId: ThreadId) =>
+  const digestOf = (projectId: ProjectId, threadId: ThreadId, leadId: ThreadId | null) =>
     Effect.gen(function* () {
-      const digest = yield* readThreadWorkDigest(sql, store, threadId);
-      if (digest === null) return null;
+      const work = yield* readThreadWorkDigest(sql, threadId, leadId);
+      if (work === null) return null;
+      yield* recordMemoryOutcomes(sql, projectId, work);
+      const { digest } = work;
       // A thread that received memory text may echo it back: keep its provider text out.
       const echo = yield* lookupMemoryEchoThreadState(sql, threadId);
       if (echo !== "clean") return withoutProviderText(digest);
@@ -140,22 +144,19 @@ export const make = Effect.gen(function* () {
       return withoutUnverifiedAuditText(digest, clean);
     });
 
-  const run = (
+  const runProject = (
     projectId: ProjectId,
     dreamed: boolean,
-  ): Effect.Effect<
-    ProjectMemoryAnalyseResult,
-    ProjectMemoryRejectedError | ProjectMemoryStoreError
-  > =>
+    settings: ServerSettingsValue,
+    counts: {
+      threadsRead: number;
+      threadsWithSignals: number;
+      candidatesReturned: number;
+      suggestionsFiled: number;
+      queueFull: boolean;
+    },
+  ) =>
     Effect.gen(function* () {
-      const settings = yield* settingsService.getSettings;
-      if (!settings.projectMemoryAnalyser) {
-        return yield* new ProjectMemoryRejectedError({ reason: "analyser-disabled" });
-      }
-      const project = yield* projects.getById({ projectId });
-      if (Option.isNone(project) || project.value.deletedAt !== null) {
-        return yield* new ProjectMemoryRejectedError({ reason: "project-missing" });
-      }
       const { textGenerationModelSelection: modelSelection } = resolveProjectSettings(
         settings,
         projectId,
@@ -233,6 +234,17 @@ export const make = Effect.gen(function* () {
         skillsSuggested: 0,
         ...(tidiesSuggested > 0 ? { tidiesSuggested } : {}),
       } as const;
+      // A full review queue pauses the work analysis: no model call, and the cursor stays so the
+      // same work is read once review frees a slot. Tidy suggestions have their own queue.
+      const [queue] = yield* sql<{ readonly pending: number }>`
+        SELECT COUNT(*) AS pending
+        FROM project_memory_proposals
+        WHERE project_id = ${projectId} AND source = 'analyser'
+      `;
+      if (queue!.pending >= PROJECT_MEMORY_ANALYSER_PENDING_MAX) {
+        counts.queueFull = true;
+        return none;
+      }
       const cursor = yield* repository.getAnalysisCursor({ projectId });
       const recent = yield* recentThreads(projectId, cursor);
       const advance = repository.advanceAnalysisCursor({
@@ -240,51 +252,165 @@ export const make = Effect.gen(function* () {
         sequence: recent.head,
         now: DateTime.formatIso(yield* DateTime.now),
       });
-      if (!recent.hasNew) return none;
-
       const digests: Array<ThreadWorkDigest> = [];
-      for (const threadId of recent.threads) {
-        const digest = yield* digestOf(threadId);
-        if (digest !== null && isAnalysable(digest)) digests.push(digest);
+      if (recent.hasNew) {
+        for (const threadId of recent.threads) {
+          counts.threadsRead += 1;
+          const digest = yield* digestOf(projectId, threadId, recent.leadOf.get(threadId) ?? null);
+          if (digest !== null) {
+            digests.push(digest);
+            if (digest.signals.length > 0) counts.threadsWithSignals += 1;
+          }
+        }
       }
-      if (digests.length === 0) {
-        yield* advance;
-        return none;
-      }
+      const { promptDigests, ...stages } = selectDigestInputs(digests);
+      let lessonsSupported = 0;
+      return yield* Effect.gen(function* () {
+        if (!recent.hasNew) return none;
+        if (promptDigests.length === 0) {
+          yield* advance;
+          return none;
+        }
 
-      // The model reads only the digest, so it runs in an empty directory rather than
-      // the workspace, where it could pick up the project's files and instructions.
-      const generated = yield* fileSystem
-        .makeTempDirectoryScoped({ prefix: "t3code-analyser-" })
-        .pipe(
-          Effect.flatMap((cwd) =>
-            textGeneration.generateWorkLessons({
-              cwd,
-              digest: buildDigestPromptInput(digests),
-              modelSelection,
-            }),
-          ),
-          Effect.scoped,
-          Effect.mapError(() => new ProjectMemoryRejectedError({ reason: "analyser-failed" })),
-        );
+        // The model reads only the digest, so it runs in an empty directory rather than
+        // the workspace, where it could pick up the project's files and instructions.
+        const generated = yield* fileSystem
+          .makeTempDirectoryScoped({ prefix: "t3code-analyser-" })
+          .pipe(
+            Effect.flatMap((cwd) =>
+              textGeneration.generateWorkLessons({
+                cwd,
+                digest: buildDigestPromptInput(promptDigests),
+                modelSelection,
+              }),
+            ),
+            Effect.scoped,
+            Effect.mapError(() => new ProjectMemoryRejectedError({ reason: "analyser-failed" })),
+          );
 
-      let memoriesProposed = 0;
-      let skillsSuggested = 0;
-      for (const candidate of selectLessons(generated, digests, recent.leadOf)) {
-        const outcome = yield* memories.proposeDerived({
-          projectId,
-          target: candidate.target,
-          text: candidate.text,
-          evidence: candidate.evidence,
-          evidenceNamed: candidate.evidenceNamed,
-          ...(dreamed ? { dreamed: true } : {}),
-        });
-        if (outcome.status !== "proposed") continue;
-        if (candidate.target === "skill") skillsSuggested += 1;
-        else memoriesProposed += 1;
+        let memoriesProposed = 0;
+        let skillsSuggested = 0;
+        counts.candidatesReturned = generated.lessons.length;
+        const candidates = selectLessons(generated, promptDigests);
+        lessonsSupported = candidates.length;
+        for (const candidate of candidates) {
+          const outcome = yield* memories.proposeDerived({
+            projectId,
+            target: candidate.target,
+            text: candidate.text,
+            evidence: candidate.evidence,
+            evidenceNamed: candidate.evidenceNamed,
+            ...(dreamed ? { dreamed: true } : {}),
+          });
+          if (outcome.status === "limit-reached") {
+            counts.queueFull = true;
+            break;
+          }
+          if (outcome.status !== "proposed") continue;
+          counts.suggestionsFiled += 1;
+          if (candidate.target === "skill") skillsSuggested += 1;
+          else memoriesProposed += 1;
+        }
+        if (!counts.queueFull) yield* advance;
+        return {
+          ...none,
+          threadsAnalysed: promptDigests.length,
+          memoriesProposed,
+          skillsSuggested,
+        };
+      }).pipe(
+        Effect.onExit((exit) =>
+          Effect.logInfo("project memory analyser stages", {
+            projectId,
+            dreamed,
+            hasNew: recent.hasNew,
+            threadsInWindow: recent.threads.length,
+            threadsRead: recent.hasNew ? recent.threads.length : 0,
+            digestsBuilt: digests.length,
+            ...stages,
+            promptDigests: promptDigests.length,
+            lessonsGenerated: counts.candidatesReturned,
+            lessonsSupported,
+            memoriesProposed: Exit.isSuccess(exit) ? exit.value.memoriesProposed : null,
+            skillsSuggested: Exit.isSuccess(exit) ? exit.value.skillsSuggested : null,
+            failed: Exit.isFailure(exit),
+          }),
+        ),
+      );
+    });
+
+  const run = (
+    projectId: ProjectId,
+    dreamed: boolean,
+  ): Effect.Effect<
+    ProjectMemoryAnalyseResult,
+    ProjectMemoryRejectedError | ProjectMemoryStoreError
+  > =>
+    Effect.gen(function* () {
+      const settings = yield* settingsService.getSettings;
+      if (!settings.projectMemoryAnalyser) {
+        return yield* new ProjectMemoryRejectedError({ reason: "analyser-disabled" });
       }
-      yield* advance;
-      return { ...none, threadsAnalysed: digests.length, memoriesProposed, skillsSuggested };
+      const project = yield* projects.getById({ projectId });
+      if (Option.isNone(project) || project.value.deletedAt !== null) {
+        return yield* new ProjectMemoryRejectedError({ reason: "project-missing" });
+      }
+      const lastAttemptAt = DateTime.formatIso(yield* DateTime.now);
+      // Filled in as the run goes, so a run that fails part-way still records what it saw. The
+      // record holds counts and an outcome only, never text from the work.
+      const counts = {
+        threadsRead: 0,
+        threadsWithSignals: 0,
+        candidatesReturned: 0,
+        suggestionsFiled: 0,
+        queueFull: false,
+      };
+      return yield* runProject(projectId, dreamed, settings, counts).pipe(
+        Effect.onExit((exit) =>
+          Effect.gen(function* () {
+            const failed = Exit.isFailure(exit);
+            const lastSuccessAt = failed ? null : DateTime.formatIso(yield* DateTime.now);
+            const outcome = failed
+              ? "failed"
+              : counts.queueFull
+                ? "queue-full"
+                : counts.suggestionsFiled > 0
+                  ? "proposed"
+                  : counts.threadsWithSignals === 0
+                    ? "no-signals"
+                    : "no-candidates";
+
+            yield* sql`
+              INSERT INTO project_memory_analysis_health (
+                project_id, last_attempt_at, last_success_at, threads_read,
+                threads_with_signals, candidates_returned, suggestions_filed, outcome
+              )
+              SELECT ${projectId}, ${lastAttemptAt}, ${lastSuccessAt}, ${counts.threadsRead},
+                ${counts.threadsWithSignals}, ${counts.candidatesReturned}, ${counts.suggestionsFiled}, ${outcome}
+              WHERE EXISTS (
+                SELECT 1 FROM projection_projects WHERE project_id = ${projectId} AND deleted_at IS NULL
+              )
+              ON CONFLICT(project_id) DO UPDATE SET
+                last_attempt_at = excluded.last_attempt_at,
+                last_success_at = COALESCE(excluded.last_success_at, last_success_at),
+                threads_read = excluded.threads_read,
+                threads_with_signals = excluded.threads_with_signals,
+                candidates_returned = excluded.candidates_returned,
+                suggestions_filed = excluded.suggestions_filed,
+                outcome = excluded.outcome
+            `.pipe(
+              Effect.catch(() =>
+                Effect.logWarning("project memory analysis health could not be saved", {
+                  projectId,
+                }),
+              ),
+            );
+          }),
+        ),
+        Effect.map((result) =>
+          counts.queueFull ? { ...result, queueFull: true as const } : result,
+        ),
+      );
     }).pipe(
       Effect.mapError((cause) =>
         isRejected(cause) || isStoreError(cause) ? cause : toStoreError(),

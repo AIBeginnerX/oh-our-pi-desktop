@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { WorkflowNode, WorkflowNodeState } from "@t3tools/client-runtime/workflow-graph";
 
-import { countsText, stateText, todoText } from "./workflowText";
+import { countsText, nodeText, stateText, todoText } from "./workflowText";
 
 // The keys plus their filled holes are the observable text: this translate fills them the way
 // the real one does, so the assertions read exactly what a reader gets.
@@ -78,6 +78,25 @@ describe("crew task state text", () => {
     expect(stateText(crewNode("unfinished", "blocked"), t)).toBe("Blocked");
     expect(stateText(crewNode("unfinished"), t)).toBe("Not finished");
     expect(stateText(crewNode("failed", "failed"), t)).toBe("Failed");
+  });
+});
+
+describe("main agent card status", () => {
+  const main = (progress?: string, doing?: "run"): WorkflowNode => ({
+    id: "main:turn-1",
+    label: "Main agent",
+    state: "running",
+    wave: 0,
+    info: {
+      actor: { role: "main", ...(doing === undefined ? {} : { doing }) },
+      ...(progress === undefined ? {} : { progress }),
+    },
+  });
+
+  it("an ended turn kept running by a monitor says so instead of a bare working", () => {
+    expect(nodeText(main("Monitoring"), t).status).toBe("Monitoring");
+    expect(nodeText(main(), t).status).toBe("Working");
+    expect(nodeText(main("Monitoring", "run"), t).status).toBe("Running a command…");
   });
 });
 

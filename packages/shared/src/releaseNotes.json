@@ -1,6 +1,104 @@
 {
   "versions": [
     {
+      "version": "0.0.162",
+      "date": "2026-11-20",
+      "highlights": [
+        {
+          "en": "The project's memory settings now explain why the work analyser made no suggestion, showing when it last ran, how many threads it read and what happened. The same information is available in the terminal's /memory.",
+          "ko": "프로젝트 메모리 설정에서 이제 작업 분석기가 제안하지 않은 이유와 마지막 실행 시각, 읽은 스레드 수, 실행 결과를 확인할 수 있습니다. 터미널의 /memory에서도 같은 정보를 보여 줍니다."
+        },
+        {
+          "en": "The work analyser now also learns from work that only failed, including a check that never passed, an audit still asking for changes and crew work that ended unverified. These outcomes help it find lessons, while suggestions still need supporting evidence from other work.",
+          "ko": "작업 분석기가 이제 한 번도 통과하지 못한 체크, 변경 요청이 해결되지 않은 감사, 검증되지 않은 채 끝난 크루 작업처럼 실패만 남은 작업에서도 배웁니다. 이런 결과도 교훈을 찾는 데 활용하며, 제안에는 여전히 다른 작업의 뒷받침 근거가 필요합니다."
+        },
+        {
+          "en": "When too many memory suggestions are waiting for review, the work analyser now pauses instead of losing new suggestions. Approve or reject a suggestion in the project's memory settings to let it resume reading the same work.",
+          "ko": "검토를 기다리는 메모리 제안이 가득 차면 이제 작업 분석기가 새 제안을 잃지 않도록 일시 중지합니다. 프로젝트 메모리 설정에서 제안을 승인하거나 거부하면 같은 작업을 다시 읽으며 분석을 이어 갑니다."
+        },
+        {
+          "en": "In the app's project memory settings and the terminal's /memory, saved memories now show how the threads they reached turned out, with good, bad and unknown counts, and memories that seem unhelpful are marked \"Worth reviewing\". A bad outcome does not prove the memory caused it; use \"Hold memory\" to stop sending it and \"Resume memory\" to allow it again, with nothing held automatically.",
+          "ko": "앱의 프로젝트 메모리 설정과 터미널의 /memory에서 저장된 메모리가 전달된 스레드의 성공·실패·미확인 수를 확인할 수 있고, 도움이 되지 않는 것으로 보이는 메모리는 \"검토할 만함\"으로 표시합니다. 결과가 나빴더라도 메모리가 원인이었다는 증거는 아니며, 자동으로 보류하지 않고 직접 \"메모리 전송 보류\"로 전송을 멈추거나 \"메모리 전송 재개\"로 다시 허용할 수 있습니다."
+        },
+        {
+          "en": "Settings → General → Crew now has a Crew scorecard showing how each model's crew tasks ended over the last 30 days, including completed, failed and verified tasks and the auditor's change requests. The terminal offers the same view with /crew scorecard; tasks you stopped are left out, and the scorecard does not change model picks.",
+          "ko": "설정 → 일반 → 크루의 크루 성과표에서 최근 30일간 모델별 크루 작업의 완료·실패·검증 결과와 감사의 변경 요청을 확인할 수 있습니다. 터미널에서는 /crew scorecard로 같은 내용을 볼 수 있으며, 직접 중지한 작업은 제외하고 성과표가 모델 선택을 바꾸지는 않습니다."
+        },
+        {
+          "en": "On the Workflows board and in the terminal, a crew task is now labelled \"tested\" only when OOP saw its tests pass. A member's own claim that tests passed shows as \"tests reported\".",
+          "ko": "Workflows 보드와 터미널에서 이제 OOP가 테스트 통과를 확인한 크루 작업만 \"테스트됨\"으로 표시합니다. 멤버가 테스트를 통과했다고 자체 보고한 경우에는 \"테스트 자체 보고\"로 표시합니다."
+        },
+        {
+          "en": "When you stop a crew task that worked in its own worktree, its unfinished edits now stay there instead of being applied to your workspace. The task report tells you where the saved edits are and how to apply them yourself.",
+          "ko": "별도 워크트리에서 작업하던 크루 작업을 중지하면 이제 미완성 변경 사항을 현재 작업 공간에 적용하지 않고 해당 워크트리에 보관합니다. 작업 보고에서 보관 위치와 직접 적용하는 방법을 확인할 수 있습니다."
+        },
+        {
+          "en": "The crew auditor now treats work deliberately left for later, including steps only you can do and crew tasks still running, as deferred. It no longer sends the lead back to fix those items just because they are unfinished.",
+          "ko": "크루 감사가 이제 사용자만 할 수 있는 단계나 아직 실행 중인 크루 작업처럼 의도적으로 나중에 하기로 남겨 둔 일을 보류된 작업으로 구분합니다. 이런 항목이 미완료라는 이유만으로 리드에게 수정을 다시 요청하지 않습니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.161",
+      "date": "2026-11-20",
+      "highlights": [
+        {
+          "en": "When a weekly usage window reaches 99%, OOP warns once per account and window with a toast and a system notification, and the Usage icon in the sidebar turns red until the window resets.",
+          "ko": "주간 사용 한도가 99%에 이르면 계정과 한도마다 한 번씩 토스트와 시스템 알림으로 알려 주고, 한도가 초기화될 때까지 사이드바의 사용량 아이콘이 빨간색으로 바뀝니다."
+        },
+        {
+          "en": "The usage line at the end of a chat now covers the whole request, crew follow-ups included, under \"This request\", and lists each model with its cost, cache rate and context used, in the app and in the terminal.",
+          "ko": "대화 끝의 사용량 줄이 이제 크루 후속 턴까지 포함한 요청 전체를 \"이번 요청\"으로 묶고, 모델마다 비용, 캐시 비율, 사용한 컨텍스트를 보여 줍니다. 앱과 터미널 모두 해당합니다."
+        },
+        {
+          "en": "Procedure suggestions from the work analyser can now be approved. An approved one is saved as a Procedure memory and reaches every provider, not just Claude, in the app and in the terminal's /memory.",
+          "ko": "작업 분석기가 제안한 절차(Procedure)를 이제 승인할 수 있습니다. 승인하면 절차 기억으로 저장되어 Claude뿐 아니라 모든 공급자에게 전달됩니다. 앱과 터미널의 /memory 모두 해당합니다."
+        },
+        {
+          "en": "The work analyser now also learns from work that went well: passing checks, accepted results, approved audits and verified crew tasks. Each crew task counts as its own piece of work, so projects run mostly by the crew get suggestions again. Add a check command under the project's Actions and run Checks to give it evidence.",
+          "ko": "작업 분석기가 이제 잘된 작업(통과한 체크, 수락된 결과, 승인된 감사, 검증된 크루 작업)에서도 배웁니다. 크루 작업을 각각 별도 작업으로 세므로, 크루가 주로 일하는 프로젝트에서도 다시 제안이 나옵니다. 프로젝트의 Actions에 체크 명령을 추가하고 Checks를 실행하면 근거가 쌓입니다."
+        },
+        {
+          "en": "Crew presets now pick the newest signed-in version of a model over an older default, for example GPT-6.2-Sol over GPT-6.1-Sol, and never compare version numbers across different models.",
+          "ko": "크루 프리셋이 이제 오래된 기본값보다 로그인된 같은 모델의 최신 버전을 고릅니다(예: GPT-6.1-Sol 대신 GPT-6.2-Sol). 서로 다른 모델끼리 버전 숫자로 비교하지는 않습니다."
+        },
+        {
+          "en": "Each failed crew attempt now records why it failed, including a server restart. An invalid-credentials error counts as signed out, so the provider sits out until OOP checks its status again instead of being retried as a crash.",
+          "ko": "크루 작업의 실패한 시도마다 실패 이유를 기록하며, 서버 재시작도 포함됩니다. 자격 증명이 잘못됐다는 오류는 로그아웃으로 처리되어, 일시적 오류처럼 다시 시도하지 않고 OOP가 공급자 상태를 다시 확인할 때까지 쉽니다."
+        }
+      ]
+    },
+    {
+      "version": "0.0.160",
+      "date": "2026-11-19",
+      "highlights": [
+        {
+          "en": "When a turn ends but a background command or monitor keeps running, the Workflows and Agents panels now show it as still working, reading \"Monitoring\" or \"Working in the background\", instead of done. The banner above the composer says what is running and that you can keep chatting or start other work meanwhile; Stop ends the background work.",
+          "ko": "턴이 끝난 뒤에도 백그라운드 명령이나 모니터가 계속 돌고 있으면, Workflows와 에이전트 패널이 완료가 아니라 \"지켜보는 중\" 또는 \"백그라운드에서 작업 중\"으로 아직 일하고 있음을 보여 줍니다. 입력창 위 배너는 무엇이 돌고 있는지와 그동안 계속 대화하거나 다른 작업을 시작할 수 있음을 알려 주며, 중지를 누르면 백그라운드 작업이 끝납니다."
+        },
+        {
+          "en": "Models newer than the model list built into OOP, such as GPT-6.2 Sol, GPT-6.2 Astra and the newest Gemini models, now count as current, so the crew model picker offers every model Settings → Providers shows. Only a model with a newer version of the same line is treated as an older model.",
+          "ko": "GPT-6.2 Sol, GPT-6.2 Astra, 최신 Gemini 모델처럼 OOP에 들어 있는 모델 목록보다 새로운 모델이 이제 최신 모델로 분류되어, 크루 모델 선택에서도 설정 → 공급자에 보이는 모델을 모두 고를 수 있습니다. 같은 계열에 더 새 버전이 있는 모델만 이전 모델로 취급됩니다."
+        },
+        {
+          "en": "ZCode chats can pick ZCode's Thought Level (low, high, max), applied when a session starts and whenever a turn changes it. When OOP cannot read ZCode's own key, GLM plan limits in Usage come from OOP_ZAI_API_KEY under the ZCode instance's Variables in Settings → Providers, and a key Z.ai rejects now explains how to add one.",
+          "ko": "ZCode 대화에서 ZCode의 Thought Level(low, high, max)을 고를 수 있고, 세션을 시작할 때와 턴에서 바꿀 때 적용됩니다. OOP가 ZCode 자체 키를 읽지 못하면 사용량의 GLM 플랜 한도를 설정 → 공급자의 ZCode 인스턴스 Variables에 넣은 OOP_ZAI_API_KEY로 읽고, Z.ai가 키를 거부하면 키를 추가하는 방법을 알려 줍니다."
+        },
+        {
+          "en": "The turn usage line lists every crew and auditor model the turn started, marked \"Usage not reported\" for providers such as Cursor that send no numbers, and refreshes when crew tasks finish, in the app and in the terminal.",
+          "ko": "턴 사용량 줄이 그 턴이 시작한 크루·감사 모델을 모두 보여 주고, Cursor처럼 수치를 보내지 않는 공급자는 \"사용량 미보고\"로 표시하며, 크루 작업이 끝날 때도 갱신됩니다. 앱과 터미널이 같습니다."
+        },
+        {
+          "en": "In the terminal app, /memory auto on turns on the safe level, approving work-analyser and Dreaming suggestions as they arrive, while all stays a separate choice. The usage panel at the foot of the left pane now draws thin-line gauges that take the warning colour from 70% and the error colour from 90%.",
+          "ko": "터미널 앱에서 /memory auto on으로 작업 분석기와 드리밍 제안만 도착하는 대로 승인하는 안전한 단계를 켤 수 있고, all은 따로 고르는 선택으로 남습니다. 왼쪽 아래 사용량 패널은 얇은 선 게이지로 바뀌어 70%부터 경고색, 90%부터 오류색으로 표시됩니다."
+        },
+        {
+          "en": "On macOS and Windows, when an older terminal-only install owns the oop command, the desktop app replaces that launcher at start, so oop runs the app's copy and follows its updates. An install of the same or a newer version is left alone.",
+          "ko": "macOS와 Windows에서 더 오래된 터미널 전용 설치가 oop 명령을 차지하고 있으면, 데스크톱 앱이 시작할 때 그 실행기를 바꿔 oop가 앱에 든 버전을 실행하고 앱 업데이트를 따라가게 합니다. 같거나 더 새 버전의 설치는 그대로 둡니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.159",
       "date": "2026-11-17",
       "highlights": [

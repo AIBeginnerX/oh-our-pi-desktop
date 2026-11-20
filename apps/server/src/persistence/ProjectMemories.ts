@@ -69,6 +69,7 @@ export const SearchProjectMemoriesInput = Schema.Struct({
   /** Escaped `%…%` patterns (ESCAPE '!') for positive 1–2 codepoint terms. */
   likePatterns: Schema.Array(Schema.String),
   limit: PositiveInt,
+  excludeHeld: Schema.optionalKey(Schema.Boolean),
 });
 export type SearchProjectMemoriesInput = typeof SearchProjectMemoriesInput.Type;
 
@@ -76,6 +77,8 @@ export const UpdateProjectMemoryInput = Schema.Struct({
   projectId: ProjectId,
   memoryId: ProjectMemoryId,
   expectedVersion: PositiveInt,
+  held: Schema.optionalKey(Schema.Boolean),
+  holdOnly: Schema.optionalKey(Schema.Boolean),
   title: Schema.String,
   body: Schema.String,
   kind: ProjectMemoryKind,
@@ -236,6 +239,7 @@ const ProjectMemoryDbRow = Schema.Struct({
   title: Schema.String,
   body: Schema.String,
   version: PositiveInt,
+  held: Schema.Literals([0, 1]),
   originType: Schema.Literals(["manual", "message"]),
   originThreadId: Schema.NullOr(ThreadId),
   originMessageId: Schema.NullOr(MessageId),
@@ -254,6 +258,7 @@ const ProjectMemoryRawDbRow = Schema.Struct({
   title: Schema.Unknown,
   body: Schema.Unknown,
   version: Schema.Unknown,
+  held: Schema.Unknown,
   originType: Schema.Unknown,
   originThreadId: Schema.Unknown,
   originMessageId: Schema.Unknown,
@@ -306,6 +311,7 @@ const toProjectMemory = (
     title: row.title,
     body: row.body,
     version: row.version,
+    ...(row.held === 1 ? { held: true } : {}),
     origin,
     validUntil: row.validUntil,
     estimatedTokens: row.estimatedTokens,
@@ -347,6 +353,7 @@ export const make = Effect.gen(function* () {
     title AS "title",
     body AS "body",
     version AS "version",
+    held AS "held",
     origin_type AS "originType",
     origin_thread_id AS "originThreadId",
     origin_message_id AS "originMessageId",
@@ -365,6 +372,7 @@ export const make = Effect.gen(function* () {
     m.title AS "title",
     m.body AS "body",
     m.version AS "version",
+    m.held AS "held",
     m.origin_type AS "originType",
     m.origin_thread_id AS "originThreadId",
     m.origin_message_id AS "originMessageId",
@@ -482,6 +490,7 @@ export const make = Effect.gen(function* () {
         WHERE ${sql.and([
           sql`m.project_id = ${input.projectId}`,
           liveProjectClause,
+          ...(input.excludeHeld === true ? [sql`m.held = 0`] : []),
           ...(matches.length === 0 ? [] : [sql.or(matches)]),
         ])}
         ORDER BY ${matches.length === 0 ? sql`` : sql`${score} ASC,`} m.updated_at DESC, m.memory_rowid DESC
@@ -650,13 +659,20 @@ export const make = Effect.gen(function* () {
           // cannot interleave between the check and the mutation.
           const updated = yield* sql<typeof ProjectMemoryRawDbRow.Type>`
             UPDATE project_memories
-            SET title = ${input.title},
-                body = ${input.body},
-                kind = ${input.kind},
-                valid_until = ${input.validUntil},
-                estimated_tokens = ${input.estimatedTokens},
-                version = version + 1,
-                updated_at = ${input.now}
+            SET held = COALESCE(${input.held === undefined ? null : Number(input.held)}, held)
+                ${
+                  input.holdOnly === true
+                    ? sql``
+                    : sql`,
+                  title = ${input.title},
+                  body = ${input.body},
+                  kind = ${input.kind},
+                  valid_until = ${input.validUntil},
+                  estimated_tokens = ${input.estimatedTokens},
+                  version = version + 1,
+                  updated_at = ${input.now}
+                `
+                }
             WHERE memory_rowid = ${row.memoryRowid}
               AND version = ${input.expectedVersion}
               AND ${liveProjectFor(input.projectId)}
@@ -674,15 +690,15 @@ export const make = Effect.gen(function* () {
               ? ({ status: "not-found" } as const)
               : ({ status: "conflict", currentVersion: raced[0].version } as const);
           }
-          // Row and index move together or not at all; contentless_delete
-          // tables only accept ordinary DELETEs.
-          yield* sql`
-            DELETE FROM project_memory_fts WHERE rowid = ${row.memoryRowid}
-          `;
-          yield* sql`
-            INSERT INTO project_memory_fts (rowid, title, body)
-            VALUES (${row.memoryRowid}, ${input.title}, ${input.body})
-          `;
+          if (input.holdOnly !== true) {
+            yield* sql`
+              DELETE FROM project_memory_fts WHERE rowid = ${row.memoryRowid}
+            `;
+            yield* sql`
+              INSERT INTO project_memory_fts (rowid, title, body)
+              VALUES (${row.memoryRowid}, ${input.title}, ${input.body})
+            `;
+          }
           const record = yield* decodeProjectMemoryDbRow(updatedRow).pipe(
             Effect.flatMap(toProjectMemory),
           );

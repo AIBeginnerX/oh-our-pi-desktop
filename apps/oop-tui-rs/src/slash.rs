@@ -182,7 +182,7 @@ pub const COMMANDS: &[Command] = &[
     cmd(
         "memory",
         &[],
-        Some("[saved | analyse | auto off|analyser|all]"),
+        Some("[saved | analyse | auto on|off|all]"),
         "Review memory suggestions, dreaming too",
         "메모리 제안 검토 (드리밍 포함)",
     ),

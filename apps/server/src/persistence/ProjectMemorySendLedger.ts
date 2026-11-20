@@ -556,7 +556,7 @@ export const make = Effect.gen(function* () {
           }>`
             SELECT memory_id AS "memoryId", kind, title, body, version, valid_until AS "validUntil"
             FROM project_memories
-            WHERE project_id = ${input.projectId}
+            WHERE project_id = ${input.projectId} AND held = 0
               AND memory_id IN ${sql.in(items.map((item) => item.memoryId))}
           `;
           const decodedRows = yield* Effect.forEach(rows, (row) =>
@@ -593,11 +593,12 @@ export const make = Effect.gen(function* () {
           const inserted = yield* sql<{ readonly attemptSeq: number }>`
             INSERT INTO project_memory_send_attempts (
               thread_id, message_id, project_id, provider_instance_id,
-              owner_instance_id, state, committed_at, settled_at
+              owner_instance_id, state, committed_at, settled_at, sent_after_event_sequence
             )
             VALUES (
               ${input.threadId}, ${input.messageId}, ${input.projectId}, ${input.providerInstanceId},
-              ${ownerInstanceId}, 'dispatch_committed', ${committedAt}, NULL
+              ${ownerInstanceId}, 'dispatch_committed', ${committedAt}, NULL,
+              (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events)
             )
             RETURNING attempt_seq AS "attemptSeq"
           `;
@@ -669,7 +670,7 @@ export const make = Effect.gen(function* () {
           }>`
             SELECT memory_id AS "memoryId", kind, title, body, version, valid_until AS "validUntil"
             FROM project_memories
-            WHERE project_id = ${input.projectId}
+            WHERE project_id = ${input.projectId} AND held = 0
               AND memory_id IN ${sql.in(memoryIds)}
           `;
           const decodedRows = yield* Effect.forEach(rows, (row) =>
@@ -688,11 +689,12 @@ export const make = Effect.gen(function* () {
           const inserted = yield* sql<{ readonly attemptSeq: number }>`
             INSERT INTO project_memory_send_attempts (
               thread_id, message_id, project_id, provider_instance_id,
-              owner_instance_id, state, committed_at, settled_at
+              owner_instance_id, state, committed_at, settled_at, sent_after_event_sequence
             )
             VALUES (
               ${input.threadId}, ${messageId}, ${input.projectId}, ${input.providerInstanceId},
-              ${ownerInstanceId}, 'external_send_unknown', ${at}, ${at}
+              ${ownerInstanceId}, 'external_send_unknown', ${at}, ${at},
+              (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events)
             )
             RETURNING attempt_seq AS "attemptSeq"
           `;
@@ -799,7 +801,7 @@ export const make = Effect.gen(function* () {
               m.version AS "memoryRowVersion", m.project_id AS "memoryProjectId",
               m.valid_until AS "validUntil"
             FROM project_memory_send_items i
-            LEFT JOIN project_memories m ON m.memory_id = i.memory_id
+            LEFT JOIN project_memories m ON m.memory_id = i.memory_id AND m.held = 0
             WHERE i.attempt_seq = ${input.attemptSeq}
           `;
           const items = yield* Effect.forEach(itemRows, (row) =>

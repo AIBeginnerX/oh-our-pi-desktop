@@ -12,6 +12,12 @@ use ZCode's tools and your ZCode sign-in instead of OpenCode.
 
 ## Models
 
-ZCode offers one model, **GLM (ZCode)**, which is whichever GLM model ZCode itself has selected.
-To use another GLM model, change it in ZCode. ZCode runs its own tools without asking for
-approval, regardless of the OOP permission mode.
+**GLM (ZCode)** is whichever GLM model ZCode itself has selected. The picker also lists the
+models ZCode can route to, and those offer ZCode's **Thought Level** (low, high, max). ZCode runs
+its own tools without asking for approval, regardless of the OOP permission mode.
+
+## Usage limits
+
+GLM plan limits come from a Z.ai API key. If OOP cannot read ZCode's own key, add
+`OOP_ZAI_API_KEY` with your Z.ai API key under the ZCode instance's **Variables** in
+**Settings > Providers** to see limits in **Usage**.

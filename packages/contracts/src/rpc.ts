@@ -364,6 +364,8 @@ import {
   CrewRetryTaskError,
   CrewRetryTaskInput,
   CrewRetryTaskResult,
+  CrewScorecard,
+  CrewScorecardReadError,
   CrewStopTasksError,
   CrewStopTasksInput,
   CrewStopTasksResult,
@@ -512,6 +514,7 @@ export const WS_METHODS = {
 
   // Crew methods
   crewRetryTask: "crew.retryTask",
+  crewScorecard: "crew.scorecard",
   crewStopTasks: "crew.stopTasks",
 
   // Cloud environment methods
@@ -875,11 +878,22 @@ export const ThreadUsageSummaryInput = Schema.Struct({
 });
 export type ThreadUsageSummaryInput = typeof ThreadUsageSummaryInput.Type;
 
+/** A thread's latest context window: tokens in use and, when known, the window size. */
+const ThreadUsageContext = Schema.Struct({
+  usedTokens: Schema.Number,
+  maxTokens: Schema.NullOr(Schema.Number),
+});
+
 /**
- * How far the summary reached. `turn` means the numbers describe the
- * requested turn only; `thread` means the whole thread family. Optional so a
- * client facing a server from before turn scoping can tell the two apart and
- * never label a whole-chat total as one turn's usage.
+ * How far the summary reached. `turn` means the numbers describe the request
+ * the named turn belongs to: the turn started by the user's message plus the
+ * crew follow-up and wake turns after it, with the crew threads they started.
+ * `thread` means the whole thread family. Optional so a client facing a
+ * server from before turn scoping can tell the two apart and never label a
+ * whole-chat total as one request's usage.
+ *
+ * A model row's `context` is the fullest latest context window among the
+ * counted threads that ran on that model; absent when none reported one.
  */
 export const ThreadUsageSummary = Schema.Struct({
   threadId: ThreadId,
@@ -887,7 +901,12 @@ export const ThreadUsageSummary = Schema.Struct({
   scope: Schema.optional(Schema.Literals(["turn", "thread"])),
   totals: ThreadUsageTotals,
   models: Schema.Array(
-    Schema.Struct({ ...ThreadUsageTotals.fields, model: Schema.String, driver: Schema.String }),
+    Schema.Struct({
+      ...ThreadUsageTotals.fields,
+      model: Schema.String,
+      driver: Schema.String,
+      context: Schema.optional(ThreadUsageContext),
+    }),
   ),
 });
 export type ThreadUsageSummary = typeof ThreadUsageSummary.Type;
@@ -913,6 +932,12 @@ const WsCrewStopTasksRpc = Rpc.make(WS_METHODS.crewStopTasks, {
   payload: CrewStopTasksInput,
   success: CrewStopTasksResult,
   error: Schema.Union([CrewStopTasksError, EnvironmentAuthorizationError]),
+});
+
+const WsCrewScorecardRpc = Rpc.make(WS_METHODS.crewScorecard, {
+  payload: Schema.Struct({}),
+  success: CrewScorecard,
+  error: Schema.Union([CrewScorecardReadError, EnvironmentAuthorizationError]),
 });
 
 /**
@@ -2045,6 +2070,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsUsageGetThreadResultsRpc,
   WsThreadUsageSummaryRpc,
   WsCrewRetryTaskRpc,
+  WsCrewScorecardRpc,
   WsCrewStopTasksRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,

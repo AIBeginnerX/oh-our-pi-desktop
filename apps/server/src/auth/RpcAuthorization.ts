@@ -70,6 +70,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.usageGetThreadResults]: AuthOrchestrationReadScope,
   [WS_METHODS.threadUsageSummary]: AuthOrchestrationReadScope,
   [WS_METHODS.crewRetryTask]: AuthOrchestrationOperateScope,
+  [WS_METHODS.crewScorecard]: AuthOrchestrationReadScope,
   [WS_METHODS.crewStopTasks]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRefreshUsageRates]: AuthOrchestrationReadScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,

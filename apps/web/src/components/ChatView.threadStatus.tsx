@@ -34,6 +34,7 @@ import {
   resolveSendEnvMode,
 } from "./ChatView.logic";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useT } from "../i18n";
 import { Button } from "./ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useProjectMemoryRecovery } from "./chat/ProjectMemoryRecovery";
@@ -146,6 +147,7 @@ export function useChatViewThreadStatus({
     activeThreadWorktreePath,
     focusComposer,
   } = terminalsAndScripts;
+  const t = useT();
 
   const closeExpandedImage = useCallback(() => {
     setExpandedImage(null);
@@ -641,14 +643,24 @@ export function useChatViewThreadStatus({
       ),
       title: working
         ? liveCount > 0
-          ? `${liveCount} ${liveCount === 1 ? "agent" : "agents"} working`
-          : "Background work"
-        : "Monitoring",
+          ? liveCount === 1
+            ? t("1 agent working in the background")
+            : t("{count} agents working in the background", { count: liveCount })
+          : t("Working in the background")
+        : t("Monitoring in the background"),
+      description: working
+        ? t("You can keep chatting meanwhile. Stop ends the background work.")
+        : t("You can keep chatting or start other work meanwhile."),
       actions: (
         <>
           {showViewAgents ? (
-            <Button size="xs" variant="ghost" aria-label="View agents" onClick={addAgentsSurface}>
-              View
+            <Button
+              size="xs"
+              variant="ghost"
+              aria-label={t("View agents")}
+              onClick={addAgentsSurface}
+            >
+              {t("View")}
             </Button>
           ) : null}
           <Button
@@ -657,7 +669,7 @@ export function useChatViewThreadStatus({
             disabled={isStoppingBackgroundWork}
             onClick={() => void handleStopBackgroundWork()}
           >
-            {isStoppingBackgroundWork ? "Stopping..." : "Stop"}
+            {isStoppingBackgroundWork ? t("Stopping...") : t("Stop")}
           </Button>
         </>
       ),
@@ -671,6 +683,7 @@ export function useChatViewThreadStatus({
     handleStopBackgroundWork,
     isStoppingBackgroundWork,
     rightPanelOpen,
+    t,
   ]);
   // A woken thread announces itself in the open view, not just the sidebar
   // pill. Dismissing marks the wake as seen (same acknowledgment as the

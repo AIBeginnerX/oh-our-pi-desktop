@@ -527,7 +527,7 @@ describe("Crew service restart delivery", () => {
   );
 
   it.effect(
-    "queues an audit fix only for a proven P1, not for a lead the auditor only pointed at",
+    "queues an audit fix only for a proven P1, not for an unproven lead or deferred work",
     () =>
       Effect.gen(function* () {
         const harness = yield* makeHarness;
@@ -538,7 +538,7 @@ describe("Crew service restart delivery", () => {
           title: "Breaks login",
           ...extra,
         });
-        const audit = (taskId: string, extra: object): typeof CrewTaskRecoveryState.Type => ({
+        const audit = (taskId: string, review: object): typeof CrewTaskRecoveryState.Type => ({
           ...finishedTask,
           taskId,
           role: "auditor",
@@ -551,23 +551,32 @@ describe("Crew service restart delivery", () => {
             result: `Verdict: needs changes\n\`\`\`json\n${JSON.stringify({
               verdict: "needs changes",
               summary: "x",
-              findings: [finding(extra)],
+              ...review,
             })}\n\`\`\``,
           },
         });
-        yield* harness.seedTask(audit("audit-unproven", { proven: false, level: "line" }));
         yield* harness.seedTask(
-          audit("audit-proven", { proven: true, level: "ran", evidence: "login.test.ts fails" }),
+          audit("audit-unproven", { findings: [finding({ proven: false, level: "line" })] }),
+        );
+        yield* harness.seedTask(
+          audit("audit-proven", {
+            findings: [finding({ proven: true, level: "ran", evidence: "login.test.ts fails" })],
+          }),
+        );
+        yield* harness.seedTask(
+          audit("audit-deferred", { findings: [], deferred: ["User publishes the release"] }),
         );
         const service = yield* harness.start;
-        yield* service.crew.wait({ threadId: LEAD, taskIds: ["audit-unproven", "audit-proven"] });
+        yield* service.crew.wait({
+          threadId: LEAD,
+          taskIds: ["audit-unproven", "audit-proven", "audit-deferred"],
+        });
         const states = yield* Effect.forEach(yield* harness.store.readTasks, (row) =>
           Schema.decodeEffect(CrewTaskRecoveryJson)(row.record_json),
         );
-        assert.equal(
-          states.find((state) => state.taskId === "audit-unproven")?.auditState,
-          "skipped",
-        );
+        for (const taskId of ["audit-unproven", "audit-deferred"]) {
+          assert.equal(states.find((state) => state.taskId === taskId)?.auditState, "skipped");
+        }
         assert.notEqual(
           states.find((state) => state.taskId === "audit-proven")?.auditState,
           "skipped",
@@ -859,6 +868,12 @@ describe("Crew service restart delivery", () => {
       const service = yield* harness.start;
       const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
       assert.equal(result[0]!.status, "failed");
+      const [row] = yield* harness.store.readTasks;
+      const stored = yield* decodeTaskRecovery(row!.record_json);
+      assert.include(stored.attempts.at(-1), {
+        error: "The server restarted while the attempt was running.",
+        kind: "restart",
+      });
       // Recovery is forked and `done` resolves before the board row, so poll on the clock.
       let completed;
       // completionEvidence waits on a 1-second stream timeout the recovery needs clock for.
@@ -1106,75 +1121,127 @@ describe("Crew service restart delivery", () => {
     }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );
 
-  it.effect("judges a recovered task's proof from the tests its thread ran", () =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness;
-      const workerId = ThreadId.make("worker-proof");
-      const turnId = TurnId.make("worker-proof-turn");
-      yield* harness.seedTask({
-        ...finishedTask,
-        report: null,
-        ended: false,
-        attempts: [
-          { model: "worker-model", threadId: workerId, messageId: MessageId.make("proof-request") },
-        ],
-      });
-      yield* Ref.set(harness.workerTurns, [
-        {
-          threadId: workerId,
-          turnId,
-          pendingMessageId: MessageId.make("proof-request"),
-          sourceProposedPlanThreadId: null,
-          sourceProposedPlanId: null,
-          assistantMessageId: MessageId.make("proof-reply"),
-          state: "completed",
-          requestedAt: NOW,
-          startedAt: NOW,
-          completedAt: NOW,
-          checkpointTurnCount: null,
-          checkpointRef: null,
-          checkpointStatus: null,
-          checkpointFiles: [],
-        },
-      ]);
-      harness.workerDetails.set(workerId, {
-        ...detail,
-        id: workerId,
-        latestTurn: { ...lead.latestTurn!, turnId },
-        messages: [
-          ...detail.messages,
-          {
-            id: MessageId.make("proof-reply"),
-            role: "assistant",
-            text: "Fixed it.\nStatus: done",
-            turnId,
-            streaming: false,
-            createdAt: NOW,
-            updatedAt: NOW,
-          },
-        ],
-        activities: [
-          {
-            id: EventId.make("proof-activity"),
-            tone: "tool",
-            kind: "tool.completed",
-            summary: "ran tests",
-            turnId,
-            createdAt: NOW,
-            payload: {
-              itemType: "command_execution",
-              status: "completed",
-              data: { command: "vp test run src/a.test.ts" },
+  for (const observed of [true, false]) {
+    it.effect(
+      `publishes ${observed ? "observed tests" : "a test claim"} for a recovered task`,
+      () =>
+        Effect.gen(function* () {
+          const harness = yield* makeHarness;
+          const workerId = ThreadId.make("worker-proof");
+          const turnId = TurnId.make("worker-proof-turn");
+          yield* harness.seedTask({
+            ...finishedTask,
+            report: null,
+            ended: false,
+            attempts: [
+              {
+                model: "worker-model",
+                threadId: workerId,
+                messageId: MessageId.make("proof-request"),
+              },
+            ],
+          });
+          yield* Ref.set(harness.workerTurns, [
+            {
+              threadId: workerId,
+              turnId,
+              pendingMessageId: MessageId.make("proof-request"),
+              sourceProposedPlanThreadId: null,
+              sourceProposedPlanId: null,
+              assistantMessageId: MessageId.make("proof-reply"),
+              state: "completed",
+              requestedAt: NOW,
+              startedAt: NOW,
+              completedAt: NOW,
+              checkpointTurnCount: null,
+              checkpointRef: null,
+              checkpointStatus: null,
+              checkpointFiles: [],
             },
-          },
-        ],
-      } as OrchestrationThread);
-      const service = yield* harness.start;
-      const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
-      assert.equal(result[0]!.proof?.verdict, "verified");
-      yield* service.close;
-    }).pipe(Effect.scoped, Effect.provide(testLayers)),
-  );
+          ]);
+          harness.workerDetails.set(workerId, {
+            ...detail,
+            id: workerId,
+            latestTurn: { ...lead.latestTurn!, turnId },
+            messages: [
+              ...detail.messages,
+              {
+                id: MessageId.make("proof-reply"),
+                role: "assistant",
+                text: observed
+                  ? "Fixed it.\nStatus: done"
+                  : 'Fixed it.\nStatus: done\n```json\n{"status":"done","summary":"Fixed it.","verification":{"command":"vp test","passed":true}}\n```',
+                turnId,
+                streaming: false,
+                createdAt: NOW,
+                updatedAt: NOW,
+              },
+            ],
+            activities: [
+              ...(observed
+                ? [
+                    {
+                      id: EventId.make("proof-activity"),
+                      tone: "tool",
+                      kind: "tool.completed",
+                      summary: "ran tests",
+                      turnId,
+                      createdAt: NOW,
+                      payload: {
+                        itemType: "command_execution",
+                        status: "completed",
+                        data: { command: "vp test run src/a.test.ts" },
+                      },
+                    },
+                  ]
+                : []),
+              {
+                id: EventId.make("proof-usage"),
+                tone: "info",
+                kind: "owned-usage",
+                summary: "usage",
+                turnId,
+                createdAt: NOW,
+                payload: {
+                  v: 1,
+                  scope: "main-turn",
+                  source: {
+                    driver: "claudeAgent",
+                    instanceId: "claudeAgent",
+                    turnId,
+                    runtimeEventId: "usage-event",
+                    nativeConversationId: null,
+                  },
+                  terminal: "completed",
+                  usage: {
+                    usageScope: "main_agent",
+                    hasSubagents: false,
+                    usageStatus: "complete",
+                    inputTokens: 1,
+                    outputTokens: 1,
+                  },
+                },
+              },
+            ],
+          } as OrchestrationThread);
+          const service = yield* harness.start;
+          const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
+          assert.equal(result[0]!.proof?.verdict, observed ? "verified" : "inconclusive");
+          const activity = yield* Stream.fromQueue(harness.dispatched).pipe(
+            Stream.filter((command) => command.type === "thread.activity.append"),
+            Stream.filter((command) => command.activity.kind === "task.completed"),
+            Stream.runHead,
+          );
+          const payload = Option.getOrThrow(activity).activity.payload as {
+            tested?: boolean;
+            testsReported?: boolean;
+          };
+          assert.equal(payload.tested, observed);
+          assert.equal(payload.testsReported, observed ? undefined : true);
+          yield* service.close;
+        }).pipe(Effect.scoped, Effect.provide(testLayers)),
+    );
+  }
 
   it.effect("retains failed delivery and reuses its identities after service recreation", () =>
     Effect.gen(function* () {
@@ -1875,6 +1942,9 @@ describe("Crew fallback switch", () => {
           assert.notInclude(note, "decodeJsonError");
         }
         assert.exists(completed, "the task ended");
+        const [row] = yield* harness.store.readTasks;
+        const stored = yield* decodeTaskRecovery(row!.record_json);
+        assert.include(stored.attempts[0], { error: LIMIT_ERROR, kind: "limit" });
         if (completed !== undefined) {
           // Every model failed: this one really failed, and says so with the errors.
           assert.include(completed.summary, "failed on every crew model");

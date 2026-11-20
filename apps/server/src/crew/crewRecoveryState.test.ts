@@ -95,8 +95,9 @@ describe("Crew recovery checkpoint codec", () => {
       assert.deepEqual(yield* decodeTask(encoded), checkpoint);
 
       const older = yield* decodeTask(
-        '{"version":1,"taskId":"task-1","leadThreadId":"lead-1","leadTurnId":null,"role":"worker","subject":"worker task","attempts":[],"report":{"taskId":"task-1","role":"worker","status":"completed","result":"done"},"collected":false,"ended":true,"auditState":"none"}',
+        '{"version":1,"taskId":"task-1","leadThreadId":"lead-1","leadTurnId":null,"role":"worker","subject":"worker task","attempts":[{"model":"worker-model","error":"could not start"}],"report":{"taskId":"task-1","role":"worker","status":"completed","result":"done"},"collected":false,"ended":true,"auditState":"none"}',
       );
+      assert.deepEqual(older.attempts, [{ model: "worker-model", error: "could not start" }]);
       assert.isUndefined(older.writeScope);
       assert.isUndefined(older.report?.report);
       assert.isUndefined(older.worktree);

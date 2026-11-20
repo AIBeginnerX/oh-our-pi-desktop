@@ -102,6 +102,7 @@ import {
   candidateNote,
   makeCrewWorktrees,
   mergeConflictNote,
+  stoppedNote,
   type CrewWorktree,
 } from "./crewWorktree.ts";
 import { crewThreadUsage } from "./crewUsage.ts";
@@ -908,11 +909,14 @@ export const make = Effect.gen(function* () {
   const settled = (threadId: ThreadId, messageId: MessageId) =>
     settleOrHold(threadId, messageId, statusOf(threadId));
 
-  const lastAssistantText = (threadId: ThreadId) =>
+  const lastAssistantText = (threadId: ThreadId, turnId?: TurnId) =>
     snapshots.getThreadDetailById(threadId).pipe(
       Effect.map((thread) => {
         if (Option.isNone(thread)) return null;
-        const reply = thread.value.messages.findLast((message) => message.role === "assistant");
+        const reply = thread.value.messages.findLast(
+          (message) =>
+            message.role === "assistant" && (turnId === undefined || message.turnId === turnId),
+        );
         return reply === undefined ? null : reply.text;
       }),
       Effect.orElseSucceed(() => null),
@@ -1079,23 +1083,30 @@ export const make = Effect.gen(function* () {
     ).pipe(Effect.catchCause(() => Effect.succeed({ usage: null, testsPassed: false })));
 
   /**
-   * What a finished task's thread shows: the `tested` and `usage` fields of its board activity,
-   * and `testsPassed`, the passing test run OOP itself observed (not the member's say-so), which
-   * its proof is judged on.
+   * What a finished task's thread shows: the `tested`, `testsReported` and `usage` fields of its
+   * board activity, and `testsPassed`, the passing test run OOP itself observed (not the member's
+   * say-so), which its proof is judged on. `tested` also counts a command check OOP ran and
+   * verified; the member's own claim only sets `testsReported`.
    */
   const completionEvidence = (
     threadId: ThreadId,
-    role: CrewRole,
+    record: CrewTaskRecord,
     report: CrewMemberReport | undefined,
   ) =>
     crewThreadFacts(threadId).pipe(
       Effect.map(({ usage, testsPassed }) => ({
         testsPassed,
         evidence: {
-          // Observed (a passing test run in the thread) or self-reported by the member's JSON report.
-          ...(role === "auditor"
+          ...(record.role === "auditor"
             ? {}
-            : { tested: testsPassed || report?.verification?.passed === true }),
+            : {
+                tested:
+                  testsPassed ||
+                  record.todos?.some(
+                    (todo) => todo.status === "verified" && todo.check?.command !== undefined,
+                  ) === true,
+                ...(report?.verification?.passed === true ? { testsReported: true } : {}),
+              }),
           ...(usage === null ? {} : { usage }),
         },
       })),
@@ -2113,10 +2124,10 @@ export const make = Effect.gen(function* () {
     );
 
   /**
-   * Applies an isolated member's changes to the lead's workspace once its turn ended. A note for
-   * the report comes back when they could not be applied and the worktree was kept.
+   * Applies an isolated member's finished changes to the lead's workspace. A stopped member's and
+   * a candidate's are kept in the worktree instead, and the note for the report says where.
    */
-  const mergeIsolated = (record: CrewTaskRecord) =>
+  const mergeIsolated = (record: CrewTaskRecord, interrupted = false) =>
     Effect.gen(function* () {
       if (record.worktree === undefined) return null;
       // A deleted lead has no workspace to take the changes.
@@ -2124,10 +2135,12 @@ export const make = Effect.gen(function* () {
         yield* worktrees.discard(record.worktree);
         return null;
       }
-      // A candidate is never applied: the lead picks from the kept patches.
-      if (record.candidate === true) {
+      if (interrupted || record.candidate === true) {
         const kept = yield* worktrees.keep(record.worktree);
-        return kept.kept ? candidateNote(record.worktree, kept) : null;
+        if (!kept.kept) return null;
+        return interrupted
+          ? stoppedNote(record.worktree, kept)
+          : candidateNote(record.worktree, kept);
       }
       const result = yield* worktrees.mergeBack(record.worktree);
       return result.merged ? null : mergeConflictNote(record.worktree, result);
@@ -2332,6 +2345,7 @@ export const make = Effect.gen(function* () {
         );
         if (Exit.isFailure(launched)) {
           attempt.error = "could not start";
+          attempt.kind = crewFailureKind(attempt.error);
           yield* persistTask(record);
           yield* markFailed(option.selection, attempt.error);
           continue;
@@ -2408,19 +2422,20 @@ export const make = Effect.gen(function* () {
           // The checks run in the task's workspace, which merging an isolated one removes.
           if (status === "completed") yield* sweepTodos(record);
           const stoppedNow = record.stopped !== undefined && status === "interrupted";
+          const isolatedInterrupted = record.worktree !== undefined && status === "interrupted";
           const { status: memberStatus, report } = crewMemberOutcome(
             record.role,
             status,
             reply,
             record.todos === undefined ? undefined : todoCounts(record.todos),
           );
-          const kept = yield* mergeIsolated(record);
+          const kept = yield* mergeIsolated(record, status === "interrupted");
           // Changes that did not reach the workspace leave the task unfinished.
           const outcome: CrewTaskOutcome =
             leftOut(record, kept) && memberStatus === "completed" ? "partial" : memberStatus;
           const { evidence, testsPassed } = yield* completionEvidence(
             threadId,
-            record.role,
+            record,
             report ?? undefined,
           );
           const proof = proofOf(record, outcome, testsPassed, report ?? undefined);
@@ -2429,7 +2444,7 @@ export const make = Effect.gen(function* () {
             result: withNote(
               withNote(
                 withNote(
-                  stoppedNow
+                  stoppedNow || isolatedInterrupted
                     ? (record.stopped ?? null)
                     : reply === null
                       ? null
@@ -2454,12 +2469,13 @@ export const make = Effect.gen(function* () {
               ...base,
               threadId,
               ...evidence,
+              ...(isolatedInterrupted && record.role !== "auditor" ? { tested: false } : {}),
               model: option.label,
               status: outcome === "interrupted" ? "stopped" : outcome,
               ...(proof === null ? {} : { proof: proof.verdict }),
               ...todoPayload(record),
-              ...(stoppedNow
-                ? { summary: record.stopped }
+              ...(stoppedNow || isolatedInterrupted
+                ? { summary: record.stopped ?? "Task was stopped." }
                 : reply === null
                   ? {}
                   : { summary: reportExcerpt(reply) }),
@@ -2481,6 +2497,7 @@ export const make = Effect.gen(function* () {
           return;
         }
         attempt.error = (yield* lastErrorOf(threadId)) ?? "the turn failed";
+        attempt.kind = crewFailureKind(attempt.error);
         yield* persistTask(record);
         yield* markFailed(option.selection, attempt.error);
         yield* settleThread(threadId);
@@ -2488,13 +2505,16 @@ export const make = Effect.gen(function* () {
 
       if (record.stopped !== undefined) {
         // Stopped between models: nothing is running, so the stop is the whole ending.
-        yield* dropIsolated(record);
+        const kept = yield* mergeIsolated(record, true);
         const stoppedProof = proofOf(record, "interrupted", false, undefined);
         yield* finish({
           status: "interrupted",
           result: withNote(
-            withNote(record.stopped, todoNoteOf(record)),
-            proofLine(stoppedProof, "interrupted"),
+            withNote(
+              withNote(record.stopped, todoNoteOf(record)),
+              proofLine(stoppedProof, "interrupted"),
+            ),
+            kept,
           ),
           ...(stoppedProof === null ? {} : { proof: stoppedProof }),
         });
@@ -3234,6 +3254,19 @@ export const make = Effect.gen(function* () {
     }
     const subject = `Review of ${lead.value.title}`;
     yield* Effect.gen(function* () {
+      // Work the lead is still waiting on is not a defect of this turn, so the auditor is told of it.
+      const runningTasks: Array<string> = [];
+      for (const record of tasks.values()) {
+        if (
+          record.leadThreadId === payload.threadId &&
+          record.role !== "auditor" &&
+          record.stopped === undefined &&
+          !record.ended &&
+          (yield* stillRunning(record))
+        ) {
+          runningTasks.push(record.subject);
+        }
+      }
       yield* startTask({
         lead: lead.value,
         role: "auditor",
@@ -3244,6 +3277,8 @@ export const make = Effect.gen(function* () {
           leadTitle: lead.value.title,
           files: payload.files.map((file) => file.path),
           request: yield* latestRequestText(payload.threadId),
+          leadReply: yield* lastAssistantText(payload.threadId, payload.turnId),
+          runningTasks,
           diff: yield* threadDiffForAudit(payload),
           turnRefs:
             payload.checkpointTurnCount > 0
@@ -3280,7 +3315,14 @@ export const make = Effect.gen(function* () {
   const readRecoveredOutcome = (record: CrewTaskRecord) =>
     Effect.gen(function* () {
       const attempt = record.attempts.at(-1);
+      const recordRestart = () => {
+        if (attempt !== undefined && attempt.error === undefined && record.stopped === undefined) {
+          attempt.error = "The server restarted while the attempt was running.";
+          attempt.kind = "restart";
+        }
+      };
       if (attempt?.threadId === undefined || attempt.messageId === undefined) {
+        recordRestart();
         return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
           status: "interrupted",
           result: "The server stopped before the worker start was recorded.",
@@ -3291,6 +3333,7 @@ export const make = Effect.gen(function* () {
         (candidate) => candidate.pendingMessageId === attempt.messageId,
       );
       if (turn === undefined) {
+        recordRestart();
         return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
           status: "interrupted",
           result: "The original worker turn is no longer available.",
@@ -3305,21 +3348,25 @@ export const make = Effect.gen(function* () {
             (message) => message.id === turn.assistantMessageId && message.turnId === turn.turnId,
           )?.text ?? null)
         : null;
+      const orphaned =
+        turn.state !== "completed" &&
+        record.stopped === undefined &&
+        (yield* lastErrorOf(attempt.threadId)) === ORPHANED_PROVIDER_SESSION_ERROR;
+      if (orphaned) recordRestart();
+      // An orphaned session follows the same recovery path as a failed turn.
       const status =
         turn.state === "completed"
           ? "completed"
-          : turn.state === "error"
+          : turn.state === "error" || orphaned
             ? "failed"
-            : record.stopped === undefined &&
-                (yield* lastErrorOf(attempt.threadId)) === ORPHANED_PROVIDER_SESSION_ERROR
-              ? // The restart orphaned the member's session: not a user stop, so its
-                // half-done worktree is treated like the pre-restart error case.
-                "failed"
-              : "interrupted";
+            : "interrupted";
       const { status: outcome, report } = crewMemberOutcome(record.role, status, reply);
       return Option.some<Pick<CrewTaskReport, "status" | "result" | "report">>({
         status: outcome,
-        result: reply === null ? null : clipCrewReport(reply, RESULT_TEXT_LIMIT),
+        result:
+          reply === null || (record.worktree !== undefined && status === "interrupted")
+            ? null
+            : clipCrewReport(reply, RESULT_TEXT_LIMIT),
         ...(report === null ? {} : { report }),
       });
     });
@@ -3355,7 +3402,7 @@ export const make = Effect.gen(function* () {
             record.stopped !== undefined && observedOutcome.status !== "completed"
               ? { status: "interrupted" as const, result: record.stopped }
               : observedOutcome;
-          // An isolated member that got as far as a result is merged back; a failed one is dropped.
+          // An isolated member's finished work is merged back; a failed attempt is dropped.
           if (outcome.status === "failed") yield* dropIsolated(record);
           // A member that finished its turn (whatever status it reported) gets its checks re-run.
           if (
@@ -3369,7 +3416,10 @@ export const make = Effect.gen(function* () {
             outcome.status,
             record.todos === undefined ? undefined : todoCounts(record.todos),
           );
-          const kept = outcome.status === "failed" ? null : yield* mergeIsolated(record);
+          const kept =
+            outcome.status === "failed"
+              ? null
+              : yield* mergeIsolated(record, outcome.status === "interrupted");
           const recoveredStatus =
             leftOut(record, kept) && finished === "completed" ? "partial" : finished;
           // The thread's test runs were not watched across the restart, but its snapshot still
@@ -3413,7 +3463,7 @@ export const make = Effect.gen(function* () {
           const evidence =
             threadId === undefined || report.status === "failed"
               ? {}
-              : (yield* completionEvidence(threadId, record.role, report.report)).evidence;
+              : (yield* completionEvidence(threadId, record, report.report)).evidence;
           yield* appendActivity({
             threadId: record.leadThreadId,
             kind: "task.completed",
@@ -3426,6 +3476,11 @@ export const make = Effect.gen(function* () {
               crewRole: record.role,
               ...(threadId === undefined ? {} : { threadId }),
               ...evidence,
+              ...(record.worktree !== undefined &&
+              report.status === "interrupted" &&
+              record.role !== "auditor"
+                ? { tested: false }
+                : {}),
               status: report.status === "interrupted" ? "stopped" : report.status,
               ...(report.proof === undefined ? {} : { proof: report.proof.verdict }),
               ...todoPayload(record),

@@ -5,6 +5,7 @@ import {
   buildDigestPromptInput,
   lessonSimilarity,
   normalizeLessonText,
+  selectDigestInputs,
   selectLessons,
 } from "./derivedLessons.ts";
 import type { ThreadWorkDigest } from "./workDigest.ts";
@@ -48,6 +49,22 @@ describe("buildDigestPromptInput", () => {
   });
 });
 
+describe("selectDigestInputs", () => {
+  it("keeps large numeric usage counters and still filters secret-looking text", () => {
+    const busy = digest("busy", {
+      usage: { turns: 200, inputTokens: 123456789, outputTokens: 12345, costUsd: 10 },
+    });
+    const independent = digest("independent");
+    const sensitive = digest("sensitive", {
+      changedFiles: ["sk-abcdefghijklmnopqrstuvwxyz0123456789"],
+    });
+    const result = selectDigestInputs([busy, independent, sensitive]);
+    expect(result.digestsWithSignals).toBe(3);
+    expect(result.sensitiveFiltered).toBe(1);
+    expect(result.promptDigests).toEqual([busy, independent]);
+  });
+});
+
 describe("selectLessons", () => {
   const digests = [digest("t1"), digest("t2"), digest("t3")];
   const lesson = (text: string, threads: string[], category: "fact" | "procedure" = "fact") => ({
@@ -86,19 +103,52 @@ describe("selectLessons", () => {
     expect(candidate?.evidenceNamed).toBe(true);
   });
 
-  it("counts a lead thread and its crew helpers as one piece of work", () => {
-    const lessons = { lessons: [lesson("Run lint", ["T1", "T2"])] };
-    const pair = [digest("lead"), digest("helper")];
-    const leadOf = new Map([["helper" as ThreadId, "lead" as ThreadId]]);
-    expect(selectLessons(lessons, pair, leadOf)).toEqual([]);
-    expect(selectLessons(lessons, pair)).toHaveLength(1);
-    expect(selectLessons(lessons, [digest("lead"), digest("other")], leadOf)).toHaveLength(1);
-  });
-
   it("drops a lesson that fewer than two distinct threads support", () => {
     expect(
       selectLessons({ lessons: [lesson("a", ["T1"]), lesson("b", ["T2", "T2"])] }, digests),
     ).toEqual([]);
+  });
+
+  it("shows repeated failures to the model without letting them meet the evidence minimum", () => {
+    const failed = (id: string) =>
+      digest(id, {
+        checks: [{ name: "test", passed: 0, failed: 1, lastStatus: "failed" }],
+        signals: [{ kind: "check-failed", eventSeq: 3, subject: "test" }],
+      });
+    const failures = [failed("t1"), failed("t2")];
+    const output = { lessons: [lesson("Run test before merging", ["T1", "T2", "T3"])] };
+    expect(selectDigestInputs(failures).promptDigests).toEqual(failures);
+    expect(selectLessons(output, failures)).toEqual([]);
+    expect(selectLessons(output, [...failures, digest("t3")])).toEqual([]);
+
+    const [candidate] = selectLessons(output, [failed("t1"), digest("t2"), digest("t3")]);
+    expect(candidate?.evidence).toEqual([
+      { threadId: "t2", eventSeq: 7 },
+      { threadId: "t3", eventSeq: 7 },
+      { threadId: "t1", eventSeq: 3 },
+    ]);
+    expect(candidate?.evidenceNamed).toBe(true);
+  });
+
+  it("keeps a thread as support when the check the lesson names only failed there", () => {
+    const accepted = (id: string) =>
+      digest(id, {
+        signals: [
+          { kind: "check-failed", eventSeq: 3, subject: "lint" },
+          { kind: "result-accepted", eventSeq: 7 },
+        ],
+      });
+    const [candidate] = selectLessons({ lessons: [lesson("Run lint first", ["T1", "T2"])] }, [
+      accepted("t1"),
+      accepted("t2"),
+    ]);
+    expect(candidate?.evidence).toEqual([
+      { threadId: "t1", eventSeq: 7 },
+      { threadId: "t1", eventSeq: 3 },
+      { threadId: "t2", eventSeq: 7 },
+      { threadId: "t2", eventSeq: 3 },
+    ]);
+    expect(candidate?.evidenceNamed).toBe(false);
   });
 
   it("drops secrets and caps one run at three lessons", () => {
@@ -122,10 +172,15 @@ describe("selectLessons", () => {
       {
         target: "skill",
         text: "Do X then Y",
-        evidence: [{ threadId: "src", eventSeq: 7 }],
+        evidence: [
+          { threadId: "src", eventSeq: 7 },
+          { threadId: "t1", eventSeq: 7 },
+        ],
         evidenceNamed: false,
       },
     ]);
-    expect(selectLessons({ lessons: [lesson("Do X", ["T1"], "procedure")] }, digests)).toEqual([]);
+    expect(selectLessons({ lessons: [lesson("Do X", ["T1"], "procedure")] }, [accepted])).toEqual(
+      [],
+    );
   });
 });

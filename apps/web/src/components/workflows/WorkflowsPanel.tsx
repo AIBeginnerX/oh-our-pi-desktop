@@ -59,6 +59,8 @@ function members(flow: WorkflowGraph): WorkflowNode[] {
 export function WorkflowsPanel(props: {
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
   readonly agents: AgentPanelModel;
+  /** The thread's background work after its turn settled; keeps a watched step running. */
+  readonly backgroundLiveness?: "working" | "monitoring" | null;
   /** The running turn, or null when the thread is idle; finished turns never look busy. */
   readonly activeTurnId: string | null;
   /** When the running turn started, so a turn that has called no tool yet still shows. */
@@ -76,11 +78,19 @@ export function WorkflowsPanel(props: {
       actorFlows({
         activities: props.activities,
         agents: props.agents,
+        backgroundLiveness: props.backgroundLiveness ?? null,
         activeTurnId: props.activeTurnId,
         activeTurnStartedAt: props.activeTurnStartedAt ?? null,
         leadModel,
       }),
-    [props.activities, props.agents, props.activeTurnId, props.activeTurnStartedAt, leadModel],
+    [
+      props.activities,
+      props.agents,
+      props.backgroundLiveness,
+      props.activeTurnId,
+      props.activeTurnStartedAt,
+      leadModel,
+    ],
   );
   // No pick means follow the newest running flow; picking the one being followed changes nothing.
   const [chosenId, setChosenId] = useState<string | null>(null);
@@ -443,7 +453,9 @@ function NodeDetails({ node, t }: { node: WorkflowNode; t: Translate }) {
         value={
           node.state === "running" && actor?.doing !== undefined
             ? doingText(actor.doing, t)
-            : info.progress
+            : info.progress === undefined
+              ? undefined
+              : t(info.progress)
         }
       />
       <Field label={t("Error")} value={info.error} />

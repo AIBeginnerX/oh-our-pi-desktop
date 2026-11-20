@@ -128,8 +128,27 @@ export const ProjectMemory = Schema.Struct({
   updatedAt: IsoDateTime,
   /** Present only on a memory the user approved from a work-analyser suggestion. */
   derivedFrom: Schema.optionalKey(ProjectMemoryDerivedFrom),
+  /** The user paused this memory: it is not sent or recalled until they resume it. */
+  held: Schema.optionalKey(Schema.Boolean),
 });
 export type ProjectMemory = typeof ProjectMemory.Type;
+
+/**
+ * How the threads that received a memory's current version turned out, from the work signals
+ * after the send. `unknown` threads had no signal either way, or were not analysed yet.
+ */
+export const ProjectMemoryOutcomeCounts = Schema.Struct({
+  sent: NonNegativeInt,
+  good: NonNegativeInt,
+  bad: NonNegativeInt,
+  unknown: NonNegativeInt,
+});
+export type ProjectMemoryOutcomeCounts = typeof ProjectMemoryOutcomeCounts.Type;
+
+/** Enough bad threads, and more of them than good ones, to ask the user to look at the memory. */
+export function isProjectMemoryWorthReviewing(outcomes: ProjectMemoryOutcomeCounts | undefined) {
+  return outcomes !== undefined && outcomes.bad >= 3 && outcomes.bad > outcomes.good;
+}
 
 /** List/search rows omit `body` unless a list asks for it with `includeBody`;
     `projectMemory.get` loads it for editing. */
@@ -145,7 +164,9 @@ export const ProjectMemorySummary = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   body: Schema.optionalKey(ProjectMemoryBody),
+  outcomes: Schema.optionalKey(ProjectMemoryOutcomeCounts),
   derivedFrom: Schema.optionalKey(ProjectMemoryDerivedFrom),
+  held: Schema.optionalKey(Schema.Boolean),
 });
 export type ProjectMemorySummary = typeof ProjectMemorySummary.Type;
 
@@ -212,6 +233,7 @@ export const ProjectMemoryUpdateInput = Schema.Struct({
   projectId: ProjectId,
   memoryId: ProjectMemoryId,
   expectedVersion: PositiveInt,
+  held: Schema.optionalKey(Schema.Boolean),
   title: Schema.optional(ProjectMemoryTitle),
   body: Schema.optional(ProjectMemoryBody),
   kind: Schema.optional(ProjectMemoryKind),
@@ -233,12 +255,11 @@ export const ProjectMemoryWriteResult = Schema.Struct({
 export type ProjectMemoryWriteResult = typeof ProjectMemoryWriteResult.Type;
 
 /**
- * What the work analyser adds to a proposal. `target: "skill"` marks a
- * procedure: approving it is done in the thread's existing skill-draft flow,
- * so the server has nothing to save. `related` holds existing memories that
- * look close to the text, shown beside it so the user decides; nothing merges
- * automatically. An approved suggestion becomes a memory that expires
- * `PROJECT_MEMORY_DERIVED_VALID_DAYS` after approval.
+ * What the work analyser adds to a proposal. Approval saves a `procedure`
+ * memory for `target: "skill"` and a `fact` for `target: "memory"`, with
+ * evidence and a validity period of `PROJECT_MEMORY_DERIVED_VALID_DAYS`.
+ * The source thread also offers a skill draft for procedure suggestions.
+ * `related` holds similar existing memories for the user to review.
  */
 export const ProjectMemoryProposalAnalysis = Schema.Struct({
   target: Schema.Literals(["memory", "skill"]),
@@ -278,8 +299,20 @@ export type ProjectMemoryProposal = typeof ProjectMemoryProposal.Type;
 export const ProjectMemoryProposalListInput = Schema.Struct({ projectId: ProjectId });
 export type ProjectMemoryProposalListInput = typeof ProjectMemoryProposalListInput.Type;
 
+export const ProjectMemoryAnalysisHealth = Schema.Struct({
+  lastAttemptAt: IsoDateTime,
+  lastSuccessAt: Schema.NullOr(IsoDateTime),
+  threadsRead: NonNegativeInt,
+  threadsWithSignals: NonNegativeInt,
+  candidatesReturned: NonNegativeInt,
+  suggestionsFiled: NonNegativeInt,
+  outcome: Schema.Literals(["proposed", "no-signals", "no-candidates", "queue-full", "failed"]),
+});
+export type ProjectMemoryAnalysisHealth = typeof ProjectMemoryAnalysisHealth.Type;
+
 export const ProjectMemoryProposalListResult = Schema.Struct({
   items: Schema.Array(ProjectMemoryProposal),
+  analysisHealth: Schema.optionalKey(ProjectMemoryAnalysisHealth),
 });
 export type ProjectMemoryProposalListResult = typeof ProjectMemoryProposalListResult.Type;
 
@@ -351,6 +384,8 @@ export const ProjectMemoryAnalyseResult = Schema.Struct({
   skillsSuggested: NonNegativeInt,
   /** Tidy suggestions added by this run; absent on older servers. */
   tidiesSuggested: Schema.optionalKey(NonNegativeInt),
+  /** Present when the review queue was full: the run stopped and continues after a review. */
+  queueFull: Schema.optionalKey(Schema.Literal(true)),
 });
 export type ProjectMemoryAnalyseResult = typeof ProjectMemoryAnalyseResult.Type;
 
@@ -445,6 +480,7 @@ export const ProjectMemoryRejectedReason = Schema.Literals([
   "proposal-limit",
   "analyser-disabled",
   "analyser-failed",
+  // Older servers can still return this reason for procedure suggestions.
   "proposal-not-memory",
   "tidy-stale",
 ]);

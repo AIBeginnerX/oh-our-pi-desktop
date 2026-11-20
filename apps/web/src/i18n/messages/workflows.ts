@@ -163,6 +163,12 @@ export const WORKFLOWS_MESSAGES: MessageCatalog = {
     es: "El turno terminó antes de que este paso informara su finalización",
   },
   reported: { ko: "보고됨", ja: "報告済み", "zh-CN": "已报告", es: "informado" },
+  "tests reported": {
+    ko: "테스트 자체 보고",
+    ja: "テストの自己申告",
+    "zh-CN": "自行报告测试",
+    es: "pruebas declaradas",
+  },
   tested: { ko: "테스트됨", ja: "テスト済み", "zh-CN": "已测试", es: "probado" },
   audited: { ko: "감사됨", ja: "監査済み", "zh-CN": "已审核", es: "auditado" },
 
@@ -455,5 +461,11 @@ export const WORKFLOWS_MESSAGES: MessageCatalog = {
     ja: "ターンを完了しました",
     "zh-CN": "本轮已完成",
     es: "Terminó el turno",
+  },
+  "Running in the background": {
+    ko: "백그라운드에서 실행 중",
+    ja: "バックグラウンドで実行中",
+    "zh-CN": "正在后台运行",
+    es: "Ejecutando en segundo plano",
   },
 };

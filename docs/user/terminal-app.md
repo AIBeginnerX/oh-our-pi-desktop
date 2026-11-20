@@ -144,12 +144,12 @@ ones from Dreaming. Pick one to review it and approve, apply or dismiss it.
 `/memory analyse` runs the work analyser now. The app mentions waiting suggestions once
 when you open a project. Turn on Dreaming and tidy-up in the desktop app's Settings.
 
-Use `/memory auto analyser` (or `oop config set memoryAutoApprove analyser`) to
-approve work-analyser and Dreaming memory suggestions automatically when you run
-`/memory` or open a project. `all` also approves suggestions agents make while they
-work, which can repeat text from files they read, so use it only for projects you
-trust. Skill ideas and tidy-ups always wait for you. Auto-approved titles appear
-in a note. `off`, the default, turns automatic approval off.
+Use `/memory auto on` (or `oop config set memoryAutoApprove on`) to approve
+work-analyser and Dreaming memory suggestions automatically when you run `/memory` or
+open a project. `all` also approves suggestions agents make while they work, which can
+repeat text from files they read, so use it only for projects you trust. Skill ideas and
+tidy-ups always wait for you. Auto-approved titles appear in a note. `off`, the default,
+turns automatic approval off.
 
 `/memory saved` lists the project's saved memories. Pick one for **Edit** or
 **Delete**; **Delete** asks you to confirm. **Edit** opens the memory in the message

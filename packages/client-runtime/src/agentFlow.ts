@@ -121,6 +121,7 @@ function newestTurn(flows: ReadonlyArray<WorkflowGraph>): WorkflowGraph | undefi
 export function agentFlow(input: {
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
   readonly agents: AgentPanelModel;
+  readonly backgroundLiveness?: "working" | "monitoring" | null;
   readonly activeTurnId: string | null;
   readonly activeTurnStartedAt: string | null;
   readonly lead: { readonly model: string | null; readonly instanceId: string | null };
@@ -128,6 +129,7 @@ export function agentFlow(input: {
   const flows = threadFlows({
     activities: input.activities,
     agents: input.agents,
+    backgroundLiveness: input.backgroundLiveness ?? null,
     activeTurnId: input.activeTurnId,
     activeTurnStartedAt: input.activeTurnStartedAt,
   });
@@ -137,16 +139,24 @@ export function agentFlow(input: {
   const crew = crewTasks(input.activities);
 
   const leadState: AgentFlowState = lead === null ? "done" : lead.state;
-  const leadSummary =
-    lead === null
+  const background =
+    turn?.turnId !== input.activeTurnId &&
+    turn?.nodes.some((node) => node.state === "running" && node.info.background);
+  const leadSummary = background
+    ? input.backgroundLiveness === "monitoring"
+      ? "Monitoring"
+      : "Working in the background"
+    : lead === null
       ? "Ready for the next request"
       : lead.state === "thinking"
         ? `Working out the next step · ${lead.steps} steps so far`
         : lead.state === "working"
           ? `Working · step ${lead.steps}`
           : `Finished the turn · ${lead.steps} step${lead.steps === 1 ? "" : "s"}`;
-  const leadDoing: WorkflowDoing | undefined =
-    lead?.state === "working"
+  // Background work has no current step; the summary says what is going on instead.
+  const leadDoing: WorkflowDoing | undefined = background
+    ? undefined
+    : lead?.state === "working"
       ? (lead.current?.category ?? "waiting")
       : lead?.state === "thinking"
         ? "thinking"

@@ -177,6 +177,31 @@ describe("report note", () => {
   it("is absent without a list", () => {
     expect(todoReportNote([], undefined)).toBeNull();
   });
+
+  it("names why each claimed item has no proof", () => {
+    const [claim, unavailable, timeout] = assignTodos([
+      "Manual review",
+      { text: "Run unit tests", check: { command: "vp test" } },
+      { text: "Run integration tests", check: { command: "vp test integration" } },
+    ]);
+    const note = todoReportNote(
+      [
+        { ...claim!, status: "claimed", note: "Reviewed it." },
+        { ...unavailable!, status: "claimed", detail: "The command could not run: no shell." },
+        {
+          ...timeout!,
+          status: "claimed",
+          detail: "The command check timed out after 120 seconds.",
+        },
+      ],
+      undefined,
+    );
+    expect(note).toContain(
+      "- t1 (claimed): Manual review - No server check was configured. Reviewed it.",
+    );
+    expect(note).toContain("- t2 (claimed): Run unit tests - The command could not run: no shell.");
+    expect(note).toContain("- t3 (claimed): Run integration tests - The command check timed out");
+  });
 });
 
 describe("files checks and write scope", () => {

@@ -30,6 +30,7 @@ import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepA
 import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
 import { DesktopUpdateNotifier } from "../components/DesktopUpdateNotifier";
+import { WeeklyUsageNotificationCoordinator } from "../components/usage/WeeklyUsageNotificationCoordinator";
 import { SetupNotificationCoordinator } from "../components/SetupNotificationCoordinator";
 import { QueuedMessageSender } from "../components/QueuedMessageSender";
 import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
@@ -238,6 +239,7 @@ function RootRouteView() {
           <SnapShotCoordinator />
           <ThreadNotificationCoordinator />
           <DesktopUpdateNotifier />
+          <WeeklyUsageNotificationCoordinator />
           <QueuedMessageSender />
           <ConfirmDialogHost />
           <CustomSnoozeDialogHost />

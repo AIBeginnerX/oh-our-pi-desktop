@@ -535,6 +535,7 @@ describe("crew failure handling", () => {
       "auth",
     );
     expect(crewFailureKind("Request failed with status 401")).toBe("auth");
+    expect(crewFailureKind('{"code":"SERVICE_AUTHENTICATION_INVALID"}')).toBe("auth");
     expect(crewFailureKind("the turn failed")).toBe("other");
     expect(crewFailureKind(undefined)).toBe("other");
   });
@@ -678,6 +679,31 @@ describe("auditPrompt", () => {
     expect(prompt).toContain("Hardening beyond the request");
     expect(prompt).toContain("`Verdict: needs changes` only when a blocking problem remains");
   });
+
+  it.each([auditPrompt, lightAuditPrompt])(
+    "shows the clipped reply and running tasks",
+    (promptFor) => {
+      const base = { leadTitle: "Release", files: ["a.ts"], request: null };
+      const leadReply = `Publish with your credentials. ${"x".repeat(2000)}`;
+      const prompt = promptFor({
+        ...base,
+        leadReply,
+        runningTasks: ["Check release notes"],
+      });
+      expect(prompt).toContain(`The lead replied:\n${leadReply.slice(0, 1997)}...\n`);
+      expect(prompt).toContain("Crew tasks still running:\n- Check release notes\n");
+      expect(prompt).toContain(
+        "because only the user can do them, and work listed as still running, in deferred",
+      );
+      expect(prompt).toContain("do not call for changes because of them");
+      expect(prompt).toContain(
+        "the lead could have done itself and deferred, or claimed was done without support in the diff",
+      );
+      expect(prompt).toContain('"deferred":string[]');
+      expect(promptFor(base)).not.toContain("The lead replied:");
+      expect(promptFor(base)).not.toContain("Crew tasks still running:");
+    },
+  );
 
   it("asks for standards and spec as two separate axes", () => {
     const prompt = auditPrompt({ leadTitle: "T", files: ["a.ts"], request: null });
@@ -1166,7 +1192,7 @@ describe("structured reports", () => {
   it("reads the auditor's verdict from its json review when the Verdict line is missing", () => {
     const review = (verdict: string) => `Looks right.\n${json({ verdict, summary: "ok" })}`;
     expect(auditVerdict(review("approve"))).toBe("approve");
-    expect(auditVerdict(review("needs changes"))).toBe("needs-changes");
+    expect(auditVerdict(review("needs changes"))).toBe("approve");
     // The json wins over a contradicting text line.
     expect(
       auditVerdict(`Verdict: needs changes\n${json({ verdict: "approve", summary: "ok" })}`),
@@ -1180,7 +1206,17 @@ describe("structured reports", () => {
       summary: "ok",
       findings: [],
       preExistingFailures: [],
+      deferred: [],
     });
+    expect(
+      parseAuditReport(
+        json({
+          verdict: "approve",
+          summary: "Waiting for release approval",
+          deferred: ["User approves release", "Check release notes"],
+        }),
+      )?.deferred,
+    ).toEqual(["User approves release", "Check release notes"]);
   });
 
   it("approves a review that asks for changes only because of failures that predate the turn", () => {
@@ -1200,7 +1236,7 @@ describe("structured reports", () => {
     expect(auditVerdict(review([provenBlocking], ["tsc: 12 errors in src/old.ts"]))).toBe(
       "needs-changes",
     );
-    expect(auditVerdict(review([], []))).toBe("needs-changes");
+    expect(auditVerdict(review([], []))).toBe("approve");
   });
 });
 
@@ -1229,6 +1265,14 @@ describe("proven audit findings", () => {
     expect(auditVerdict(review([proven({ severity: "P0" })]))).toBe("needs-changes");
   });
 
+  it("checks proof even when the blocking finding falls outside the display limit", () => {
+    const unprovenHigh = Array.from({ length: CREW_REPORT_MAX_FINDINGS }, () => ({
+      ...unproven,
+      severity: "P0",
+    }));
+    expect(auditVerdict(review([...unprovenHigh, proven()]))).toBe("needs-changes");
+  });
+
   it("treats proven true with level said or line, or without evidence, as unproven", () => {
     expect(auditVerdict(review([proven({ level: "said" })]))).toBe("approve");
     expect(auditVerdict(review([proven({ level: "line" })]))).toBe("approve");
@@ -1243,8 +1287,8 @@ describe("proven audit findings", () => {
     expect(auditVerdict(review([proven({ severity: "P2" })]))).toBe("approve");
   });
 
-  it("still blocks a needs-changes review that lists no findings", () => {
-    expect(auditVerdict(review([]))).toBe("needs-changes");
+  it("approves a needs-changes review that lists no findings", () => {
+    expect(auditVerdict(review([]))).toBe("approve");
   });
 
   it("keeps the Verdict line path and the pre-existing exception as before", () => {

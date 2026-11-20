@@ -30,7 +30,7 @@ fn expected(key: &str) -> String {
         "symbols" => "auto | unicode | ascii".into(),
         "statusLine" => "auto | full | compact | minimal".into(),
         "language" => "en | ko".into(),
-        "memoryAutoApprove" => "off | analyser | all".into(),
+        "memoryAutoApprove" => "on | off | analyser | all".into(),
         _ => "true | false".into(),
     }
 }
@@ -76,9 +76,16 @@ fn validate(key: &str, raw: &str) -> Option<Value> {
             _ => None,
         };
     }
+    // `on` is the easy word for the safe level, which is stored as `analyser`.
+    if key == "memoryAutoApprove" {
+        return match raw {
+            "on" | "analyser" => Some(json!("analyser")),
+            "off" | "all" => Some(json!(raw)),
+            _ => None,
+        };
+    }
     let accepted = match key {
         "theme" => theme::is_safe_name(raw),
-        "memoryAutoApprove" => matches!(raw, "off" | "analyser" | "all"),
         "symbols" => matches!(raw, "auto" | "unicode" | "ascii"),
         "statusLine" => matches!(raw, "auto" | "full" | "compact" | "minimal"),
         _ => matches!(raw, "en" | "ko"),
@@ -244,10 +251,27 @@ mod tests {
         );
         let bad = run_in(&home, set("memoryAutoApprove", "yes"), &[]);
         assert_eq!(bad.code, 2);
-        assert!(bad.err[0].contains("off | analyser | all"));
+        assert!(bad.err[0].contains("on | off | analyser | all"));
         assert_eq!(
             run_in(&home, ConfigAction::Get("memoryAutoApprove".into()), &[]).out,
             ["all"]
+        );
+        // `on` is the easy word for the safe level, and `analyser` is still accepted.
+        assert_eq!(
+            run_in(&home, set("memoryAutoApprove", "on"), &[]).out,
+            ["memoryAutoApprove = analyser"]
+        );
+        assert_eq!(
+            run_in(&home, ConfigAction::Get("memoryAutoApprove".into()), &[]).out,
+            ["analyser"]
+        );
+        let saved: Value =
+            serde_json::from_str(&std::fs::read_to_string(home.join("settings.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved["memoryAutoApprove"], "analyser");
+        assert_eq!(
+            run_in(&home, set("memoryAutoApprove", "analyser"), &[]).out,
+            ["memoryAutoApprove = analyser"]
         );
         let _ = std::fs::remove_dir_all(home);
     }

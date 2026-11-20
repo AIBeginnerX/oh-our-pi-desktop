@@ -111,6 +111,16 @@ interface Want {
   readonly avoid?: ReadonlyArray<ModelSelection | null>;
 }
 
+/** Compare up to three numeric components, skipping date suffixes on versioned slugs. */
+function modelVersion(slug: string): number | undefined {
+  const match = /([0-9]+)(?:[.-]([0-9]{1,3})(?![0-9]))?(?:[.-]([0-9]{1,3})(?![0-9]))?/.exec(slug);
+  if (match?.[1] === undefined || match[1].length > 3) return undefined;
+  return Number(match[1]) * 1_000_000 + Number(match[2] ?? 0) * 1_000 + Number(match[3] ?? 0);
+}
+
+/** The model's name with its version numbers masked: versions only compete within one line. */
+const modelLine = (slug: string) => slug.toLowerCase().replace(/[0-9]+(?:[.-][0-9]+)*/g, "#");
+
 function pick(options: ReadonlyArray<CrewModelOption>, want: Want): CrewModelOption | null {
   const providerOf = (selection: ModelSelection | null | undefined) =>
     selection == null
@@ -124,11 +134,35 @@ function pick(options: ReadonlyArray<CrewModelOption>, want: Want): CrewModelOpt
       (tierRank === -1 ? 100 : tierRank * 10) +
       (otherDriver !== undefined && option.driver === otherDriver ? 8 : 0) +
       (sameDriver !== undefined && option.driver !== sameDriver ? 2 : 0) +
-      ((want.avoid ?? []).some((avoided) => sameModel(avoided, option.selection)) ? 6 : 0) +
-      (option.isDefault ? 0 : 1)
+      ((want.avoid ?? []).some((avoided) => sameModel(avoided, option.selection)) ? 6 : 0)
     );
   };
-  return [...options].sort((a, b) => score(a) - score(b))[0] ?? null;
+  const ranked = [...options].sort(
+    (a, b) => score(a) - score(b) || Number(b.isDefault) - Number(a.isDefault),
+  );
+  const first = ranked[0];
+  if (first === undefined) return null;
+  if (modelVersion(first.selection.model) === undefined) return first;
+
+  // Resolve the family and line first so the version tiebreak cannot reorder unrelated models.
+  const family = modelFamily(first.selection.model, first.driver);
+  const line = modelLine(first.selection.model);
+  const bestScore = score(first);
+  return (
+    ranked
+      .filter(
+        (option) =>
+          score(option) === bestScore &&
+          option.tier === first.tier &&
+          modelFamily(option.selection.model, option.driver) === family &&
+          modelLine(option.selection.model) === line,
+      )
+      .flatMap((option) => {
+        const version = modelVersion(option.selection.model);
+        return version === undefined ? [] : [{ option, version }];
+      })
+      .sort((a, b) => b.version - a.version)[0]?.option ?? first
+  );
 }
 
 /** What a preset puts in each role, given the brain the thread already runs. */

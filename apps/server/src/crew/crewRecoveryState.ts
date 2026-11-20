@@ -88,6 +88,9 @@ export const CrewTaskRecoveryState = Schema.Struct({
       threadId: Schema.optional(ThreadId),
       messageId: Schema.optional(MessageId),
       error: Schema.optional(Schema.String),
+      kind: Schema.optional(
+        Schema.Literals(["billing", "auth", "limit", "model", "other", "restart"]),
+      ),
     }),
   ),
   /** Why the task was stopped while it ran; a restart finishes the stop instead of resuming it. */

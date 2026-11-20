@@ -1,16 +1,7 @@
-//! The thread usage footer: one dim line under the conversation saying what the latest turn used,
-//! the same line the web chat shows (`formatThreadUsageFooter` in
-//! apps/web/src/components/chat/threadUsageText.ts). The cache rate and the per-model costs come
-//! from the server's `thread.usageSummary`, asked for the thread's latest turn; the context part
-//! comes from the thread's own latest `context-window.updated` activity, so it needs no request.
-//!
-//! The summary is asked for when a thread opens and again when a turn settles, never while a turn
-//! runs (the numbers would be half a turn old). A server from before the method answers with a
-//! failure; the line is then simply left out, with nothing said about it. An answer that names no
-//! scope is a whole-thread total from a server older than turn scoping: the line then shows it
-//! without the "this turn" label rather than passing a chat total off as one turn's usage.
-//!
-//! `footer` and `context` are pure; the rest fetches, holds the answer and draws it.
+//! One dim line covering the request and each model's cost, cache and context.
+//! Server model usage takes precedence over the thread context fallback, which never stands in
+//! for a request: the thread's latest context may predate it.
+//! Older scope-less summaries remain unlabelled; fetching and drawing stay outside pure formatting.
 
 use crate::app::{Active, App, Msg};
 use crate::i18n::{Lang, lang, tr_in_lang};
@@ -38,7 +29,12 @@ pub enum Cost {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Model {
     pub model: String,
+    /// The turns this model was measured over. `Some(0)` is a crew model the server lists without
+    /// any usage behind it, and `None` a row from a server that does not say: both read as reported.
+    pub turns: Option<u64>,
     pub cost: Cost,
+    pub cache_rate: Option<f64>,
+    pub context: Option<(f64, Option<f64>)>,
 }
 
 /// The part of `thread.usageSummary` the line reads.
@@ -46,11 +42,9 @@ pub struct Model {
 pub struct Summary {
     /// `ok`, or `too-large` when the thread is bigger than the server will total up.
     pub status: String,
-    /// `Some("turn")` when the numbers describe the asked-for turn. `None` is
-    /// what an older server answers with, for the whole thread.
+    /// `Some("turn")` when the numbers describe the request the asked-for turn belongs to. `None`
+    /// is what an older server answers with, for the whole thread.
     pub scope: Option<String>,
-    /// The share of input tokens that came from the cache, 0..1; `None` when nothing reported it.
-    pub cache_rate: Option<f64>,
     pub models: Vec<Model>,
 }
 
@@ -68,19 +62,56 @@ pub fn parse(value: &Value) -> Option<Summary> {
     Some(Summary {
         status: value["status"].as_str().unwrap_or("ok").to_string(),
         scope: value["scope"].as_str().map(str::to_string),
-        cache_rate: value["totals"]["cacheRate"]
-            .as_f64()
-            .filter(|rate| rate.is_finite()),
         models: value["models"]
             .as_array()
             .into_iter()
             .flatten()
             .map(|row| Model {
                 model: flat(row["model"].as_str().unwrap_or_default()),
+                turns: row["turns"].as_u64(),
                 cost: parse_cost(&row["cost"]),
+                cache_rate: row["cacheRate"].as_f64().filter(|n| n.is_finite()),
+                context: row["context"]["usedTokens"]
+                    .as_f64()
+                    .filter(|n| n.is_finite() && *n >= 0.0)
+                    .map(|used| {
+                        (
+                            used,
+                            row["context"]["maxTokens"]
+                                .as_f64()
+                                .filter(|n| n.is_finite() && *n > 0.0),
+                        )
+                    }),
             })
             .collect(),
     })
+}
+
+/// Compact provider model name, preserving non-Claude version conventions.
+pub fn short_model(model: &str) -> String {
+    let model = model.rsplit(['/', '\\']).next().unwrap_or(model);
+    let model = model.strip_prefix("claude-").unwrap_or(model);
+    let mut model = model;
+    if let Some((base, date)) = model.rsplit_once('-')
+        && date.len() == 8
+        && date.bytes().all(|b| b.is_ascii_digit())
+    {
+        model = base;
+    }
+    model = model.strip_suffix("-latest").unwrap_or(model);
+    let (base, suffix) = match model.find('[') {
+        Some(at) if model.ends_with(']') => (&model[..at], &model[at..]),
+        _ => (model, ""),
+    };
+    if let Some((prefix, minor)) = base.rsplit_once('-')
+        && let Some((name, major)) = prefix.rsplit_once('-')
+    {
+        let version = |s: &str| (1..=2).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_digit());
+        if version(major) && version(minor) {
+            return format!("{name}-{major}.{minor}{suffix}");
+        }
+    }
+    model.to_string()
 }
 
 fn parse_cost(cost: &Value) -> Cost {
@@ -109,29 +140,39 @@ pub fn context(thread: &Thread) -> Option<(f64, Option<f64>)> {
     Some((used, max))
 }
 
-/// The line, as the web chat has it: "this turn" when the server answered for
-/// one, then cache rate, context, and one part per model, joined by ` · `.
-/// Korean or English comes from the caller so the tests do not depend on the running language.
+/// Request scope, fallback context, then each model's usage.
 pub fn footer(summary: Option<&Summary>, context: Option<(f64, Option<f64>)>, ko: bool) -> String {
     let usable = summary.filter(|s| s.usable());
-    let mut parts: Vec<String> = Vec::new();
-    if usable.and_then(|s| s.scope.as_deref()) == Some("turn") {
-        parts.push(tr_in_lang("usage.thisTurn", ko).to_string());
+    let rows = usable.map(|s| s.models.as_slice()).unwrap_or_default();
+    let mut parts = Vec::new();
+    let request = usable.and_then(|s| s.scope.as_deref()) == Some("turn");
+    if request {
+        parts.push(tr_in_lang("usage.thisRequest", ko).to_string());
     }
-    if let Some(rate) = usable.and_then(|s| s.cache_rate) {
-        parts.push(fill(
-            tr_in_lang("usage.cache", ko),
-            &[("rate", cache_percent(rate))],
-        ));
+    if !request
+        && !rows.iter().any(|row| row.context.is_some())
+        && let Some((used, max)) = context
+    {
+        parts.push(format!("ctx {}", context_usage(used, max)));
     }
-    if let Some((used, max)) = context {
-        parts.push(fill(
-            tr_in_lang("usage.context", ko),
-            &[("usage", context_usage(used, max))],
-        ));
-    }
-    for row in usable.map(|s| s.models.as_slice()).unwrap_or_default() {
-        parts.push(format!("{} {}", row.model, cost_text(row.cost, ko)));
+    for row in rows {
+        let mut pieces = vec![short_model(&row.model)];
+        if row.turns == Some(0) {
+            pieces.push(tr_in_lang("usage.notReported", ko).to_string());
+        } else {
+            pieces.push(cost_text(row.cost, ko));
+            if let Some(rate) = row.cache_rate {
+                pieces.push(fill(
+                    tr_in_lang("usage.cache", ko),
+                    &[("rate", cache_percent(rate))],
+                ));
+            }
+        }
+        // A crew model with no usage measured still shows the context it reported.
+        if let Some((used, max)) = row.context {
+            pieces.push(format!("ctx {}", context_usage(used, max)));
+        }
+        parts.push(pieces.join(" "));
     }
     parts.join(" · ")
 }
@@ -139,8 +180,7 @@ pub fn footer(summary: Option<&Summary>, context: Option<(f64, Option<f64>)>, ko
 fn context_usage(used: f64, max: Option<f64>) -> String {
     let mut usage = context_tokens(used);
     if let Some(max) = max {
-        usage.push_str(&format!(" / {}", context_tokens(max)));
-        usage.push_str(&format!(" ({:.0}%)", (used / max * 100.0).min(100.0)));
+        usage.push_str(&format!("/{}", context_tokens(max)));
     }
     usage
 }
@@ -161,13 +201,13 @@ fn context_tokens(value: f64) -> String {
     }
 }
 
-/// `97.8%`: the web app's `formatPercent` with one decimal.
+/// `92%`: the web app's `formatPercent` with no decimals.
 fn cache_percent(share: f64) -> String {
     let percent = share * 100.0;
-    if percent > 0.0 && percent < 0.1 {
-        return "<0.1%".to_string();
+    if percent > 0.0 && percent < 1.0 {
+        return "<1%".to_string();
     }
-    format!("{percent:.1}%")
+    format!("{percent:.0}%")
 }
 
 fn cost_text(cost: Cost, ko: bool) -> String {
@@ -194,6 +234,7 @@ pub struct State {
     summary: Option<Summary>,
     /// A turn was running at the last look, to notice it settling.
     running: bool,
+    usage_receipts: usize,
     /// The open thread's running audit and its model, kept from the last update so drawing does
     /// not fold the activities again.
     audit: Option<Option<String>>,
@@ -221,7 +262,16 @@ pub fn on_thread(app: &mut App) {
     let settled = (app.usage.running || app.usage.audit.is_some()) && !running && audit.is_none();
     app.usage.audit = audit;
     app.usage.running = running;
-    if settled {
+    let receipts = app
+        .conv
+        .thread
+        .activities
+        .iter()
+        .filter(|activity| activity.kind == "task.completed" || activity.kind == "owned-usage")
+        .count();
+    let changed = receipts != app.usage.usage_receipts;
+    app.usage.usage_receipts = receipts;
+    if settled || (changed && !running && app.usage.audit.is_none()) {
         request(app);
     }
 }
@@ -303,6 +353,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn request_label_matches_web() {
+        let summary = parse(&json!({"status":"ok", "scope":"turn", "models":[]})).unwrap();
+        assert_eq!(footer(Some(&summary), None, false), "This request");
+    }
+
+    #[test]
     fn audit_lifecycle_replaces_usage_and_finishes() {
         let event = |kind: &str, id: &str, role: &str| Activity {
             kind: kind.into(),
@@ -358,152 +414,122 @@ mod tests {
         assert_eq!(seen.lock().unwrap().len(), before + 1);
     }
 
-    fn summary(status: &str, cache_rate: Option<f64>) -> Summary {
-        Summary {
-            status: status.into(),
-            scope: None,
-            cache_rate,
-            models: vec![
-                Model {
-                    model: "claude-opus-5-5".into(),
-                    cost: Cost::Reported(4.12),
-                },
-                Model {
-                    model: "gpt-6-astra".into(),
-                    cost: Cost::Estimated(0.31),
-                },
-                Model {
-                    model: "glm-5.3".into(),
-                    cost: Cost::Unknown,
-                },
-            ],
+    #[tokio::test]
+    async fn worker_completion_after_lead_settled_refreshes_models_once() {
+        let (port, seen) =
+            serve(|tag, _| {
+                (tag == SUMMARY_RPC).then(|| Ok(json!({
+            "status": "ok", "models": [{"model":"gpt-6.1-sol", "cost":{"kind":"unknown"}}]
+        })))
+            })
+            .await;
+        let (mut app, mut rx) = connected(port, two_turns(json!({})), false).await;
+        opened(&mut app, "t1");
+        next(&mut app, &mut rx).await;
+        let before = seen.lock().unwrap().len();
+        app.conv.thread.activities.push(Activity {
+            kind: "task.completed".into(),
+            payload: json!({"crewRole":"worker", "taskId":"worker", "threadId":"child"}),
+            ..Default::default()
+        });
+        on_thread(&mut app);
+        next(&mut app, &mut rx).await;
+        assert_eq!(seen.lock().unwrap().len(), before + 1);
+        assert!(
+            app.usage
+                .summary
+                .as_ref()
+                .unwrap()
+                .models
+                .iter()
+                .any(|row| row.model == "gpt-6.1-sol")
+        );
+        on_thread(&mut app);
+        assert_eq!(seen.lock().unwrap().len(), before + 1);
+    }
+
+    #[test]
+    fn short_model_cases() {
+        for (input, expected) in [
+            ("provider/claude-opus-5-5", "opus-5.5"),
+            ("provider\\claude-sonnet-4-6[1m]", "sonnet-4.6[1m]"),
+            ("claude-haiku-5-5-20260101", "haiku-5.5"),
+            ("claude-opus-5-5-latest", "opus-5.5"),
+            ("gpt-6.2-sol", "gpt-6.2-sol"),
+            ("gpt-6-astra", "gpt-6-astra"),
+            ("deepseek-v41-flash-1017", "deepseek-v41-flash-1017"),
+            ("model-123-4", "model-123-4"),
+            ("model-1-23", "model-1.23"),
+        ] {
+            assert_eq!(short_model(input), expected);
         }
     }
 
     #[test]
-    fn the_line_names_the_cache_the_context_and_what_each_model_cost() {
-        let summary = summary("ok", Some(0.978));
+    fn lead_and_two_crew_rows() {
+        let summary = parse(&json!({"status":"ok", "scope":"turn", "totals":{"cacheRate":0.1},
+            "models":[
+                {"model":"claude-opus-5-5","turns":1,"cost":{"kind":"estimated","usd":4.12},
+                 "cacheRate":0.92,"context":{"usedTokens":182000,"maxTokens":1000000}},
+                {"model":"gpt-6.2-sol","turns":2,"cost":{"kind":"estimated","usd":0.4},
+                 "cacheRate":0.85,"context":{"usedTokens":64000,"maxTokens":400000}},
+                {"model":"gpt-6.2-astra","turns":0,"cost":{"kind":"reported","usd":3},"cacheRate":0.5}
+            ]})).unwrap();
+        assert_eq!(summary.models[0].cache_rate, Some(0.92));
+        assert_eq!(summary.models[0].context, Some((182000.0, Some(1000000.0))));
         assert_eq!(
-            footer(Some(&summary), Some((118_000.0, Some(200_000.0))), true),
-            "캐시 97.8% · 컨텍스트 118k / 200k (59%) · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 비용 알 수 없음"
+            footer(Some(&summary), Some((1.0, None)), false),
+            "This request · opus-5.5 ≈$4.12 cache 92% ctx 182k/1m · gpt-6.2-sol ≈$0.40 cache 85% ctx 64k/400k · gpt-6.2-astra Usage not reported"
         );
-        assert_eq!(
-            footer(Some(&summary), Some((118_000.0, Some(200_000.0))), false),
-            "Cache 97.8% · Context 118k / 200k (59%) · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 Cost unknown"
+        assert!(
+            footer(Some(&summary), None, true).starts_with("이번 요청 · opus-5.5 ≈$4.12 캐시 92%")
         );
-    }
-
-    #[test]
-    fn reported_estimated_and_unknown_costs_each_read_their_own_way() {
-        let rows = [Cost::Reported(4.1), Cost::Estimated(0.3), Cost::Unknown];
-        let text: Vec<String> = rows.iter().map(|cost| cost_text(*cost, false)).collect();
-        assert_eq!(text, ["$4.10", "≈$0.30", "Cost unknown"]);
-        let unknown = Summary {
-            status: "ok".into(),
-            scope: None,
-            cache_rate: None,
-            models: vec![Model {
-                model: "glm".into(),
-                cost: Cost::Unknown,
-            }],
-        };
-        assert_eq!(footer(Some(&unknown), None, true), "glm 비용 알 수 없음");
-    }
-
-    #[test]
-    fn no_cache_rate_drops_the_cache_part_and_leaves_the_models() {
-        let summary = summary("ok", None);
-        let text = footer(Some(&summary), None, false);
-        assert!(!text.contains("Cache"), "{text}");
+        let unreported = parse(&json!({"status":"ok", "scope":"turn", "models":[
+            {"model":"gpt-6.2-astra","turns":0,"context":{"usedTokens":2000,"maxTokens":10000}}
+        ]}))
+        .unwrap();
         assert_eq!(
-            text,
-            "claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 Cost unknown"
+            footer(Some(&unreported), None, false),
+            "This request · gpt-6.2-astra Usage not reported ctx 2k/10k"
         );
     }
 
     #[test]
-    fn no_context_drops_the_context_part() {
-        let summary = summary("ok", Some(0.5));
+    fn context_fallback_and_no_label_without_scope() {
+        let mut summary = parse(&json!({"status":"ok","scope":"turn","models":[
+            {"model":"opus","cost":{"kind":"reported","usd":4.12}}
+        ]}))
+        .unwrap();
+        // The thread's latest context may come from an earlier request.
         assert_eq!(
-            footer(Some(&summary), None, true),
-            "캐시 50.0% · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 비용 알 수 없음"
+            footer(Some(&summary), Some((118000.0, Some(200000.0))), false),
+            "This request · opus $4.12"
         );
+        summary.scope = None;
+        assert_eq!(footer(Some(&summary), None, false), "opus $4.12");
+        assert_eq!(
+            footer(Some(&summary), Some((118000.0, Some(200000.0))), false),
+            "ctx 118k/200k · opus $4.12"
+        );
+        assert_eq!(footer(None, Some((1500000.0, None)), false), "ctx 1.5m");
         assert_eq!(footer(None, None, true), "");
     }
 
     #[test]
-    fn a_thread_too_large_to_total_up_shows_only_its_context() {
-        let summary = summary("too-large", Some(0.98));
-        assert_eq!(footer(Some(&summary), None, true), "");
-        assert_eq!(
-            footer(Some(&summary), Some((15_000.0, Some(200_000.0))), true),
-            "컨텍스트 15k / 200k (8%)"
-        );
-    }
-
-    #[test]
-    fn a_context_report_without_a_window_size_shows_no_share() {
-        assert_eq!(footer(None, Some((950.0, None)), true), "컨텍스트 950");
-        assert_eq!(
-            footer(None, Some((1_500_000.0, None)), false),
-            "Context 1.5m"
-        );
-        assert_eq!(footer(None, Some((1_200.0, None)), false), "Context 1.2k");
-    }
-
-    #[test]
-    fn the_line_is_read_from_the_servers_answer() {
-        let value = json!({
-            "threadId": "t1", "status": "ok",
-            "totals": {"inputTokens": 1000, "cacheRate": 0.3,
-                "cost": {"kind": "unknown"}},
-            "models": [
-                {"model": "opus", "cacheRate": 0.3, "cost": {"kind": "reported", "usd": 4.12}},
-                {"model": "astra", "cacheRate": null, "cost": {"kind": "estimated", "usd": 0.31}},
-                {"model": "glm", "cacheRate": null}
-            ]
-        });
-        let summary = parse(&value).unwrap();
-        assert_eq!(
-            (summary.status.as_str(), summary.cache_rate),
-            ("ok", Some(0.3))
-        );
-        // No scope in the answer: a whole-thread total from an older server.
-        assert_eq!(summary.scope, None);
-        assert_eq!(
-            footer(Some(&summary), None, true),
-            "캐시 30.0% · opus $4.12 · astra ≈$0.31 · glm 비용 알 수 없음"
-        );
+    fn validates_context_and_preserves_cost_cache_formats() {
+        let summary = parse(&json!({"models":[
+            {"model":"a","context":{"usedTokens":-1,"maxTokens":100}},
+            {"model":"b","context":{"usedTokens":0,"maxTokens":null}},
+            {"model":"c","context":{"usedTokens":1200,"maxTokens":-1}}
+        ]}))
+        .unwrap();
+        assert_eq!(summary.models[0].context, None);
+        assert_eq!(summary.models[1].context, Some((0.0, None)));
+        assert_eq!(summary.models[2].context, Some((1200.0, None)));
+        assert_eq!(cost_text(Cost::Unknown, false), "Cost unknown");
+        assert_eq!(cost_text(Cost::Estimated(0.3), false), "≈$0.30");
+        assert_eq!(cache_percent(0.0001), "<1%");
         assert!(parse(&Value::Null).is_none());
-        // A null cache rate and a missing cost both read as "nothing to say".
-        let bare = parse(&json!({"status": "too-large"})).unwrap();
-        assert_eq!((bare.cache_rate, bare.models.len()), (None, 0));
-    }
-
-    #[test]
-    fn a_turn_scoped_answer_leads_with_this_turn_and_a_whole_thread_one_does_not() {
-        let parsed =
-            parse(&json!({"status": "ok", "scope": "turn", "totals": {}, "models": []})).unwrap();
-        assert_eq!(parsed.scope.as_deref(), Some("turn"));
-        let per_turn = Summary {
-            scope: Some("turn".into()),
-            ..summary("ok", Some(0.978))
-        };
-        assert_eq!(
-            footer(Some(&per_turn), Some((118_000.0, Some(200_000.0))), false),
-            "This turn · Cache 97.8% · Context 118k / 200k (59%) · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 Cost unknown"
-        );
-        assert_eq!(
-            footer(Some(&per_turn), None, true),
-            "이번 턴 · 캐시 97.8% · claude-opus-5-5 $4.12 · gpt-6-astra ≈$0.31 · glm-5.3 비용 알 수 없음"
-        );
-        // A whole-thread answer, or an old server's scope-less one, stays unlabelled.
-        let whole = Summary {
-            scope: Some("thread".into()),
-            ..summary("ok", Some(0.978))
-        };
-        assert!(!footer(Some(&whole), None, false).contains("This turn"));
-        assert!(!footer(Some(&summary("ok", Some(0.978))), None, false).contains("This turn"));
     }
 
     #[test]
@@ -645,10 +671,10 @@ mod tests {
         let rows = screen(&app, 120, 40);
         let at = rows
             .iter()
-            .position(|row| row.contains("Context 118k / 200k (59%)"))
+            .position(|row| row.contains("ctx 118k/200k"))
             .unwrap_or_else(|| panic!("{rows:#?}"));
-        assert!(rows[at].contains("Cache 97.8%"), "{}", rows[at]);
-        assert!(rows[at].contains("claude-opus-5-5 $4.12"), "{}", rows[at]);
+        assert!(!rows[at].contains("cache"), "{}", rows[at]);
+        assert!(rows[at].contains("opus-5.5 $4.12"), "{}", rows[at]);
         // Nothing of the conversation is under it: it is the last line of the transcript.
         assert!(
             rows[at + 1..]

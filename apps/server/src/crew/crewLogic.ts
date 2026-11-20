@@ -73,7 +73,7 @@ const FINDING_SEVERITIES =
 
 const REPORT_SHAPE = `{"status":"done"|"partial"|"blocked","summary":string,"changedFiles":string[],"verification":{"command":string,"passed":boolean|null}|null,"findings":[${FINDING_SHAPE}]}`;
 
-const AUDIT_REPORT_SHAPE = `{"verdict":"approve"|"needs changes","summary":string,"safetyFact":{"fact":string,"level":${EVIDENCE_LEVELS},"evidence":string},"findings":[${FINDING_SHAPE}],"preExistingFailures":string[]}`;
+const AUDIT_REPORT_SHAPE = `{"verdict":"approve"|"needs changes","summary":string,"safetyFact":{"fact":string,"level":${EVIDENCE_LEVELS},"evidence":string},"findings":[${FINDING_SHAPE}],"preExistingFailures":string[],"deferred":string[]}`;
 
 /** The one security line a task that edits files gets; a task without a scope gains no text. */
 const WRITE_SCOPE_SECURITY_LINE =
@@ -349,17 +349,26 @@ type AuditPromptInput = {
   readonly files: ReadonlyArray<string>;
   /** The user's request the turn answered; the audit judges the change against it. */
   readonly request: string | null;
+  /** The lead's reply in the audited turn: what it says it did and what it left to the user. */
+  readonly leadReply?: string | null;
+  /** Titles of the lead's crew tasks that had not finished when the audit started. */
+  readonly runningTasks?: ReadonlyArray<string>;
   /** Everything the thread changed so far, from `auditDiff`; without it the auditor reads the workspace. */
   readonly diff?: string | null;
   /** The workspace snapshots (hidden git refs) from before and after the audited turn. */
   readonly turnRefs?: { readonly from: string; readonly to: string } | null;
 };
 
-/** The part every audit prompt opens with: who, which files, the user's request, and the diff. */
+/**
+ * The part every audit prompt opens with: who, which files, the user's request, the lead's reply,
+ * crew work still running, and the diff.
+ */
 function auditPromptHead(input: AuditPromptInput, diff: string | null): ReadonlyArray<string> {
   const listed = input.files.slice(0, 40);
   const more = input.files.length - listed.length;
   const request = input.request?.trim();
+  const leadReply = input.leadReply?.trim();
+  const runningTasks = input.runningTasks ?? [];
   // Longer than any backtick run in the diff, so a changed markdown file cannot close the fence.
   const fence = "`".repeat(
     Math.max(3, ...[...(diff ?? "").matchAll(/`+/g)].map((run) => run[0].length + 1)),
@@ -370,6 +379,16 @@ function auditPromptHead(input: AuditPromptInput, diff: string | null): Readonly
     ...(more > 0 ? [`- and ${more} more`] : []),
     ...(request
       ? ["", "The user asked:", request.length > 2000 ? `${request.slice(0, 1997)}...` : request]
+      : []),
+    ...(leadReply
+      ? [
+          "",
+          "The lead replied:",
+          leadReply.length > 2000 ? `${leadReply.slice(0, 1997)}...` : leadReply,
+        ]
+      : []),
+    ...(runningTasks.length > 0
+      ? ["", "Crew tasks still running:", ...runningTasks.map((title) => `- ${title}`)]
       : []),
     ...(diff === null
       ? []
@@ -386,6 +405,8 @@ function turnRefsLine(turnRefs: AuditPromptInput["turnRefs"], fallback: string):
 
 /** The closing lines every audit prompt shares: the verdict line and the JSON report. */
 const AUDIT_REPORT_LINES = [
+  "List steps the lead handed to the user because only the user can do them, and work listed as still running, in deferred. Treat them as deferred work and do not call for changes because of them.",
+  "Report work the lead could have done itself and deferred, or claimed was done without support in the diff, when the evidence shows a defect.",
   `After that line, close the reply with the same review as one fenced \`\`\`json block of this shape: ${AUDIT_REPORT_SHAPE}`,
   `In it, blocking problems are proven P0 or P1 findings (level traced, ran, or app) and the rest are P2 or P3 (${FINDING_SEVERITIES}); \`preExistingFailures\` has one string per failure that predates the turn, naming the command or test; use [] when a list is empty.`,
 ];
@@ -744,6 +765,7 @@ export const CrewAuditReport = Schema.Struct({
   ),
   findings: emptyList(Finding),
   preExistingFailures: emptyList(Schema.String),
+  deferred: emptyList(Schema.String),
 });
 export type CrewAuditReport = typeof CrewAuditReport.Type;
 
@@ -815,23 +837,19 @@ export function parseAuditReport(text: string | null): CrewAuditReport | null {
   return report === null ? null : { ...report, findings: capFindings(report.findings) };
 }
 
+const isBlockingFinding = (finding: typeof Finding.Type) =>
+  (finding.severity === "P0" || finding.severity === "P1") && isProvenFinding(finding);
+
 /**
  * The auditor's verdict: from its JSON review when it has one, else its last `Verdict:` line, or
- * null when the report has neither. Only a proven P0 or P1 finding blocks; a review that asks for
- * changes with no findings at all still blocks (a model that dropped the list is respected), and
- * one that asks for changes only because of failures that predate the turn approves.
+ * null when the report has neither. A JSON review asks for changes only with a proven P0 or P1
+ * finding, read from the whole list, not the capped one: a fix turn needs evidence, so a review
+ * that asks for changes without one approves.
  */
 export function auditVerdict(report: string | null): "approve" | "needs-changes" | null {
-  const audit = parseAuditReport(report);
+  const audit = parseLastJsonBlock(CrewAuditReport, report);
   if (audit !== null) {
-    const isHigh = (finding: (typeof audit.findings)[number]) =>
-      finding.severity === "P0" || finding.severity === "P1";
-    if (audit.findings.some((finding) => isHigh(finding) && isProvenFinding(finding)))
-      return "needs-changes";
-    const onlyPreExisting = audit.preExistingFailures.length > 0 && !audit.findings.some(isHigh);
-    return audit.verdict === "approve" || onlyPreExisting || audit.findings.length > 0
-      ? "approve"
-      : "needs-changes";
+    return audit.findings.some(isBlockingFinding) ? "needs-changes" : "approve";
   }
   const verdicts = [
     ...withoutJsonBlocks(report).matchAll(/verdict\W{0,4}\s*(approve|needs changes)/gi),
@@ -995,7 +1013,7 @@ export function crewFailureKind(
   )
     return "billing";
   if (
-    /unauthori[sz]ed|not (logged|signed) in|sign in again|log in again|authentication (required|failed)|invalid api key|\b401\b/i.test(
+    /unauthori[sz]ed|not (logged|signed) in|sign in again|log in again|authentication (required|failed)|invalid api key|\bSERVICE_AUTHENTICATION_INVALID\b|\b401\b/i.test(
       text,
     )
   )

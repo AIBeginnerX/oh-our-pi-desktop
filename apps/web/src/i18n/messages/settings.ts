@@ -1,6 +1,44 @@
 import type { MessageCatalog } from "./types";
 
 export const SETTINGS_MESSAGES: MessageCatalog = {
+  "Crew scorecard · Last 30 days": {
+    ko: "크루 성과표 · 최근 30일",
+    ja: "クルー成績表 · 過去30日",
+    "zh-CN": "小队记分卡 · 最近 30 天",
+    es: "Resultados del equipo · Últimos 30 días",
+  },
+  "Refresh scorecard": {
+    ko: "성과표 새로고침",
+    ja: "成績表を更新",
+    "zh-CN": "刷新记分卡",
+    es: "Actualizar resultados",
+  },
+  "Could not load the crew scorecard.": {
+    ko: "크루 성과표를 불러오지 못했습니다.",
+    ja: "クルー成績表を読み込めませんでした。",
+    "zh-CN": "无法加载小队记分卡。",
+    es: "No se pudieron cargar los resultados del equipo.",
+  },
+  "No finished crew work in this period.": {
+    ko: "이 기간에 종료된 크루 작업이 없습니다.",
+    ja: "この期間に終了したクルー作業はありません。",
+    "zh-CN": "此期间没有结束的小队任务。",
+    es: "No hay tareas finalizadas en este período.",
+  },
+  "{audits} audits · {changes} asked for changes · {proven} with proven blockers · {unreadable} unreadable":
+    {
+      ko: "감사 {audits}건 · 변경 요청 {changes}건 · 입증된 차단 문제 {proven}건 · 판정 불가 {unreadable}건",
+      ja: "監査 {audits} 件 · 修正要求 {changes} 件 · 実証済みの重大な指摘あり {proven} 件 · 判定不能 {unreadable} 件",
+      "zh-CN":
+        "审核 {audits} 次 · 要求修改 {changes} 次 · 其中有已证实的阻塞问题 {proven} 次 · 无法判定 {unreadable} 次",
+      es: "{audits} auditorías · {changes} solicitudes de cambios · {proven} con bloqueos demostrados · {unreadable} sin veredicto",
+    },
+  "{completed} completed · {failed} failed · {verified} of {tasks} verified": {
+    ko: "완료 {completed}건 · 실패 {failed}건 · {tasks}건 중 {verified}건 검증",
+    ja: "完了 {completed} 件 · 失敗 {failed} 件 · {tasks} 件中 {verified} 件を検証",
+    "zh-CN": "完成 {completed} 项 · 失败 {failed} 项 · {tasks} 项中已验证 {verified} 项",
+    es: "{completed} completadas · {failed} fallidas · {verified} de {tasks} verificadas",
+  },
   "Sends the titles and text of saved project memories to the text-generation model to find duplicates, contradictions and outdated memories. Memories that look like secrets are never sent. Uses only models whose provider already receives project memory in chats. Suggestions wait for you to apply them.":
     {
       ko: "저장된 프로젝트 메모리의 제목과 본문을 텍스트 생성 모델로 보내 중복, 모순, 오래된 메모리를 찾습니다. 비밀 정보로 보이는 메모리는 보내지 않습니다. 대화에서 이미 프로젝트 메모리를 받는 제공자의 모델만 사용합니다. 제안은 적용할 때까지 기다립니다.",
@@ -452,6 +490,48 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "请先在常规设置中开启工作分析器。",
     es: "Activa primero el analizador de trabajo en los ajustes generales.",
   },
+  "Could not load work analyser status.": {
+    ko: "작업 분석기 상태를 불러오지 못했습니다.",
+    ja: "作業アナライザーの状態を読み込めませんでした。",
+    "zh-CN": "无法加载工作分析器状态。",
+    es: "No se pudo cargar el estado del analizador de trabajo.",
+  },
+  "Work analyser has not run for this project yet.": {
+    ko: "이 프로젝트에서 작업 분석기를 아직 실행하지 않았습니다.",
+    ja: "このプロジェクトでは作業アナライザーはまだ実行されていません。",
+    "zh-CN": "工作分析器尚未在此项目中运行。",
+    es: "El analizador de trabajo aún no se ha ejecutado en este proyecto.",
+  },
+  "Last analysis {date}. Checked {threads} threads, {signals} with signals.": {
+    ko: "마지막 분석 {date}. 스레드 {threads}개를 확인했고 그중 {signals}개에서 작업 신호를 찾았습니다.",
+    ja: "前回の分析は {date}。{threads} 件のスレッドを確認し、{signals} 件にシグナルがありました。",
+    "zh-CN": "上次分析于 {date}。检查了 {threads} 个线程，其中 {signals} 个有工作信号。",
+    es: "Último análisis el {date}. Se revisaron {threads} hilos, {signals} con señales.",
+  },
+  "No new work signals found.": {
+    ko: "새 작업 신호를 찾지 못했습니다.",
+    ja: "新しい作業シグナルは見つかりませんでした。",
+    "zh-CN": "未找到新的工作信号。",
+    es: "No se encontraron nuevas señales de trabajo.",
+  },
+  "No new suggestions met the evidence requirements.": {
+    ko: "근거가 충분한 새 제안이 없었습니다.",
+    ja: "根拠の要件を満たす新しい提案はありませんでした。",
+    "zh-CN": "没有新建议符合证据要求。",
+    es: "Ninguna sugerencia nueva cumplió los requisitos de evidencia.",
+  },
+  "The review queue is full. Analysis continues after you review a suggestion.": {
+    ko: "검토 대기열이 가득 찼습니다. 제안을 검토하면 분석을 이어갑니다.",
+    ja: "レビュー待ちのキューがいっぱいです。提案をレビューすると分析を再開します。",
+    "zh-CN": "审查队列已满。审查一条建议后将继续分析。",
+    es: "La cola de revisión está llena. El análisis continúa cuando revises una sugerencia.",
+  },
+  "The last analysis failed.": {
+    ko: "마지막 분석에 실패했습니다.",
+    ja: "前回の分析に失敗しました。",
+    "zh-CN": "上次分析失败。",
+    es: "El último análisis falló.",
+  },
   "Nothing new to suggest": {
     ko: "새로 제안할 내용이 없습니다",
     ja: "新しい提案はありません",
@@ -483,17 +563,47 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "线程 {index}",
     es: "Hilo {index}",
   },
+  "Sent to {sent} threads · {good} went well · {bad} went poorly · {unknown} unknown": {
+    ko: "스레드 {sent}개에 전송 · 성공 {good}개 · 실패 {bad}개 · 미확인 {unknown}개",
+    ja: "{sent} 件のスレッドに送信 · 成功 {good} 件 · 失敗 {bad} 件 · 不明 {unknown} 件",
+    "zh-CN": "已发送到 {sent} 个线程 · 良好 {good} · 不佳 {bad} · 未知 {unknown}",
+    es: "Enviada a {sent} hilos · {good} con buen resultado · {bad} con mal resultado · {unknown} sin determinar",
+  },
+  "A bad outcome does not prove the memory caused it.": {
+    ko: "결과가 나빴더라도 메모리가 원인이었다는 증거는 아닙니다.",
+    ja: "結果が悪くても、メモリが原因だったとは限りません。",
+    "zh-CN": "结果不佳并不能证明是这条记忆造成的。",
+    es: "Un mal resultado no demuestra que la memoria lo haya causado.",
+  },
+  "Worth reviewing": {
+    ko: "검토할 만함",
+    ja: "要確認",
+    "zh-CN": "值得审阅",
+    es: "Conviene revisar",
+  },
+  "Memory held": {
+    ko: "전송 보류 중",
+    ja: "送信保留中",
+    "zh-CN": "已暂停发送",
+    es: "Envío en pausa",
+  },
+  "Hold memory": {
+    ko: "메모리 전송 보류",
+    ja: "メモリの送信を保留",
+    "zh-CN": "暂停发送记忆",
+    es: "Pausar memoria",
+  },
+  "Resume memory": {
+    ko: "메모리 전송 재개",
+    ja: "メモリの送信を再開",
+    "zh-CN": "恢复发送记忆",
+    es: "Reanudar memoria",
+  },
   Derived: {
     ko: "파생",
     ja: "派生",
     "zh-CN": "派生",
     es: "Derivada",
-  },
-  "A procedure seen in recent work. Save it from the thread's skill draft.": {
-    ko: "최근 작업에서 확인된 절차입니다. 스레드의 스킬 초안에서 저장하세요.",
-    ja: "最近の作業で見られた手順です。スレッドのスキル下書きから保存してください。",
-    "zh-CN": "最近工作中出现的流程。请从该线程的技能草稿中保存。",
-    es: "Un procedimiento visto en el trabajo reciente. Guárdalo desde el borrador de habilidad del hilo.",
   },
   "Suggested from recent work. If approved, it expires {days} days later unless you change that.": {
     ko: "최근 작업에서 제안되었습니다. 승인하면 변경하지 않는 한 {days}일 뒤 만료됩니다.",

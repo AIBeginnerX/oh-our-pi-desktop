@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { DesktopMenuLanguage } from "@t3tools/contracts";
 import {
   ArrowLeftIcon,
@@ -33,6 +34,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { hasWeeklyUsageAlertAtom } from "../usage/weeklyUsageAlertsAtom";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
 import { useT } from "../../i18n";
 import { MENU_LANGUAGE_OPTIONS, useMenuLanguage } from "../../state/menuLanguage";
@@ -175,6 +177,7 @@ function SidebarMenuLanguageItem() {
 
 export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
   const t = useT();
+  const hasWeeklyUsageAlert = useAtomValue(hasWeeklyUsageAlertAtom);
   const navigate = useNavigate();
   const navigateToMainApp = useNavigateToMainApp();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -253,8 +256,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             />
           ) : null}
           <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label={t("Usage")}
+            icon={
+              <ChartNoAxesColumnIcon
+                className={hasWeeklyUsageAlert ? "text-destructive" : undefined}
+              />
+            }
+            label={t(hasWeeklyUsageAlert ? "Usage · weekly limit almost reached" : "Usage")}
             onClick={handleUsageClick}
           />
         </>

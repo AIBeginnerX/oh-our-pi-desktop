@@ -342,8 +342,8 @@ pub fn text(key: &str) -> &'static str {
         "session.c.crewTasks" => s("{count} crew task(s)", "crew 작업 {count}"),
         "session.c.crewUnsupported" => s("crew unsupported", "crew 미지원"),
         "session.c.crewUsage" => s(
-            "Usage: /crew [on|off|preset <{words}>|model <role> [model|auto]|default|reset|stop [id|all]|log|back]",
-            "사용법: /crew [on|off|preset <{words}>|model <역할> [모델|auto]|default|reset|stop [id|all]|log|back]",
+            "Usage: /crew [on|off|preset <{words}>|model <role> [model|auto]|default|reset|stop [id|all]|log|scorecard|back]",
+            "사용법: /crew [on|off|preset <{words}>|model <역할> [모델|auto]|default|reset|stop [id|all]|log|scorecard|back]",
         ),
         "session.c.enterGoalText" => s("Enter the goal text.", "목표 내용을 입력하세요."),
         "session.c.goal" => s("Goal", "목표"),

@@ -115,10 +115,10 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "Auditor is reviewing this answer",
             "감사자가 이 답변을 검토하는 중",
         ),
-        "usage.thisTurn" => pick("This turn", "이번 턴"),
-        "usage.cache" => pick("Cache {rate}", "캐시 {rate}"),
-        "usage.context" => pick("Context {usage}", "컨텍스트 {usage}"),
+        "usage.thisRequest" => pick("This request", "이번 요청"),
+        "usage.cache" => pick("cache {rate}", "캐시 {rate}"),
         "usage.costUnknown" => pick("Cost unknown", "비용 알 수 없음"),
+        "usage.notReported" => pick("Usage not reported", "사용량 미보고"),
         "hint.composer" => pick(
             "Enter send · Shift-Enter newline · Tab list · Ctrl-B/G side panes · PgUp/PgDn scroll · /model /mode /effort · Ctrl-C quit",
             "Enter 전송 · Shift-Enter 줄바꿈 · Tab 목록 · Ctrl-B/G 옆 창 · PgUp/PgDn 스크롤 · /model /mode /effort · Ctrl-C 종료",

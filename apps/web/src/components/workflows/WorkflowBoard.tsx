@@ -30,7 +30,12 @@ export const WORKFLOW_STATE_TONE: Record<WorkflowNodeState, string> = {
   unfinished: "text-warning",
 };
 
-const EVIDENCE_VARIANT = { reported: "outline", tested: "info", audited: "success" } as const;
+const EVIDENCE_VARIANT = {
+  reported: "outline",
+  "tests reported": "outline",
+  tested: "info",
+  audited: "success",
+} as const;
 
 /** A reported cost, with "+ unpriced" when part of the usage beside it came with none. */
 export function workflowCostLabel(
@@ -307,7 +312,7 @@ const WorkflowNodeCard = memo(function WorkflowNodeCard(props: {
         {meta.length > 0 ? <span className="truncate">· {meta.join(" · ")}</span> : null}
       </span>
       {!agentCard && running && node.info.progress ? (
-        <span className="truncate text-2xs text-muted-foreground/80">{node.info.progress}</span>
+        <span className="truncate text-2xs text-muted-foreground/80">{t(node.info.progress)}</span>
       ) : null}
     </button>
   );

@@ -735,3 +735,79 @@ describe("agent flows", () => {
     expect(flow?.steps?.nodes).toHaveLength(60);
   });
 });
+
+describe("background work after a turn ends", () => {
+  const rows = () => [
+    tool("tool.started", "2026-10-14T01:00:00Z", "bg", "Bash", "inProgress"),
+    activity("task.started", "2026-10-14T01:00:01Z", {
+      taskId: "bg-task",
+      toolUseId: "bg",
+      taskType: "local_bash",
+      agentKind: "background",
+    }),
+    tool("tool.completed", "2026-10-14T01:00:02Z", "bg", "Bash", "completed"),
+  ];
+  const model = deriveAgentPanelModel({ agents: [] });
+  it("keeps monitoring work running after its tool returns", () => {
+    const input = {
+      activities: rows(),
+      agents: model,
+      activeTurnId: null,
+      backgroundLiveness: "monitoring" as const,
+    };
+    const graph = threadFlows(input)[0]!;
+    expect(graph.status).toBe("running");
+    expect(graph.nodes[0]).toMatchObject({
+      state: "running",
+      info: { background: true, progress: "Monitoring" },
+    });
+    expect(graph.nodes.some((node) => node.id.startsWith("thinking:"))).toBe(false);
+    expect(actorFlows(input)[0]).toMatchObject({
+      status: "running",
+      nodes: [{ state: "running", info: { progress: "Monitoring" } }],
+    });
+  });
+  it("completes stale background work when the server reports no liveness", () => {
+    expect(
+      threadFlows({ activities: rows(), agents: model, activeTurnId: null })[0]?.nodes[0]?.state,
+    ).toBe("completed");
+  });
+  it("follows a terminal task even when the thread still monitors", () => {
+    expect(
+      threadFlows({
+        activities: [
+          ...rows(),
+          activity("task.completed", "2026-10-14T01:00:10Z", {
+            taskId: "bg-task",
+            status: "completed",
+          }),
+        ],
+        agents: model,
+        activeTurnId: null,
+        backgroundLiveness: "monitoring",
+      })[0]?.nodes[0]?.state,
+    ).toBe("completed");
+  });
+  it("recognizes legacy monitor tasks without agentKind", () => {
+    const activities = rows();
+    activities[1] = activity("task.started", "2026-10-14T01:00:01Z", {
+      taskId: "bg-task",
+      toolUseId: "bg",
+      taskType: "monitor",
+    });
+    expect(
+      threadFlows({
+        activities,
+        agents: model,
+        activeTurnId: null,
+        backgroundLiveness: "monitoring",
+      })[0]?.nodes[0],
+    ).toMatchObject({ state: "running", info: { progress: "Monitoring" } });
+  });
+  it("still cancels unfinished foreground work", () => {
+    expect(
+      threadFlows({ activities: rows().slice(0, 1), agents: model, activeTurnId: null })[0]
+        ?.nodes[0]?.state,
+    ).toBe("cancelled");
+  });
+});

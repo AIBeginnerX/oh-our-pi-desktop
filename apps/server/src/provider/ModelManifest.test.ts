@@ -38,6 +38,131 @@ const model = (overrides: Partial<ServerProviderModel>): ServerProviderModel => 
 });
 
 describe("classifyModels", () => {
+  it("keeps newly advertised versions current while detecting older unlisted models", () => {
+    const cases = [
+      {
+        driver: "codex",
+        current: [
+          "gpt-6-astra",
+          "gpt-6.1-sol",
+          "gpt-6-luna",
+          "gpt-daybreak-blue-latest",
+          "gpt-daybreak-red-latest",
+        ],
+        legacy: [
+          "gpt-6-sol",
+          "gpt-5.6-sol",
+          "gpt-5.6-terra",
+          "gpt-5.6-luna",
+          "gpt-5.5",
+          "gpt-5.4-mini",
+          "gpt-5.3-codex-spark",
+        ],
+        fresh: [
+          "gpt-6.2-sol",
+          "openai.gpt-6.2-sol",
+          "gpt-6.2-astra",
+          "gpt-6.1-terra",
+          "gpt-6.1.0-sol",
+        ],
+        old: ["gpt-5.2", "gpt-4.1-mini", "o3", "gpt-6.0-sol"],
+      },
+      {
+        driver: "antigravity",
+        current: [
+          "gemini-4-carbon",
+          "gemini-4-argon",
+          "gemini-3.8-flash",
+          "gemini-3.8-flash-high",
+          "gemini-3.8-flash-medium",
+          "gemini-3.8-flash-low",
+        ],
+        legacy: [
+          "gemini-3.7-flash-high",
+          "gemini-3.6-flash-low",
+          "gemini-pro-agent",
+          "gemini-3.1-pro-low",
+        ],
+        fresh: [
+          "gemini-4-argon-low",
+          "gemini-4-argon-medium",
+          "gemini-4-argon-high",
+          "gemini-4-hydrogen-low",
+          "gemini-4-hydrogen-medium",
+          "gemini-4-hydrogen-high",
+          "gemini-4-hydrogen-xhigh",
+        ],
+        old: ["gemini-3.5-flash-high"],
+      },
+      {
+        driver: "claudeAgent",
+        current: ["claude-fable-5-2", "claude-opus-5-5"],
+        legacy: ["claude-fable-4-0"],
+        fresh: ["claude-fable-5-3", "claude-fable-5.2.0"],
+        old: ["claude-opus-4-1", "claude-fable-5-1"],
+      },
+    ];
+    for (const { driver, current, legacy, fresh, old } of cases) {
+      const manifest: ModelManifestData = {
+        version: 1,
+        currentModels: { [driver]: current },
+        providers: {
+          [driver]: {
+            profiles: {},
+            models: [
+              ...current.map((slug) => ({ slug, name: slug, status: "current" as const })),
+              ...legacy.map((slug) => ({ slug, name: slug, status: "legacy" as const })),
+            ],
+          },
+        },
+      };
+      for (const [slugs, expected] of [
+        [fresh, false],
+        [old, true],
+      ] as const) {
+        for (const slug of slugs) {
+          const [result] = classifyModels(
+            [model({ slug, isLegacy: true })],
+            manifest,
+            ProviderDriverKind.make(driver),
+          );
+          assert.strictEqual(result?.isLegacy ?? false, expected, slug);
+        }
+      }
+    }
+  });
+
+  it("uses catalog versions and preserves explicit status and current-list precedence", () => {
+    const manifest: ModelManifestData = {
+      version: 1,
+      currentModels: { codex: ["gpt-4-sol", "gpt-3-sol"] },
+      providers: {
+        codex: {
+          profiles: {},
+          models: [
+            { slug: "gpt-3-sol", name: "Legacy", status: "legacy" },
+            { slug: "gpt-6-sol", name: "Current", status: "current" },
+            { slug: "gpt-8-sol", name: "Legacy future", status: "legacy" },
+          ],
+        },
+      },
+    };
+    const slugs = ["gpt-3-sol", "gpt-4-sol", "gpt-6-sol", "gpt-7-sol", "gpt-5-mini", "gpt-6-mini"];
+    assert.deepStrictEqual(
+      classifyModels(
+        slugs.map((slug) => model({ slug })),
+        manifest,
+        CODEX,
+      ).map((entry) => entry.isLegacy ?? false),
+      [true, false, false, true, true, false],
+    );
+    assert.strictEqual(
+      classifyModels([model({ slug: "unknown" })], { version: 1, currentModels: {} }, CODEX)[0]
+        ?.isLegacy ?? false,
+      false,
+    );
+  });
+
   it("classifies qualified Codex families without changing their wire ids", () => {
     const manifest: ModelManifestData = { version: 1, currentModels: { codex: ["gpt-test"] } };
     const models = [

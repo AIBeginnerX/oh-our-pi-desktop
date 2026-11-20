@@ -85,6 +85,7 @@ export interface RankableProjectMemory {
   readonly title: string;
   /** Absent when the list was read without bodies: scored on the title alone. */
   readonly body?: string | undefined;
+  readonly held?: boolean;
   readonly validUntil?: string | null | undefined;
 }
 
@@ -113,7 +114,9 @@ export function rankProjectMemories<T extends RankableProjectMemory>(
   const docs = items
     .filter(
       (item) =>
-        !options.excludedMemoryIds?.has(item.memoryId) && !isExpired(item.validUntil, nowMs),
+        item.held !== true &&
+        !options.excludedMemoryIds?.has(item.memoryId) &&
+        !isExpired(item.validUntil, nowMs),
     )
     .map((item) => {
       const title = new Set(extractTerms(item.title));

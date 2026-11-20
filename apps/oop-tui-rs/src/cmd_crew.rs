@@ -20,7 +20,7 @@ use crate::flow::{
 use crate::i18n::{Lang, lang, tr};
 use crate::notes::Tone;
 use crate::panels_common::{
-    evidence_word, flat, format_cost, format_elapsed, phase_word, proof_word, tokens_word,
+    evidence_word, fill, flat, format_cost, format_elapsed, phase_word, proof_word, s, tokens_word,
 };
 use crate::screen::Screen;
 use crate::server_settings::{self, Patched};
@@ -37,6 +37,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 pub const RETRY_RPC: &str = "crew.retryTask";
 pub const STOP_RPC: &str = "crew.stopTasks";
+const SCORECARD_RPC: &str = "crew.scorecard";
 
 // ---- the words ----------------------------------------------------------------------------------
 
@@ -1725,15 +1726,112 @@ fn retry_task(app: &mut App, task: &TaskRef) {
 
 // ---- the command ------------------------------------------------------------------------------
 
+fn scorecard_line(row: &Value) -> Option<String> {
+    let role = row["role"].as_str()?;
+    let model = flat(row["model"].as_str()?);
+    let (role, metrics) = match role {
+        "auditor" => (
+            s("Auditor", "감사자"),
+            fill(
+                s(
+                    "{audits} audits · {changes} asked for changes · {proven} with proven blockers · {unreadable} unreadable",
+                    "감사 {audits}건 · 변경 요청 {changes}건 · 입증된 차단 문제 {proven}건 · 판정 불가 {unreadable}건",
+                ),
+                &[
+                    ("audits", row["audits"].as_u64()?.to_string()),
+                    ("changes", row["needsChanges"].as_u64()?.to_string()),
+                    ("proven", row["provenBlocking"].as_u64()?.to_string()),
+                    ("unreadable", row["unreadable"].as_u64()?.to_string()),
+                ],
+            ),
+        ),
+        "worker" | "expert" => {
+            let tasks = row["tasks"].as_u64()?;
+            let verified = row["verified"].as_u64()?;
+            let mut metrics = fill(
+                s(
+                    "{completed} completed · {failed} failed · {verified} of {tasks} verified",
+                    "완료 {completed}건 · 실패 {failed}건 · {tasks}건 중 {verified}건 검증",
+                ),
+                &[
+                    ("completed", row["completed"].as_u64()?.to_string()),
+                    ("failed", row["failed"].as_u64()?.to_string()),
+                    ("verified", verified.to_string()),
+                    ("tasks", tasks.to_string()),
+                ],
+            );
+            if tasks >= 10 {
+                metrics.push_str(&format!(
+                    " ({:.0}%)",
+                    verified as f64 * 100.0 / tasks as f64
+                ));
+            }
+            let label = if role == "worker" {
+                s("Worker", "워커")
+            } else {
+                s("Expert", "전문가")
+            };
+            (label, metrics)
+        }
+        _ => return None,
+    };
+    Some(format!("{role} · {model} · {metrics}"))
+}
+
+fn show_scorecard(app: &mut App) {
+    let Some(rpc) = app.rpc.clone() else {
+        return offline(app);
+    };
+    let tx = app.sender();
+    tokio::spawn(async move {
+        // A server from before the scorecard has no such request, so the read fails there too.
+        let rows = rpc
+            .call(SCORECARD_RPC, json!({}))
+            .await
+            .ok()
+            .and_then(|result| result["rows"].as_array().cloned());
+        let _ = tx.send(Msg::Ext(Box::new(move |app| {
+            let Some(rows) = rows else {
+                app.notice = Some(
+                    s(
+                        "Could not load the crew scorecard from this server.",
+                        "이 서버에서 크루 성과표를 불러오지 못했습니다.",
+                    )
+                    .into(),
+                );
+                return;
+            };
+            let mut lines: Vec<_> = rows.iter().filter_map(scorecard_line).collect();
+            if lines.is_empty() {
+                lines.push(
+                    s(
+                        "No finished crew work in this period.",
+                        "이 기간에 종료된 크루 작업이 없습니다.",
+                    )
+                    .into(),
+                );
+            }
+            app.note(
+                Tone::Info,
+                s("Crew scorecard · Last 30 days", "크루 성과표 · 최근 30일"),
+                lines,
+            );
+        })));
+    });
+}
+
 /// `/crew` opens the screen; `/crew on|off`, `/crew preset <name>`, `/crew model <role> [model|auto]`
-/// and `/crew default` change it directly; `/crew back` leaves a crew task's thread.
+/// and `/crew default` change it directly; `/crew scorecard` reads environment history.
 pub fn run(app: &mut App, argument: &str) {
+    let args: Vec<&str> = argument.split_whitespace().collect();
+    let word = args.first().map(|w| w.to_lowercase());
+    if word.as_deref() == Some("scorecard") {
+        return show_scorecard(app);
+    }
     if matches!(app.active, Active::None) {
         app.notice = Some(tr("notice.pickFirst").into());
         return;
     }
-    let args: Vec<&str> = argument.split_whitespace().collect();
-    let word = args.first().map(|w| w.to_lowercase());
     if crew_sub(app).is_some() {
         match word.as_deref() {
             None | Some("back") => back_to_lead(app),
@@ -2685,3 +2783,50 @@ impl Screen for CrewScreen {
 #[cfg(test)]
 #[path = "cmd_crew_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod scorecard_tests {
+    use super::*;
+
+    #[test]
+    fn crew_scorecard_renders_counts_and_gates_verification_rates() {
+        let worker = scorecard_line(&json!({
+            "role": "worker", "model": "Model A", "tasks": 4,
+            "completed": 3, "verified": 3, "failed": 1
+        }))
+        .unwrap();
+        assert_eq!(
+            worker,
+            s(
+                "Worker · Model A · 3 completed · 1 failed · 3 of 4 verified",
+                "워커 · Model A · 완료 3건 · 실패 1건 · 4건 중 3건 검증",
+            )
+        );
+
+        let expert = scorecard_line(&json!({
+            "role": "expert", "model": "Model B", "tasks": 10,
+            "completed": 9, "verified": 8, "failed": 1
+        }))
+        .unwrap();
+        assert_eq!(
+            expert,
+            s(
+                "Expert · Model B · 9 completed · 1 failed · 8 of 10 verified (80%)",
+                "전문가 · Model B · 완료 9건 · 실패 1건 · 10건 중 8건 검증 (80%)",
+            )
+        );
+
+        let auditor = scorecard_line(&json!({
+            "role": "auditor", "model": "Model C", "audits": 4,
+            "needsChanges": 2, "provenBlocking": 1, "unreadable": 1
+        }))
+        .unwrap();
+        assert_eq!(
+            auditor,
+            s(
+                "Auditor · Model C · 4 audits · 2 asked for changes · 1 with proven blockers · 1 unreadable",
+                "감사자 · Model C · 감사 4건 · 변경 요청 2건 · 입증된 차단 문제 1건 · 판정 불가 1건",
+            )
+        );
+    }
+}

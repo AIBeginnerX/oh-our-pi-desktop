@@ -65,6 +65,28 @@ export function candidateNote(
   ].join("\n");
 }
 
+/**
+ * What the lead reads at the end of a stopped task's report: its unfinished changes were not
+ * applied, where they are, and the commands that apply them or clean up.
+ */
+export function stoppedNote(
+  worktree: CrewWorktree,
+  result: Extract<CrewKeepResult, { readonly kept: true }>,
+): string {
+  const quote = (value: string) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+  const patch = result.patchPath;
+  const repo = quote(worktree.repoRoot);
+  return [
+    "",
+    "Task was stopped. Changes were not applied.",
+    `Worktree: ${worktree.path}`,
+    ...(patch === null
+      ? ["The patch could not be written. The changes are in the worktree."]
+      : [`Patch: ${patch}`, `Apply with: git -C ${repo} apply --binary -- ${quote(patch)}`]),
+    `After review, remove with: git -C ${repo} worktree remove --force -- ${quote(worktree.path)}${patch === null ? "" : ` && rm -f -- ${quote(patch)}`}`,
+  ].join("\n");
+}
+
 /** The files `git apply` refused, read from its stderr. */
 export function applyConflictFiles(stderr: string): ReadonlyArray<string> {
   const files = stderr.split("\n").flatMap((line) => {
@@ -236,9 +258,9 @@ export const makeCrewWorktrees = Effect.gen(function* () {
       );
 
   /**
-   * For a candidate: writes the member's patch and keeps the worktree, and never touches the
+   * For a candidate or stopped task: writes the patch, keeps the worktree and never touches the
    * lead's workspace. A worktree with no changes is removed. A git failure keeps the worktree
-   * too, since the candidate's work is still in it.
+   * too, since the member's work is still in it.
    */
   const keep = (worktree: CrewWorktree): Effect.Effect<CrewKeepResult> =>
     Effect.gen(function* () {
@@ -247,7 +269,7 @@ export const makeCrewWorktrees = Effect.gen(function* () {
       return patchPath === null ? ({ kept: false } as const) : ({ kept: true, patchPath } as const);
     }).pipe(
       Effect.catch((error) =>
-        Effect.logWarning("crew candidate patch could not be written", { error }).pipe(
+        Effect.logWarning("crew worktree patch could not be written", { error }).pipe(
           Effect.as({ kept: true, patchPath: null } as const),
         ),
       ),

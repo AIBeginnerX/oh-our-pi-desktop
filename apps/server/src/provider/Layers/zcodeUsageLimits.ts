@@ -125,8 +125,8 @@ export function zcodeQuotaToWindows(payload: unknown): ServerProviderUsageWindow
 }
 
 /**
- * GLM coding-plan limits for the Z.ai or BigModel key ZCode signs in with, read from
- * `~/.zcode/v2/config.json`. Other ZCode providers (custom endpoints, MiniMax) report nothing.
+ * GLM coding-plan limits from the instance Z.ai key, then the legacy ZCode config.
+ * Other ZCode providers (custom endpoints, MiniMax) report nothing.
  */
 export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* (
   environment: NodeJS.ProcessEnv,
@@ -137,49 +137,72 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const home = environment.HOME || environment.USERPROFILE || NodeOS.homedir();
   const read = Effect.gen(function* () {
-    // Newer ZCode versions dropped `config.json` and keep every credential encrypted in
-    // `credentials.json`, which we do not decrypt. A missing file is that state, not a failure
-    // worth retrying, so it reports as unsupported.
-    const contents = yield* fs
-      .readFileString(path.join(home, ".zcode", "v2", "config.json"))
-      .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.void));
-    if (contents === undefined) {
-      return makeUnavailableUsageLimits({
-        checkedAt,
-        reason: "unsupported",
-        message:
-          "This ZCode version does not keep a plan key OOP can read, so GLM limits are not shown.",
-      });
+    const instanceKey = environment.OOP_ZAI_API_KEY?.trim();
+    let apiKey = instanceKey;
+    let host = "https://api.z.ai";
+    if (!apiKey) {
+      // Newer ZCode versions dropped `config.json` and keep every credential encrypted in
+      // `credentials.json`, which we do not decrypt. A missing file is that state, not a failure
+      // worth retrying, so it reports as unsupported.
+      const contents = yield* fs
+        .readFileString(path.join(home, ".zcode", "v2", "config.json"))
+        .pipe(Effect.catchReason("PlatformError", "NotFound", () => Effect.void));
+      if (contents === undefined) {
+        return makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message:
+            "This ZCode version does not keep a plan key OOP can read. Add OOP_ZAI_API_KEY with your Z.ai API key under this ZCode instance's Variables to see GLM limits.",
+        });
+      }
+      const config = yield* decodeConfig(contents);
+      const plan = Object.entries(config.provider ?? {}).find(
+        ([id, provider]) =>
+          id.startsWith("builtin:") &&
+          (id.includes("zai") || id.includes("bigmodel")) &&
+          provider.enabled === true &&
+          (provider.options?.apiKey?.trim().length ?? 0) > 0,
+      );
+      if (plan === undefined) {
+        return makeUnavailableUsageLimits({
+          checkedAt,
+          reason: "unsupported",
+          message: "Sign in to ZCode with a Z.ai or BigModel plan to see GLM limits.",
+        });
+      }
+      const [id, provider] = plan;
+      host =
+        id.includes("zai") || provider.options?.baseURL?.includes("api.z.ai")
+          ? "https://api.z.ai"
+          : "https://open.bigmodel.cn";
+      apiKey = provider.options?.apiKey?.trim();
     }
-    const config = yield* decodeConfig(contents);
-    const plan = Object.entries(config.provider ?? {}).find(
-      ([id, provider]) =>
-        id.startsWith("builtin:") &&
-        (id.includes("zai") || id.includes("bigmodel")) &&
-        provider.enabled === true &&
-        (provider.options?.apiKey?.trim().length ?? 0) > 0,
-    );
-    if (plan === undefined) {
-      return makeUnavailableUsageLimits({
-        checkedAt,
-        reason: "unsupported",
-        message: "Sign in to ZCode with a Z.ai or BigModel plan to see GLM limits.",
-      });
-    }
-    const [id, provider] = plan;
-    const host =
-      id.includes("zai") || provider.options?.baseURL?.includes("api.z.ai")
-        ? "https://api.z.ai"
-        : "https://open.bigmodel.cn";
     const response = yield* client.execute(
       HttpClientRequest.get(`${host}${QUOTA_PATH}`).pipe(
         HttpClientRequest.setHeaders({
           Accept: "application/json",
-          Authorization: `Bearer ${provider.options?.apiKey?.trim() ?? ""}`,
+          Authorization: `Bearer ${apiKey}`,
         }),
       ),
     );
-    const windows = zcodeQuotaToWindows(yield* response.json);
+    // Z.ai answers a bad key with HTTP 200 and `success: false`; a gateway may answer 401/403.
+    const denied = response.status === 401 || response.status === 403;
+    const payload: unknown = denied ? null : yield* response.json;
+    if (
+      denied ||
+      (typeof payload === "object" &&
+        payload !== null &&
+        "success" in payload &&
+        payload.success === false)
+    ) {
+      return makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "probeFailed",
+        message:
+          "Z.ai rejected the plan key. Add OOP_ZAI_API_KEY with your Z.ai API key under this ZCode instance's Variables to see GLM limits.",
+      });
+    }
+    const windows = zcodeQuotaToWindows(payload);
     return windows === null
       ? makeUnavailableUsageLimits({
           checkedAt,
@@ -190,14 +213,12 @@ export const readZCodeUsageLimits = Effect.fn("readZCodeUsageLimits")(function* 
   });
   return yield* read.pipe(
     Effect.timeout("10 seconds"),
-    Effect.catch(() =>
-      Effect.succeed(
-        makeUnavailableUsageLimits({
-          checkedAt,
-          reason: "probeFailed",
-          message: "Could not read GLM plan limits. Refresh provider status to retry.",
-        }),
-      ),
+    Effect.orElseSucceed(() =>
+      makeUnavailableUsageLimits({
+        checkedAt,
+        reason: "probeFailed",
+        message: "Could not read GLM plan limits. Refresh provider status to retry.",
+      }),
     ),
   );
 });

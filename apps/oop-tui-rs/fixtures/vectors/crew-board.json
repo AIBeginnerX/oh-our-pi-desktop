@@ -341,7 +341,7 @@
       }
     },
     {
-      "name": "approving audit after the worker makes it audited; the auditor has none",
+      "name": "the member's own word that tests passed is tests reported, not tested",
       "thread": {
         "id": "thread-1",
         "projectId": "project-1",
@@ -368,13 +368,74 @@
               "taskId": "w1",
               "crewRole": "worker",
               "status": "completed",
+              "tested": false,
+              "testsReported": true
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:09.000Z"
+          }
+        ],
+        "latestTurn": {
+          "turnId": "turn-1",
+          "state": "completed",
+          "requestedAt": "2026-01-01T00:00:00.000Z",
+          "startedAt": "2026-01-01T00:00:00.000Z",
+          "completedAt": "2026-01-01T00:01:40.000Z"
+        },
+        "session": {
+          "status": "ready",
+          "activeTurnId": null,
+          "updatedAt": "2026-01-01T00:00:00.000Z"
+        }
+      },
+      "expected": {
+        "tasks": [
+          {
+            "taskId": "w1",
+            "role": "worker",
+            "phase": "completed",
+            "evidence": "tests reported"
+          }
+        ],
+        "running": 0,
+        "settled": 1
+      }
+    },
+    {
+      "name": "approving audit after the worker makes it audited; the auditor has none",
+      "thread": {
+        "id": "thread-1",
+        "projectId": "project-1",
+        "title": "Vector",
+        "activities": [
+          {
+            "id": "act-317",
+            "tone": "info",
+            "kind": "task.started",
+            "summary": "task.started",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker"
+            },
+            "turnId": "turn-1",
+            "createdAt": "2026-01-01T00:00:01.000Z"
+          },
+          {
+            "id": "act-318",
+            "tone": "info",
+            "kind": "task.completed",
+            "summary": "task.completed",
+            "payload": {
+              "taskId": "w1",
+              "crewRole": "worker",
+              "status": "completed",
               "tested": true
             },
             "turnId": "turn-1",
             "createdAt": "2026-01-01T00:00:09.000Z"
           },
           {
-            "id": "act-317",
+            "id": "act-319",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -386,7 +447,7 @@
             "createdAt": "2026-01-01T00:00:10.000Z"
           },
           {
-            "id": "act-318",
+            "id": "act-320",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -439,7 +500,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-319",
+            "id": "act-321",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -451,7 +512,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-320",
+            "id": "act-322",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -465,7 +526,7 @@
             "createdAt": "2026-01-01T00:00:09.000Z"
           },
           {
-            "id": "act-321",
+            "id": "act-323",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -477,7 +538,7 @@
             "createdAt": "2026-01-01T00:00:10.000Z"
           },
           {
-            "id": "act-322",
+            "id": "act-324",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -530,7 +591,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-323",
+            "id": "act-325",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -542,7 +603,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-324",
+            "id": "act-326",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -556,7 +617,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-325",
+            "id": "act-327",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -568,7 +629,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-326",
+            "id": "act-328",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -620,7 +681,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-327",
+            "id": "act-329",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -632,7 +693,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-328",
+            "id": "act-330",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -645,7 +706,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-329",
+            "id": "act-331",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -657,7 +718,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-330",
+            "id": "act-332",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -671,7 +732,7 @@
             "createdAt": "2026-01-01T00:00:20.000Z"
           },
           {
-            "id": "act-331",
+            "id": "act-333",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -683,7 +744,7 @@
             "createdAt": "2026-01-01T00:00:21.000Z"
           },
           {
-            "id": "act-332",
+            "id": "act-334",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -741,7 +802,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-333",
+            "id": "act-335",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -753,7 +814,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-334",
+            "id": "act-336",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -766,7 +827,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-335",
+            "id": "act-337",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -778,7 +839,7 @@
             "createdAt": "2026-01-01T00:00:03.000Z"
           },
           {
-            "id": "act-336",
+            "id": "act-338",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -791,7 +852,7 @@
             "createdAt": "2026-01-01T00:00:04.000Z"
           },
           {
-            "id": "act-337",
+            "id": "act-339",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -803,7 +864,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-338",
+            "id": "act-340",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -816,7 +877,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-339",
+            "id": "act-341",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -828,7 +889,7 @@
             "createdAt": "2026-01-01T00:00:07.000Z"
           },
           {
-            "id": "act-340",
+            "id": "act-342",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -841,7 +902,7 @@
             "createdAt": "2026-01-01T00:00:08.000Z"
           },
           {
-            "id": "act-341",
+            "id": "act-343",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -853,7 +914,7 @@
             "createdAt": "2026-01-01T00:00:09.000Z"
           },
           {
-            "id": "act-342",
+            "id": "act-344",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -866,7 +927,7 @@
             "createdAt": "2026-01-01T00:00:10.000Z"
           },
           {
-            "id": "act-343",
+            "id": "act-345",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -878,7 +939,7 @@
             "createdAt": "2026-01-01T00:00:11.000Z"
           },
           {
-            "id": "act-344",
+            "id": "act-346",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -891,7 +952,7 @@
             "createdAt": "2026-01-01T00:00:12.000Z"
           },
           {
-            "id": "act-345",
+            "id": "act-347",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -903,7 +964,7 @@
             "createdAt": "2026-01-01T00:00:13.000Z"
           },
           {
-            "id": "act-346",
+            "id": "act-348",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -916,7 +977,7 @@
             "createdAt": "2026-01-01T00:00:14.000Z"
           },
           {
-            "id": "act-347",
+            "id": "act-349",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -928,7 +989,7 @@
             "createdAt": "2026-01-01T00:00:15.000Z"
           },
           {
-            "id": "act-348",
+            "id": "act-350",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -941,7 +1002,7 @@
             "createdAt": "2026-01-01T00:00:16.000Z"
           },
           {
-            "id": "act-349",
+            "id": "act-351",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -953,7 +1014,7 @@
             "createdAt": "2026-01-01T00:00:17.000Z"
           },
           {
-            "id": "act-350",
+            "id": "act-352",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1041,7 +1102,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-351",
+            "id": "act-353",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1053,7 +1114,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-352",
+            "id": "act-354",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1067,7 +1128,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-353",
+            "id": "act-355",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1079,7 +1140,7 @@
             "createdAt": "2026-01-01T00:00:03.000Z"
           },
           {
-            "id": "act-354",
+            "id": "act-356",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1093,7 +1154,7 @@
             "createdAt": "2026-01-01T00:00:04.000Z"
           },
           {
-            "id": "act-355",
+            "id": "act-357",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1105,7 +1166,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-356",
+            "id": "act-358",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1119,7 +1180,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-357",
+            "id": "act-359",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1131,7 +1192,7 @@
             "createdAt": "2026-01-01T00:00:07.000Z"
           },
           {
-            "id": "act-358",
+            "id": "act-360",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1145,7 +1206,7 @@
             "createdAt": "2026-01-01T00:00:08.000Z"
           },
           {
-            "id": "act-359",
+            "id": "act-361",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1157,7 +1218,7 @@
             "createdAt": "2026-01-01T00:00:09.000Z"
           },
           {
-            "id": "act-360",
+            "id": "act-362",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1231,7 +1292,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-361",
+            "id": "act-363",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1243,7 +1304,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-362",
+            "id": "act-364",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1261,7 +1322,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-363",
+            "id": "act-365",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1273,7 +1334,7 @@
             "createdAt": "2026-01-01T00:00:03.000Z"
           },
           {
-            "id": "act-364",
+            "id": "act-366",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1288,7 +1349,7 @@
             "createdAt": "2026-01-01T00:00:04.000Z"
           },
           {
-            "id": "act-365",
+            "id": "act-367",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1300,7 +1361,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-366",
+            "id": "act-368",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1315,7 +1376,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-367",
+            "id": "act-369",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1327,7 +1388,7 @@
             "createdAt": "2026-01-01T00:00:07.000Z"
           },
           {
-            "id": "act-368",
+            "id": "act-370",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1341,7 +1402,7 @@
             "createdAt": "2026-01-01T00:00:08.000Z"
           },
           {
-            "id": "act-369",
+            "id": "act-371",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1353,7 +1414,7 @@
             "createdAt": "2026-01-01T00:00:09.000Z"
           },
           {
-            "id": "act-370",
+            "id": "act-372",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1367,7 +1428,7 @@
             "createdAt": "2026-01-01T00:00:10.000Z"
           },
           {
-            "id": "act-371",
+            "id": "act-373",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1379,7 +1440,7 @@
             "createdAt": "2026-01-01T00:00:11.000Z"
           },
           {
-            "id": "act-372",
+            "id": "act-374",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1396,7 +1457,7 @@
             "createdAt": "2026-01-01T00:00:12.000Z"
           },
           {
-            "id": "act-373",
+            "id": "act-375",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1408,7 +1469,7 @@
             "createdAt": "2026-01-01T00:00:13.000Z"
           },
           {
-            "id": "act-374",
+            "id": "act-376",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1522,7 +1583,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-375",
+            "id": "act-377",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1534,7 +1595,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-376",
+            "id": "act-378",
             "tone": "info",
             "kind": "task.progress",
             "summary": "task.progress",
@@ -1548,7 +1609,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-377",
+            "id": "act-379",
             "tone": "info",
             "kind": "task.progress",
             "summary": "task.progress",
@@ -1562,7 +1623,7 @@
             "createdAt": "2026-01-01T00:00:03.000Z"
           },
           {
-            "id": "act-378",
+            "id": "act-380",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1575,7 +1636,7 @@
             "createdAt": "2026-01-01T00:00:04.000Z"
           },
           {
-            "id": "act-379",
+            "id": "act-381",
             "tone": "info",
             "kind": "task.progress",
             "summary": "task.progress",
@@ -1589,7 +1650,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-380",
+            "id": "act-382",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1601,7 +1662,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-381",
+            "id": "act-383",
             "tone": "info",
             "kind": "task.progress",
             "summary": "task.progress",
@@ -1615,7 +1676,7 @@
             "createdAt": "2026-01-01T00:00:07.000Z"
           },
           {
-            "id": "act-382",
+            "id": "act-384",
             "tone": "info",
             "kind": "task.progress",
             "summary": "task.progress",
@@ -1681,7 +1742,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-383",
+            "id": "act-385",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1693,7 +1754,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-384",
+            "id": "act-386",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1711,7 +1772,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-385",
+            "id": "act-387",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1723,7 +1784,7 @@
             "createdAt": "2026-01-01T00:00:03.000Z"
           },
           {
-            "id": "act-386",
+            "id": "act-388",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1740,7 +1801,7 @@
             "createdAt": "2026-01-01T00:00:04.000Z"
           },
           {
-            "id": "act-387",
+            "id": "act-389",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1752,7 +1813,7 @@
             "createdAt": "2026-01-01T00:00:05.000Z"
           },
           {
-            "id": "act-388",
+            "id": "act-390",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1769,7 +1830,7 @@
             "createdAt": "2026-01-01T00:00:06.000Z"
           },
           {
-            "id": "act-389",
+            "id": "act-391",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1781,7 +1842,7 @@
             "createdAt": "2026-01-01T00:00:07.000Z"
           },
           {
-            "id": "act-390",
+            "id": "act-392",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1860,7 +1921,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-391",
+            "id": "act-393",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1872,7 +1933,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-392",
+            "id": "act-394",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1927,7 +1988,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-393",
+            "id": "act-395",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1939,7 +2000,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-394",
+            "id": "act-396",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -1986,7 +2047,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-395",
+            "id": "act-397",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -1998,7 +2059,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-396",
+            "id": "act-398",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2012,7 +2073,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-397",
+            "id": "act-399",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2024,7 +2085,7 @@
             "createdAt": "2026-01-01T00:00:03.000Z"
           },
           {
-            "id": "act-398",
+            "id": "act-400",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2077,7 +2138,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-399",
+            "id": "act-401",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2089,7 +2150,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-400",
+            "id": "act-402",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2101,7 +2162,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-401",
+            "id": "act-403",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2153,7 +2214,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-402",
+            "id": "act-404",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2165,7 +2226,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-403",
+            "id": "act-405",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2178,7 +2239,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-404",
+            "id": "act-406",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2227,7 +2288,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-405",
+            "id": "act-407",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2239,7 +2300,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-406",
+            "id": "act-408",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2252,7 +2313,7 @@
             "createdAt": "2026-01-01T00:00:02.000Z"
           },
           {
-            "id": "act-407",
+            "id": "act-409",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2264,7 +2325,7 @@
             "createdAt": "2026-01-01T00:00:11.000Z"
           },
           {
-            "id": "act-408",
+            "id": "act-410",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",
@@ -2310,7 +2371,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-409",
+            "id": "act-411",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2322,7 +2383,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-410",
+            "id": "act-412",
             "tone": "tool",
             "kind": "tool.completed",
             "summary": "tool.completed",
@@ -2367,7 +2428,7 @@
         "title": "Vector",
         "activities": [
           {
-            "id": "act-411",
+            "id": "act-413",
             "tone": "info",
             "kind": "task.started",
             "summary": "task.started",
@@ -2379,7 +2440,7 @@
             "createdAt": "2026-01-01T00:00:01.000Z"
           },
           {
-            "id": "act-412",
+            "id": "act-414",
             "tone": "info",
             "kind": "task.completed",
             "summary": "task.completed",

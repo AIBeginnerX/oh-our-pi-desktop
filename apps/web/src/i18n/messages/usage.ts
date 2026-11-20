@@ -2,6 +2,36 @@ import type { MessageCatalog } from "./types";
 
 /** The Usage page: unpriced display, coverage note, inline limit gauges, sortable breakdown. */
 export const USAGE_MESSAGES: MessageCatalog = {
+  "Weekly usage almost used up": {
+    ko: "주간 사용 한도에 거의 도달했습니다",
+    ja: "週間利用枠が残りわずかです",
+    "zh-CN": "每周用量即将达到上限",
+    es: "Casi has agotado tu cuota semanal",
+  },
+  "Usage · weekly limit almost reached": {
+    ko: "사용량 · 주간 한도 임박",
+    ja: "使用量 · 週間上限間近",
+    "zh-CN": "用量 · 即将达到每周上限",
+    es: "Uso · a punto de alcanzar el límite semanal",
+  },
+  "{account} · {percent}% left, resets {time}": {
+    ko: "{account} · {percent}% 남음, {time}에 초기화",
+    ja: "{account} · 残り{percent}%、{time}にリセット",
+    "zh-CN": "{account} · 剩余 {percent}%，{time} 重置",
+    es: "{account} · queda un {percent}%, se restablece el {time}",
+  },
+  "{account} · {percent}% left": {
+    ko: "{account} · {percent}% 남음",
+    ja: "{account} · 残り{percent}%",
+    "zh-CN": "{account} · 剩余 {percent}%",
+    es: "{account} · queda un {percent}%",
+  },
+  "View usage": {
+    ko: "사용량 보기",
+    ja: "使用量を見る",
+    "zh-CN": "查看用量",
+    es: "Ver uso",
+  },
   Plan: {
     ko: "플랜",
     ja: "プラン",

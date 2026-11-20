@@ -482,7 +482,8 @@ export function ProjectMemoryPicker(props: {
     () => new Set(props.selected.map((reference) => reference.memoryId)),
     [props.selected],
   );
-  const items = result.data?.items ?? [];
+  // A held memory is not sent, so it is not offered.
+  const items = (result.data?.items ?? []).filter((item) => item.held !== true);
   return (
     <div className="flex max-h-80 min-w-64 flex-col gap-1" data-memory-picker="true">
       <Input

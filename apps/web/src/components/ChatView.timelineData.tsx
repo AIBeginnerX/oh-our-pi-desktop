@@ -1,5 +1,5 @@
 import { useT } from "../i18n";
-import { runningCrewAudit, completedCrewAuditCount } from "@t3tools/client-runtime/crew-board";
+import { runningCrewAudit } from "@t3tools/client-runtime/crew-board";
 import { collectProviderUsageLimits, hasProviderUsageLimits } from "@t3tools/shared/usageLimits";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
@@ -377,18 +377,21 @@ export function useChatViewTimelineData({
   );
   const t = useT();
   const audit = useMemo(() => runningCrewAudit(threadActivities), [threadActivities]);
-  const completedAuditCount = useMemo(
-    () => completedCrewAuditCount(threadActivities),
+  const usageReceiptCount = useMemo(
+    () =>
+      threadActivities.filter(
+        (activity) => activity.kind === "task.completed" || activity.kind === "owned-usage",
+      ).length,
     [threadActivities],
   );
-  // The chat usage footer read: fetched on thread open, turn settle, and audit completion.
+  // Refresh after crew completions too: children can finish after the lead settles.
   const threadUsageSummary = useThreadUsageSummary({
     environmentId,
     threadId: activeThreadId,
     latestTurnId: activeLatestTurn?.turnId ?? null,
     latestTurnSettled,
     auditRunning: audit !== null,
-    completedAuditCount,
+    completedAuditCount: usageReceiptCount,
   });
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the

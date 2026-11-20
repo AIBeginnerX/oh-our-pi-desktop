@@ -36,6 +36,7 @@ import {
   PROVIDER_STOPPED_START_DETAIL,
   type CrewMemoryRef,
   type CrewTaskOutcome,
+  type crewFailureKind,
 } from "./crewLogic.ts";
 
 import type { CrewTaskReport } from "./CrewService.ts";
@@ -91,6 +92,7 @@ export interface CrewAttempt {
   threadId?: ThreadId | undefined;
   messageId?: MessageId | undefined;
   error?: string | undefined;
+  kind?: ReturnType<typeof crewFailureKind> | "restart" | undefined;
 }
 
 export interface CrewTaskRecord {

@@ -1288,6 +1288,18 @@ const crewCases = [
     lastT1,
   ],
   [
+    "the member's own word that tests passed is tests reported, not tested",
+    [
+      crewTask("task.started", LEAD, 1, "w1", "worker"),
+      crewTask("task.completed", LEAD, 9, "w1", "worker", {
+        status: "completed",
+        tested: false,
+        testsReported: true,
+      }),
+    ],
+    lastT1,
+  ],
+  [
     "approving audit after the worker makes it audited; the auditor has none",
     [
       crewTask("task.started", LEAD, 1, "w1", "worker"),

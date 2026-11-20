@@ -171,10 +171,12 @@ pub fn read_file(path: &Path) -> SettingsFile {
     }
     match object.get("memoryAutoApprove").map(|v| v.as_str()) {
         None => {}
-        Some(Some(value @ ("off" | "analyser" | "all"))) => {
+        Some(Some(value @ ("off" | "all"))) => {
             settings.memory_auto_approve = value.to_string();
         }
-        Some(_) => bad("memoryAutoApprove", "off | analyser | all"),
+        // `on` is the easy word for the safe level, which is stored as `analyser`.
+        Some(Some("on" | "analyser")) => settings.memory_auto_approve = "analyser".into(),
+        Some(_) => bad("memoryAutoApprove", "on | off | analyser | all"),
     }
     match object.get("language").map(|v| v.as_str()) {
         None => {}
@@ -406,8 +408,13 @@ mod tests {
     fn memory_auto_approve_modes() {
         let path = temp("memory-auto");
         assert_eq!(Settings::default().memory_auto_approve, "off");
-        for mode in ["off", "analyser", "all"] {
-            std::fs::write(&path, json!({"memoryAutoApprove":mode}).to_string()).unwrap();
+        for (written, mode) in [
+            ("off", "off"),
+            ("on", "analyser"),
+            ("analyser", "analyser"),
+            ("all", "all"),
+        ] {
+            std::fs::write(&path, json!({"memoryAutoApprove":written}).to_string()).unwrap();
             let file = read_file(&path);
             assert_eq!(file.settings.memory_auto_approve, mode);
             assert!(file.warnings.is_empty());
@@ -416,7 +423,7 @@ mod tests {
             std::fs::write(&path, json!({"memoryAutoApprove":value}).to_string()).unwrap();
             let file = read_file(&path);
             assert_eq!(file.settings.memory_auto_approve, "off");
-            assert!(file.warnings[0].contains("off | analyser | all"));
+            assert!(file.warnings[0].contains("on | off | analyser | all"));
         }
         cleanup(&path);
     }

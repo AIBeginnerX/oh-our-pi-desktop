@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import {
   ensureTerminalApp,
   ensureTerminalCommand,
+  ensureWindowsTerminalCommand,
   installedAppBundle,
   type TerminalIntegrationTools,
 } from "./DesktopTerminalIntegration.ts";
@@ -302,4 +303,82 @@ describe("ensureTerminalCommand", () => {
       assert.deepEqual(await NodeFSP.readdir(root), ["Applications"]);
     });
   });
+});
+
+describe("terminal-only macOS takeover", () => {
+  for (const version of ["0.0.9", "0.0.158", "0.0.159", "garbled", null]) {
+    it(`handles installed version ${version}`, async () => {
+      await withTemp(async (root) => {
+        const { appBundle } = await makeApp(root);
+        const install = NodePath.join(root, "terminal's");
+        const binDirectory = NodePath.join(root, "bin");
+        const markerFile = NodePath.join(root, "remembered");
+        await NodeFSP.mkdir(install);
+        await NodeFSP.mkdir(binDirectory);
+        if (version !== null)
+          await NodeFSP.writeFile(NodePath.join(install, ".oop-terminal-install"), version + "\n");
+        const quoted = "'" + install.replaceAll("'", "'\\''") + "'";
+        const original =
+          "#!/bin/sh\n# oop-terminal-launcher (written by install-terminal.sh; safe to delete)\nroot=" +
+          quoted +
+          "\n";
+        const target = NodePath.join(binDirectory, "oop");
+        await NodeFSP.writeFile(target, original);
+        const result = await ensureTerminalCommand({
+          appBundle,
+          binDirectory,
+          markerFile,
+          appVersion: "0.0.158",
+        });
+        assert.equal(result, version === "0.0.9" ? "replaced-older-terminal" : "terminal-install");
+        assert.equal(
+          await NodeFSP.readFile(target, "utf8"),
+          version === "0.0.9" ? terminalLauncherScript(appBundle) : original,
+        );
+        assert.isTrue((await NodeFSP.stat(install)).isDirectory());
+        if (version === "0.0.9") assert.isTrue((await NodeFSP.stat(markerFile)).isFile());
+      });
+    });
+  }
+});
+
+describe("Windows terminal-only takeover", () => {
+  for (const version of ["0.0.9", "0.0.158", "0.0.159", "garbled", null]) {
+    it(`handles installed version ${version}`, async () => {
+      await withTemp(async (root) => {
+        const directory = NodePath.join(root, "oop-terminal");
+        const resourcesPath = NodePath.join(root, "resources");
+        await NodeFSP.mkdir(directory);
+        await NodeFSP.mkdir(NodePath.join(resourcesPath, "oop"), { recursive: true });
+        await NodeFSP.writeFile(NodePath.join(resourcesPath, "oop", "oop-rs.exe"), "");
+        if (version !== null)
+          await NodeFSP.writeFile(
+            NodePath.join(directory, ".oop-terminal-install"),
+            version + "\r\n",
+          );
+        const target = NodePath.join(directory, "oop.cmd");
+        const original =
+          '@echo off\r\nrem oop-terminal-launcher (written by install-terminal.ps1; safe to delete)\r\n"%LOCALAPPDATA%/oop-terminal\\oop-rs.exe" %*\r\n';
+        await NodeFSP.writeFile(target, original);
+        const input = {
+          executable: "C:\\OOP\\OOP.exe",
+          resourcesPath,
+          appVersion: "0.0.158",
+          localAppData: root,
+          programFiles: undefined,
+        };
+        assert.equal(
+          await ensureWindowsTerminalCommand(input),
+          version === "0.0.9" ? "replaced-older-terminal" : "terminal-install",
+        );
+        const actual = await NodeFSP.readFile(target, "utf8");
+        if (version === "0.0.9") {
+          assert.include(actual, "rem oop-desktop-terminal-launcher");
+          assert.include(actual, "set OOP_IN_DESKTOP_APP=1");
+          assert.equal(await ensureWindowsTerminalCommand(input), "foreign");
+        } else assert.equal(actual, original);
+        assert.isTrue((await NodeFSP.stat(directory)).isDirectory());
+      });
+    });
+  }
 });

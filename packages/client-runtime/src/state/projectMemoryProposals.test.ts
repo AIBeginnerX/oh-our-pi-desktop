@@ -19,17 +19,16 @@ const base = {
 } as unknown as ProjectMemoryProposal;
 
 describe("projectMemoryProposalView", () => {
-  it("treats a proposal without analysis as an approvable agent proposal", () => {
+  it("treats a proposal without analysis as an agent proposal", () => {
     expect(projectMemoryProposalView(base)).toEqual({
       source: "agent",
       target: "memory",
-      canApprove: true,
       evidenceThreadIds: [],
       related: [],
     });
   });
 
-  it("lists each evidence thread once and blocks approving a skill suggestion", () => {
+  it("marks a skill suggestion and lists each evidence thread once", () => {
     const view = projectMemoryProposalView({
       ...base,
       analysis: {
@@ -43,7 +42,7 @@ describe("projectMemoryProposalView", () => {
       },
     } as unknown as ProjectMemoryProposal);
     expect(view.source).toBe("analyser");
-    expect(view.canApprove).toBe(false);
+    expect(view.target).toBe("skill");
     expect(view.evidenceThreadIds).toEqual(["t1", "t2"]);
   });
 });

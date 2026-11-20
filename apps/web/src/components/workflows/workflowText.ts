@@ -143,9 +143,14 @@ export function nodeText(node: WorkflowNode, t: Translate): NodeText {
     model: modelText(node.info.model),
     body: actor.role === "main" ? tools || undefined : (actor.task ?? node.info.progress),
     status:
-      node.state === "running" && actor.doing !== undefined
-        ? doingText(actor.doing, t)
-        : stateText(node, t),
+      node.state !== "running"
+        ? stateText(node, t)
+        : actor.doing !== undefined
+          ? doingText(actor.doing, t)
+          : // A main agent whose turn ended keeps running only for background work it names here.
+            actor.role === "main" && node.info.progress !== undefined
+            ? t(node.info.progress)
+            : stateText(node, t),
   };
 }
 

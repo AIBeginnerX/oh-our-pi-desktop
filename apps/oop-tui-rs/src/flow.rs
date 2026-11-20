@@ -1358,6 +1358,8 @@ fn collect_tool_steps(activities: &[Activity]) -> Vec<TurnSteps> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Evidence {
     Reported,
+    /// The member says its tests passed; OOP did not see them pass.
+    TestsReported,
     Tested,
     Audited,
 }
@@ -1402,6 +1404,7 @@ struct CrewStep {
     /// The `task.completed` status; absent while the task runs.
     outcome: Option<String>,
     tested: bool,
+    tests_reported: bool,
     verdict: Option<String>,
     proof: Option<Proof>,
     usage: Option<CrewUsage>,
@@ -1450,6 +1453,7 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
                     thread_id: None,
                     outcome: None,
                     tested: false,
+                    tests_reported: false,
                     verdict: None,
                     proof: None,
                     usage: None,
@@ -1492,6 +1496,7 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
             task.completed_at = Some(activity.created_at.clone());
             task.outcome = txt(&payload["status"], 20);
             task.tested = payload["tested"].as_bool() == Some(true);
+            task.tests_reported = payload["testsReported"].as_bool() == Some(true);
             task.verdict = txt(&payload["verdict"], 20);
             task.proof = Proof::from_payload(&payload["proof"]);
             let usage = &payload["usage"];
@@ -1515,7 +1520,8 @@ fn collect_crew_tasks(activities: &[Activity]) -> Vec<(String, Vec<CrewStep>)> {
 }
 
 /// How far each finished worker or expert task can be trusted: audited when the latest audit that
-/// finished after it approved, tested when its own run passed tests, reported otherwise.
+/// finished after it approved, tested when OOP saw its tests pass, tests reported when only the
+/// member says so, reported otherwise.
 fn crew_evidence(tasks: &[CrewStep]) -> HashMap<String, Evidence> {
     let mut audits: Vec<&CrewStep> = tasks
         .iter()
@@ -1549,6 +1555,8 @@ fn crew_evidence(tasks: &[CrewStep]) -> HashMap<String, Evidence> {
                 Evidence::Audited
             } else if task.tested {
                 Evidence::Tested
+            } else if task.tests_reported {
+                Evidence::TestsReported
             } else {
                 Evidence::Reported
             },
@@ -2762,6 +2770,15 @@ mod tests {
             .unwrap_or_else(|e| panic!("{}: thread: {e}", case["name"]))
     }
 
+    fn evidence_name(evidence: Evidence) -> &'static str {
+        match evidence {
+            Evidence::Reported => "reported",
+            Evidence::TestsReported => "tests reported",
+            Evidence::Tested => "tested",
+            Evidence::Audited => "audited",
+        }
+    }
+
     fn proof_name(proof: Proof) -> &'static str {
         match proof {
             Proof::Verified => "verified",
@@ -2791,7 +2808,7 @@ mod tests {
             "completedAt": node.completed_at,
             "tokens": node.tokens,
             "costUsd": node.cost,
-            "evidence": node.evidence.map(lower),
+            "evidence": node.evidence.map(evidence_name),
             "outcome": node.outcome,
             "error": node.error,
         });
@@ -2869,7 +2886,7 @@ mod tests {
                             "taskId": t.task_id,
                             "role": t.role,
                             "phase": lower(t.phase),
-                            "evidence": t.evidence.map(lower),
+                            "evidence": t.evidence.map(evidence_name),
                             "proof": t.proof.map(proof_name),
                             "tokens": t.tokens,
                             "costUsd": t.cost,

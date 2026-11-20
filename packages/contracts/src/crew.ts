@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { CrewFallbackRoles, CrewPinnedRoles, CrewPreset } from "./orchestration.ts";
 
 /**
@@ -71,6 +71,45 @@ export const CrewStopTasksResult = Schema.Struct({
   stopping: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type CrewStopTasksResult = typeof CrewStopTasksResult.Type;
+
+/**
+ * How one model did in one crew role. For the auditor, `needsChanges` counts the reviews that
+ * asked for changes and `provenBlocking` those of them that backed a blocking finding with evidence.
+ */
+export const CrewScorecardRow = Schema.Union([
+  Schema.Struct({
+    role: Schema.Literals(["worker", "expert"]),
+    model: Schema.String,
+    tasks: NonNegativeInt,
+    completed: NonNegativeInt,
+    verified: NonNegativeInt,
+    failed: NonNegativeInt,
+  }),
+  Schema.Struct({
+    role: Schema.Literal("auditor"),
+    model: Schema.String,
+    audits: NonNegativeInt,
+    needsChanges: NonNegativeInt,
+    provenBlocking: NonNegativeInt,
+    unreadable: NonNegativeInt,
+  }),
+]);
+export type CrewScorecardRow = typeof CrewScorecardRow.Type;
+
+export const CrewScorecard = Schema.Struct({
+  windowStart: IsoDateTime,
+  rows: Schema.Array(CrewScorecardRow),
+});
+export type CrewScorecard = typeof CrewScorecard.Type;
+
+export class CrewScorecardReadError extends Schema.TaggedError<CrewScorecardReadError>()(
+  "CrewScorecardReadError",
+  { reason: Schema.String },
+) {
+  override get message(): string {
+    return this.reason;
+  }
+}
 
 export class CrewStopTasksError extends Schema.TaggedError<CrewStopTasksError>()(
   "CrewStopTasksError",

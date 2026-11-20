@@ -75,6 +75,7 @@ export interface WorkflowActor {
 }
 
 export interface WorkflowNodeInfo {
+  readonly background?: boolean;
   readonly actor?: WorkflowActor;
   /** On a tool step: the category it counts under; absent for steps that launch agents. */
   readonly toolCategory?: ToolCategory;

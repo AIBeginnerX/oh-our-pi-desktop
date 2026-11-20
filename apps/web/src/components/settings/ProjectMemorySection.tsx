@@ -2,13 +2,15 @@ import type {
   EnvironmentId,
   ProjectId,
   ProjectMemory,
+  ProjectMemoryAnalysisHealth,
   ProjectMemoryDerivedFrom,
   ProjectMemoryId,
   ProjectMemoryKind,
   ProjectMemoryOrigin,
+  ProjectMemorySummary,
   ProjectMemoryWriteResult,
 } from "@t3tools/contracts";
-import { PROJECT_MEMORY_MAX_LIMIT } from "@t3tools/contracts";
+import { isProjectMemoryWorthReviewing, PROJECT_MEMORY_MAX_LIMIT } from "@t3tools/contracts";
 import { projectMemoryAnalyserState } from "@t3tools/client-runtime/state/project-memory-proposals";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
@@ -31,6 +33,7 @@ import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { isElectron } from "../../env";
 import { useT } from "../../i18n";
+import { useUiLanguage } from "../../state/menuLanguage";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { usePrimarySessionState } from "../../environments/primary";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -743,6 +746,57 @@ export function ProjectMemorySection({
 }
 
 /**
+ * One quiet line under the analyser row: when the analyser last ran for this project, what it
+ * looked at, and why it suggested nothing, so an empty suggestions list is explained.
+ */
+function ProjectMemoryAnalysisStatus({
+  enabled,
+  loaded,
+  failed,
+  health,
+}: {
+  readonly enabled: boolean;
+  readonly loaded: boolean;
+  readonly failed: boolean;
+  readonly health: ProjectMemoryAnalysisHealth | undefined;
+}) {
+  const t = useT();
+  const language = useUiLanguage();
+  // The analyser row already says when the analyser is off, so this line only adds what it knows.
+  const reason = !enabled
+    ? undefined
+    : failed
+      ? t("Could not load work analyser status.")
+      : loaded && health === undefined
+        ? t("Work analyser has not run for this project yet.")
+        : undefined;
+  const lastRun = health
+    ? t("Last analysis {date}. Checked {threads} threads, {signals} with signals.", {
+        date: new Date(health.lastAttemptAt).toLocaleString(language, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        threads: health.threadsRead,
+        signals: health.threadsWithSignals,
+      })
+    : undefined;
+  const outcome =
+    enabled && !failed && health
+      ? {
+          proposed: undefined,
+          "no-signals": t("No new work signals found."),
+          "no-candidates": t("No new suggestions met the evidence requirements."),
+          "queue-full": t(
+            "The review queue is full. Analysis continues after you review a suggestion.",
+          ),
+          failed: t("The last analysis failed."),
+        }[health.outcome]
+      : undefined;
+  const status = [reason, lastRun, outcome].filter(Boolean).join(" ");
+  return status ? <p className="text-xs text-muted-foreground">{status}</p> : null;
+}
+
+/**
  * The work analyser is off until the user turns it on in General settings, and
  * only runs when asked here. It sends structured summaries of recent work (check results, review
  * verdicts, reverts), never chat text, to the project's text-generation model.
@@ -753,11 +807,13 @@ function ProjectMemoryAnalyserRow({
   projectId,
   enabled,
   writeLock,
+  refreshProposals,
 }: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
   readonly enabled: boolean;
   readonly writeLock: string | null;
+  readonly refreshProposals: () => void;
 }) {
   const t = useT();
   const analyse = useAtomCommand(projectMemory.analyse, { reportFailure: false });
@@ -769,8 +825,15 @@ function ProjectMemoryAnalyserRow({
     try {
       const result = await analyse({ environmentId, input: { projectId } });
       if (result._tag === "Success") {
-        const { memoriesProposed, skillsSuggested, tidiesSuggested } = result.value;
+        const { memoriesProposed, skillsSuggested, tidiesSuggested, queueFull } = result.value;
         const found = memoriesProposed + skillsSuggested;
+        if (queueFull) {
+          toastManager.add({
+            type: "warning",
+            title: t("The review queue is full. Analysis continues after you review a suggestion."),
+          });
+          return;
+        }
         toastManager.add({
           type: "success",
           title:
@@ -786,6 +849,7 @@ function ProjectMemoryAnalyserRow({
         return;
       }
       if (isAtomCommandInterrupted(result)) return;
+      refreshProposals();
       const cause = squashAtomCommandFailure(result);
       toastManager.add({
         type: "error",
@@ -815,6 +879,70 @@ function ProjectMemoryAnalyserRow({
         </Button>
       }
     />
+  );
+}
+
+function ProjectMemoryOutcomeRow({
+  environmentId,
+  item,
+  writeLock,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly item: ProjectMemorySummary;
+  readonly writeLock: string | null;
+}) {
+  const t = useT();
+  const update = useAtomCommand(projectMemory.update);
+  const [saving, setSaving] = useState(false);
+  const { outcomes } = item;
+  const held = item.held === true;
+  const review = isProjectMemoryWorthReviewing(outcomes);
+
+  const toggleHold = async () => {
+    if (saving || writeLock !== null) return;
+    setSaving(true);
+    try {
+      await update({
+        environmentId,
+        input: {
+          projectId: item.projectId,
+          memoryId: item.memoryId,
+          expectedVersion: item.version,
+          held: !held,
+        },
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 px-2 pb-1">
+      {outcomes !== undefined ? (
+        <p className="text-xs text-muted-foreground">
+          {t(
+            "Sent to {sent} threads · {good} went well · {bad} went poorly · {unknown} unknown",
+            outcomes,
+          )}
+        </p>
+      ) : null}
+      {held || review ? (
+        <>
+          <Badge variant="outline" size="sm">
+            {held ? t("Memory held") : t("Worth reviewing")}
+          </Badge>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={saving || writeLock !== null}
+            title={writeLock ?? undefined}
+            onClick={() => void toggleHold()}
+          >
+            {held ? t("Resume memory") : t("Hold memory")}
+          </Button>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -861,6 +989,9 @@ function ProjectMemorySectionInner({
           input: { projectId, query: search, limit: PROJECT_MEMORY_MAX_LIMIT },
         }),
   );
+  const proposals = useEnvironmentQuery(
+    showProposals ? projectMemory.proposals({ environmentId, input: { projectId } }) : null,
+  );
   // Every pending read reports no value, so a memory another client deleted
   // (or this client just removed) cannot linger in the list while its
   // replacement loads.
@@ -890,14 +1021,24 @@ function ProjectMemorySectionInner({
           projectId={projectId}
           enabled={analyser === "on"}
           writeLock={writeLock}
+          refreshProposals={proposals.refresh}
         />
       ) : null}
       <div className="flex flex-col gap-2 px-6">
         {writeLock !== null ? <p className="text-xs text-muted-foreground">{writeLock}</p> : null}
+        {analyser !== "unsupported" ? (
+          <ProjectMemoryAnalysisStatus
+            enabled={analyser === "on"}
+            loaded={proposals.isSuccess}
+            failed={proposals.error !== null}
+            health={proposals.data?.analysisHealth}
+          />
+        ) : null}
         {showProposals ? (
           <ProjectMemoryProposals
             environmentId={environmentId}
             projectId={projectId}
+            items={proposals.data?.items ?? []}
             writeLock={writeLock}
           />
         ) : null}
@@ -925,6 +1066,11 @@ function ProjectMemorySectionInner({
             {trimmed === "" ? "No memories yet." : "No memories match this search."}
           </p>
         ) : null}
+        {items.some((item) => (item.outcomes?.bad ?? 0) > 0) ? (
+          <p className="text-xs text-muted-foreground">
+            {t("A bad outcome does not prove the memory caused it.")}
+          </p>
+        ) : null}
         <ul className="flex flex-col">
           {items.map((item) => (
             <li key={item.memoryId}>
@@ -949,6 +1095,13 @@ function ProjectMemorySectionInner({
                   ≈{item.estimatedTokens} tok
                 </span>
               </button>
+              {item.outcomes !== undefined || item.held === true ? (
+                <ProjectMemoryOutcomeRow
+                  environmentId={environmentId}
+                  item={item}
+                  writeLock={writeLock}
+                />
+              ) : null}
             </li>
           ))}
         </ul>

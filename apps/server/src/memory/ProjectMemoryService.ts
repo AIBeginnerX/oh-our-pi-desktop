@@ -25,6 +25,7 @@ import {
   type ProjectMemory,
   type ProjectMemoryAcknowledgeThreadInput,
   type ProjectMemoryAcknowledgeThreadResult,
+  ProjectMemoryAnalysisHealth,
   type ProjectMemoryCreateInput,
   ProjectMemoryConflictError,
   type ProjectMemoryEvidence,
@@ -60,6 +61,7 @@ import {
 import { ProjectMemoryRepository } from "../persistence/ProjectMemories.ts";
 import { ProjectMemorySendLedger } from "../persistence/ProjectMemorySendLedger.ts";
 import { ProjectionProjectRepository } from "../persistence/Services/ProjectionProjects.ts";
+import { listMemoryOutcomeCounts } from "./memoryOutcomeStore.ts";
 import { ProjectionThreadRepository } from "../persistence/Services/ProjectionThreads.ts";
 import {
   LESSON_DUPLICATE_SIMILARITY,
@@ -69,6 +71,8 @@ import {
 } from "./derivedLessons.ts";
 import { makeSearchPlan, planHasTerms } from "./memorySearch.ts";
 import { looksLikeSensitiveText } from "./sensitiveText.ts";
+
+const decodeAnalysisHealth = Schema.decodeUnknownEffect(ProjectMemoryAnalysisHealth);
 
 /** What an agent hands to `memory_propose`. */
 export interface ProjectMemoryProposeInput {
@@ -115,8 +119,8 @@ export type ProjectMemoryProposeDerivedOutcome =
  *
  * Agent proposals are not memories until a user approves them: they live in
  * their own table, so list, search, get, and every send path never see them.
- * `approveProposal` moves one into the memory store as a normal `fact`;
- * `rejectProposal` deletes it.
+ * `approveProposal` moves one into the memory store as a `fact` or
+ * `procedure`. `rejectProposal` deletes it.
  *
  * Expiry is *not* a read filter: expired memories stay listable and
  * deletable so users can manage them; `validUntil` is enforced when content
@@ -221,6 +225,7 @@ const toSummary = (record: ProjectMemory): ProjectMemorySummary => ({
   title: record.title,
   version: record.version,
   origin: record.origin,
+  ...(record.held === true ? { held: true } : {}),
   ...(record.derivedFrom === undefined ? {} : { derivedFrom: record.derivedFrom }),
   validUntil: record.validUntil,
   estimatedTokens: record.estimatedTokens,
@@ -300,15 +305,42 @@ export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crypto = yield* Crypto.Crypto;
 
-  const browse = (projectId: ProjectId, limit: number, includeBody = false) =>
-    repository.listForProject({ projectId, limit }).pipe(
-      Effect.map((page) => ({
-        items: page.items.map((record) =>
-          includeBody ? { ...toSummary(record), body: record.body } : toSummary(record),
-        ),
+  const summarizePage = (
+    projectId: ProjectId,
+    page: { readonly items: ReadonlyArray<ProjectMemory>; readonly truncated: boolean },
+    includeBody = false,
+  ) =>
+    Effect.gen(function* () {
+      const counts =
+        page.items.length === 0 ? [] : yield* listMemoryOutcomeCounts(sql, page.items, projectId);
+      const byId = new Map(counts.map(({ memoryId, ...row }) => [memoryId, row]));
+      return {
+        items: page.items.map((record) => {
+          const count = byId.get(record.memoryId);
+          return {
+            ...toSummary(record),
+            ...(includeBody ? { body: record.body } : {}),
+            // Only a memory whose current version was sent has outcomes to show.
+            ...(count?.version === record.version
+              ? {
+                  outcomes: {
+                    sent: count.sent,
+                    good: count.good,
+                    bad: count.bad,
+                    unknown: count.unknown,
+                  },
+                }
+              : {}),
+          };
+        }),
         truncated: page.truncated,
-      })),
-    );
+      };
+    });
+
+  const browse = (projectId: ProjectId, limit: number, includeBody = false) =>
+    repository
+      .listForProject({ projectId, limit })
+      .pipe(Effect.flatMap((page) => summarizePage(projectId, page, includeBody)));
 
   const list: ProjectMemoryService["Service"]["list"] = (input) =>
     browse(input.projectId, input.limit ?? PROJECT_MEMORY_MAX_LIMIT, input.includeBody).pipe(
@@ -321,12 +353,15 @@ export const make = Effect.gen(function* () {
     const plan = makeSearchPlan((input.query ?? "").normalize("NFC"), { strict: relevantOnly });
     return (
       planHasTerms(plan)
-        ? repository.search({ projectId: input.projectId, ...plan, limit }).pipe(
-            Effect.map((page) => ({
-              items: page.items.map(toSummary),
-              truncated: page.truncated,
-            })),
-          )
+        ? repository
+            .search({ projectId: input.projectId, ...plan, limit, excludeHeld: relevantOnly })
+            .pipe(
+              Effect.flatMap((page) =>
+                relevantOnly
+                  ? Effect.succeed({ items: page.items.map(toSummary), truncated: page.truncated })
+                  : summarizePage(input.projectId, page),
+              ),
+            )
         : relevantOnly
           ? Effect.succeed({ items: [], truncated: false })
           : browse(input.projectId, limit)
@@ -410,9 +445,15 @@ export const make = Effect.gen(function* () {
           currentVersion: existing.version,
         });
       }
+      const holdOnly =
+        input.held !== undefined &&
+        input.title === undefined &&
+        input.body === undefined &&
+        input.kind === undefined &&
+        input.validUntil === undefined;
       const title = (input.title ?? existing.title).normalize("NFC");
       const body = (input.body ?? existing.body).normalize("NFC");
-      if (looksLikeSensitiveText(title) || looksLikeSensitiveText(body)) {
+      if (!holdOnly && (looksLikeSensitiveText(title) || looksLikeSensitiveText(body))) {
         return yield* new ProjectMemoryRejectedError({ reason: "sensitive" });
       }
       // Fenced: the epoch/inflight pair stays held until the repository's
@@ -424,6 +465,7 @@ export const make = Effect.gen(function* () {
           projectId: input.projectId,
           memoryId: input.memoryId,
           expectedVersion: input.expectedVersion,
+          ...(input.held === undefined ? {} : { held: input.held, holdOnly }),
           title,
           body,
           kind: input.kind ?? existing.kind,
@@ -603,10 +645,18 @@ export const make = Effect.gen(function* () {
     }).pipe(Effect.mapError(toStoreError));
 
   const listProposals: ProjectMemoryService["Service"]["listProposals"] = (input) =>
-    repository.listProposals(input).pipe(
-      Effect.map((items) => ({ items })),
-      Effect.mapError(toStoreError),
-    );
+    Effect.gen(function* () {
+      const [health] = yield* sql`
+        SELECT last_attempt_at AS "lastAttemptAt", last_success_at AS "lastSuccessAt",
+          threads_read AS "threadsRead", threads_with_signals AS "threadsWithSignals",
+          candidates_returned AS "candidatesReturned", suggestions_filed AS "suggestionsFiled", outcome
+        FROM project_memory_analysis_health WHERE project_id = ${input.projectId}
+      `;
+      const items = yield* repository.listProposals(input);
+      if (health === undefined) return { items };
+      const analysisHealth = yield* decodeAnalysisHealth(health);
+      return { items, analysisHealth };
+    }).pipe(Effect.mapError(toStoreError));
 
   const approveProposal: ProjectMemoryService["Service"]["approveProposal"] = (input) =>
     // One transaction: the memory exists and the proposal is gone, or neither
@@ -617,13 +667,11 @@ export const make = Effect.gen(function* () {
           const proposal = yield* repository.getProposal(input);
           if (Option.isNone(proposal)) return { status: "proposal-missing" } as const;
           const { title, body, analysis } = proposal.value;
-          // A procedure is kept as a Project Skill draft from its thread, not as a memory.
-          if (analysis?.target === "skill") return { status: "proposal-not-memory" } as const;
           const now = yield* DateTime.now;
           const outcome = yield* repository.insert({
             memoryId: ProjectMemoryId.make(yield* crypto.randomUUIDv4),
             projectId: input.projectId,
-            kind: "fact",
+            kind: analysis?.target === "skill" ? "procedure" : "fact",
             title,
             body,
             origin:

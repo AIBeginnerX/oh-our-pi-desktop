@@ -46,6 +46,13 @@ run `oop stop` and delete the folder and the command:
 `Remove-Item -Recurse -Force "$env:LOCALAPPDATA\oop-terminal"`. Your data in
 `~/.oop-desktop` stays.
 
+On macOS and Windows the desktop app carries the same terminal app. If both are
+installed and this one is older, the desktop app points `oop` at its own copy when
+it starts, so `oop` always matches the desktop version. The terminal app's files
+are then unused and can be deleted (`~/.local/share/oop-terminal`, or
+`%LOCALAPPDATA%\oop-terminal\app` on Windows). If this one is newer, the desktop
+app's update check offers that release.
+
 ## Desktop app
 
 macOS (Apple Silicon):

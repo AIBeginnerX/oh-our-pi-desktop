@@ -87,6 +87,8 @@ import Migration0072 from "./Migrations/072_DropUnusedOrchestrationCommandReceip
 import Migration0073 from "./Migrations/073_ProjectMemoryProposalDreamed.ts";
 
 import Migration0074 from "./Migrations/074_ProjectMemoryTidy.ts";
+import Migration0075 from "./Migrations/075_ProjectMemoryAnalysisHealth.ts";
+import Migration0076 from "./Migrations/076_ProjectMemoryOutcomes.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -173,6 +175,8 @@ const migrationEntries = [
   [72, "DropUnusedOrchestrationCommandReceiptIndexes", Migration0072],
   [73, "ProjectMemoryProposalDreamed", Migration0073],
   [74, "ProjectMemoryTidy", Migration0074],
+  [75, "ProjectMemoryAnalysisHealth", Migration0075],
+  [76, "ProjectMemoryOutcomes", Migration0076],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

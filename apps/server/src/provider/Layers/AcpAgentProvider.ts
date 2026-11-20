@@ -22,6 +22,7 @@ import * as Result from "effect/Result";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
+import { acpReasoningOption } from "../acp/AcpReasoningOption.ts";
 import { sessionModelStateFromInitialize } from "../acp/AcpRuntimeModel.ts";
 import { type AcpAgentLaunch, makeGrokAcpRuntime } from "../acp/GrokAcpSupport.ts";
 import {
@@ -122,6 +123,27 @@ export function acpConfigOptionModels(
 ): ReadonlyArray<ServerProviderModel> {
   const option = configOptions?.find((entry) => entry.category === "model");
   if (option?.type !== "select") return [];
+  const thought = acpReasoningOption(configOptions);
+  const capabilities =
+    thought?.type === "select"
+      ? createModelCapabilities({
+          optionDescriptors: [
+            {
+              id: "reasoningEffort",
+              label: thought.name,
+              type: "select",
+              currentValue: thought.currentValue,
+              options: thought.options
+                .flatMap((entry) => ("value" in entry ? [entry] : entry.options))
+                .map((entry) => ({
+                  id: entry.value,
+                  label: entry.name,
+                  ...(entry.value === thought.currentValue ? { isDefault: true } : {}),
+                })),
+            },
+          ],
+        })
+      : ACP_AGENT_EMPTY_CAPABILITIES;
   const seen = new Set<string>();
   return option.options
     .flatMap((entry) => ("value" in entry ? [entry] : entry.options))
@@ -134,7 +156,7 @@ export function acpConfigOptionModels(
           slug,
           name: entry.name.trim() || slug,
           isCustom: false,
-          capabilities: ACP_AGENT_EMPTY_CAPABILITIES,
+          capabilities,
         },
       ];
     });

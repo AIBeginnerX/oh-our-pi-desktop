@@ -123,6 +123,80 @@ fn driver_of<'a>(options: &'a [ModelOption], selection: Brain) -> Option<&'a str
         .map(|o| o.driver.as_str())
 }
 
+// Mirrors modelFamily in packages/shared/src/crew.ts.
+fn model_family(option: &ModelOption) -> &str {
+    let name = option.model.to_lowercase();
+    let contains = |words: &[&str]| words.iter().any(|word| name.contains(word));
+    if contains(&["claude", "opus", "sonnet", "haiku", "fable"]) {
+        return "claude";
+    }
+    if contains(&["gpt", "codex"])
+        || name
+            .split(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .any(|word| matches!(word, "o3" | "o4"))
+    {
+        return "openai";
+    }
+    if name.contains("gemini") {
+        return "google";
+    }
+    if contains(&["grok", "composer"]) {
+        return "xai";
+    }
+    ["glm", "kimi", "qwen", "deepseek", "minimax"]
+        .into_iter()
+        .filter_map(|family| name.find(family).map(|position| (position, family)))
+        .min()
+        .map_or(option.driver.as_str(), |(_, family)| family)
+}
+
+// The model's name with its version numbers masked: versions only compete within one line.
+// Mirrors modelLine in packages/shared/src/crew.ts.
+fn model_line(slug: &str) -> String {
+    let chars: Vec<char> = slug.to_lowercase().chars().collect();
+    let mut line = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if !chars[index].is_ascii_digit() {
+            line.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        line.push('#');
+        while index < chars.len() {
+            if chars[index].is_ascii_digit() {
+                index += 1;
+            } else if matches!(chars[index], '.' | '-')
+                && chars.get(index + 1).is_some_and(char::is_ascii_digit)
+            {
+                index += 2;
+            } else {
+                break;
+            }
+        }
+    }
+    line
+}
+
+// Compare up to three numeric components, skipping date suffixes on versioned slugs.
+fn model_version(slug: &str) -> Option<[u32; 3]> {
+    let start = slug.find(|c: char| c.is_ascii_digit())?;
+    let mut rest = &slug[start..];
+    let mut version = [0; 3];
+    for (index, component) in version.iter_mut().enumerate() {
+        let end = rest.bytes().take_while(u8::is_ascii_digit).count();
+        if !(1..=3).contains(&end) {
+            return (index != 0).then_some(version);
+        }
+        *component = rest[..end].parse().ok()?;
+        let Some(next) = rest[end..].strip_prefix(['.', '-']) else {
+            break;
+        };
+        rest = next;
+    }
+    Some(version)
+}
+
 fn pick(options: &[ModelOption], want: &Want) -> Option<usize> {
     let other = driver_of(options, want.other_than);
     let same_driver = driver_of(options, want.provider_of);
@@ -144,17 +218,34 @@ fn pick(options: &[ModelOption], want: &Want) -> Option<usize> {
             6
         } else {
             0
-        } + if o.is_default { 0 } else { 1 }
-    };
-    // A stable sort by score: the first of equals wins, as in the TypeScript.
-    let mut best: Option<(usize, i32)> = None;
-    for (index, option) in options.iter().enumerate() {
-        let s = score(option);
-        if best.is_none_or(|(_, b)| s < b) {
-            best = Some((index, s));
         }
+    };
+    let (first_index, first) = options
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, option)| (score(option), !option.is_default))?;
+    if model_version(&first.model).is_none() {
+        return Some(first_index);
     }
-    best.map(|(i, _)| i)
+
+    // Resolve the family and line first so the version tiebreak cannot reorder unrelated models.
+    let family = model_family(first);
+    let line = model_line(&first.model);
+    let best_score = score(first);
+    options
+        .iter()
+        .enumerate()
+        .filter(|(_, option)| {
+            score(option) == best_score
+                && option.tier == first.tier
+                && model_family(option) == family
+                && model_line(&option.model) == line
+        })
+        .filter_map(|(index, option)| {
+            model_version(&option.model).map(|version| (index, version, option.is_default))
+        })
+        .min_by_key(|&(_, version, is_default)| (std::cmp::Reverse(version), !is_default))
+        .map(|(index, _, _)| index)
 }
 
 fn selection_of(option: Option<usize>, options: &[ModelOption]) -> Brain<'_> {
@@ -374,6 +465,44 @@ mod tests {
         let options = model_options(&config(json!({})));
         assert_eq!(options.len(), 5);
         assert!(options.iter().all(|o| o.instance_id != "off"));
+    }
+
+    #[test]
+    fn recommends_newer_versions_only_within_the_same_tier_and_line() {
+        for (older, other, expected) in [
+            ("gpt-6.1-sol", "gpt-6.2-sol", "gpt-6.2-sol"),
+            ("claude-opus-5", "claude-opus-5-5", "claude-opus-5-5"),
+            ("gpt-6.9-sol", "gpt-6.10-sol", "gpt-6.10-sol"),
+            ("gpt-6.1-sol", "claude-opus-7", "gpt-6.1-sol"),
+            ("gpt-6.1-sol", "gpt-sol-pro", "gpt-6.1-sol"),
+            ("gpt-6.1-sol", "gpt-7-mini", "gpt-6.1-sol"),
+        ] {
+            let config = json!({"providers": [{
+                "instanceId": "cursor", "driver": "cursor", "enabled": true,
+                "installed": true, "status": "ready", "models": [
+                    {"slug": older, "isDefault": true}, {"slug": other}
+                ]
+            }]});
+            let [worker, _, _] = auto_picks(&config, None, "quality");
+            assert_eq!(worker.unwrap().model, expected);
+        }
+    }
+
+    #[test]
+    fn keeps_the_default_over_an_unrelated_model_with_a_higher_number() {
+        for (driver, other, fallback) in [
+            ("grok", "grok-4.6", "composer-2"),
+            ("codex", "custom-2", "custom-1"),
+        ] {
+            let config = json!({"providers": [
+                {"instanceId": "cursor", "driver": "cursor", "enabled": true, "installed": true,
+                 "status": "ready", "models": [{"slug": fallback, "isDefault": true}]},
+                {"instanceId": driver, "driver": driver, "enabled": true, "installed": true,
+                 "status": "ready", "models": [{"slug": other}]},
+            ]});
+            let [worker, _, _] = auto_picks(&config, None, "quality");
+            assert_eq!(worker.unwrap().model, fallback);
+        }
     }
 
     #[test]

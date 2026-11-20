@@ -9,12 +9,13 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
-  type OrchestrationEvent,
+  PROJECT_MEMORY_ANALYSER_PENDING_MAX,
   ProjectId,
+  ProjectMemoryProposalListResult,
   TextGenerationError,
   ThreadId,
 } from "@t3tools/contracts";
@@ -25,7 +26,6 @@ import { ProjectionThreadRepositoryLive } from "../persistence/Layers/Projection
 import { runMigrations } from "../persistence/Migrations.ts";
 import { layer as projectMemoriesLayer } from "../persistence/ProjectMemories.ts";
 import { layer as sendLedgerLayer } from "../persistence/ProjectMemorySendLedger.ts";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import {
   TextGeneration,
@@ -50,7 +50,6 @@ interface Fixture {
   respond: (
     input: WorkLessonsGenerationInput,
   ) => Effect.Effect<WorkLessonsGenerationResult, TextGenerationError>;
-  readonly events: Map<string, Array<OrchestrationEvent>>;
 }
 
 const withAnalyser = <E>(
@@ -80,20 +79,7 @@ const withAnalyser = <E>(
         ],
       }),
     respond: () => Effect.succeed({ lessons: [] }),
-    events: new Map(),
   };
-  // The digest comes from the fake store; the global event log table only
-  // has to agree with it about which threads moved and how far.
-  const store = Layer.mock(OrchestrationEventStore, {
-    getAggregateReplayStats: ({ aggregateId }) =>
-      Effect.succeed({
-        eventCount: fixture.events.get(aggregateId)?.length ?? 0,
-        payloadBytes: 0,
-        hasCreateEvent: true,
-      }),
-    readAggregateRange: ({ aggregateId }) =>
-      Stream.fromIterable(fixture.events.get(aggregateId) ?? []),
-  });
   const textGeneration = Layer.mock(TextGeneration, {
     generateMemoryTidy: (input) => {
       fixture.tidyRequests.push(input);
@@ -110,7 +96,6 @@ const withAnalyser = <E>(
     ProjectionThreadRepositoryLive,
     ProjectionProjectRepositoryLive,
     sendLedgerLayer,
-    store,
     textGeneration,
     ServerSettings.layerTest({
       projectMemoryAnalyser: options.analyser,
@@ -167,41 +152,30 @@ const markSent = (threadId: ThreadId) =>
     `;
   });
 
+const decodeProposalList = Schema.decodeSync(ProjectMemoryProposalListResult);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
+
 let sequence = 0;
-/** Append one event to the fake store and to the event-log table. */
-const append = (fixture: Fixture, threadId: ThreadId, type: string, payload: unknown) =>
+/** Append one event to the event-log table. */
+const append = (threadId: ThreadId, type: string, payload: unknown) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     sequence += 1;
-    const event = {
-      sequence,
-      eventId: `event-${sequence}`,
-      aggregateKind: "thread",
-      aggregateId: threadId,
-      type,
-      occurredAt: NOW,
-      commandId: null,
-      causationEventId: null,
-      correlationId: null,
-      metadata: {},
-      payload,
-    } as unknown as OrchestrationEvent;
-    fixture.events.set(threadId, [...(fixture.events.get(threadId) ?? []), event]);
     yield* sql`
       INSERT INTO orchestration_events (
         sequence, event_id, aggregate_kind, stream_id, stream_version, event_type,
         occurred_at, actor_kind, payload_json, metadata_json
       )
       VALUES (
-        ${sequence}, ${event.eventId}, 'thread', ${threadId}, ${sequence}, ${type},
-        ${NOW}, 'system', '{}', '{}'
+        ${sequence}, ${`event-${sequence}`}, 'thread', ${threadId}, ${sequence}, ${type},
+        ${NOW}, 'system', ${encodeJson(payload)}, '{}'
       )
     `;
-    return event.sequence;
+    return sequence;
   });
 
-const activity = (fixture: Fixture, threadId: ThreadId, kind: string, payload: unknown) =>
-  append(fixture, threadId, "thread.activity-appended", {
+const activity = (threadId: ThreadId, kind: string, payload: unknown) =>
+  append(threadId, "thread.activity-appended", {
     threadId,
     activity: {
       id: `activity-${sequence + 1}`,
@@ -214,14 +188,8 @@ const activity = (fixture: Fixture, threadId: ThreadId, kind: string, payload: u
     },
   });
 
-const receipt = (
-  fixture: Fixture,
-  threadId: ThreadId,
-  attempt: string,
-  status: string,
-  scriptName = "test",
-) =>
-  activity(fixture, threadId, "selected-check-receipt", {
+const receipt = (threadId: ThreadId, attempt: string, status: string, scriptName = "test") =>
+  activity(threadId, "selected-check-receipt", {
     attemptId: attempt,
     revision: 1,
     phase: "completed",
@@ -253,32 +221,314 @@ const seedThread = (threadId: ThreadId, projectId: string = PROJECT) =>
   });
 
 /** Two threads that each fixed a failing check; thread A's result was accepted. */
-const seedTwoThreads = (fixture: Fixture) =>
+const seedTwoThreads = () =>
   Effect.gen(function* () {
     yield* runMigrations();
     yield* seedProject();
     for (const threadId of [THREAD_A, THREAD_B]) {
       yield* seedThread(threadId);
-      yield* append(fixture, threadId, "thread.created", { threadId });
-      yield* append(fixture, threadId, "thread.message-sent", {
+      yield* append(threadId, "thread.created", { threadId });
+      yield* append(threadId, "thread.message-sent", {
         threadId,
         role: "user",
         text: "SECRET TRANSCRIPT WORDS",
         streaming: false,
       });
-      yield* receipt(fixture, threadId, `${threadId}-1`, "failed");
-      yield* receipt(fixture, threadId, `${threadId}-2`, "passed");
+      yield* receipt(threadId, `${threadId}-1`, "failed");
+      yield* receipt(threadId, `${threadId}-2`, "passed");
     }
-    yield* activity(fixture, THREAD_A, "task-result", {
+    yield* activity(THREAD_A, "task-result", {
       requirements: { version: 1 },
       acceptance: { acceptedAt: NOW },
     });
   });
 
+const readHealth = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const [health] =
+    yield* sql`SELECT * FROM project_memory_analysis_health WHERE project_id = ${PROJECT}`;
+  assert.isDefined(health);
+  return health!;
+});
+
+const seedPending = (count: number) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    for (let index = 0; index < count; index++) {
+      yield* sql`
+        INSERT INTO project_memory_proposals (
+          proposal_id, project_id, thread_id, title, body, reason, created_at, source, evidence_json
+        ) VALUES (
+          ${`pending-${index}`}, ${PROJECT}, ${THREAD_A}, 'Pending', 'Unrelated suggestion',
+          'Fixture', ${NOW}, 'analyser', '[]'
+        )
+      `;
+    }
+  });
+
 describe("ProjectMemoryAnalyser", () => {
+  test(
+    "records and updates the outcome of a sent memory after its send boundary",
+    { analyser: true },
+    () =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* seedProject();
+        yield* seedThread(THREAD_A);
+        yield* append(THREAD_A, "thread.created", { threadId: THREAD_A });
+        yield* append(THREAD_A, "thread.reverted", {});
+        const service = yield* ProjectMemoryService;
+        const { memory } = yield* service.create({
+          projectId: PROJECT,
+          title: "Run checks",
+          body: "Run focused checks after changes",
+          kind: "procedure",
+        });
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+        INSERT INTO project_memory_send_attempts (
+          thread_id, message_id, project_id, provider_instance_id, owner_instance_id,
+          state, committed_at, sent_after_event_sequence
+        ) VALUES (${THREAD_A}, 'message-1', ${PROJECT}, 'provider', 'owner', 'provider_accepted', ${NOW}, ${sequence})
+      `;
+        yield* sql`
+        INSERT INTO project_memory_send_items (attempt_seq, memory_id, memory_version)
+        SELECT attempt_seq, ${memory.memoryId}, ${memory.version} FROM project_memory_send_attempts
+      `;
+        // A hand-off the provider refused settles unknown: that memory never arrived, so the
+        // thread says nothing about it.
+        const refused = yield* service.create({
+          projectId: PROJECT,
+          title: "Never arrived",
+          body: "The provider refused this hand-off",
+          kind: "fact",
+        });
+        yield* sql`
+        INSERT INTO project_memory_send_attempts (
+          thread_id, message_id, project_id, provider_instance_id, owner_instance_id,
+          state, committed_at, settled_at, sent_after_event_sequence
+        ) VALUES (${THREAD_A}, 'message-refused', ${PROJECT}, 'provider', 'owner', 'external_send_unknown', ${NOW}, ${NOW}, ${sequence})
+      `;
+        yield* sql`
+        INSERT INTO project_memory_send_items (attempt_seq, memory_id, memory_version)
+        SELECT attempt_seq, ${refused.memory.memoryId}, ${refused.memory.version}
+        FROM project_memory_send_attempts WHERE message_id = 'message-refused'
+      `;
+        const analyser = yield* ProjectMemoryAnalyser;
+        const outcomes = sql`SELECT outcome, judged_at_event_sequence FROM project_memory_outcomes`;
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.deepEqual(yield* outcomes, [
+          { outcome: "unknown", judged_at_event_sequence: sequence },
+        ]);
+        yield* receipt(THREAD_A, "check-1", "passed");
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.deepEqual(yield* outcomes, [
+          { outcome: "good", judged_at_event_sequence: sequence },
+        ]);
+        yield* append(THREAD_A, "thread.reverted", {});
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.deepEqual(yield* outcomes, [{ outcome: "bad", judged_at_event_sequence: sequence }]);
+        yield* service.delete({
+          projectId: PROJECT,
+          memoryId: memory.memoryId,
+          expectedVersion: 1,
+        });
+        assert.deepEqual(yield* outcomes, []);
+      }),
+  );
+
+  it("decodes a proposal list from a server without analysis health", () => {
+    assert.deepEqual(decodeProposalList({ items: [] }), {
+      items: [],
+    });
+  });
+
+  test("records a run with no signals", { analyser: true }, (fixture) =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* seedProject();
+      yield* seedThread(THREAD_A);
+      yield* append(THREAD_A, "thread.created", { threadId: THREAD_A });
+      const analyser = yield* ProjectMemoryAnalyser;
+      yield* analyser.analyse({ projectId: PROJECT });
+      const memory = yield* ProjectMemoryService;
+      const proposals = yield* memory.listProposals({ projectId: PROJECT });
+      assert.deepEqual(proposals.items, []);
+      assert.isDefined(proposals.analysisHealth);
+      assert.include(proposals.analysisHealth, {
+        outcome: "no-signals",
+        threadsRead: 1,
+        threadsWithSignals: 0,
+      });
+      const health = yield* readHealth;
+      assert.include(health, {
+        outcome: "no-signals",
+        threads_read: 1,
+        threads_with_signals: 0,
+        candidates_returned: 0,
+        suggestions_filed: 0,
+      });
+      assert.isString(health.last_attempt_at);
+      assert.isString(health.last_success_at);
+      assert.equal(fixture.requests.length, 0);
+
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`UPDATE projection_projects SET deleted_at = ${NOW} WHERE project_id = ${PROJECT}`;
+      assert.deepEqual(yield* sql`SELECT * FROM project_memory_analysis_health`, []);
+    }),
+  );
+
+  test(
+    "pauses before calling the model when the analyser queue is full",
+    { analyser: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* seedTwoThreads();
+        const sql = yield* SqlClient.SqlClient;
+        yield* seedPending(PROJECT_MEMORY_ANALYSER_PENDING_MAX);
+        fixture.respond = () =>
+          Effect.succeed({
+            lessons: [
+              { category: "fact", text: "Re-run the check after fixing it", threads: ["T1", "T2"] },
+            ],
+          });
+        const analyser = yield* ProjectMemoryAnalyser;
+        const result = yield* analyser.analyse({ projectId: PROJECT });
+        assert.propertyVal(result, "queueFull", true);
+        assert.lengthOf(fixture.requests, 0);
+        assert.deepEqual(
+          yield* sql`SELECT last_event_sequence FROM project_memory_analysis_cursors WHERE project_id = ${PROJECT}`,
+          [],
+        );
+        assert.include(yield* readHealth, {
+          outcome: "queue-full",
+          threads_read: 0,
+          threads_with_signals: 0,
+          candidates_returned: 0,
+          suggestions_filed: 0,
+        });
+      }),
+  );
+
+  for (const review of ["pending", "approved", "rejected"] as const) {
+    test(
+      `replays held evidence without filing the ${review} lesson again`,
+      { analyser: true },
+      (fixture) =>
+        Effect.gen(function* () {
+          yield* seedTwoThreads();
+          yield* seedPending(PROJECT_MEMORY_ANALYSER_PENDING_MAX - 1);
+          const first = "Verify configuration defaults before rollout";
+          const held = "Record migration timings in the release notes";
+          fixture.respond = () =>
+            Effect.succeed({
+              lessons: [
+                { category: "fact", text: first, threads: ["T1", "T2"] },
+                { category: "fact", text: held, threads: ["T1", "T2"] },
+              ],
+            });
+          const analyser = yield* ProjectMemoryAnalyser;
+          const memory = yield* ProjectMemoryService;
+          const input = { projectId: PROJECT };
+          assert.include(yield* analyser.analyse(input), { memoriesProposed: 1, queueFull: true });
+          assert.include(yield* readHealth, {
+            outcome: "queue-full",
+            candidates_returned: 2,
+            suggestions_filed: 1,
+          });
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepEqual(
+            yield* sql`SELECT last_event_sequence FROM project_memory_analysis_cursors WHERE project_id = ${PROJECT}`,
+            [],
+          );
+          const before = (yield* memory.listProposals(input)).items;
+          const filed = before.find((proposal) => proposal.body === first)!;
+          assert.notInclude(
+            before.map((proposal) => proposal.body),
+            held,
+          );
+          if (review === "approved") {
+            yield* memory.approveProposal({ ...input, proposalId: filed.proposalId });
+          } else {
+            const reviewed =
+              review === "rejected"
+                ? filed
+                : before.find((proposal) => proposal.body === "Unrelated suggestion")!;
+            yield* memory.rejectProposal({ ...input, proposalId: reviewed.proposalId });
+          }
+
+          const result = yield* analyser.analyse(input);
+          assert.equal(result.memoriesProposed, 1);
+          assert.lengthOf(fixture.requests, 2);
+          assert.equal(fixture.requests[1]?.digest, fixture.requests[0]?.digest);
+          const after = (yield* memory.listProposals(input)).items;
+          assert.equal(after.filter((proposal) => proposal.body === held).length, 1);
+          assert.deepEqual(
+            after.filter((proposal) => proposal.body === first).map(({ proposalId }) => proposalId),
+            review === "pending" ? [filed.proposalId] : [],
+          );
+          assert.deepEqual(
+            yield* sql`SELECT last_event_sequence FROM project_memory_analysis_cursors WHERE project_id = ${PROJECT}`,
+            [{ last_event_sequence: sequence }],
+          );
+        }),
+    );
+  }
+
+  test(
+    "a crew thread's verified completion counts for that thread, not its lead",
+    { analyser: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* seedProject();
+        for (const threadId of [THREAD_A, THREAD_B, THREAD_C]) {
+          yield* seedThread(threadId);
+          yield* append(threadId, "thread.created", { threadId });
+        }
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE projection_threads SET parent_thread_id = ${THREAD_A} WHERE thread_id IN (${THREAD_B}, ${THREAD_C})`;
+        const verified = (threadId: ThreadId) =>
+          activity(THREAD_A, "task.completed", {
+            crewRole: "worker",
+            status: "completed",
+            proof: "verified",
+            threadId,
+            summary: "Crew report text",
+          });
+        yield* append(THREAD_B, "thread.turn-diff-completed", { files: [{ path: "queue.ts" }] });
+        yield* verified(THREAD_B);
+
+        const analyser = yield* ProjectMemoryAnalyser;
+        yield* analyser.analyse({ projectId: PROJECT });
+        assert.lengthOf(fixture.requests, 0);
+
+        // A second crew task under the same lead is independent work.
+        yield* verified(THREAD_C);
+        fixture.respond = () =>
+          Effect.succeed({
+            lessons: [
+              {
+                category: "fact",
+                text: "Verify queue changes before handoff",
+                threads: ["T1", "T2"],
+              },
+            ],
+          });
+        const result = yield* analyser.analyse({ projectId: PROJECT });
+        assert.equal(result.memoriesProposed, 1);
+        const prompt = fixture.requests[0]!.digest;
+        assert.include(prompt, '"label":"T2"');
+        assert.notInclude(prompt, '"label":"T3"');
+        assert.include(prompt, "queue.ts");
+        assert.include(prompt, "crew-work-verified");
+        assert.notInclude(prompt, "Crew report text");
+      }),
+  );
+
   test("is refused, with no model call, while the setting is off", { analyser: false }, (fixture) =>
     Effect.gen(function* () {
-      yield* seedTwoThreads(fixture);
+      yield* seedTwoThreads();
       const analyser = yield* ProjectMemoryAnalyser;
       const error = yield* Effect.flip(analyser.analyse({ projectId: PROJECT }));
       if (error._tag !== "ProjectMemoryRejectedError") throw new Error(error._tag);
@@ -292,7 +542,7 @@ describe("ProjectMemoryAnalyser", () => {
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         fixture.respond = () =>
           Effect.succeed({
             lessons: [
@@ -334,7 +584,7 @@ describe("ProjectMemoryAnalyser", () => {
 
   test("a lesson backed by a single thread is dropped", { analyser: true }, (fixture) =>
     Effect.gen(function* () {
-      yield* seedTwoThreads(fixture);
+      yield* seedTwoThreads();
       fixture.respond = () =>
         Effect.succeed({
           lessons: [
@@ -353,11 +603,11 @@ describe("ProjectMemoryAnalyser", () => {
   );
 
   test(
-    "a procedure becomes a skill-draft suggestion from its source thread",
+    "a procedure becomes a skill-draft suggestion with an accepted source and independent evidence",
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         fixture.respond = () =>
           Effect.succeed({
             lessons: [
@@ -375,10 +625,10 @@ describe("ProjectMemoryAnalyser", () => {
 
         const [proposal] = (yield* memory.listProposals({ projectId: PROJECT })).items;
         assert.equal(proposal?.analysis?.target, "skill");
-        // Only thread A's result was accepted, so it is the one named as the source.
+        // Thread A's accepted result makes it the primary source.
         assert.deepEqual(
           proposal?.analysis?.evidence.map((item) => item.threadId),
-          [THREAD_A],
+          [THREAD_A, THREAD_B],
         );
         assert.equal(proposal?.threadId, THREAD_A);
         assert.deepEqual((yield* memory.list({ projectId: PROJECT })).items, []);
@@ -387,9 +637,9 @@ describe("ProjectMemoryAnalyser", () => {
 
   test("provider text of an echo-tainted thread is withheld", { analyser: true }, (fixture) =>
     Effect.gen(function* () {
-      yield* seedTwoThreads(fixture);
+      yield* seedTwoThreads();
       for (const threadId of [THREAD_A, THREAD_B]) {
-        yield* activity(fixture, threadId, "task.completed", {
+        yield* activity(threadId, "task.completed", {
           crewRole: "auditor",
           threadId: `child-${threadId}`,
           verdict: "needs-changes",
@@ -411,14 +661,14 @@ describe("ProjectMemoryAnalyser", () => {
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         const audits = [
           [THREAD_A, "child-a", "AUDIT TEXT tainted child"],
           [THREAD_B, "child-b", "AUDIT TEXT clean child"],
           [THREAD_B, undefined, "AUDIT TEXT unnamed child"],
         ] as const;
         for (const [lead, child, summary] of audits) {
-          yield* activity(fixture, lead, "task.completed", {
+          yield* activity(lead, "task.completed", {
             crewRole: "auditor",
             ...(child === undefined ? {} : { threadId: child }),
             verdict: "needs-changes",
@@ -438,11 +688,55 @@ describe("ProjectMemoryAnalyser", () => {
   );
 
   test(
+    "a lead keeps its auditors' verdicts, so approval after changes still counts",
+    { analyser: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* runMigrations();
+        yield* seedProject();
+        for (const threadId of [THREAD_A, THREAD_B]) {
+          yield* seedThread(threadId);
+          yield* append(threadId, "thread.created", { threadId });
+        }
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE projection_threads SET parent_thread_id = ${THREAD_A} WHERE thread_id = ${THREAD_B}`;
+        yield* activity(THREAD_A, "task.completed", {
+          crewRole: "worker",
+          status: "completed",
+          proof: "verified",
+          threadId: THREAD_B,
+        });
+        const review = (verdict: string, auditor: string) =>
+          activity(THREAD_A, "task.completed", {
+            crewRole: "auditor",
+            threadId: auditor,
+            verdict,
+            summary: "Review",
+          });
+        yield* review("needs-changes", "auditor-1");
+        // The fix happens in a crew follow-up turn of the same request.
+        yield* append(THREAD_A, "thread.message-sent", {
+          threadId: THREAD_A,
+          role: "user",
+          text: '<oop_crew_follow_up round="1" fixes="1">\nFix it',
+          streaming: false,
+        });
+        yield* review("approve", "auditor-2");
+        const analyser = yield* ProjectMemoryAnalyser;
+        yield* analyser.analyse({ projectId: PROJECT });
+
+        const prompt = fixture.requests[0]?.digest ?? "";
+        assert.include(prompt, "audit-needs-changes-then-fixed");
+        assert.include(prompt, "crew-work-verified");
+      }),
+  );
+
+  test(
     "a rejected suggestion is not proposed again by a later run",
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         fixture.respond = () =>
           Effect.succeed({
             lessons: [
@@ -460,7 +754,7 @@ describe("ProjectMemoryAnalyser", () => {
         yield* memory.rejectProposal({ projectId: PROJECT, proposalId: proposal!.proposalId });
 
         // New work arrives, the model says the same thing again.
-        yield* receipt(fixture, THREAD_B, "thread-b-3", "passed");
+        yield* receipt(THREAD_B, "thread-b-3", "passed");
         const second = yield* analyser.analyse({ projectId: PROJECT });
         assert.equal(second.memoriesProposed, 0);
         assert.equal(fixture.requests.length, 2);
@@ -473,7 +767,7 @@ describe("ProjectMemoryAnalyser", () => {
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         const answer = (text: string) => () =>
           Effect.succeed({
             lessons: [{ category: "fact" as const, text, threads: ["T1", "T2"] }],
@@ -486,7 +780,7 @@ describe("ProjectMemoryAnalyser", () => {
         yield* memory.rejectProposal({ projectId: PROJECT, proposalId: proposal!.proposalId });
 
         fixture.respond = answer("Always execute the tests again once a broken one is repaired");
-        yield* receipt(fixture, THREAD_B, "thread-b-3", "passed");
+        yield* receipt(THREAD_B, "thread-b-3", "passed");
         const second = yield* analyser.analyse({ projectId: PROJECT });
         assert.equal(second.memoriesProposed, 0);
         assert.equal(fixture.requests.length, 2);
@@ -496,7 +790,7 @@ describe("ProjectMemoryAnalyser", () => {
 
   test("nothing new since the last run means no model call", { analyser: true }, (fixture) =>
     Effect.gen(function* () {
-      yield* seedTwoThreads(fixture);
+      yield* seedTwoThreads();
       const analyser = yield* ProjectMemoryAnalyser;
       yield* analyser.analyse({ projectId: PROJECT });
       const second = yield* analyser.analyse({ projectId: PROJECT });
@@ -510,7 +804,7 @@ describe("ProjectMemoryAnalyser", () => {
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         fixture.respond = () =>
           Effect.fail(
             new TextGenerationError({ operation: "generateWorkLessons", detail: "boom SECRET" }),
@@ -520,10 +814,34 @@ describe("ProjectMemoryAnalyser", () => {
         if (error._tag !== "ProjectMemoryRejectedError") throw new Error(error._tag);
         assert.equal(error.reason, "analyser-failed");
         assert.notInclude(error.message, "SECRET");
+        const health = yield* readHealth;
+        assert.include(health, {
+          outcome: "failed",
+          last_success_at: null,
+          threads_read: 2,
+          threads_with_signals: 2,
+          candidates_returned: 0,
+          suggestions_filed: 0,
+        });
+        assert.notInclude(encodeJson(health), "SECRET");
 
         fixture.respond = () => Effect.succeed({ lessons: [] });
         yield* analyser.analyse({ projectId: PROJECT });
         assert.equal(fixture.requests.length, 2);
+        const success = yield* readHealth;
+        assert.include(success, { outcome: "no-candidates" });
+        assert.isString(success.last_success_at);
+
+        yield* receipt(THREAD_B, "thread-b-3", "passed");
+        fixture.respond = () =>
+          Effect.fail(
+            new TextGenerationError({ operation: "generateWorkLessons", detail: "retry failed" }),
+          );
+        yield* Effect.flip(analyser.analyse({ projectId: PROJECT }));
+        assert.include(yield* readHealth, {
+          outcome: "failed",
+          last_success_at: success.last_success_at,
+        });
       }),
   );
 
@@ -532,7 +850,7 @@ describe("ProjectMemoryAnalyser", () => {
     { analyser: true },
     (fixture) =>
       Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
+        yield* seedTwoThreads();
         fixture.respond = () =>
           Effect.succeed({
             lessons: [
@@ -556,55 +874,65 @@ describe("ProjectMemoryAnalyser", () => {
       }),
   );
 
-  test(
-    "a failing project is skipped and the next one still dreams",
-    { analyser: true },
-    (fixture) =>
-      Effect.gen(function* () {
-        yield* seedTwoThreads(fixture);
-        yield* seedProject("project-2");
-        for (const threadId of [THREAD_C, THREAD_D]) {
-          yield* seedThread(threadId, "project-2");
-          yield* append(fixture, threadId, "thread.created", { threadId });
-          yield* append(fixture, threadId, "thread.message-sent", {
-            threadId,
-            role: "user",
-            text: "SECOND PROJECT WORK",
-            streaming: false,
-          });
-          yield* receipt(fixture, threadId, `${threadId}-1`, "failed", "dreamlint");
-          yield* receipt(fixture, threadId, `${threadId}-2`, "passed", "dreamlint");
-        }
-        // The first project's digest names no "dreamlint" check, so its model
-        // call fails; the second project's names it and must still be filed.
-        fixture.respond = (input) =>
-          input.digest.includes("dreamlint")
-            ? Effect.succeed({
-                lessons: [
-                  { category: "fact", text: "Lint before every commit", threads: ["T1", "T2"] },
-                ],
-              })
-            : Effect.fail(
-                new TextGenerationError({ operation: "generateWorkLessons", detail: "boom" }),
-              );
-        const analyser = yield* ProjectMemoryAnalyser;
-        const memory = yield* ProjectMemoryService;
+  for (const firstProject of ["failed", "queue-full"] as const) {
+    test(
+      `a ${firstProject} project does not stop the next project from dreaming`,
+      { analyser: true },
+      (fixture) =>
+        Effect.gen(function* () {
+          yield* seedTwoThreads();
+          if (firstProject === "queue-full") {
+            yield* seedPending(PROJECT_MEMORY_ANALYSER_PENDING_MAX);
+          }
+          yield* seedProject("project-2");
+          for (const threadId of [THREAD_C, THREAD_D]) {
+            yield* seedThread(threadId, "project-2");
+            yield* append(threadId, "thread.created", { threadId });
+            yield* append(threadId, "thread.message-sent", {
+              threadId,
+              role: "user",
+              text: "SECOND PROJECT WORK",
+              streaming: false,
+            });
+            yield* receipt(threadId, `${threadId}-1`, "failed", "dreamlint");
+            yield* receipt(threadId, `${threadId}-2`, "passed", "dreamlint");
+          }
+          // Only the second project's digest names "dreamlint".
+          fixture.respond = (input) =>
+            input.digest.includes("dreamlint")
+              ? Effect.succeed({
+                  lessons: [
+                    { category: "fact", text: "Lint before every commit", threads: ["T1", "T2"] },
+                  ],
+                })
+              : Effect.fail(
+                  new TextGenerationError({ operation: "generateWorkLessons", detail: "boom" }),
+                );
+          const analyser = yield* ProjectMemoryAnalyser;
+          const memory = yield* ProjectMemoryService;
 
-        const result = yield* analyser.dream;
-        assert.deepEqual(result, { projects: 2, failed: 1 });
+          const result = yield* analyser.dream;
+          const paused = firstProject === "queue-full";
+          assert.deepEqual(result, { projects: 2, failed: paused ? 0 : 1 });
 
-        assert.deepEqual((yield* memory.listProposals({ projectId: PROJECT })).items, []);
-        const [proposal] = (yield* memory.listProposals({ projectId: ProjectId.make("project-2") }))
-          .items;
-        assert.equal(proposal?.body, "Lint before every commit");
-        assert.equal(proposal?.analysis?.dreamed, true);
-        assert.equal(fixture.requests.length, 2);
-      }),
-  );
+          assert.include(yield* readHealth, { outcome: firstProject, suggestions_filed: 0 });
+          assert.lengthOf(
+            (yield* memory.listProposals({ projectId: PROJECT })).items,
+            paused ? PROJECT_MEMORY_ANALYSER_PENDING_MAX : 0,
+          );
+          const [proposal] = (yield* memory.listProposals({
+            projectId: ProjectId.make("project-2"),
+          })).items;
+          assert.equal(proposal?.body, "Lint before every commit");
+          assert.equal(proposal?.analysis?.dreamed, true);
+          assert.lengthOf(fixture.requests, paused ? 1 : 2);
+        }),
+    );
+  }
 
   test("dream runs nothing while the analyser setting is off", { analyser: false }, (fixture) =>
     Effect.gen(function* () {
-      yield* seedTwoThreads(fixture);
+      yield* seedTwoThreads();
       const analyser = yield* ProjectMemoryAnalyser;
       const memory = yield* ProjectMemoryService;
       const result = yield* analyser.dream;
@@ -647,6 +975,22 @@ describe("guarded tidy analysis", () => {
         yield* service.dismissTidy({ projectId: PROJECT, tidyId: items[0]!.tidyId });
         yield* analyser.analyse({ projectId: PROJECT });
         assert.equal(fixture.tidyRequests.length, 1);
+      }),
+  );
+
+  test(
+    "still suggests tidy-ups while the review queue is full",
+    { analyser: true, tidy: true },
+    (fixture) =>
+      Effect.gen(function* () {
+        yield* seedTwoThreads();
+        yield* seedPending(PROJECT_MEMORY_ANALYSER_PENDING_MAX);
+        yield* seedTidyMemories;
+        const analyser = yield* ProjectMemoryAnalyser;
+        const result = yield* analyser.analyse({ projectId: PROJECT });
+        assert.include(result, { queueFull: true, tidiesSuggested: 1 });
+        assert.lengthOf(fixture.requests, 0);
+        assert.lengthOf(fixture.tidyRequests, 1);
       }),
   );
   for (const options of [
@@ -696,7 +1040,7 @@ describe("guarded tidy analysis", () => {
   );
   test("tidy failure does not fail lessons", { analyser: true, tidy: true }, (fixture) =>
     Effect.gen(function* () {
-      yield* seedTwoThreads(fixture);
+      yield* seedTwoThreads();
       yield* seedTidyMemories;
       fixture.tidyRespond = () =>
         Effect.fail(

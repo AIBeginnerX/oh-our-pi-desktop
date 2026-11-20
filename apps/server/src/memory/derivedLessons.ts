@@ -7,7 +7,7 @@ import {
 
 import type { WorkLessonsGenerationResult } from "../textGeneration/TextGeneration.ts";
 import { looksLikeSensitiveText } from "./sensitiveText.ts";
-import type { ThreadWorkDigest } from "./workDigest.ts";
+import { FAILURE_SIGNAL_KINDS, type ThreadWorkDigest, type WorkSignal } from "./workDigest.ts";
 
 /**
  * Pure pieces of the work analyser: what the model is shown, and how its
@@ -36,9 +36,24 @@ export function lessonSimilarity(left: string, right: string): number {
   return shared / (a.size + b.size - shared);
 }
 
-/** A digest the analyser may look at: one that is sensitive-looking is left out whole. */
-export const isAnalysable = (digest: ThreadWorkDigest): boolean =>
-  digest.signals.length > 0 && !looksLikeSensitiveText(JSON.stringify(digest));
+/**
+ * The digests the model is shown: safe ones with signals, and only when at
+ * least two distinct threads have them, since no lesson could be backed with fewer.
+ */
+export function selectDigestInputs(digests: ReadonlyArray<ThreadWorkDigest>) {
+  const signalled = digests.filter((digest) => digest.signals.length > 0);
+  // Usage is numeric metadata. Long inputTokens/outputTokens counts can look
+  // like credential assignments when scanned with their JSON keys.
+  const eligible = signalled.filter(
+    (digest) => !looksLikeSensitiveText(JSON.stringify({ ...digest, usage: undefined })),
+  );
+  return {
+    digestsWithSignals: signalled.length,
+    sensitiveFiltered: signalled.length - eligible.length,
+    eligible: eligible.length,
+    promptDigests: eligible.length >= PROJECT_MEMORY_EVIDENCE_MIN_THREADS ? eligible : [],
+  };
+}
 
 /**
  * The text the model sees, labelled T1, T2, … in the given order. Structured
@@ -84,44 +99,46 @@ export interface LessonCandidate {
 /** Signals cited per thread at most. */
 const EVIDENCE_PER_THREAD_MAX = 3;
 
+const isFailure = (signal: WorkSignal) => FAILURE_SIGNAL_KINDS.has(signal.kind);
+
 /**
- * The thread's signals the lesson is about: those whose check name the lesson
- * mentions. A lesson that names no check cannot be tied to one signal, so the
- * thread's first signal stands for it.
+ * The thread's signals the lesson is about. Failures aside, those are the
+ * signals whose check name the lesson mentions; a lesson that names no check
+ * cannot be tied to one signal, so the thread's first stands for it. A failure
+ * is added only when the lesson names its check, and a thread whose signals
+ * are all failures does not back a lesson.
  */
-const evidenceOf = (
-  digest: ThreadWorkDigest,
-  text: string,
-): { readonly evidence: ReadonlyArray<ProjectMemoryEvidence>; readonly named: boolean } => {
+const evidenceOf = (digest: ThreadWorkDigest, text: string) => {
   const lesson = normalizeLessonText(text);
-  const named = digest.signals.filter(
-    (signal) =>
-      signal.subject !== undefined && lesson.includes(normalizeLessonText(signal.subject)),
-  );
-  const chosen = named.length > 0 ? named : digest.signals.slice(0, 1);
+  const mentioned = (signal: WorkSignal) =>
+    signal.subject !== undefined && lesson.includes(normalizeLessonText(signal.subject));
+  const backing = digest.signals.filter((signal) => !isFailure(signal));
+  const named = backing.filter(mentioned);
+  const failures = digest.signals.filter((signal) => isFailure(signal) && mentioned(signal));
   return {
+    digest,
+    backed: backing.length > 0,
     named: named.length > 0,
-    evidence: chosen
+    evidence: [...(named.length > 0 ? named : backing.slice(0, 1)), ...failures]
       .slice(0, EVIDENCE_PER_THREAD_MAX)
-      .map((signal) => ({ threadId: digest.threadId, eventSeq: signal.eventSeq })),
+      .map((signal): ProjectMemoryEvidence => ({
+        threadId: digest.threadId,
+        eventSeq: signal.eventSeq,
+      })),
   };
 };
 
 /**
  * The model's lessons, kept only when the digests back them. Evidence is
  * chosen here from the digests, never taken from the model: it names the
- * labelled threads' own signal events. A fact, prohibition or preference
- * needs at least two distinct cited pieces of work (a lead thread and its crew
- * helpers count once); a procedure is nominated as a
- * skill-draft source and needs a cited thread that is one. Anything else, or
- * sensitive-looking, is dropped. At most `PROJECT_MEMORY_ANALYSER_RUN_MAX`
- * remain.
+ * labelled threads' own signal events. Each lesson needs at least two
+ * distinct threads with a signal that is not a failure; a crew thread counts
+ * on its own because its completion is read into its digest, not its lead's.
+ * Procedures also need an accepted, passing source.
  */
 export function selectLessons(
   output: WorkLessonsGenerationResult,
   digests: ReadonlyArray<ThreadWorkDigest>,
-  /** Lead thread of each crew child thread: a lead and its helpers are one piece of work. */
-  leadOf: ReadonlyMap<ThreadId, ThreadId> = new Map(),
 ): ReadonlyArray<LessonCandidate> {
   const byLabel = new Map(digests.map((digest, index) => [`T${index + 1}`, digest]));
   const candidates: Array<LessonCandidate> = [];
@@ -133,24 +150,23 @@ export function selectLessons(
       const digest = byLabel.get(label.trim());
       if (digest !== undefined && digest.signals.length > 0) cited.set(digest.threadId, digest);
     }
-    if (lesson.category === "procedure") {
-      const source = [...cited.values()].find(isSkillSource);
-      if (source !== undefined) {
-        const { evidence, named } = evidenceOf(source, text);
-        candidates.push({ target: "skill", text, evidence, evidenceNamed: named });
-      }
-    } else if (
-      new Set([...cited.keys()].map((threadId) => leadOf.get(threadId) ?? threadId)).size >=
-      PROJECT_MEMORY_EVIDENCE_MIN_THREADS
-    ) {
-      const picks = [...cited.values()].map((digest) => evidenceOf(digest, text));
-      candidates.push({
-        target: "memory",
-        text,
-        evidence: picks.flatMap((pick) => pick.evidence),
-        evidenceNamed: picks.every((pick) => pick.named),
-      });
-    }
+    const picks = [...cited.values()].map((digest) => evidenceOf(digest, text));
+    const backed = picks.filter((pick) => pick.backed);
+    if (backed.length < PROJECT_MEMORY_EVIDENCE_MIN_THREADS) continue;
+    const procedure = lesson.category === "procedure";
+    const source = procedure ? backed.find((pick) => isSkillSource(pick.digest)) : undefined;
+    if (procedure && source === undefined) continue;
+    const ordered = [
+      ...(source === undefined ? [] : [source]),
+      ...backed.filter((pick) => pick !== source),
+      ...picks.filter((pick) => !pick.backed),
+    ];
+    candidates.push({
+      target: procedure ? "skill" : "memory",
+      text,
+      evidence: ordered.flatMap((pick) => pick.evidence),
+      evidenceNamed: backed.every((pick) => pick.named),
+    });
   }
   return candidates.slice(0, PROJECT_MEMORY_ANALYSER_RUN_MAX);
 }

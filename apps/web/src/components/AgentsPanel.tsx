@@ -619,6 +619,8 @@ function rosterSummary(agent: AgentFlowEntry, t: Translate): string {
   const tools = toolSummaryText(agent.tools ?? [], t);
   if (agent.doing !== undefined)
     return [doingText(agent.doing, t), tools].filter(Boolean).join(" · ");
+  // Live without a current step: the turn ended but background work, such as a monitor, runs on.
+  if (isLive(agent.state)) return [t(agent.summary), tools].filter(Boolean).join(" · ");
   return tools === "" ? agent.summary : [t("Finished the turn"), tools].join(" · ");
 }
 
@@ -788,6 +790,7 @@ export function AgentsPanel({
   environmentId = null,
   threadId = null,
   activities,
+  backgroundLiveness = null,
   activeTurnId = null,
   activeTurnStartedAt = null,
   lead = null,
@@ -798,6 +801,8 @@ export function AgentsPanel({
   threadId?: ThreadId | null;
   /** The thread's activities; with them the panel shows every agent's flow, the lead's included. */
   activities?: ReadonlyArray<OrchestrationThreadActivity>;
+  /** The thread's background work after its turn settled; keeps a watched step running. */
+  backgroundLiveness?: "working" | "monitoring" | null;
   activeTurnId?: string | null;
   activeTurnStartedAt?: string | null;
   /** The lead's model and provider instance, as the composer selected them. */
@@ -816,11 +821,12 @@ export function AgentsPanel({
         : agentFlow({
             activities,
             agents: model,
+            backgroundLiveness,
             activeTurnId,
             activeTurnStartedAt,
             lead: lead ?? { model: null, instanceId: null },
           }),
-    [activities, model, activeTurnId, activeTurnStartedAt, lead],
+    [activities, model, backgroundLiveness, activeTurnId, activeTurnStartedAt, lead],
   );
   const colorOf = useMemo(() => {
     const byAgent = new Map(

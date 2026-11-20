@@ -109,3 +109,34 @@ describe("agentFlow", () => {
     expect(flowOf("turn-1").agents[0]).toMatchObject({ state: "thinking", doing: "thinking" });
   });
 });
+
+it.each(["monitoring", "working"] as const)(
+  "summarizes %s after the turn ends",
+  (backgroundLiveness) => {
+    const activities = [
+      step("2026-10-19T01:00:00Z", "bg", "execute", "watch", "inProgress"),
+      activity("task.started", "2026-10-19T01:00:01Z", {
+        taskId: "bg-task",
+        toolUseId: "bg",
+        taskType: "shell",
+        agentKind: "background",
+      }),
+      step("2026-10-19T01:00:02Z", "bg", "execute", "watch", "completed"),
+    ];
+    const input = {
+      activities,
+      agents: deriveAgentPanelModel({ agents: [] }),
+      activeTurnId: null,
+      activeTurnStartedAt: null,
+      lead: { model: null, instanceId: null },
+    };
+    const lead = agentFlow({ ...input, backgroundLiveness }).agents[0];
+    expect(lead).toMatchObject({
+      state: "working",
+      summary: backgroundLiveness === "monitoring" ? "Monitoring" : "Working in the background",
+    });
+    // No current step to name, so the roster shows the summary rather than "Running a command…".
+    expect(lead?.doing).toBeUndefined();
+    expect(agentFlow(input).agents[0]?.state).toBe("done");
+  },
+);

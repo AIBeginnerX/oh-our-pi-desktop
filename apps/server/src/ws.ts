@@ -24,6 +24,7 @@ import {
   type AuthEnvironmentScope,
   CommandId,
   CrewRetryTaskError,
+  CrewScorecardReadError,
   CrewStopTasksError,
   type DiscoveredLocalServerList,
   EventId,
@@ -133,6 +134,7 @@ import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as CrewService from "./crew/CrewService.ts";
+import { readCrewScorecard } from "./crew/crewScorecard.ts";
 import * as ProjectMemoryAnalyser from "./memory/ProjectMemoryAnalyser.ts";
 import * as ProjectMemoryService from "./memory/ProjectMemoryService.ts";
 import * as ProjectSkillService from "./skills/ProjectSkillService.ts";
@@ -1566,6 +1568,17 @@ const makeWsRpcLayer = (
             crew.retryTask({ threadId: input.leadThreadId, taskId: input.taskId }).pipe(
               Effect.map(({ taskId }) => ({ taskId })),
               Effect.mapError((error) => new CrewRetryTaskError({ reason: error.reason })),
+            ),
+            { "rpc.aggregate": "crew" },
+          ),
+        [WS_METHODS.crewScorecard]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.crewScorecard,
+            readCrewScorecard.pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.mapError(
+                () => new CrewScorecardReadError({ reason: "Crew history could not be read." }),
+              ),
             ),
             { "rpc.aggregate": "crew" },
           ),

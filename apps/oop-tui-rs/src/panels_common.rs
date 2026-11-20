@@ -552,6 +552,7 @@ pub fn count_word(kind: &str, count: usize) -> String {
 pub fn evidence_word(evidence: Evidence) -> &'static str {
     match evidence {
         Evidence::Reported => s("Reported only", "보고만 있음"),
+        Evidence::TestsReported => s("Tests reported, not seen", "테스트 자체 보고"),
         Evidence::Tested => s("Tests passed", "테스트 통과"),
         Evidence::Audited => s("Audit approved", "감사 승인"),
     }

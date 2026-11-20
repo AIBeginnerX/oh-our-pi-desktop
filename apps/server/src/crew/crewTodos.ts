@@ -227,10 +227,17 @@ export function todoReportNote(
     "",
     "",
     `TODO: ${counts.total} items, ${parts.join(", ")}.`,
-    ...rest.map(
-      (todo) =>
-        `- ${todo.id} (${todo.status}): ${todo.text}${(todo.detail ?? todo.note) ? ` - ${todo.detail ?? todo.note}` : ""}`,
-    ),
+    ...rest.map((todo) => {
+      const reason = [
+        todo.status === "claimed" && todo.check === undefined
+          ? "No server check was configured."
+          : undefined,
+        todo.detail ?? todo.note,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      return `- ${todo.id} (${todo.status}): ${todo.text}${reason ? ` - ${reason}` : ""}`;
+    }),
     ...(outOfScope === undefined
       ? []
       : [
@@ -358,7 +365,9 @@ export function taskProof(input: {
     ? { verdict: "verified", reason: "a passing test run was observed in the member's thread" }
     : {
         verdict: "inconclusive",
-        reason: "no server check ran and no passing test run was observed",
+        reason: input.selfReportedPassed
+          ? "the member reported passing tests, but OOP did not observe a passing run"
+          : "no server check ran and no passing test run was observed",
       };
 }
 

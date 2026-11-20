@@ -9,6 +9,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -31,6 +32,7 @@ import {
   type ProjectMemoryCreateInput,
   ProjectMemoryRejectedError,
   ProjectMemoryStoreError,
+  ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -456,6 +458,87 @@ const createInput = (
 });
 
 describe("ProjectMemoryService", () => {
+  test("lists distinct current-version exposures and holds both composer sends and recall until resumed", () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      const projectId = ProjectId.make("project-1");
+      const threadId = ThreadId.make("thread-1");
+      yield* seedProject(projectId);
+      yield* seedThread(projectId, threadId);
+      yield* seedMessage(threadId, "message-1");
+      yield* seedMessage(threadId, "message-2");
+      const service = yield* ProjectMemoryService;
+      const ledger = yield* ProjectMemorySendLedger;
+      const { memory } = yield* service.create(createInput());
+      const { memoryId } = memory;
+      const now = DateTime.makeUnsafe(NOW);
+      const scope = {
+        projectId,
+        threadId,
+        providerInstanceId: ProviderInstanceId.make("provider"),
+      };
+      const recall = { ...scope, now, memoryIds: [memoryId] };
+      const dispatch = { ...scope, now, items: [{ memoryId, selectedVersion: 1 }] };
+      const committed = yield* ledger.commitDispatch({
+        ...dispatch,
+        messageId: MessageId.make("message-1"),
+      });
+      if (committed.status !== "committed") return assert.fail("expected the dispatch to commit");
+      yield* ledger.recordRecall(recall);
+      for (const [threadId, version, state] of [
+        ["thread-2", 1, "provider_accepted"],
+        ["thread-3", 1, "provider_accepted"],
+        ["other-version", 2, "provider_accepted"],
+        // A hand-off the provider refused settles unknown: the memory never arrived.
+        ["never-arrived", 1, "external_send_unknown"],
+      ] as const) {
+        yield* seedExposure({ threadId, messageId: "message-1", memoryId, version, state });
+      }
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO project_memory_outcomes
+          (project_id, memory_id, memory_version, thread_id, outcome, judged_at_event_sequence)
+        VALUES (${projectId}, ${memoryId}, 1, ${threadId}, 'good', 1),
+               (${projectId}, ${memoryId}, 1, 'thread-2', 'bad', 2)
+      `;
+      const page = () => service.list({ projectId });
+      const counts = { sent: 3, good: 1, bad: 1, unknown: 1 };
+      assert.deepEqual((yield* page()).items[0]?.outcomes, counts);
+
+      const update = { projectId, memoryId, expectedVersion: 1 };
+      yield* service.update({ ...update, held: true });
+      assert.include((yield* page()).items[0], { held: true, version: 1 });
+      assert.deepEqual((yield* page()).items[0]?.outcomes, counts);
+      assert.deepEqual(yield* ledger.recordRecall(recall), { status: "recorded", memories: [] });
+      assert.deepEqual(
+        yield* ledger.commitDispatch({ ...dispatch, messageId: MessageId.make("message-2") }),
+        { status: "held", reason: "unavailable" },
+      );
+      assert.deepEqual(
+        yield* ledger.revalidateDispatch({ ...scope, attemptSeq: committed.attemptSeq }),
+        { status: "held", reason: "unavailable" },
+      );
+      assert.deepEqual(
+        (yield* service.search({ projectId, query: "migrations", relevantOnly: true })).items,
+        [],
+      );
+
+      yield* service.update({ ...update, held: false });
+      assert.isUndefined((yield* page()).items[0]?.held);
+      assert.equal(
+        (yield* ledger.revalidateDispatch({ ...scope, attemptSeq: committed.attemptSeq })).status,
+        "valid",
+      );
+      const recalled = yield* ledger.recordRecall(recall);
+      assert.equal(recalled.status === "recorded" && recalled.memories[0]?.memoryId, memoryId);
+      assert.equal(
+        (yield* ledger.commitDispatch({ ...dispatch, messageId: MessageId.make("message-2") }))
+          .status,
+        "committed",
+      );
+      assert.deepEqual((yield* page()).items[0]?.outcomes, counts);
+    }));
+
   test("creates, gets, and lists memories inside one project", () =>
     Effect.gen(function* () {
       yield* runMigrations();
@@ -476,6 +559,8 @@ describe("ProjectMemoryService", () => {
 
       const page = yield* service.list({ projectId: ProjectId.make("project-1") });
       assert.equal(page.items.length, 1);
+      // Never sent: no outcome line to show.
+      assert.isUndefined(page.items[0]?.outcomes);
       // Summaries carry no body.
       assert.isFalse("body" in page.items[0]!);
       assert.isFalse(page.truncated);
@@ -2263,6 +2348,7 @@ describe("ProjectMemoryService work-analyser suggestions", () => {
         proposalId: outcome.proposal.proposalId,
       });
       // The wire origin stays one an older client decodes; the evidence rides beside it.
+      assert.equal(approved.memory.kind, "fact");
       assert.deepEqual(approved.memory.origin, { type: "manual" });
       assert.deepEqual(approved.memory.derivedFrom, evidence);
       const expires = Date.parse(approved.memory.validUntil ?? "");
@@ -2274,7 +2360,7 @@ describe("ProjectMemoryService work-analyser suggestions", () => {
       assert.deepEqual(listed.items[0]?.derivedFrom, evidence);
     }));
 
-  test("a skill suggestion is not saved as a memory", () =>
+  test("approving a skill suggestion saves one derived procedure and removes the suggestion", () =>
     Effect.gen(function* () {
       yield* runMigrations();
       yield* seedProject("project-1");
@@ -2284,13 +2370,30 @@ describe("ProjectMemoryService work-analyser suggestions", () => {
       );
       if (outcome.status !== "proposed") throw new Error(outcome.status);
 
-      const error = yield* Effect.flip(
-        service.approveProposal({ projectId: PROJECT, proposalId: outcome.proposal.proposalId }),
+      const input = { projectId: PROJECT, proposalId: outcome.proposal.proposalId };
+      const before = yield* Clock.currentTimeMillis;
+      const { memory } = yield* service.approveProposal(input);
+      assert.equal(memory.kind, "procedure");
+      assert.deepEqual(memory.origin, { type: "manual" });
+      assert.deepEqual(memory.derivedFrom, evidence);
+      assert.equal(
+        Date.parse(memory.validUntil ?? ""),
+        before + PROJECT_MEMORY_DERIVED_VALID_DAYS * 24 * 60 * 60 * 1000,
       );
+      assert.deepEqual((yield* service.listProposals({ projectId: PROJECT })).items, []);
+
+      const error = yield* Effect.flip(service.approveProposal(input));
       if (error._tag !== "ProjectMemoryRejectedError") throw new Error(error._tag);
-      assert.equal(error.reason, "proposal-not-memory");
-      assert.equal((yield* service.list({ projectId: PROJECT })).items.length, 0);
-      assert.equal((yield* service.listProposals({ projectId: PROJECT })).items.length, 1);
+      assert.equal(error.reason, "proposal-missing");
+      const listed = yield* service.list({ projectId: PROJECT });
+      assert.deepEqual(
+        listed.items.map((item) => item.memoryId),
+        [memory.memoryId],
+      );
+      assert.deepEqual(
+        (yield* service.get({ projectId: PROJECT, memoryId: memory.memoryId })).memory,
+        memory,
+      );
     }));
 });
 

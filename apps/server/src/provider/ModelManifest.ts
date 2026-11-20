@@ -223,7 +223,38 @@ function isLegacyModel(
   if (catalogModel) return catalogModel.status === "legacy";
   const currentModels = manifest.currentModels[driverKind];
   if (!currentModels) return false;
-  return !currentModels.includes(slug) && !currentModels.includes(family);
+  if (currentModels.includes(slug) || currentModels.includes(family)) return false;
+
+  const parse = (slug: string) => {
+    const normalized = driverKind === "codex" ? codexModelFamily(slug) : slug;
+    const match = /(^|-)(\d+(?:[.-]\d+)*)(?=-|$)/.exec(normalized);
+    if (!match) return undefined;
+    return {
+      line: `${normalized.slice(0, match.index)}${match[1]}{version}${normalized.slice(match.index + match[0].length)}`,
+      version: match[2]!.split(/[.-]/).map(Number),
+    };
+  };
+  const candidate = parse(family);
+  if (!candidate) return true;
+  const isNewer = (version: number[]) => {
+    for (let i = 0; i < Math.max(version.length, candidate.version.length); i++) {
+      const difference = (version[i] ?? 0) - (candidate.version[i] ?? 0);
+      if (difference !== 0) return difference > 0;
+    }
+    return false;
+  };
+  const known = [
+    ...currentModels.map((slug) => ({ slug, status: "current" })),
+    ...(catalog ?? []),
+  ].flatMap((model) => {
+    const parsed = parse(model.slug);
+    return parsed ? [{ ...parsed, status: model.status }] : [];
+  });
+  const sameLine = known.filter((model) => model.line === candidate.line);
+  // The manifest can lag new releases, so newer advertised models stay current.
+  return (
+    sameLine.length > 0 ? sameLine : known.filter((model) => model.status === "current")
+  ).some((model) => isNewer(model.version));
 }
 
 /**

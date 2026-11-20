@@ -5,7 +5,11 @@
  * Built from the activities and subagent roster a client already holds for the thread; nothing
  * new is fetched.
  */
-import type { OrchestrationThreadActivity } from "@t3tools/contracts";
+import {
+  INERT_TASK_TYPES,
+  MONITOR_TASK_TYPES,
+  type OrchestrationThreadActivity,
+} from "@t3tools/contracts";
 
 import {
   crewEvidence,
@@ -286,6 +290,7 @@ type CrewStep = ToolStep & {
   /** The task.completed status; absent while the task runs. */
   outcome?: string | undefined;
   tested?: boolean;
+  testsReported?: boolean;
   verdict?: string | undefined;
   /** The server's proof verdict from task.completed; absent from an older server. */
   proof?: CrewProofVerdict | undefined;
@@ -313,6 +318,7 @@ interface ToolStep {
   completedAt?: string;
   subtitle?: string;
   model?: string;
+  background?: boolean;
   progress?: string;
   tokens?: number;
   error?: string;
@@ -485,7 +491,7 @@ function collectToolSteps(activities: ReadonlyArray<OrchestrationThreadActivity>
       // A later update that names nothing must not erase what an earlier one made clear.
       const category = toolCategory(step.name, data?.kind, payload.itemType);
       if (existing === undefined || category !== "other") step.category = category;
-      step.state = toolStepState(payload);
+      if (!step.background) step.state = toolStepState(payload);
       const detail = text(payload.detail);
       if (detail !== undefined) step.description = detail;
       const target = toolTarget(data, detail, step.name);
@@ -493,7 +499,7 @@ function collectToolSteps(activities: ReadonlyArray<OrchestrationThreadActivity>
       if (!step.fixedLabel) {
         step.label = step.target === undefined ? step.name : `${step.name} · ${step.target}`;
       }
-      if (activity.kind === "tool.completed" || step.state !== "running") {
+      if (!step.background && (activity.kind === "tool.completed" || step.state !== "running")) {
         step.completedAt = activity.createdAt;
       }
       continue;
@@ -533,16 +539,33 @@ function collectToolSteps(activities: ReadonlyArray<OrchestrationThreadActivity>
       step.model = model;
       step.subtitle = [text(payload.effort, 20), model].filter(Boolean).join(" · ");
     }
-    const progress = text(payload.summary) ?? text(payload.lastToolName, 80);
+    const taskType = typeof payload.taskType === "string" ? payload.taskType : undefined;
+    const monitor = taskType !== undefined && MONITOR_TASK_TYPES.has(taskType);
+    // Work that outlives its tool call; plan-mode bookkeeping is background-kind but never live.
+    const background =
+      monitor ||
+      (payload.agentKind === "background" &&
+        (taskType === undefined || !INERT_TASK_TYPES.has(taskType)));
+    if (background) step.background = true;
+    const progress =
+      text(payload.summary) ??
+      (step.background
+        ? (step.progress ?? (monitor ? "Monitoring" : "Running in the background"))
+        : text(payload.lastToolName, 80));
     if (progress !== undefined) step.progress = progress;
     const usage = record(payload.usage);
     const tokens = usage?.totalTokens ?? usage?.total_tokens;
     if (typeof tokens === "number") step.tokens = tokens;
-    const state = taskState(activity.kind, payload.status);
+    const terminal =
+      step.background &&
+      ["completed", "failed", "cancelled", "stopped"].includes(String(payload.status));
+    const state = terminal ? toolState(payload.status) : taskState(activity.kind, payload.status);
     if (state !== undefined) {
       step.state = state;
-      if (state !== "running") step.completedAt = activity.createdAt;
-      else delete step.completedAt;
+      if (state !== "running") {
+        step.completedAt = activity.createdAt;
+        delete step.background;
+      } else delete step.completedAt;
     }
     const error = state === "failed" ? (text(payload.summary) ?? text(payload.detail)) : undefined;
     if (error !== undefined) step.error = error;
@@ -563,6 +586,7 @@ function collectToolSteps(activities: ReadonlyArray<OrchestrationThreadActivity>
 
 function stepInfo(step: ToolStep): WorkflowNodeInfo {
   return {
+    ...(step.background ? { background: true } : {}),
     ...optional("subtitle", step.subtitle),
     ...optional("model", step.model),
     ...optional("description", step.description),
@@ -702,6 +726,7 @@ function collectCrewTasks(
       task.completedAt = activity.createdAt;
       task.outcome = text(payload.status, 20);
       task.tested = payload.tested === true;
+      task.testsReported = payload.testsReported === true;
       task.verdict = text(payload.verdict, 20);
       task.proof = crewProofOf(payload.proof);
       task.usage = crewUsage(payload.usage);
@@ -723,6 +748,7 @@ function crewTurn(turnTasks: ReadonlyArray<CrewStep>) {
       role: task.role,
       outcome: task.outcome,
       tested: task.tested,
+      testsReported: task.testsReported,
       completedAt: task.completedAt,
       verdict: task.verdict,
     })),
@@ -860,18 +886,26 @@ function withThinkingFrontier(graph: WorkflowGraph): WorkflowGraph {
 
 /**
  * Lines a turn or crew graph up with whether its turn is still running. The brain works exactly
- * while its turn runs. Once a turn ends nothing in it is still working: a tool step whose
- * completion never arrived and a crew task with no final report both read as stopped, never as
- * done, until a report arrives. A running turn with no step running gets a thinking frontier.
+ * while its turn runs. Unreported foreground work reads as stopped after the turn ends.
+ * Background work follows server liveness until its task reports completion. Only an active
+ * turn with no running step gets a thinking frontier.
  */
-export function settleWithTurn(graph: WorkflowGraph, activeTurnId: string | null): WorkflowGraph {
-  const settled = settleNodesWithTurn(graph, activeTurnId);
+export function settleWithTurn(
+  graph: WorkflowGraph,
+  activeTurnId: string | null,
+  backgroundLiveness: "working" | "monitoring" | null = null,
+): WorkflowGraph {
+  const settled = settleNodesWithTurn(graph, activeTurnId, backgroundLiveness);
   return settled.kind === "turn" && settled.turnId !== undefined && settled.turnId === activeTurnId
     ? withThinkingFrontier(settled)
     : settled;
 }
 
-function settleNodesWithTurn(graph: WorkflowGraph, activeTurnId: string | null): WorkflowGraph {
+function settleNodesWithTurn(
+  graph: WorkflowGraph,
+  activeTurnId: string | null,
+  backgroundLiveness: "working" | "monitoring" | null,
+): WorkflowGraph {
   if (graph.turnId === undefined) return graph;
   const live = graph.turnId === activeTurnId;
   let changed = false;
@@ -882,9 +916,13 @@ function settleNodesWithTurn(graph: WorkflowGraph, activeTurnId: string | null):
         ? "running"
         : "completed"
       : !live && node.state === "running"
-        ? "cancelled"
+        ? node.info.background
+          ? backgroundLiveness === null
+            ? "completed"
+            : "running"
+          : "cancelled"
         : node.state;
-    const unconfirmed = graph.kind === "turn" && state !== node.state;
+    const unconfirmed = graph.kind === "turn" && state !== node.state && !node.info.background;
     if (state === node.state && (state === "running" || node.info.completedAt !== undefined)) {
       return node;
     }
@@ -922,6 +960,7 @@ function settleNodesWithTurn(graph: WorkflowGraph, activeTurnId: string | null):
 export function threadFlows(input: {
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
   readonly agents: AgentPanelModel;
+  readonly backgroundLiveness?: "working" | "monitoring" | null;
   readonly activeTurnId?: string | null;
   /** When the running turn started; lets a turn that has called no tool yet show its agent. */
   readonly activeTurnStartedAt?: string | null;
@@ -952,7 +991,9 @@ export function threadFlows(input: {
     });
   }
   return (
-    activeTurnId === undefined ? flows : flows.map((flow) => settleWithTurn(flow, activeTurnId))
+    activeTurnId === undefined
+      ? flows
+      : flows.map((flow) => settleWithTurn(flow, activeTurnId, input.backgroundLiveness ?? null))
   ).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
@@ -967,8 +1008,9 @@ interface TurnInput {
   readonly turnId: string;
   readonly steps: ReadonlyArray<ToolStep>;
   readonly tasks: ReadonlyArray<CrewStep>;
-  /** Whether the lead's turn still runs; nothing in a finished turn is still working. */
+  /** Whether the lead's foreground turn still runs. */
   readonly live: boolean;
+  readonly backgroundLiveness: "working" | "monitoring" | null;
   readonly leadModel: string | null;
   /** When a running turn began, which may be before its first tool call. */
   readonly startedAt: string | undefined;
@@ -996,6 +1038,10 @@ function launchNode(step: ToolStep): WorkflowNode {
 /** A turn drawn as agents: the main agent, then the crew and subagents it handed work to. */
 function agentFlowOfTurn(input: TurnInput): WorkflowGraph {
   const { turnId, steps, live } = input;
+  const background =
+    input.backgroundLiveness !== null &&
+    steps.some((step) => step.background && step.state === "running");
+  const working = live || background;
   const crew = crewTurn(input.tasks);
   const updatedAt =
     latest([
@@ -1050,7 +1096,7 @@ function agentFlowOfTurn(input: TurnInput): WorkflowGraph {
   const main: WorkflowNode = {
     id: mainId,
     label: "Main agent",
-    state: live ? "running" : "completed",
+    state: working ? "running" : "completed",
     wave: 0,
     info: {
       actor: {
@@ -1061,7 +1107,15 @@ function agentFlowOfTurn(input: TurnInput): WorkflowGraph {
       },
       ...optional("model", input.leadModel),
       startedAt,
-      ...(live ? {} : { completedAt: updatedAt }),
+      ...(background
+        ? {
+            progress:
+              input.backgroundLiveness === "monitoring"
+                ? "Monitoring"
+                : "Working in the background",
+          }
+        : {}),
+      ...(working ? {} : { completedAt: updatedAt }),
       ...optional("tokens", crew.usage?.tokens),
       ...optional("costUsd", crew.usage?.costUsd),
       ...(crew.usage?.unpriced === true ? { unpriced: true } : {}),
@@ -1089,7 +1143,7 @@ function agentFlowOfTurn(input: TurnInput): WorkflowGraph {
     kind: crew.sorted.length > 0 ? "crew" : "turn",
     turnId,
     name: "Turn",
-    status: live ? "running" : children.length === 0 ? "completed" : graphStatus(children),
+    status: working ? "running" : children.length === 0 ? "completed" : graphStatus(children),
     startedAt,
     updatedAt,
     waveTitles: [
@@ -1111,6 +1165,7 @@ function agentFlowOfTurn(input: TurnInput): WorkflowGraph {
 export function actorFlows(input: {
   readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
   readonly agents: AgentPanelModel;
+  readonly backgroundLiveness?: "working" | "monitoring" | null;
   /** The running turn, or null when the thread is idle. */
   readonly activeTurnId: string | null;
   /** When the running turn started; lets a turn that has called no tool yet show its agent. */
@@ -1135,9 +1190,13 @@ export function actorFlows(input: {
         steps: stepsByTurn.get(turnId) ?? [],
         tasks: tasksByTurn.get(turnId) ?? [],
         live: turnId === activeTurnId,
+        backgroundLiveness: input.backgroundLiveness ?? null,
         leadModel: input.leadModel ?? null,
         startedAt: turnId === activeTurnId ? (input.activeTurnStartedAt ?? undefined) : undefined,
-        stepGraph: raw === undefined ? undefined : settleWithTurn(raw, activeTurnId),
+        stepGraph:
+          raw === undefined
+            ? undefined
+            : settleWithTurn(raw, activeTurnId, input.backgroundLiveness ?? null),
       });
     })
     .sort((a, b) => a.startedAt.localeCompare(b.startedAt))

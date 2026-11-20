@@ -5,17 +5,19 @@
 
 /**
  * How far a finished task's result can be trusted. There is no "done": a report is only a claim
- * until a test run or an approving audit backs it.
+ * until a test run or an approving audit backs it, and so is a member saying its tests passed.
  */
-export type CrewEvidence = "reported" | "tested" | "audited";
+export type CrewEvidence = "reported" | "tests reported" | "tested" | "audited";
 
 export interface CrewEvidenceTask {
   readonly id: string;
   readonly role: string;
   /** The task.completed status; absent while the task runs. */
   readonly outcome?: string | undefined;
-  /** The crew thread ended on a passing test run, or its report said its verification passed. */
+  /** OOP saw the tests pass: a passing test run in the crew thread, or a command check it ran. */
   readonly tested?: boolean | undefined;
+  /** The member's report says its tests passed, which nothing confirmed. */
+  readonly testsReported?: boolean | undefined;
   readonly completedAt?: string | undefined;
   /** The auditor's verdict, on audit tasks. */
   readonly verdict?: string | undefined;
@@ -23,9 +25,9 @@ export interface CrewEvidenceTask {
 
 /**
  * Evidence for each worker or expert task of one lead turn that completed or finished part of its
- * work. A task is audited when the latest audit that finished after it approved, tested when its
- * own run passed tests, reported otherwise. Failed, blocked, and stopped tasks, and ones still
- * running, get none.
+ * work. A task is audited when the latest audit that finished after it approved, tested when OOP
+ * saw its tests pass, tests reported when only the member says so, reported otherwise. Failed,
+ * blocked, and stopped tasks, and ones still running, get none.
  */
 export function crewEvidence(
   tasks: ReadonlyArray<CrewEvidenceTask>,
@@ -45,7 +47,13 @@ export function crewEvidence(
     const latestAudit = audits.findLast((audit) => (audit.completedAt ?? "") > completedAt);
     evidence.set(
       task.id,
-      latestAudit?.verdict === "approve" ? "audited" : task.tested === true ? "tested" : "reported",
+      latestAudit?.verdict === "approve"
+        ? "audited"
+        : task.tested === true
+          ? "tested"
+          : task.testsReported === true
+            ? "tests reported"
+            : "reported",
     );
   }
   return evidence;

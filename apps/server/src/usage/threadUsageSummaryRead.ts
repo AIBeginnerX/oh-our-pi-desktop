@@ -1,16 +1,11 @@
 /**
- * Chat usage footer read: aggregates a thread's owned-usage rows, including
- * its crew child threads, straight from the projection read model.
+ * Chat usage footer read for a request or the whole thread family, including
+ * owned usage and the latest context window of each counted thread.
  *
- * No new stored data — two indexed, bounded queries: one over
- * `projection_thread_activities` for the usage rows, one over
- * `orchestration_events` for the model timeline (`thread.created`,
- * `thread.meta-updated`, `thread.turn-start-requested`). Each usage row is
- * attributed to the model its turn actually ran with, not the thread's
- * current selection, and priced with the same rate table and overrides the
- * Usage screen uses. Rows whose payload no longer decodes are skipped, and a
- * thread with more rows or model events than `THREAD_USAGE_MAX_ROWS` reports
- * "too-large" with no numbers rather than an unbounded read.
+ * Projection rows are attributed using the model timeline from
+ * `orchestration_events`. Usage uses the Usage screen's rates and overrides.
+ * Rows with undecodable payloads are skipped. Reads exceeding the row cap
+ * report "too-large" with no numbers.
  *
  * @module threadUsageSummaryRead
  */
@@ -20,6 +15,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { isCrewFollowUp } from "../crew/crewLogic.ts";
 import { UsageService } from "./UsageService.ts";
 import { OWNED_USAGE_ACTIVITY_KIND, OwnedTurnUsageObservationV1 } from "./ownedUsage.schema.ts";
 import { aggregateThreadUsage } from "./threadUsageSummary.ts";
@@ -49,6 +45,23 @@ export type ThreadUsageModelEventRow = {
   readonly eventModel: string | null;
 };
 
+type RequestTurn = {
+  readonly turnId: string;
+  readonly text: string | null;
+};
+
+/** Walks newest-first lead turns from the named turn back to its user message. */
+export const requestTurnIds = (turns: ReadonlyArray<RequestTurn>, turnId: string): string[] => {
+  const start = turns.findIndex((turn) => turn.turnId === turnId);
+  if (start === -1) return [turnId];
+  const ids: string[] = [];
+  for (const turn of turns.slice(start)) {
+    ids.push(turn.turnId);
+    if (typeof turn.text === "string" && !isCrewFollowUp(turn.text)) break;
+  }
+  return ids;
+};
+
 /** Zero totals for the too-large shape, which still carries the full summary structure. */
 const emptyTotals: ThreadUsageSummary["totals"] = {
   inputTokens: 0,
@@ -60,9 +73,10 @@ const emptyTotals: ThreadUsageSummary["totals"] = {
   cost: { kind: "unknown" },
 };
 
-/** How far a summary reached: one turn, or the whole thread family. */
-const summaryScope = (turnId: string | undefined): "turn" | "thread" =>
-  turnId === undefined ? "thread" : "turn";
+type UsageRequest = {
+  readonly turnIds: ReadonlySet<string>;
+  readonly children: ReadonlySet<ThreadId>;
+};
 
 const decodeObservation = Schema.decodeUnknownOption(
   Schema.fromJsonString(OwnedTurnUsageObservationV1),
@@ -120,7 +134,7 @@ const turnStartsByThread = (
 };
 
 /**
- * The model of the latest turn start at or before the usage row; ISO
+ * The model of the latest turn start at or before the activity; ISO
  * timestamps compare lexicographically.
  */
 const modelAt = (
@@ -134,6 +148,57 @@ const modelAt = (
   return null;
 };
 
+type ModelUsageRow = ThreadUsageSummary["models"][number];
+type UsageContext = NonNullable<ModelUsageRow["context"]>;
+type ContextActivityRow = Omit<ThreadUsageActivityRow, "turnId">;
+
+const decodeContextPayload = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown));
+
+const readContext = (json: string): UsageContext | undefined => {
+  const payload = Option.getOrNull(decodeContextPayload(json));
+  if (typeof payload !== "object" || payload === null) return undefined;
+  const { usedTokens, maxTokens } = payload as { usedTokens?: unknown; maxTokens?: unknown };
+  if (typeof usedTokens !== "number" || !Number.isFinite(usedTokens) || usedTokens < 0)
+    return undefined;
+  return {
+    usedTokens,
+    maxTokens:
+      typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
+        ? maxTokens
+        : null,
+  };
+};
+
+const contextFullness = ({ usedTokens, maxTokens }: UsageContext): number =>
+  maxTokens !== null && maxTokens > 0 ? usedTokens / maxTokens : usedTokens;
+
+/** Attaches the fullest latest context reported by the counted threads for each model. */
+export const attachModelContexts = (
+  models: ThreadUsageSummary["models"],
+  snapshots: ReadonlyArray<ContextActivityRow>,
+  modelEvents: ReadonlyArray<ThreadUsageModelEventRow>,
+  countedThreads?: ReadonlySet<ThreadId>,
+): ReadonlyArray<ModelUsageRow> => {
+  const turnStarts = turnStartsByThread(modelEvents);
+  const contexts = new Map<string, UsageContext>();
+  for (const row of snapshots) {
+    if (countedThreads !== undefined && !countedThreads.has(row.threadId)) continue;
+    const context = readContext(row.payloadJson);
+    if (context === undefined) continue;
+    const model =
+      modelAt(turnStarts.get(row.threadId), row.createdAt) ??
+      (row.modelSelectionJson === null ? null : modelFromSelectionJson(row.modelSelectionJson));
+    if (model === null) continue;
+    const previous = contexts.get(model);
+    if (previous === undefined || contextFullness(context) > contextFullness(previous))
+      contexts.set(model, context);
+  }
+  return models.map((row) => {
+    const context = contexts.get(row.model);
+    return context === undefined ? row : { ...row, context };
+  });
+};
+
 /**
  * Pure reducer over projection rows and model events: attributes each row to
  * the model its turn ran with — the latest turn start at or before the row,
@@ -143,12 +208,9 @@ const modelAt = (
  * `THREAD_USAGE_MAX_ROWS` for both queries. Past the cap the summary reports
  * "too-large" with empty totals and models — no numbers is not zero usage.
  *
- * `turnId` narrows the counted rows to that turn: the lead thread's rows of
- * the turn plus every row of the family's other threads (the crew children of
- * the turn). The cost chains still step over the whole family first, so the
- * turn's cost is its own step of its provider chain, not the running total.
- * The response says which scope it counted, and thread scope is also what an
- * omitted `turnId` reports.
+ * A request counts the lead's request turns and every row of its crew
+ * children. Cost chains step over the whole family before counting each
+ * request's share. Without a request, the summary counts the whole family.
  */
 export const deriveThreadUsageSummary = (
   threadId: ThreadId,
@@ -157,10 +219,9 @@ export const deriveThreadUsageSummary = (
   overrides: RateTable,
   maxRows: number,
   modelEvents: ReadonlyArray<ThreadUsageModelEventRow> = [],
-  turnId?: string,
-  turnChildren: ReadonlySet<ThreadId> = NO_TURN_CHILDREN,
+  request?: UsageRequest,
 ): ThreadUsageSummary => {
-  const scope = summaryScope(turnId);
+  const scope = request === undefined ? "thread" : "turn";
   if (rows.length > maxRows || modelEvents.length > maxRows)
     return { threadId, status: "too-large", scope, totals: emptyTotals, models: [] };
   const turnStarts = turnStartsByThread(modelEvents);
@@ -187,23 +248,20 @@ export const deriveThreadUsageSummary = (
     });
   }
   const counted =
-    turnId === undefined
+    request === undefined
       ? undefined
       : (entry: { threadId: ThreadId; turnId: string | null }) =>
-          entry.threadId !== threadId ? turnChildren.has(entry.threadId) : entry.turnId === turnId;
+          entry.threadId !== threadId
+            ? request.children.has(entry.threadId)
+            : entry.turnId !== null && request.turnIds.has(entry.turnId);
   return { ...aggregateThreadUsage(threadId, entries, rates, overrides, counted), scope };
 };
-
-/** An empty set is the turn-children set of a thread-scoped read. */
-const NO_TURN_CHILDREN: ReadonlySet<ThreadId> = new Set();
 
 /**
  * Reads the summary for one thread and its crew child threads
  * (`projection_threads.parent_thread_id`) through the real projection store.
- * With `turnId`, only that turn is counted: the lead thread's observations of
- * the turn plus, in full, the crew child threads started during it — the
- * threads the lead's turn-scoped `task.*` activities name — including the
- * turn's auditor, which starts the same way. Children of other turns stay out.
+ * With `turnId`, counts the request containing that turn, including the crew
+ * children and auditors named by the lead's `task.*` activities in the request.
  */
 export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(function* (
   threadId: ThreadId,
@@ -212,6 +270,21 @@ export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(funct
   const sql = yield* SqlClient.SqlClient;
   const usage = yield* UsageService;
   const { rates, overrides } = yield* usage.pricingTables;
+  const requestTurns =
+    turnId === undefined
+      ? undefined
+      : requestTurnIds(
+          yield* sql<RequestTurn>`
+            SELECT t.turn_id AS "turnId", MAX(m.text) AS text
+            FROM projection_turns AS t
+            LEFT JOIN projection_thread_messages AS m ON m.message_id = t.pending_message_id
+            WHERE t.thread_id = ${threadId} AND t.turn_id IS NOT NULL
+            GROUP BY t.turn_id
+            ORDER BY MIN(t.requested_at) DESC, MAX(t.row_id) DESC
+            LIMIT 200
+          `,
+          turnId,
+        );
   const rows = yield* sql<ThreadUsageActivityRow>`
     SELECT
       a.thread_id AS "threadId",
@@ -245,33 +318,87 @@ export const readThreadUsageSummary = Effect.fn("threadUsageSummary.read")(funct
     ORDER BY sequence
     LIMIT ${THREAD_USAGE_MAX_ROWS + 1}
   `;
-  // The crew child threads the turn started, read straight off the lead's
-  // turn-scoped task activities; the whole family read above feeds the cost
-  // chains, and the filter keeps only the turn's share of it.
-  const turnChildren =
-    turnId === undefined
-      ? NO_TURN_CHILDREN
-      : new Set(
-          (yield* sql<{ readonly childThreadId: ThreadId }>`
+  const request: UsageRequest | undefined =
+    requestTurns === undefined
+      ? undefined
+      : {
+          turnIds: new Set(requestTurns),
+          children: new Set(
+            (yield* sql<{ readonly childThreadId: ThreadId }>`
               SELECT DISTINCT json_extract(a.payload_json, '$.threadId') AS "childThreadId"
               FROM projection_thread_activities AS a
               WHERE a.thread_id = ${threadId}
-                AND a.turn_id = ${turnId}
+                AND ${sql.in("a.turn_id", requestTurns)}
                 AND a.kind IN ('task.started', 'task.progress', 'task.completed')
                 AND json_extract(a.payload_json, '$.threadId') IN (
                   SELECT thread_id FROM projection_threads
                   WHERE parent_thread_id = ${threadId}
                 )
             `).map((row) => row.childThreadId),
-        );
-  return deriveThreadUsageSummary(
+          ),
+        };
+  const summary = deriveThreadUsageSummary(
     threadId,
     rows,
     rates,
     overrides,
     THREAD_USAGE_MAX_ROWS,
     modelEvents,
-    turnId,
-    turnChildren,
+    request,
   );
+  if (summary.status !== "ok") return summary;
+  // Task receipts identify participants independently of optional provider usage.
+  // Keep these rows out of token/cost chains: absence is not a zero receipt.
+  const participants = yield* sql<{ threadId: ThreadId; modelSelectionJson: string }>`
+    SELECT thread_id AS "threadId", model_selection_json AS "modelSelectionJson"
+    FROM projection_threads
+    WHERE parent_thread_id = ${threadId}
+    LIMIT ${THREAD_USAGE_MAX_ROWS + 1}
+  `;
+  if (participants.length > THREAD_USAGE_MAX_ROWS)
+    return { ...summary, status: "too-large" as const, totals: emptyTotals, models: [] };
+  const models = [...summary.models];
+  for (const participant of participants) {
+    if (request !== undefined && !request.children.has(participant.threadId)) continue;
+    const model = modelFromSelectionJson(participant.modelSelectionJson);
+    if (model === null || models.some((row) => row.model === model)) continue;
+    // No observation established a driver; an instance id is not a driver kind.
+    models.push({ ...emptyTotals, model, driver: "" });
+  }
+  const countedThreads =
+    request === undefined ? undefined : new Set([threadId, ...request.children]);
+  // A request reads only its own threads' snapshots, and the lead's only from the request's
+  // turns: a crew thread belongs to the request that started it, the lead outlives requests.
+  const snapshots = yield* sql<ContextActivityRow>`
+    SELECT
+      t.thread_id AS "threadId",
+      t.model_selection_json AS "modelSelectionJson",
+      a.payload_json AS "payloadJson",
+      a.created_at AS "createdAt"
+    FROM projection_threads AS t
+    JOIN projection_thread_activities AS a ON a.activity_id = (
+      SELECT candidate.activity_id
+      FROM projection_thread_activities AS candidate
+      WHERE candidate.thread_id = t.thread_id AND candidate.kind = 'context-window.updated'
+        ${
+          request === undefined
+            ? sql``
+            : sql`AND (candidate.thread_id <> ${threadId} OR ${sql.in("candidate.turn_id", [...request.turnIds])})`
+        }
+      ORDER BY candidate.created_at DESC, candidate.sequence DESC, candidate.activity_id DESC
+      LIMIT 1
+    )
+    WHERE ${
+      countedThreads === undefined
+        ? sql`t.thread_id = ${threadId} OR t.parent_thread_id = ${threadId}`
+        : sql.in("t.thread_id", [...countedThreads])
+    }
+    LIMIT ${THREAD_USAGE_MAX_ROWS + 1}
+  `;
+  if (snapshots.length > THREAD_USAGE_MAX_ROWS)
+    return { ...summary, status: "too-large" as const, totals: emptyTotals, models: [] };
+  return {
+    ...summary,
+    models: attachModelContexts(models, snapshots, modelEvents, countedThreads),
+  };
 });

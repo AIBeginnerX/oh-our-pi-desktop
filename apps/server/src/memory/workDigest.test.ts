@@ -53,11 +53,11 @@ const taskResult = (version: number, accepted: boolean) =>
 const audit = (verdict: string | null, summary = "finding") =>
   activity("task.completed", { crewRole: "auditor", verdict, summary });
 
-const userMessage = () =>
+const userMessage = (text = "secret words") =>
   event("thread.message-sent", {
     threadId: thread,
     role: "user",
-    text: "secret words",
+    text,
     streaming: false,
   });
 
@@ -76,9 +76,48 @@ describe("deriveWorkDigest", () => {
     ]);
   });
 
-  it("does not signal a check that only passed", () => {
-    const digest = deriveWorkDigest(thread, [receipt("a1", 1, "completed", "passed")]);
-    expect(digest.signals).toEqual([]);
+  it("keeps clean passing checks and an accepted result as evidence", () => {
+    const events = [receipt("a1", 1, "completed", "passed"), taskResult(1, true)];
+    expect(deriveWorkDigest(thread, events).signals).toEqual([
+      { kind: "check-passed", eventSeq: events[0]!.sequence, subject: "test" },
+      { kind: "result-accepted", eventSeq: events[1]!.sequence },
+    ]);
+  });
+
+  it("cites the latest failed attempt once when a check has never passed", () => {
+    const first = receipt("a1", 1, "completed", "failed");
+    const last = receipt("a2", 1, "completed", "timed-out");
+    expect(deriveWorkDigest(thread, [first, last]).signals).toEqual([
+      { kind: "check-failed", eventSeq: last.sequence, subject: "test" },
+    ]);
+  });
+
+  it("does not call a check failed while a retry is running or if it ever passed", () => {
+    const failed = receipt("a1", 1, "completed", "failed");
+    const running = receipt("a2", 0, "running", "pending");
+    expect(deriveWorkDigest(thread, [failed, running]).signals).toEqual([]);
+    const passed = receipt("a0", 1, "completed", "passed");
+    const failedAfterPass = receipt("a3", 1, "completed", "failed");
+    expect(deriveWorkDigest(thread, [passed, failedAfterPass]).signals).toEqual([]);
+    expect(deriveWorkDigest(thread, [failed, passed]).signals.map((signal) => signal.kind)).toEqual(
+      ["check-failed-then-passed"],
+    );
+  });
+
+  it("keeps verified crew completion and approval without their report text", () => {
+    const completed = (status: string, proof: string) =>
+      activity("task.completed", { crewRole: "worker", status, proof, summary: "crew report" });
+    const digest = deriveWorkDigest(thread, [
+      completed("completed", "verified"),
+      completed("completed", "inconclusive"),
+      completed("partial", "not-verified"),
+      audit("approve"),
+    ]);
+    expect(digest.signals.map((signal) => signal.kind)).toEqual([
+      "crew-work-verified",
+      "audit-approved",
+    ]);
+    expect(JSON.stringify(digest)).not.toContain("crew report");
   });
 
   it("detects needs-changes followed by approve", () => {
@@ -88,6 +127,47 @@ describe("deriveWorkDigest", () => {
       { kind: "audit-needs-changes-then-fixed", eventSeq: events[1]!.sequence },
     ]);
     expect(digest.audits.map((a) => a.verdict)).toEqual(["needs-changes", "approve"]);
+  });
+
+  it("cites the latest requested changes once when no later audit approved", () => {
+    const earlier = audit("needs-changes");
+    const latest = audit("needs-changes");
+    expect(deriveWorkDigest(thread, [earlier, latest, audit(null)]).signals).toEqual([
+      { kind: "audit-needs-changes-unresolved", eventSeq: latest.sequence },
+    ]);
+  });
+
+  it.each([
+    { status: "failed", proof: undefined },
+    { status: "completed", proof: undefined },
+    { status: "completed", proof: "inconclusive" },
+  ])("cites a crew task with status $status and proof $proof once", ({ status, proof }) => {
+    const payload = { taskId: "task-1", crewRole: "expert", status, proof };
+    const completion = activity("task.completed", payload);
+    const redelivery = activity("task.completed", payload);
+    expect(deriveWorkDigest(thread, [completion, redelivery]).signals).toEqual([
+      { kind: "crew-work-unverified", eventSeq: completion.sequence },
+    ]);
+    const verified = activity("task.completed", {
+      ...payload,
+      status: "completed",
+      proof: "verified",
+    });
+    expect(deriveWorkDigest(thread, [completion, verified]).signals).toEqual([
+      { kind: "crew-work-verified", eventSeq: verified.sequence },
+    ]);
+  });
+
+  it("pairs an approval with requested changes only within one user request", () => {
+    const followUp = userMessage('<oop_crew_follow_up round="1" fixes="1">\nFix it');
+    const fixed = deriveWorkDigest(thread, [audit("needs-changes"), followUp, audit("approve")]);
+    expect(fixed.signals.map((s) => s.kind)).toEqual(["audit-needs-changes-then-fixed"]);
+    const unrelated = deriveWorkDigest(thread, [
+      audit("needs-changes"),
+      userMessage("Now do something else"),
+      audit("approve"),
+    ]);
+    expect(unrelated.signals.map((s) => s.kind)).toEqual(["audit-approved"]);
   });
 
   it("detects reverts and an interrupt followed by a user message, without message text", () => {
@@ -107,7 +187,7 @@ describe("deriveWorkDigest", () => {
   it("counts a withdrawal but not an acceptance cleared by new requirements", () => {
     const withdrawn = deriveWorkDigest(thread, [taskResult(1, true), taskResult(1, false)]);
     expect(withdrawn.result).toEqual({ accepted: 1, withdrawn: 1, acceptedNow: false });
-    expect(withdrawn.signals.map((s) => s.kind)).toEqual(["result-withdrawn"]);
+    expect(withdrawn.signals.map((s) => s.kind)).toEqual(["result-accepted", "result-withdrawn"]);
     const respecced = deriveWorkDigest(thread, [taskResult(1, true), taskResult(2, false)]);
     expect(respecced.result.withdrawn).toBe(0);
   });

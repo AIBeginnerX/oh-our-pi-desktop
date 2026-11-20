@@ -9,8 +9,10 @@ import { UsageService } from "./UsageService.ts";
 import type { RateTable } from "./usagePricing.ts";
 import {
   THREAD_USAGE_MAX_ROWS,
+  attachModelContexts,
   deriveThreadUsageSummary,
   readThreadUsageSummary,
+  requestTurnIds,
   type ThreadUsageModelEventRow,
 } from "./threadUsageSummaryRead.ts";
 
@@ -150,7 +152,63 @@ const usageStub = Layer.succeed(UsageService, {
 
 const testLayers = Layer.provideMerge(usageStub, SqlitePersistenceMemory);
 
+describe("requestTurnIds", () => {
+  const turns = [
+    { turnId: "later", text: "Next request" },
+    { turnId: "follow-up-2", text: '<oop_crew_follow_up round="2" fixes="0">' },
+    { turnId: "wake", text: null },
+    { turnId: "follow-up-1", text: '<oop_crew_follow_up round="1" fixes="0">' },
+    { turnId: "user", text: "Start request" },
+  ];
+
+  it("includes follow-ups and wakes back through their user message", () => {
+    expect(requestTurnIds(turns, "follow-up-2")).toEqual([
+      "follow-up-2",
+      "wake",
+      "follow-up-1",
+      "user",
+    ]);
+  });
+
+  it("stops at a new user message", () => {
+    expect(requestTurnIds(turns, "later")).toEqual(["later"]);
+  });
+
+  it("falls back to the named turn when it is absent", () => {
+    expect(requestTurnIds(turns, "unknown")).toEqual(["unknown"]);
+  });
+});
+
 describe("readThreadUsageSummary", () => {
+  it.effect("includes crew and auditor models even before usage is reported", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* insertThread(sql, "lead", null);
+      for (const [id, model] of [
+        ["worker", "deepseek"],
+        ["auditor", "gpt-6.1-sol"],
+      ]) {
+        yield* insertThread(sql, id!, "lead");
+        yield* sql`UPDATE projection_threads SET model_selection_json = ${modelSelection(model!)} WHERE thread_id = ${id}`;
+        yield* insertCrewTaskActivity(sql, id!, "lead", "task.completed", "turn-1", id!);
+      }
+      const before = yield* readThreadUsageSummary(threadId, "turn-1");
+      expect(before.models.map((row) => row.model).sort()).toEqual(["deepseek", "gpt-6.1-sol"]);
+      expect(before.models.every((row) => row.cost.kind === "unknown")).toBe(true);
+      yield* insertUsageActivity(
+        sql,
+        "auditor-usage",
+        "auditor",
+        observationJson(),
+        createdAt,
+        "audit-turn",
+      );
+      const after = yield* readThreadUsageSummary(threadId, "turn-1");
+      expect(after.models.find((row) => row.model === "gpt-6.1-sol")?.inputTokens).toBe(1000);
+      expect(after.models.filter((row) => row.model === "gpt-6.1-sol")).toHaveLength(1);
+    }).pipe(Effect.provide(testLayers)),
+  );
+
   it.effect(
     "aggregates a thread with its crew children, skipping undecodable rows and threads outside the family",
     () =>
@@ -298,7 +356,7 @@ describe("readThreadUsageSummary", () => {
   );
 
   it.effect(
-    "reads one turn: the lead's rows of the turn plus, in full, the crew child the turn started",
+    "reads the final wake turn with the request's lead and crew usage, excluding earlier requests",
     () =>
       Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -306,6 +364,38 @@ describe("readThreadUsageSummary", () => {
         yield* insertThread(sql, "crew-child-1", "lead");
         yield* insertThread(sql, "crew-child-2", "lead");
         yield* insertThread(sql, "crew-child-3", "lead");
+        yield* sql`
+        UPDATE projection_threads SET model_selection_json = ${modelSelection("gpt-5.2")}
+        WHERE thread_id IN ('crew-child-1', 'crew-child-2')
+      `;
+        const turns = [
+          ["turn-1", createdAt, "Earlier request"],
+          ["turn-2", "2026-01-01T00:02:00.000Z", "Current request"],
+          ["follow-up", "2026-01-01T00:03:00.000Z", '<oop_crew_follow_up round="1" fixes="0">'],
+          ["wake", "2026-01-01T00:04:00.000Z", null],
+        ] as const;
+        for (const [id, at, message] of turns) {
+          const messageId = message === null ? null : `message-${id}`;
+          if (messageId !== null)
+            yield* sql`
+              INSERT INTO projection_thread_messages (
+                message_id, thread_id, turn_id, role, text, is_streaming, created_at, updated_at
+              ) VALUES (${messageId}, 'lead', ${id}, 'user', ${message}, 0, ${at}, ${at})
+            `;
+          yield* sql`
+            INSERT INTO projection_turns (
+              thread_id, turn_id, pending_message_id, state, requested_at, checkpoint_files_json
+            ) VALUES ('lead', ${id}, ${messageId}, 'completed', ${at}, '[]')
+          `;
+        }
+        yield* insertUsageActivity(
+          sql,
+          "lead-wake",
+          "lead",
+          observationJson(),
+          turns[3][1],
+          "wake",
+        );
         yield* insertUsageActivity(sql, "lead-t1", "lead", observationJson(), createdAt, "turn-1");
         yield* insertUsageActivity(
           sql,
@@ -315,15 +405,13 @@ describe("readThreadUsageSummary", () => {
           "2026-01-01T00:02:01.000Z",
           "turn-2",
         );
-        // The second turn delegates a crew task; the lead's turn-scoped task
-        // activity names its attempt thread, which reports two usage rows of
-        // its own turns.
+        // The follow-up delegates a task whose attempt reports two usage rows.
         yield* insertCrewTaskActivity(
           sql,
           "task-start-2",
           "lead",
           "task.started",
-          "turn-2",
+          "follow-up",
           "crew-child-2",
         );
         yield* insertUsageActivity(
@@ -368,16 +456,46 @@ describe("readThreadUsageSummary", () => {
           observationJson(),
           "2026-01-01T00:02:04.000Z",
         );
+        for (const [id, thread, turn, usedTokens, at] of [
+          ["old", "crew-child-2", null, 90, "2026-01-01T00:03:02.000Z"],
+          ["latest", "crew-child-2", null, 40, "2026-01-01T00:03:03.000Z"],
+          ["earlier-request", "crew-child-1", null, 95, createdAt],
+          // The lead reported its context only in the earlier request.
+          ["lead-earlier", "lead", "turn-1", 70, createdAt],
+        ] as const) {
+          yield* sql`
+            INSERT INTO projection_thread_activities (
+              activity_id, thread_id, turn_id, tone, kind, summary, payload_json, created_at
+            ) VALUES (
+              ${id}, ${thread}, ${turn}, 'neutral', 'context-window.updated', '',
+              json_object('usedTokens', ${usedTokens}, 'maxTokens', 100), ${at}
+            )
+          `;
+        }
 
-        const read = yield* readThreadUsageSummary(threadId, "turn-2");
+        const read = yield* readThreadUsageSummary(threadId, "wake");
         assert.strictEqual(read.status, "ok");
         assert.strictEqual(read.scope, "turn");
-        expect(read.totals.turns).toBe(3);
+        expect(read.totals.turns).toBe(4);
+        expect(read.models.find((row) => row.model === "gpt-5.2")).toMatchObject({
+          turns: 2,
+          context: { usedTokens: 40, maxTokens: 100 },
+        });
+        // The lead's context from the earlier request is not this request's.
+        expect(read.models.find((row) => row.model === "claude-opus-4-5")?.context).toBeUndefined();
 
         // Without a turn the same store still counts the whole family.
         const whole = yield* readThreadUsageSummary(threadId);
         assert.strictEqual(whole.scope, "thread");
-        expect(whole.totals.turns).toBe(7);
+        expect(whole.totals.turns).toBe(8);
+        expect(whole.models.find((row) => row.model === "gpt-5.2")?.context).toEqual({
+          usedTokens: 95,
+          maxTokens: 100,
+        });
+        expect(whole.models.find((row) => row.model === "claude-opus-4-5")?.context).toEqual({
+          usedTokens: 70,
+          maxTokens: 100,
+        });
       }).pipe(Effect.provide(testLayers)),
   );
 
@@ -468,6 +586,55 @@ describe("deriveThreadUsageSummary", () => {
   ) => deriveThreadUsageSummary(threadId, rows, rates, new Map(), maxRows, modelEvents);
   const estimatedUsd = (cost: ThreadUsageSummary["totals"]["cost"]): number =>
     cost.kind === "estimated" ? cost.usd : Number.NaN;
+
+  it("counts request lead turns and crew children", () => {
+    const earlierChild = ThreadId.make("earlier-child");
+    const read = deriveThreadUsageSummary(
+      threadId,
+      [
+        row(undefined, modelSelection("earlier"), createdAt, threadId, "earlier"),
+        row(undefined, undefined, createdAt, threadId, "user"),
+        row(undefined, undefined, createdAt, threadId, "follow-up"),
+        row(undefined, modelSelection("crew"), createdAt, childThreadId),
+        row(undefined, modelSelection("earlier"), createdAt, earlierChild),
+      ],
+      rates,
+      new Map(),
+      THREAD_USAGE_MAX_ROWS,
+      [],
+      { turnIds: new Set(["user", "follow-up"]), children: new Set([childThreadId]) },
+    );
+    expect(read.models.map(({ model, turns }) => [model, turns])).toEqual([
+      ["claude-opus-4-5", 2],
+      ["crew", 1],
+    ]);
+  });
+
+  it("attaches the fullest counted context to the model active at the snapshot", () => {
+    const models = derive([row(), row(undefined, modelSelection("gpt-5.2"))], 2).models;
+    const snapshot = (id: ThreadId, model: string, usedTokens: number, maxTokens: number | null) =>
+      row(JSON.stringify({ usedTokens, maxTokens }), modelSelection(model), createdAt, id);
+    const secondChild = ThreadId.make("second-child");
+    const thirdChild = ThreadId.make("third-child");
+    const fourthChild = ThreadId.make("fourth-child");
+    const attached = attachModelContexts(
+      models,
+      [
+        snapshot(threadId, "gpt-5.2", 70, 100),
+        snapshot(childThreadId, "claude-opus-4-5", 100, 200),
+        snapshot(secondChild, "gpt-5.2", 120, null),
+        snapshot(thirdChild, "gpt-5.2", 80, null),
+        snapshot(fourthChild, "gpt-5.2", -1, null),
+        snapshot(ThreadId.make("excluded"), "claude-opus-4-5", 99, 100),
+      ],
+      [modelEvent("thread.turn-start-requested", createdAt, "claude-opus-4-5")],
+      new Set([threadId, childThreadId, secondChild, thirdChild, fourthChild]),
+    );
+    expect(attached.map(({ context }) => context)).toEqual([
+      { usedTokens: 70, maxTokens: 100 },
+      { usedTokens: 120, maxTokens: null },
+    ]);
+  });
 
   it("treats exactly the cap as readable and one row past it as too-large", () => {
     expect(derive([row(), row()], 2).status).toBe("ok");

@@ -11,9 +11,8 @@ import type {
  */
 export interface ProjectMemoryProposalView {
   readonly source: "agent" | "analyser";
-  /** A skill suggestion is kept from its thread's skill draft, not saved as a memory. */
+  /** A skill suggestion becomes a procedure memory on approval. */
   readonly target: "memory" | "skill";
-  readonly canApprove: boolean;
   /** Distinct threads the suggestion rests on, in citation order. */
   readonly evidenceThreadIds: ReadonlyArray<ThreadId>;
   /** Existing memories shown beside the text so the user decides; never merged. */
@@ -28,7 +27,6 @@ export function projectMemoryProposalView(
     return {
       source: "agent",
       target: "memory",
-      canApprove: true,
       evidenceThreadIds: [],
       related: [],
     };
@@ -36,7 +34,6 @@ export function projectMemoryProposalView(
   return {
     source: "analyser",
     target: analysis.target,
-    canApprove: analysis.target === "memory",
     evidenceThreadIds: [...new Set(analysis.evidence.map((item) => item.threadId))],
     related: analysis.related,
   };
