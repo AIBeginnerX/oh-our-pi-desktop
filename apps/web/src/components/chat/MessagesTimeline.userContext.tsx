@@ -620,6 +620,7 @@ export const UserMessageBody = memo(function UserMessageBody(props: {
       text={props.text}
       cwd={props.markdownCwd}
       threadRef={ctx.threadRef ?? undefined}
+      onAttachContext={ctx.onAttachContext}
       skills={props.skills}
       className="text-message-foreground"
       lineBreaks
@@ -658,6 +659,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           text={formatReviewCommentFence(fenceLanguage, comment.diff)}
           cwd={ctx.markdownCwd}
           threadRef={ctx.threadRef ?? undefined}
+          onAttachContext={ctx.onAttachContext}
           skills={ctx.skills}
           className="text-message-foreground"
         />

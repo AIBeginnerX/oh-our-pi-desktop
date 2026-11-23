@@ -1,13 +1,17 @@
 import { OpenCodeSettings, ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import * as NetService from "@t3tools/shared/Net";
-import { beforeEach, expect } from "vite-plus/test";
+import { beforeEach, expect, vi } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
 import * as OpenCodeRuntime from "../provider/opencodeRuntime.ts";
@@ -15,6 +19,9 @@ import * as OpenCodeServerOwner from "../provider/OpenCodeServerOwner.ts";
 import type { OpenCodeProviderScope } from "../provider/openCodeProviderScope.ts";
 import * as OpenCodeTextGeneration from "./OpenCodeTextGeneration.ts";
 import * as TextGeneration from "./TextGeneration.ts";
+
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 const runtimeMock = {
   state: {
@@ -24,6 +31,8 @@ const runtimeMock = {
     authHeaders: [] as Array<string | null>,
     closeCalls: [] as string[],
     sessionCreateCalls: 0,
+    sessions: new Set<string>(),
+    stallDelete: false,
     connectionError: undefined as Error | undefined,
     sessionCreateError: undefined as unknown,
     sessionResult: undefined as { data?: { id: string } } | undefined,
@@ -39,6 +48,8 @@ const runtimeMock = {
     this.state.authHeaders.length = 0;
     this.state.closeCalls.length = 0;
     this.state.sessionCreateCalls = 0;
+    this.state.sessions.clear();
+    this.state.stallDelete = false;
     this.state.connectionError = undefined;
     this.state.sessionCreateError = undefined;
     this.state.sessionResult = undefined;
@@ -100,7 +111,14 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
           if (runtimeMock.state.sessionCreateError !== undefined) {
             throw runtimeMock.state.sessionCreateError;
           }
-          return runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
+          const result = runtimeMock.state.sessionResult ?? { data: { id: `${baseUrl}/session` } };
+          if (result.data) runtimeMock.state.sessions.add(result.data.id);
+          return result;
+        },
+        delete: async ({ sessionID }: { sessionID: string }) => {
+          if (runtimeMock.state.stallDelete) return new Promise<never>(() => {});
+          runtimeMock.state.sessions.delete(sessionID);
+          return { data: true };
         },
         prompt: async (input: { readonly parts: ReadonlyArray<unknown> }) => {
           runtimeMock.state.promptUrls.push(baseUrl);
@@ -238,6 +256,200 @@ const advanceIdleClock = Effect.gen(function* () {
 });
 
 it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
+  it.effect("uses the attached image for OpenCode 2 thread titles and branch names", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const attachment = {
+        type: "image" as const,
+        id: "thread-image-attachment",
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 3,
+      };
+      const imagePath = path.join(attachmentsDir, `${attachment.id}.png`);
+      yield* fs.makeDirectory(attachmentsDir, { recursive: true });
+      yield* fs.writeFile(imagePath, new Uint8Array([1, 2, 3]));
+      const uri = (yield* path.toFileUrl(yield* fs.realPath(imagePath))).href;
+
+      const prompts: unknown[] = [];
+      let removed = 0;
+      const response = encodeJson({
+        title: "Inspect screenshot",
+        branch: "inspect-screenshot",
+      });
+      const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+        switch (new URL(String(url)).pathname) {
+          case "/api/session":
+            return Response.json({ data: { id: "generation-session" } });
+          case "/api/session/generation-session/generate":
+            return Response.json({ data: { text: response } });
+          case "/api/session/generation-session/prompt":
+            prompts.push(decodeJson(String(init?.body)));
+            return Response.json({ data: {} });
+          case "/api/experimental/session/generation-session/wait":
+            return new Response(null, { status: 204 });
+          case "/api/session/generation-session/message":
+            return Response.json({
+              data: [{ type: "assistant", content: [{ type: "text", text: response }] }],
+              cursor: {},
+            });
+          case "/api/session/generation-session":
+            removed += 1;
+            return new Response(null, { status: 204 });
+          default:
+            throw new Error("Unexpected OpenCode request");
+        }
+      });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          fetch.mockRestore();
+        }),
+      );
+
+      const settings = EXTERNAL_SERVER_WITHOUT_AUTH_OPENCODE_SETTINGS;
+      const serverOwner = yield* OpenCodeServerOwner.make({
+        binaryPath: settings.binaryPath,
+        directory: process.cwd(),
+      });
+      const generation = yield* OpenCodeTextGeneration.makeOpenCodeTextGeneration(
+        settings,
+        undefined,
+        { isV2: Effect.succeed(true), serverOwner },
+      ).pipe(Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner));
+      const input = {
+        cwd: process.cwd(),
+        message: "See the screenshot.",
+        modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        attachments: [attachment],
+      };
+      expect(yield* generation.generateThreadTitle(input)).toEqual({ title: "Inspect screenshot" });
+      expect(yield* generation.generateBranchName(input)).toEqual({ branch: "inspect-screenshot" });
+      expect(prompts).toEqual([
+        expect.objectContaining({ files: [{ uri, name: attachment.name }] }),
+        expect.objectContaining({ files: [{ uri, name: attachment.name }] }),
+      ]);
+      expect(removed).toBe(2);
+    }).pipe(Effect.scoped),
+  );
+
+  for (const mode of [
+    "rejected",
+    "timeout",
+    "empty",
+    "wait-missing",
+    "text-only",
+    "invalid-json",
+    "wrong-schema",
+  ] as const) {
+    it.effect(`falls back in a clean OpenCode 2 session: ${mode}`, () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+        const attachment = {
+          type: "image" as const,
+          id: "fallback-image",
+          name: "test.png",
+          mimeType: "image/png",
+          sizeBytes: 3,
+        };
+        yield* fs.makeDirectory(attachmentsDir, { recursive: true });
+        yield* fs.writeFile(
+          path.join(attachmentsDir, `${attachment.id}.png`),
+          new Uint8Array([1, 2, 3]),
+        );
+        const waiting = yield* Deferred.make<void>();
+        let created = 0;
+        const removed: string[] = [];
+        const generated: string[] = [];
+        let promptText: unknown;
+        const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+          const pathname = new URL(String(url)).pathname;
+          if (pathname === "/api/session")
+            return Response.json({ data: { id: `session-${++created}` } });
+          if (pathname.endsWith("/prompt")) {
+            promptText = decodeJson(String(init?.body));
+            return mode === "rejected"
+              ? Response.json({ error: "images unsupported" }, { status: 400 })
+              : Response.json({ data: {} });
+          }
+          if (pathname.endsWith("/wait")) {
+            if (mode === "timeout") {
+              Deferred.doneUnsafe(waiting, Effect.void);
+              return new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+                  once: true,
+                });
+              });
+            }
+            return new Response(null, { status: mode === "wait-missing" ? 404 : 204 });
+          }
+          if (pathname.endsWith("/message"))
+            return Response.json({
+              data:
+                mode === "invalid-json" || mode === "wrong-schema"
+                  ? [
+                      {
+                        type: "assistant",
+                        content: [
+                          {
+                            type: "text",
+                            text:
+                              mode === "invalid-json"
+                                ? "I cannot view images"
+                                : encodeJson({ wrong: true }),
+                          },
+                        ],
+                      },
+                    ]
+                  : [],
+              cursor: {},
+            });
+          if (pathname.endsWith("/generate")) {
+            generated.push(pathname);
+            const body = decodeJson(String(init?.body));
+            if (mode !== "text-only")
+              expect(body).toMatchObject({ prompt: (promptText as { text: string }).text });
+            return Response.json({ data: { text: encodeJson({ title: "Text fallback" }) } });
+          }
+          removed.push(pathname);
+          return new Response(null, { status: 204 });
+        });
+        yield* Effect.addFinalizer(() => Effect.sync(() => fetch.mockRestore()));
+        const settings = EXTERNAL_SERVER_WITHOUT_AUTH_OPENCODE_SETTINGS;
+        const serverOwner = yield* OpenCodeServerOwner.make({
+          binaryPath: settings.binaryPath,
+          directory: process.cwd(),
+        });
+        const generation = yield* OpenCodeTextGeneration.makeOpenCodeTextGeneration(
+          settings,
+          undefined,
+          { isV2: Effect.succeed(true), serverOwner },
+        ).pipe(Effect.provideService(OpenCodeServerOwner.OpenCodeServerOwner, serverOwner));
+        const fiber = yield* generation
+          .generateThreadTitle({
+            cwd: process.cwd(),
+            message: "Inspect image",
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            attachments: mode === "text-only" ? [] : [attachment],
+          })
+          .pipe(Effect.forkScoped);
+        if (mode === "timeout") {
+          yield* Deferred.await(waiting);
+          yield* TestClock.adjust("60 seconds");
+        }
+        expect(yield* Fiber.join(fiber)).toEqual({ title: "Text fallback" });
+        expect(created).toBe(mode === "text-only" ? 1 : 2);
+        expect(generated).toEqual([`/api/session/session-${created}/generate`]);
+        expect(removed).toEqual(
+          Array.from({ length: created }, (_, i) => `/api/session/session-${i + 1}`),
+        );
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    );
+  }
+
   it.effect("rejects another upstream provider before starting scoped text generation", () =>
     withOpenCodeTextGeneration(
       DEFAULT_OPENCODE_SETTINGS,
@@ -463,6 +675,31 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
     ),
   );
 
+  it.effect("deletes the one-shot session after returning a commit message", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        const result = yield* textGeneration.generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT);
+        expect(result.subject).toBe("Improve OpenCode reuse");
+        expect(runtimeMock.state.sessions.size).toBe(0);
+      }),
+    ),
+  );
+
+  it.effect("returns generated text when the one-shot session delete does not respond", () =>
+    withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
+      Effect.gen(function* () {
+        runtimeMock.state.stallDelete = true;
+        const generation = yield* textGeneration
+          .generateCommitMessage(DEFAULT_COMMIT_MESSAGE_INPUT)
+          .pipe(Effect.forkScoped);
+        yield* TestClock.adjust("2 seconds");
+        expect(generation.pollUnsafe()).toBeUndefined();
+        yield* TestClock.adjust("1 second");
+        expect((yield* Fiber.join(generation)).subject).toBe("Improve OpenCode reuse");
+      }),
+    ).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("preserves the SDK cause and request context when prompting fails", () =>
     withOpenCodeTextGeneration(DEFAULT_OPENCODE_SETTINGS, (textGeneration) =>
       Effect.gen(function* () {
@@ -484,6 +721,7 @@ it.layer(OpenCodeTextGenerationTestLayer)("OpenCodeTextGeneration", (it) => {
           cause: sdkCause,
         });
         expect((error.cause as { cause: unknown }).cause).toBe(sdkCause);
+        expect(runtimeMock.state.sessions.size).toBe(0);
       }),
     ),
   );

@@ -65,6 +65,7 @@ fn enable_kitty_keys() {
 
 pub struct Guard {
     mouse: bool,
+    suspended: bool,
 }
 
 impl Guard {
@@ -81,17 +82,27 @@ impl Guard {
             let _ = release_modes(&mut stdout());
             previous(info);
         }));
-        (Guard { mouse }, terminal)
+        (
+            Guard {
+                mouse,
+                suspended: false,
+            },
+            terminal,
+        )
     }
 
     /// Gives the terminal back for a program that wants it: the modes off, the alternate screen left.
     pub fn suspend(&mut self) {
+        if std::mem::replace(&mut self.suspended, true) {
+            return;
+        }
         let _ = release_modes(&mut stdout());
         ratatui::restore();
     }
 
     /// Takes the terminal again after `suspend`, with the modes as they were.
     pub fn resume(&mut self) -> DefaultTerminal {
+        self.suspended = false;
         let terminal = ratatui::init();
         let _ = execute!(stdout(), EnableBracketedPaste);
         if KITTY_KEYS.load(Ordering::SeqCst) {
@@ -138,8 +149,13 @@ pub async fn suspend_process(guard: &mut Guard) -> DefaultTerminal {
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        let _ = release_modes(&mut stdout());
-        ratatui::restore();
+        if !self.suspended {
+            self.suspend();
+        } else if ratatui::crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
+            // A full-screen picker can take raw mode while the app is suspended.
+            let _ = execute!(stdout(), DisableBracketedPaste);
+            ratatui::restore();
+        }
     }
 }
 
@@ -166,6 +182,85 @@ fn release(out: &mut impl Write, kitty: bool) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn suspended_guard_restores_modes_reenabled_by_the_picker() {
+        use ratatui::crossterm::terminal::{
+            EnterAlternateScreen, enable_raw_mode, is_raw_mode_enabled,
+        };
+        use std::os::fd::{FromRawFd, OwnedFd};
+        use std::os::unix::process::CommandExt;
+        use std::process::Command;
+
+        const CHILD: &str = "OOP_TEST_SUSPENDED_GUARD";
+        if std::env::var_os(CHILD).is_some() {
+            // SAFETY: these queries have no side effects. Require a detached child with a tty.
+            assert!(unsafe { libc::getsid(0) == libc::getpid() && libc::isatty(0) == 1 });
+            KITTY_KEYS.store(true, Ordering::SeqCst);
+            for picker in [false, true] {
+                enable_raw_mode().unwrap();
+                let mut guard = Guard {
+                    mouse: false,
+                    suspended: false,
+                };
+                guard.suspend();
+                if picker {
+                    enable_raw_mode().unwrap();
+                    execute!(stdout(), EnterAlternateScreen, EnableBracketedPaste).unwrap();
+                }
+                drop(guard);
+                assert!(!is_raw_mode_enabled().unwrap(), "raw mode after drop");
+            }
+            return;
+        }
+
+        let (mut master, mut slave) = (-1, -1);
+        // SAFETY: openpty writes two new descriptors. No optional parameters are needed.
+        let opened = unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(opened, 0);
+        // SAFETY: openpty succeeded, so we own both descriptors.
+        let (_master, slave) =
+            unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+        let mut child = Command::new(std::env::current_exe().unwrap());
+        child
+            .args([
+                "--exact",
+                "terminal::tests::suspended_guard_restores_modes_reenabled_by_the_picker",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .stdin(slave);
+        // SAFETY: setsid detaches from any inherited terminal before starting the test executable.
+        unsafe {
+            child.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    Err(std::io::Error::last_os_error())
+                } else {
+                    Ok(())
+                }
+            })
+        };
+        let output = child.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output = String::from_utf8(output.stdout).unwrap();
+        for off in ["\x1b[?1049l", "\x1b[?2004l"] {
+            assert_eq!(output.matches(off).count(), 3, "{output:?}");
+        }
+        assert_eq!(output.matches("\x1b[<1u").count(), 2, "{output:?}");
+    }
 
     #[test]
     fn leaving_turns_off_mouse_reporting_and_bracketed_paste() {

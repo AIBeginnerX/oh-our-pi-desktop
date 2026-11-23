@@ -67,7 +67,7 @@ export interface ProjectionFullThreadDiffContext {
 /** The thread fields pull request sync reads, for a thread with at least one link. */
 export type ProjectionThreadPullRequests = Pick<
   OrchestrationThreadShell,
-  "id" | "projectId" | "settledOverride" | "settledAt" | "pullRequests"
+  "id" | "projectId" | "branch" | "settledOverride" | "settledAt" | "pullRequests"
 >;
 
 export interface ProjectionThreadDetailQuery {
@@ -77,6 +77,8 @@ export interface ProjectionThreadDetailQuery {
    * the activity query. Omit this option to preserve the full detail response.
    */
   readonly activityKinds?: ReadonlyArray<string>;
+  /** Keep the unresolved approval and user-input requests when `activityKinds` filters. */
+  readonly includePinnedActivities?: boolean;
 }
 
 /**
@@ -193,6 +195,16 @@ export interface ProjectionSnapshotQueryShape {
     readonly fromSequenceExclusive: number;
     readonly toSequenceInclusive: number;
   }) => Effect.Effect<ProjectionEventReplayStats, ProjectionRepositoryError>;
+
+  /** Find a non-deleted thread in a non-deleted project by its exact worktree path. */
+  readonly getActiveThreadIdByWorktreePath: (
+    worktreePath: string,
+  ) => Effect.Effect<Option.Option<ThreadId>, ProjectionRepositoryError>;
+
+  readonly listActiveWorkspaceRoots: () => Effect.Effect<
+    ReadonlyArray<string>,
+    ProjectionRepositoryError
+  >;
 
   /**
    * Read the active project for an exact workspace root match.

@@ -52,6 +52,7 @@ import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
 import { useThreadUsageSummary } from "../state/threadUsageSummary";
 import { formatCrewAuditFooter, formatThreadUsageFooter } from "./chat/threadUsageText";
 import {
+  canRollbackConversation,
   latestTurnStartFailureId,
   shouldShowPlanFollowUpPrompt,
   resolveFileAttachmentUrl,
@@ -359,9 +360,10 @@ export function useChatViewTimelineData({
     providerStatuses.find(
       (status) => status.instanceId === activeThread?.session?.providerInstanceId,
     ) ?? activeProviderStatus;
-  const supportsConversationRollback =
-    conversationProviderStatus !== null &&
-    conversationProviderStatus.supportsConversationRollback !== false;
+  const supportsConversationRollback = canRollbackConversation(
+    activeThread,
+    conversationProviderStatus,
+  );
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const latestCheckpointCompletedAt = activeThread?.checkpoints.at(-1)?.completedAt ?? null;

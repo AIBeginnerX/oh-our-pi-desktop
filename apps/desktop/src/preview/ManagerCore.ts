@@ -10,19 +10,18 @@ import * as Scope from "effect/Scope";
 import * as SynchronizedRef from "effect/SynchronizedRef";
 import { RECORDING_CURSOR_CHANNEL, RECORDING_CONTROLLER_CHANNEL } from "./GuestProtocol.ts";
 import {
-  CAPTURE_PAGE_ATTEMPT_TIMEOUT_MS,
   CAPTURE_PAGE_RETRY_ATTEMPTS,
   CAPTURE_PAGE_RETRY_DELAY_MS,
   type FrameCaptureConsumer,
   type PreviewOperationContext,
   type PreviewTabState,
   attempt,
+  attemptCapturePromise,
   currentIso,
   replaceMap,
 } from "./ManagerSupport.ts";
 import {
   PreviewArtifactPathOutsideDirectoryError,
-  PreviewOperationError,
   PreviewTabNotFoundError,
   PreviewWebContentsNotFoundError,
   PreviewWebviewNotInitializedError,
@@ -55,17 +54,7 @@ export const makePreviewNativeCore = (ctx: PreviewNativeState) => {
     const capture = Effect.gen(function* () {
       // Check after the retry delay, and again before accepting its result.
       yield* requireCurrentGuest;
-      const image = yield* Effect.tryPromise({
-        // An abort-signal parameter makes a stalled promise interruptible.
-        try: (_signal) => wc.capturePage(),
-        catch: (cause) => new PreviewOperationError({ ...errorContext, cause }),
-      }).pipe(
-        Effect.timeout(CAPTURE_PAGE_ATTEMPT_TIMEOUT_MS),
-        Effect.catchTags({
-          TimeoutError: (cause) =>
-            Effect.fail(new PreviewOperationError({ ...errorContext, cause })),
-        }),
-      );
+      const image = yield* attemptCapturePromise(errorContext, () => wc.capturePage());
       yield* requireCurrentGuest;
       return image;
     });

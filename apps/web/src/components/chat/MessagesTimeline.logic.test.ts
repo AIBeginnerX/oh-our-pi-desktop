@@ -10,6 +10,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationThread,
+  type OrchestrationThreadActivity,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
 import {
@@ -20,13 +21,16 @@ import {
 import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 import {
+  collectSuggestedTaskEntries,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
+  cycleTranscriptViewMode,
   deriveMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   liveWorkEntryLabel,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTranscriptExpanded,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
@@ -39,10 +43,100 @@ import {
   createMessageAttachmentPreviewProjector,
   deriveTimelineEntries,
   deriveTimelineEntriesWithState,
+  deriveWorkLogEntries,
   type WorkLogEntry,
   type TimelineEntriesProjection,
 } from "../../session-logic";
+import { createTimelineMinimapPreviewStore } from "./timelineMinimapItems";
 import { isImageAttachment, type ChatMessage, type TurnDiffSummary } from "../../types";
+
+describe("transcript view modes", () => {
+  it("cycles normal through thinking and verbose back to normal", () => {
+    const thinking = cycleTranscriptViewMode("normal");
+    const verbose = cycleTranscriptViewMode(thinking);
+    expect([thinking, verbose, cycleTranscriptViewMode(verbose)]).toEqual([
+      "thinking",
+      "verbose",
+      "normal",
+    ]);
+  });
+
+  it.each([
+    ["normal", false, false],
+    ["thinking", true, false],
+    ["verbose", true, true],
+  ] as const)("uses the %s default and keeps manual choices", (mode, reasoning, work) => {
+    expect(resolveTranscriptExpanded(mode, "reasoning", undefined)).toBe(reasoning);
+    expect(resolveTranscriptExpanded(mode, "work", undefined)).toBe(work);
+    for (const disclosure of ["reasoning", "work"] as const) {
+      expect(resolveTranscriptExpanded(mode, disclosure, true)).toBe(true);
+      expect(resolveTranscriptExpanded(mode, disclosure, false)).toBe(false);
+    }
+  });
+});
+
+it("places a valid task suggestion at its work-log position outside the turn fold", () => {
+  const projectRef = {
+    environmentId: EnvironmentId.make("environment"),
+    projectId: ProjectId.make("project"),
+  };
+  const turnId = TurnId.make("turn");
+  const createdAt = "2026-10-29T00:00:01.000Z";
+  const suggestion = {
+    id: EventId.make("valid"),
+    kind: "task.suggested",
+    summary: "Inspect the trace",
+    tone: "info",
+    turnId,
+    createdAt,
+    payload: { suggestionId: "suggestion", title: "Inspect the trace", prompt: "Read the trace" },
+  } satisfies OrchestrationThreadActivity;
+  const suggestedTasks = collectSuggestedTaskEntries(
+    [
+      suggestion,
+      { ...suggestion, id: EventId.make("invalid"), payload: { title: "Missing prompt" } },
+      { ...suggestion, id: EventId.make("other"), kind: "thread.message.sent" },
+    ],
+    projectRef,
+  );
+  expect([...suggestedTasks.keys()]).toEqual([suggestion.id]);
+
+  const messages: ChatMessage[] = [
+    {
+      id: MessageId.make("before"),
+      role: "user",
+      text: "Find the problem",
+      turnId: null,
+      createdAt: "2026-10-29T00:00:00.000Z",
+      updatedAt: createdAt,
+      streaming: false,
+    },
+    {
+      id: MessageId.make("after"),
+      role: "assistant",
+      text: "I found a lead",
+      turnId,
+      createdAt: "2026-10-29T00:00:02.000Z",
+      updatedAt: createdAt,
+      streaming: false,
+    },
+  ];
+  const rows = deriveMessagesTimelineRows({
+    timelineEntries: deriveTimelineEntries(messages, [], deriveWorkLogEntries([suggestion])),
+    suggestedTasks,
+    isWorking: false,
+    activeTurnStartedAt: null,
+    turnDiffSummaries: [],
+    supportsConversationRollback: false,
+  });
+  expect(rows.slice(0, 3).map(({ id }) => id)).toEqual(["before", suggestion.id, "after"]);
+  expect(rows[1]).toMatchObject({
+    kind: "suggested-task",
+    title: "Inspect the trace",
+    prompt: "Read the trace",
+    projectRef,
+  });
+});
 
 describe("streaming row projection", () => {
   function fixture(text = "") {
@@ -485,11 +579,24 @@ describe("streaming row projection", () => {
 
     try {
       const first = project();
+      const minimapPositions = first.minimapPositions;
+      const previewStore = createTimelineMinimapPreviewStore();
+      const getPreview = previewStore.snapshotFor(minimapPositions.at(-1)!);
       const saved = structuredClone(first.rows);
+      const earlierRow = first.rows[0]!;
+      const earlierId = earlierRow.id;
+      let earlierRowIdReads = 0;
+      Object.defineProperty(earlierRow, "id", {
+        get() {
+          earlierRowIdReads += 1;
+          return earlierId;
+        },
+      });
       expect(checkpointLookupReads).toBeGreaterThan(0);
       checkpointLookupReads = 0;
       for (let index = 0; index < 10; index += 1) {
         const next = send(` ${index}`, index + 1);
+        expect(next.minimapPositions).toBe(minimapPositions);
         for (const [rowIndex, row] of first.rows.entries()) {
           if (
             (row.kind === "message" || row.kind === "assistant-meta") &&
@@ -500,21 +607,48 @@ describe("streaming row projection", () => {
         }
       }
       expect(checkpointLookupReads).toBe(0);
+      expect(earlierRowIdReads).toBe(0);
       const streamed = project();
+      previewStore.setRows(streamed.rows);
+      expect(getPreview().assistantText).toBe("Partial 0 1 2 3 4 5 6 7 8 9");
       expect(streamed.rows).toEqual(deriveMessagesTimelineRows(streamed.input));
 
       imageUrl = "https://renewed.test/image";
       const renewed = project();
+      expect(renewed.minimapPositions).toBe(minimapPositions);
       expect(renewed.rows[0]).not.toBe(first.rows[0]);
       expect(renewed.rows[0]).toMatchObject({
         message: { attachments: [{ previewUrl: imageUrl }] },
       });
-      const completed = send("Complete", 11, false);
+      const more = send(" more", 11);
+      expect(more.minimapPositions).toBe(minimapPositions);
+      previewStore.setRows(more.rows);
+      expect(getPreview().assistantText).toBe("Partial 0 1 2 3 4 5 6 7 8 9 more");
+      const completed = send("Complete", 12, false);
       expect(completed.rows).toEqual(deriveMessagesTimelineRows(completed.input));
       expect(
         completed.rows.find((row) => row.kind === "message" && row.message.id === liveMessage.id),
       ).toMatchObject({ message: { text: "Complete" }, assistantCopyStreaming: false });
+      previewStore.setRows(completed.rows);
+      expect(previewStore.snapshotFor(completed.minimapPositions.at(-1)!)().assistantText).toBe(
+        "Complete",
+      );
       expect(first.rows).toEqual(saved);
+
+      const earlierPrompt = {
+        ...history[0]!.user,
+        id: MessageId.make("paged-prompt"),
+        createdAt: "2026-09-02T23:59:00.000Z",
+      };
+      thread = { ...thread, messages: [earlierPrompt, ...thread.messages] };
+      registry.set(
+        state,
+        AsyncResult.success({ ...EMPTY_ENVIRONMENT_THREAD_STATE, data: Option.some(thread) }),
+      );
+      const paged = project();
+      expect(paged.minimapPositions).not.toBe(completed.minimapPositions);
+      expect(paged.minimapPositions[0]).toMatchObject({ id: earlierPrompt.id, rowIndex: 0 });
+      expect(paged.minimapPositions[1]).toMatchObject({ id: earlierId, rowIndex: 1 });
     } finally {
       unmount();
       registry.dispose();
@@ -2251,6 +2385,22 @@ describe("deriveMessagesTimelineRows", () => {
       entries,
       expanded: true,
     });
+    for (const mode of ["thinking", "verbose"] as const) {
+      const modeRows = deriveMessagesTimelineRows({ ...input, transcriptViewMode: mode });
+      expect(modeRows.find((row) => row.kind === "turn-fold")).toMatchObject({ expanded: true });
+      expect(modeRows.find((row) => row.kind === "activity-group")).toMatchObject({
+        entries,
+        expanded: true,
+      });
+      const manuallyCollapsedRows = deriveMessagesTimelineRows({
+        ...input,
+        transcriptViewMode: mode,
+        disclosureChoices: new Map([["group:activity-group:reasoning-entry", false]]),
+      });
+      expect(manuallyCollapsedRows.find((row) => row.kind === "activity-group")).toMatchObject({
+        expanded: false,
+      });
+    }
     expect(deriveMessagesTimelineRows(input)).toEqual(rows);
   });
 

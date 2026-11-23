@@ -7,6 +7,8 @@ import { useUiLanguage } from "../../state/menuLanguage";
 import { Button } from "../ui/button";
 
 const FOCUSABLE = "button:not([disabled])";
+// The full list stays in Settings → What's new, reached by the card's existing "See all updates" button.
+const MAX_NOTICE_HIGHLIGHTS = 5;
 
 /**
  * The launch card under the neon sign. It owns focus while open: Escape closes it and Tab
@@ -64,7 +66,7 @@ export function WhatsNewNotice(props: {
         {t("What's new in OOP {version}", { version: OOP_VERSION })}
       </h2>
       <ul className="list-disc space-y-1.5 pl-5 text-sm text-muted-foreground">
-        {props.notes.highlights.map((highlight) => (
+        {props.notes.highlights.slice(0, MAX_NOTICE_HIGHLIGHTS).map((highlight) => (
           <li key={highlight.en}>{localizedHighlight(highlight, language)}</li>
         ))}
       </ul>

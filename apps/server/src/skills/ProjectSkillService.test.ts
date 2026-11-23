@@ -275,6 +275,8 @@ const snapshotQueryLayer = (shell: OrchestrationThreadShell | null) =>
     getSnapshotSequence: unused,
     getCounts: unused,
     getEventReplayStats: unused,
+    getActiveThreadIdByWorktreePath: unused,
+    listActiveWorkspaceRoots: unused,
     getActiveProjectByWorkspaceRoot: unused,
     getProjectShellById: unused,
     getProjectShells: unused,

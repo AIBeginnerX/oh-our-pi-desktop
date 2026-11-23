@@ -272,14 +272,51 @@ export function findEscapeSequenceEndIndex(input: string, start: number): number
   return isEscapeFinalByte(input.charCodeAt(cursor)) ? cursor + 1 : start + 1;
 }
 
+// Internal pending-state markers cannot be produced by the parser's ESC/C1 prefixes.
+// Keep only the discard state and a possible split ST, never the discarded payload.
+const DISCARDED_STRING = "\u0000discarded-string";
+const DISCARDED_STRING_ESCAPE = `${DISCARDED_STRING}\u001b`;
+const MAX_PENDING_CONTROL_BYTES = 16 * 1024;
+
 export function sanitizeTerminalHistoryChunk(
   pendingControlSequence: string,
   data: string,
 ): { visibleText: string; pendingControlSequence: string } {
-  const input = `${pendingControlSequence}${data}`;
+  const discarding =
+    pendingControlSequence === DISCARDED_STRING ||
+    pendingControlSequence === DISCARDED_STRING_ESCAPE;
+  const input = `${discarding ? (pendingControlSequence === DISCARDED_STRING_ESCAPE ? "\u001b" : "") : pendingControlSequence}${data}`;
   let visibleText = "";
   let index = 0;
-
+  let cachedTerminator: number | null | undefined;
+  const stringEnd = (start: number) => {
+    if (
+      cachedTerminator === undefined ||
+      (cachedTerminator !== null && cachedTerminator <= start)
+    ) {
+      cachedTerminator = findStringTerminatorIndex(input, start);
+    }
+    return cachedTerminator;
+  };
+  const droppedEnd = (start: number) => {
+    for (let cursor = start; cursor < input.length; cursor++) {
+      const code = input.charCodeAt(cursor);
+      if (code === 0x1b) {
+        if (cursor + 1 === input.length) return -2;
+        return cursor + (input.charCodeAt(cursor + 1) === 0x5c ? 2 : 0);
+      }
+      if (code === 7 || code === 0x9c || code === 0x18 || code === 0x1a) return cursor + 1;
+    }
+    return -1;
+  };
+  if (discarding) {
+    index = droppedEnd(0);
+    if (index < 0)
+      return {
+        visibleText,
+        pendingControlSequence: index === -2 ? DISCARDED_STRING_ESCAPE : DISCARDED_STRING,
+      };
+  }
   const append = (value: string) => {
     visibleText += value;
   };
@@ -319,7 +356,22 @@ export function sanitizeTerminalHistoryChunk(
         nextCodePoint === 0x5e ||
         nextCodePoint === 0x5f
       ) {
-        const terminatorIndex = findStringTerminatorIndex(input, index + 2);
+        const terminatorIndex = stringEnd(index + 2);
+        const end = terminatorIndex ?? input.length;
+        if (
+          end - index > MAX_PENDING_CONTROL_BYTES ||
+          Buffer.byteLength(input.slice(index, end)) > MAX_PENDING_CONTROL_BYTES
+        ) {
+          const resumed = droppedEnd(index + 2);
+          if (resumed < 0)
+            return {
+              visibleText,
+              pendingControlSequence: resumed === -2 ? DISCARDED_STRING_ESCAPE : DISCARDED_STRING,
+            };
+          index = resumed;
+          continue;
+        }
+
         if (terminatorIndex === null) {
           return { visibleText, pendingControlSequence: input.slice(index) };
         }
@@ -365,7 +417,22 @@ export function sanitizeTerminalHistoryChunk(
     }
 
     if (codePoint === 0x9d || codePoint === 0x90 || codePoint === 0x9e || codePoint === 0x9f) {
-      const terminatorIndex = findStringTerminatorIndex(input, index + 1);
+      const terminatorIndex = stringEnd(index + 1);
+      const end = terminatorIndex ?? input.length;
+      if (
+        end - index > MAX_PENDING_CONTROL_BYTES ||
+        Buffer.byteLength(input.slice(index, end)) > MAX_PENDING_CONTROL_BYTES
+      ) {
+        const resumed = droppedEnd(index + 1);
+        if (resumed < 0)
+          return {
+            visibleText,
+            pendingControlSequence: resumed === -2 ? DISCARDED_STRING_ESCAPE : DISCARDED_STRING,
+          };
+        index = resumed;
+        continue;
+      }
+
       if (terminatorIndex === null) {
         return { visibleText, pendingControlSequence: input.slice(index) };
       }

@@ -150,7 +150,6 @@ impl Input {
         full_text(&self.atoms)
     }
 
-    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.atoms.is_empty()
     }

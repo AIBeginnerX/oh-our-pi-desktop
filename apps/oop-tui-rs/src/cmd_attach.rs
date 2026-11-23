@@ -2,7 +2,10 @@
 use crate::app::{Active, App, Modal, Msg, Pick};
 use crate::panels_common::s;
 use serde_json::{Value, json};
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 #[derive(Clone)]
 pub struct File {
@@ -12,9 +15,15 @@ pub struct File {
 #[derive(Default)]
 pub struct State {
     pending: HashMap<String, Vec<File>>,
+    failed_uploads: HashSet<String>,
     busy: bool,
     pub ready: Vec<Value>,
 }
+
+pub(crate) fn blocks_queue(app: &App) -> bool {
+    app.attachments.busy || app.attachments.failed_uploads.contains(&key(app))
+}
+
 fn key(app: &App) -> String {
     match &app.active {
         Active::Thread(id) => format!("thread:{id}"),
@@ -173,11 +182,15 @@ pub fn picked(app: &mut App, _: &Pick, index: usize) {
     if app.attachments.busy {
         return;
     }
-    if let Some(files) = app.attachments.pending.get_mut(&key(app)) {
+    let k = key(app);
+    if let Some(files) = app.attachments.pending.get_mut(&k) {
         if index < files.len() {
             files.remove(index);
         } else {
             files.clear();
+        }
+        if files.is_empty() {
+            app.attachments.failed_uploads.remove(&k);
         }
     }
 }
@@ -237,7 +250,9 @@ pub fn before_send(app: &mut App, text: &str) -> bool {
                 {
                     app.attachments.ready = ready;
                     if app.send(&text) {
+                        app.awaiting = Some(app.tick);
                         app.attachments.pending.remove(&k);
+                        app.attachments.failed_uploads.remove(&k);
                         if app.input.text().trim() == text {
                             app.input.take(true);
                         }
@@ -254,8 +269,23 @@ pub fn before_send(app: &mut App, text: &str) -> bool {
                     )
                 }
                 Err(reason) => {
+                    if app.attachments.pending.contains_key(&k) {
+                        app.attachments.failed_uploads.insert(k.clone());
+                    }
+                    let current = key(app) == k;
+                    if current && app.input.is_empty() {
+                        app.input.set(&text);
+                    }
+                    let hint = if current && app.input.text().trim() != text {
+                        s(
+                            " Use ↑ on the first line to recall the message from input history.",
+                            " 첫 줄에서 ↑를 눌러 입력 기록의 메시지를 불러오세요.",
+                        )
+                    } else {
+                        ""
+                    };
                     app.notice = Some(format!(
-                        "{} {reason}",
+                        "{} {reason}{hint}",
                         s(
                             "Attachment upload failed; draft and files kept:",
                             "첨부 업로드 실패·초안과 파일 유지:"
@@ -386,7 +416,7 @@ mod tests {
         std::fs::remove_dir_all(elsewhere).unwrap();
     }
 
-    async fn transfer(success: bool) {
+    async fn transfer(success: bool, queued: bool, second: Option<&str>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let http = tokio::spawn(async move {
@@ -424,15 +454,72 @@ mod tests {
         app.conv.thread.worktree_path = Some(app.cwd.clone());
         app.origin = Some(origin);
         std::fs::write(root.join("log.txt"), "abc").unwrap();
-        run(&mut app, "log.txt");
-        for ch in "hello".chars() {
-            app.input.insert(ch);
+        let session = |sequence, status| Msg::Thread {
+            id: "t1".into(),
+            item: json!({"kind": "event", "event": {
+                "sequence": sequence, "type": "thread.session-set",
+                "occurredAt": "2026-01-01T00:00:00.000Z",
+                "payload": {"session": {"status": status, "updatedAt": "x"}},
+            }}),
+        };
+        app.input.set("hello");
+        if queued {
+            app.handle(session(6, "running"));
+            app.submit();
+            assert_eq!(app.queue.len(), 1);
+            if let Some(text) = second {
+                app.input.set(text);
+                app.submit();
+                assert_eq!(app.queue.len(), 2);
+            }
+            run(&mut app, "log.txt");
+            app.handle(session(7, "ready"));
+            assert!(app.attachments.busy);
+            if !success && second.is_some() {
+                app.input.set("newer draft");
+            }
+        } else {
+            run(&mut app, "log.txt");
+            assert!(!app.send("hello"));
         }
-        assert!(!app.send("hello"));
         while app.attachments.busy {
             app.handle(rx.recv().await.unwrap());
         }
         http.await.unwrap();
+        if queued {
+            // An event can arrive before the upload callback's turn starts running.
+            app.handle(session(8, "ready"));
+            assert!(!app.attachments.busy, "a failed upload was started again");
+            if second.is_none() {
+                assert!(app.queue.is_empty());
+            }
+            assert_eq!(
+                app.log
+                    .iter()
+                    .filter(|c| c["type"] == "thread.turn.start")
+                    .count(),
+                usize::from(success),
+            );
+            if success && let Some(text) = second {
+                assert_eq!(app.log[0]["message"]["text"], "hello");
+                assert_eq!(app.queue.front().map(String::as_str), Some(text));
+                crate::cmd_history::undo(&mut app);
+                assert_eq!(
+                    app.notice.as_deref(),
+                    Some(s(
+                        "You cannot undo while work is running. Press Esc to interrupt, then run /undo again.",
+                        "작업 중에는 되돌릴 수 없습니다. Esc로 중단한 뒤 다시 /undo 하세요.",
+                    )),
+                );
+                app.handle(session(9, "running"));
+                assert_eq!(app.log.len(), 1);
+                app.handle(session(10, "ready"));
+                assert!(app.queue.is_empty());
+                assert_eq!(app.log.len(), 2);
+                assert_eq!(app.log[1]["type"], "thread.turn.start");
+                assert_eq!(app.log[1]["message"]["text"], text);
+            }
+        }
         if success {
             assert!(line(&app).is_none());
             assert!(app.input.text().is_empty());
@@ -455,7 +542,18 @@ mod tests {
                 .unwrap();
             assert_eq!(payload["message"]["attachments"][0]["id"], "upload-1");
         } else {
-            assert_eq!(app.input.text(), "hello");
+            if let Some(text) = second {
+                assert_eq!(app.queue.front().map(String::as_str), Some(text));
+                assert_eq!(app.input.text(), "newer draft");
+                assert!(app.input.history_back());
+                assert!(app.input.history_back());
+                assert_eq!(app.input.text(), "hello");
+                assert!(app.input.history_forward());
+                assert!(app.input.history_forward());
+                assert_eq!(app.input.text(), "newer draft");
+            } else {
+                assert_eq!(app.input.text(), "hello");
+            }
             assert!(line(&app).is_some());
             assert!(
                 !seen
@@ -468,11 +566,31 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[tokio::test]
+    async fn queued_attachment_is_sent_once_even_if_a_thread_event_arrives() {
+        transfer(true, true, None).await;
+    }
+
+    #[tokio::test]
+    async fn queued_attachment_waits_for_its_turn_before_sending_the_next_message() {
+        transfer(true, true, Some("second")).await;
+    }
+
+    #[tokio::test]
+    async fn queued_attachment_failure_does_not_retry_on_thread_events() {
+        transfer(false, true, None).await;
+    }
+
+    #[tokio::test]
+    async fn queued_attachment_failure_keeps_newer_draft_and_pauses_the_queue() {
+        transfer(false, true, Some("second")).await;
+    }
+
+    #[tokio::test]
     async fn attach_send_uploads_and_clears() {
-        transfer(true).await;
+        transfer(true, false, None).await;
     }
     #[tokio::test]
     async fn attach_failure_keeps_draft_and_sends_nothing() {
-        transfer(false).await;
+        transfer(false, false, None).await;
     }
 }

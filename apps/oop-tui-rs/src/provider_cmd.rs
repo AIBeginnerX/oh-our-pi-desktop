@@ -505,7 +505,10 @@ impl Deps for Live {
             Some(id) => serde_json::json!({"instanceId": id}),
             None => serde_json::json!({}),
         };
-        let answer = self.rpc.call("server.refreshProviders", payload).await?;
+        let answer = self
+            .rpc
+            .call_with_timeout("server.refreshProviders", payload, None)
+            .await?;
         Ok(answer
             .get("providers")
             .and_then(Value::as_array)

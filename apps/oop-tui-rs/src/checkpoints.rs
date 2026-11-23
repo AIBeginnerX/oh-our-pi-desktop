@@ -205,13 +205,6 @@ pub fn parse_diff_args(args: &[&str]) -> Result<DiffRequest, String> {
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Restore {
-    Possible,
-    SharedFolder,
-    CheckpointUnusable,
-}
-
 /// What `/undo` would undo and what it would touch, read from the thread as it is now.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UndoPlan {
@@ -222,7 +215,6 @@ pub struct UndoPlan {
     pub files: (u64, u64, u64),
     /// The message that started the turn; it goes back to the composer.
     pub prompt: Option<String>,
-    pub restore: Restore,
 }
 
 /// The text of the message that started the turn behind `checkpoint`: the last user message before its reply.
@@ -278,16 +270,6 @@ pub fn undo_plan(thread: &Thread, now: i64) -> Result<UndoPlan, Gap> {
     let checkpoint = diff_turn(thread, None, now)?;
     let turn = checkpoint.checkpoint_turn_count.unwrap_or(0);
     let target = turn.saturating_sub(1);
-    let before = (target != 0)
-        .then(|| {
-            thread
-                .checkpoints
-                .iter()
-                .find(|c| c.checkpoint_turn_count == Some(target))
-        })
-        .flatten();
-    // Turn zero is the state before the first turn, which the server keeps as its own baseline.
-    let baseline_usable = target == 0 || before.is_some_and(|c| c.status == "ready");
     let files = checkpoint.files.iter().fold((0, 0, 0), |(n, a, d), f| {
         (n + 1, a + f.additions, d + f.deletions)
     });
@@ -296,13 +278,6 @@ pub fn undo_plan(thread: &Thread, now: i64) -> Result<UndoPlan, Gap> {
         target,
         files,
         prompt: prompt_of(thread, checkpoint),
-        restore: if thread.worktree_path.is_none() {
-            Restore::SharedFolder
-        } else if baseline_usable {
-            Restore::Possible
-        } else {
-            Restore::CheckpointUnusable
-        },
     })
 }
 
@@ -485,30 +460,15 @@ mod tests {
     }
 
     #[test]
-    fn the_undo_plan_names_the_turn_the_prompt_and_what_can_be_restored() {
+    fn the_undo_plan_names_the_turn_prompt_and_changed_file_counts() {
         let t = thread(3);
         let plan = undo_plan(&t, NOW).unwrap();
         assert_eq!((plan.turn, plan.target), (3, 2));
         assert_eq!(plan.files, (1, 3, 1));
         assert_eq!(plan.prompt.as_deref(), Some("ask 3"));
-        assert_eq!(plan.restore, Restore::Possible);
         let mut shared = thread(3);
         shared.worktree_path = None;
-        assert_eq!(
-            undo_plan(&shared, NOW).unwrap().restore,
-            Restore::SharedFolder
-        );
-        let mut bad = thread(3);
-        bad.checkpoints[1].status = "missing".into();
-        assert_eq!(
-            undo_plan(&bad, NOW).unwrap().restore,
-            Restore::CheckpointUnusable
-        );
-        // the first turn goes back to the baseline, which always exists
-        assert_eq!(
-            undo_plan(&thread(1), NOW).unwrap().restore,
-            Restore::Possible
-        );
+        assert_eq!(undo_plan(&shared, NOW).unwrap().target, 2);
         assert_eq!(undo_plan(&thread(1), NOW).unwrap().target, 0);
         // the ultrathink prefix is not part of the question
         let mut t = thread(1);

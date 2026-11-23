@@ -97,10 +97,10 @@ An async question can outlive the turn or a server restart. The engine reads tha
 durable activity before resolving it because the in-memory command snapshot omits old activities.
 Do not infer that a request has disappeared merely because it is outside the recent window.
 
-Capabilities must describe what the provider can actually do. Antigravity can capture workspace
-checkpoints but cannot roll back its conversation. The [checkpoint boundary](./overview.md#turn-completion-and-checkpoints)
-therefore rejects revert before touching files. Native permission and question option IDs must
-also survive normalization; a display label is not necessarily a valid reply.
+Capabilities must describe what the provider can actually do. Antigravity supports checkpoint
+diffs. Conversation rewind requires provider rollback support, which Antigravity lacks. Native
+permission and question option IDs must also survive normalization. A display label is not
+necessarily a valid reply.
 
 ## Attachments and stored history
 

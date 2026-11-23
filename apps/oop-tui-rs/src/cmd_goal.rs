@@ -511,6 +511,10 @@ impl Screen for GoalPrompt {
                     app.notice = Some(text("session.c.enterGoalText").into());
                     return false;
                 }
+                if !app.has_connection() {
+                    app.notice = Some(tr("notice.offline").into());
+                    return false;
+                }
                 save(app, Some(words), None);
                 return true;
             }
@@ -820,6 +824,18 @@ mod tests {
             fake.called(crate::server_settings::UPDATE_SETTINGS)
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn offline_goal_prompt_keeps_the_answer_open() {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new("0.0.0", "/tmp", "/tmp", tx);
+        let mut prompt = GoalPrompt::default();
+        prompt.input.set("Keep this goal");
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!prompt.key(enter, &mut app));
+        assert_eq!(prompt.input.text(), "Keep this goal");
+        assert_eq!(app.notice.as_deref(), Some(tr("notice.offline")));
     }
 
     #[tokio::test]

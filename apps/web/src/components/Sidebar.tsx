@@ -92,6 +92,8 @@ import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
+import { useRightPanelStore } from "../rightPanelStore";
+import { readPreparedConnection } from "../state/session";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
   readThreadShell,
@@ -2213,33 +2215,52 @@ export default function Sidebar() {
                 projectRef.projectId === thread.projectId,
             ),
           ) ?? null;
+        const besideHost =
+          routeThreadRef &&
+          routeThreadKey &&
+          routeThreadKey !== threadKey &&
+          threadByKeyRef.current.has(routeThreadKey) &&
+          thread.archivedAt === null &&
+          readPreparedConnection(threadRef.environmentId)
+            ? routeThreadRef
+            : null;
         const clicked = await settlePromise(() =>
           api.contextMenu.show(
-            buildThreadActionMenuItems({
-              branch: thread.branch ?? null,
-              projectFilter: threadProjectGroup
-                ? {
-                    label: threadProjectGroup.displayName,
-                    isActive: projectScopeKey === threadProjectGroup.projectKey,
-                  }
-                : null,
-              isPinned,
-              isSettled,
-              autoSettleEnabled: thread.autoSettleDisabledAt == null,
-              isSnoozed,
-              canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
-              isRegeneratingTitle,
-              isRunning:
-                thread.session?.status === "running" && thread.session.activeTurnId != null,
-              supports: {
-                settlement: supportsSettlement,
-                autoSettleOptOut: supportsAutoSettleOptOut,
-                snooze: supportsSnooze,
-                pinning: supportsPinning,
-                titleRegeneration: supportsTitleRegeneration,
-              },
-              snoozePresets,
-            }),
+            [
+              ...(besideHost
+                ? [
+                    {
+                      id: "open-beside" as const,
+                      label: t("Open beside current chat"),
+                    },
+                  ]
+                : []),
+              ...buildThreadActionMenuItems({
+                branch: thread.branch ?? null,
+                projectFilter: threadProjectGroup
+                  ? {
+                      label: threadProjectGroup.displayName,
+                      isActive: projectScopeKey === threadProjectGroup.projectKey,
+                    }
+                  : null,
+                isPinned,
+                isSettled,
+                autoSettleEnabled: thread.autoSettleDisabledAt == null,
+                isSnoozed,
+                canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
+                isRegeneratingTitle,
+                isRunning:
+                  thread.session?.status === "running" && thread.session.activeTurnId != null,
+                supports: {
+                  settlement: supportsSettlement,
+                  autoSettleOptOut: supportsAutoSettleOptOut,
+                  snooze: supportsSnooze,
+                  pinning: supportsPinning,
+                  titleRegeneration: supportsTitleRegeneration,
+                },
+                snoozePresets,
+              }),
+            ],
             position,
           ),
         );
@@ -2253,6 +2274,17 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "open-beside":
+            if (
+              besideHost &&
+              routeThreadKeyRef.current === scopedThreadKey(besideHost) &&
+              threadByKeyRef.current.get(threadKey)?.archivedAt === null &&
+              readPreparedConnection(threadRef.environmentId)
+            ) {
+              useRightPanelStore.getState().openChat(besideHost, threadRef);
+              if (isMobile) setOpenMobile(false);
+            }
+            return;
           case "filter-by-project":
             // This item is the only scope control here, so picking the
             // already-scoped project again is the way back to all projects.
@@ -2446,16 +2478,21 @@ export default function Sidebar() {
       copyThreadIdToClipboard,
       deleteThread,
       handleMultiSelectContextMenu,
+      isMobile,
       markThreadUnread,
       openProjectSettings,
       projectScopeKey,
       projectByKey,
+      routeThreadKey,
+      routeThreadRef,
       serverConfigs,
+      setOpenMobile,
       setProjectScopeKey,
       setThreadAutoSettle,
       startThreadRename,
       updateThreadMetadata,
       timestampFormat,
+      t,
     ],
   );
 

@@ -101,6 +101,56 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
       }),
     );
 
+    it.effect.skipIf(!symlinksSupported)(
+      "confines restricted absolute reads to the real workspace root",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const cwd = yield* makeTempDir;
+          const outsideDir = yield* makeTempDir;
+          const insidePath = path.join(cwd, "inside.txt");
+          const outsidePath = path.join(outsideDir, "outside.txt");
+          const linkedPath = path.join(cwd, "linked.txt");
+          yield* writeTextFile(cwd, "inside.txt", "inside");
+          yield* writeTextFile(outsideDir, "outside.txt", "outside");
+          yield* fileSystem.symlink(outsidePath, linkedPath);
+
+          const options = { workspaceOnly: true };
+          const inside = yield* workspaceFileSystem.readFile(
+            { cwd, relativePath: insidePath },
+            options,
+          );
+          expect(inside.contents).toBe("inside");
+          for (const relativePath of [outsidePath, linkedPath]) {
+            const error = yield* workspaceFileSystem
+              .readFile({ cwd, relativePath }, options)
+              .pipe(Effect.flip);
+            expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFilePathEscapeError);
+            const outside = yield* workspaceFileSystem.readFile({ cwd, relativePath });
+            expect(outside.contents).toBe("outside");
+          }
+        }),
+    );
+
+    it.effect("does not disclose whether an outside file exists", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const outside = yield* makeTempDir;
+        const input = { cwd, relativePath: path.join(outside, "outside.txt") };
+        const read = () =>
+          workspaceFileSystem.readFile(input, { workspaceOnly: true }).pipe(Effect.flip);
+        const missing = yield* read();
+        yield* writeTextFile(outside, "outside.txt", "outside");
+        const existing = yield* read();
+        expect(missing._tag).toBe(existing._tag);
+        expect(existing._tag).toBe("WorkspaceFilePathEscapeError");
+      }),
+    );
+
     // Needs mkfifo; Windows has no FIFOs to reject.
     it.effect.skipIf(HostProcessPlatform.defaultValue() === "win32")(
       "rejects a FIFO without blocking on open",

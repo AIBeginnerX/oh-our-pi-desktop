@@ -186,25 +186,25 @@ impl Conversation {
         self.thread.session_running() || self.thread.messages.iter().any(|m| m.streaming)
     }
 
-    pub fn apply(&mut self, item: &Value) {
+    pub fn apply(&mut self, item: &Value) -> Option<serde_json::Error> {
         match item["kind"].as_str() {
             // The flag nothing reads does not change the picture; a snapshot replaces the thread.
             Some("synchronized") => self.synchronized = true,
             Some("snapshot") => {
-                self.apply_snapshot(&item["snapshot"]);
+                if let Err(error) = self.apply_snapshot(&item["snapshot"]) {
+                    return Some(error);
+                }
                 self.revision += 1;
             }
             // Only what the reducer changed (Updated or Deleted) invalidates the rendered lines.
             Some("event") if self.apply_event(&item["event"]) => self.revision += 1,
             _ => {}
         }
+        None
     }
 
-    fn apply_snapshot(&mut self, snapshot: &Value) {
-        let Ok(thread) = serde_json::from_value::<Thread>(snapshot["thread"].clone()) else {
-            return;
-        };
-        self.thread = thread;
+    fn apply_snapshot(&mut self, snapshot: &Value) -> serde_json::Result<()> {
+        self.thread = serde_json::from_value(snapshot["thread"].clone())?;
         self.pages.clear();
         self.loaded = true;
         self.deleted = false;
@@ -214,6 +214,7 @@ impl Conversation {
             .as_str()
             .map(str::to_string);
         self.loading_older = false;
+        Ok(())
     }
 
     /// Folds one stream event in; true when the reducer changed what the thread shows (Updated or
@@ -236,44 +237,47 @@ impl Conversation {
     }
 
     /// A page of older turns, read over HTTP, goes in front of what is held.
-    pub fn apply_older(&mut self, snapshot: &Value) {
-        if let Ok(page) = serde_json::from_value::<Thread>(snapshot["thread"].clone()) {
-            let held = |ids: HashSet<&str>, new: Vec<&str>| -> HashSet<String> {
-                new.into_iter()
-                    .filter(|id| !ids.contains(id))
-                    .map(str::to_string)
-                    .collect()
-            };
-            let t = &self.thread;
-            let added = Page {
-                cursor: self.older_cursor.clone().unwrap_or_default(),
-                messages: held(
-                    t.messages.iter().map(|m| m.id.as_str()).collect(),
-                    page.messages.iter().map(|m| m.id.as_str()).collect(),
-                ),
-                activities: held(
-                    t.activities.iter().map(|a| a.id.as_str()).collect(),
-                    page.activities.iter().map(|a| a.id.as_str()).collect(),
-                ),
-                checkpoints: held(
-                    t.checkpoints.iter().map(|c| c.turn_id.as_str()).collect(),
-                    page.checkpoints
-                        .iter()
-                        .map(|c| c.turn_id.as_str())
-                        .collect(),
-                ),
-            };
-            self.thread.merge_older(page);
-            if !added.cursor.is_empty() {
-                self.pages.push(added);
-            }
+    pub fn apply_older(&mut self, snapshot: &Value) -> Option<serde_json::Error> {
+        self.loading_older = false;
+        let page = match serde_json::from_value::<Thread>(snapshot["thread"].clone()) {
+            Ok(page) => page,
+            Err(error) => return Some(error),
+        };
+        let held = |ids: HashSet<&str>, new: Vec<&str>| -> HashSet<String> {
+            new.into_iter()
+                .filter(|id| !ids.contains(id))
+                .map(str::to_string)
+                .collect()
+        };
+        let t = &self.thread;
+        let added = Page {
+            cursor: self.older_cursor.clone().unwrap_or_default(),
+            messages: held(
+                t.messages.iter().map(|m| m.id.as_str()).collect(),
+                page.messages.iter().map(|m| m.id.as_str()).collect(),
+            ),
+            activities: held(
+                t.activities.iter().map(|a| a.id.as_str()).collect(),
+                page.activities.iter().map(|a| a.id.as_str()).collect(),
+            ),
+            checkpoints: held(
+                t.checkpoints.iter().map(|c| c.turn_id.as_str()).collect(),
+                page.checkpoints
+                    .iter()
+                    .map(|c| c.turn_id.as_str())
+                    .collect(),
+            ),
+        };
+        self.thread.merge_older(page);
+        if !added.cursor.is_empty() {
+            self.pages.push(added);
         }
         self.has_more = snapshot["page"]["hasMore"].as_bool() == Some(true);
         self.older_cursor = snapshot["page"]["beforeCursor"]
             .as_str()
             .map(str::to_string);
-        self.loading_older = false;
         self.revision += 1;
+        None
     }
 
     /// Lets the oldest pages read by scrolling up go while more than `HELD_MESSAGES` are held,

@@ -176,6 +176,14 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "Not connected to the server.",
             "서버에 연결되어 있지 않습니다.",
         ),
+        "notice.rpcTimedOut" => pick(
+            "The server did not respond in time.",
+            "서버가 제시간에 응답하지 않았습니다.",
+        ),
+        "notice.dispatchUnconfirmed" => pick(
+            "The server did not confirm the request in time. It may still take effect.",
+            "요청 처리 여부를 제시간에 확인할 수 없었습니다. 나중에 적용될 수 있습니다.",
+        ),
         "notice.pickFirst" => pick(
             "Pick a project or thread first.",
             "먼저 프로젝트나 스레드를 고르세요.",
@@ -219,6 +227,7 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "계획 모드: 에이전트가 실행 전에 계획합니다.",
         ),
         "notice.planOff" => pick("Back to the default mode.", "기본 모드로 돌아갑니다."),
+        "notice.threadFailed" => pick("Could not load the thread", "스레드를 불러오지 못했습니다"),
         "notice.olderFailed" => pick(
             "Could not load older turns",
             "이전 대화를 불러오지 못했습니다",
@@ -306,8 +315,29 @@ fn lookup(key: &str, ko: bool) -> &'static str {
             "새 스레드입니다. 메시지를 입력하면 시작합니다.",
         ),
         "notice.help" => pick(
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /computers /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
-            "/model /mode /effort /plan /default /implement /goal /crew /provider /dag-workflow /savvy /files /replay /skills /new /threads /projects /computers /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
+            "/model /mode /effort /plan /default /implement /goal /autofix /crew /provider /dag-workflow /savvy /files /replay /skills /new /btw /threads /projects /computers /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B list · Ctrl-G panel",
+            "/model /mode /effort /plan /default /implement /goal /autofix /crew /provider /dag-workflow /savvy /files /replay /skills /new /btw /threads /projects /computers /stats /tasks /sidebar /panel /copy /mouse /pet /usage /history /diff /undo /theme /update /help /exit · Ctrl-B 목록 · Ctrl-G 패널",
+        ),
+        "btw.usage" => pick("Usage: /btw <question>", "사용법: /btw <질문>"),
+        "btw.openThread" => pick(
+            "Open an existing thread to use /btw.",
+            "/btw를 사용하려면 기존 스레드를 여세요.",
+        ),
+        "btw.tooLong" => pick(
+            "The question is too long. Keep it to 2,000 characters.",
+            "질문이 너무 깁니다. 2,000자 이내로 입력하세요.",
+        ),
+        "btw.gettingAnswer" => pick("Getting an answer…", "답변을 받는 중…"),
+        "btw.answer" => pick("/btw answer", "/btw 답변"),
+        "btw.unavailable" => pick(
+            "A side answer is unavailable.",
+            "지금은 답변을 받을 수 없습니다.",
+        ),
+        "notice.autoFixOn" => pick("PR auto-fix is on.", "PR 자동 수정이 켜져 있습니다."),
+        "notice.autoFixOff" => pick("PR auto-fix is off.", "PR 자동 수정이 꺼져 있습니다."),
+        "notice.autoFixThread" => pick(
+            "Open an existing thread to use /autofix.",
+            "/autofix 를 사용하려면 기존 스레드를 여세요.",
         ),
         "notice.unsupported" => pick(
             "Not in oop-rs yet: use the TypeScript terminal for it.",

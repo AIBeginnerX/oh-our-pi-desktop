@@ -193,6 +193,16 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
         Effect.andThen(Ref.set(pending, new Map())),
       );
 
+    // A closed pipe can precede delivery of the child exit status.
+    const preferProcessExit = (fallback: CodexError.CodexAppServerError) => {
+      const fallbackEffect = Effect.succeed(fallback);
+      return (
+        options.terminationError?.pipe(
+          Effect.timeoutOrElse({ duration: "3 seconds", orElse: () => fallbackEffect }),
+        ) ?? fallbackEffect
+      );
+    };
+
     const handleTermination = (classify: () => Effect.Effect<CodexError.CodexAppServerError>) =>
       Ref.modify(terminationHandled, (handled) => {
         if (handled) {
@@ -434,10 +444,8 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
             Effect.matchEffect({
               onFailure: (error) => handleTermination(() => Effect.succeed(error)),
               onSuccess: () =>
-                handleTermination(
-                  () =>
-                    options.terminationError ??
-                    Effect.succeed(new CodexError.CodexAppServerInputStreamEndedError({})),
+                handleTermination(() =>
+                  preferProcessExit(new CodexError.CodexAppServerInputStreamEndedError({})),
                 ),
             }),
           ),
@@ -445,7 +453,20 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
       Effect.forkScoped,
     );
 
-    yield* Stream.fromQueue(outgoing).pipe(Stream.run(options.stdio.stdout()), Effect.forkScoped);
+    yield* Stream.fromQueue(outgoing).pipe(
+      Stream.run(options.stdio.stdout()),
+      Effect.catch((cause) =>
+        handleTermination(() =>
+          preferProcessExit(
+            new CodexError.CodexAppServerTransportError({
+              operation: "write-output-stream",
+              cause,
+            }),
+          ),
+        ),
+      ),
+      Effect.forkScoped,
+    );
 
     const request = (method: string, payload?: unknown) =>
       Effect.gen(function* () {

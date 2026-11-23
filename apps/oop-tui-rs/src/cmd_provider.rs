@@ -32,13 +32,14 @@ pub fn take_request(app: &mut App) -> Option<(ProviderRequest, Option<String>, O
 
 /// Runs `request` with the screen given back: the terminal is released, the command gets it, and
 /// Enter brings the screen back so its output can be read first. The terminal to draw on again,
-/// and a notice when the command did not succeed (it has said why on the terminal).
+/// and a notice when the command did not succeed, or `None` if the session was asked to end.
 pub async fn run_in_foreground(
     guard: &mut crate::terminal::Guard,
     request: ProviderRequest,
     server: Option<String>,
     home: Option<String>,
-) -> (ratatui::DefaultTerminal, Option<String>) {
+    ended: impl Future<Output = ()>,
+) -> Option<(ratatui::DefaultTerminal, Option<String>)> {
     use std::sync::atomic::Ordering;
     // The key reader may be inside a poll: let it see the flag before the command reads the keys.
     crate::terminal::INPUT_PAUSED.store(true, Ordering::SeqCst);
@@ -52,7 +53,22 @@ pub async fn run_in_foreground(
             "Enter 를 누르면 OOP 로 돌아갑니다."
         )
     );
-    let _ = std::io::stdin().read_line(&mut String::new());
+    let (read, input) = tokio::sync::oneshot::channel();
+    // A plain thread can remain blocked on stdin while the process exits on termination.
+    std::thread::spawn(move || {
+        let _ = std::io::stdin().read_line(&mut String::new());
+        let _ = read.send(());
+    });
+    if !return_on_enter(
+        async {
+            let _ = input.await;
+        },
+        ended,
+    )
+    .await
+    {
+        return None;
+    }
     let terminal = guard.resume();
     crate::terminal::INPUT_PAUSED.store(false, Ordering::SeqCst);
     let notice = (code != 0).then(|| {
@@ -62,7 +78,15 @@ pub async fn run_in_foreground(
         )
         .to_string()
     });
-    (terminal, notice)
+    Some((terminal, notice))
+}
+
+async fn return_on_enter(input: impl Future<Output = ()>, ended: impl Future<Output = ()>) -> bool {
+    tokio::select! {
+        biased;
+        _ = ended => false,
+        _ = input => true,
+    }
 }
 
 /// The command has ended and the screen is back: read the server's configuration again, since
@@ -88,6 +112,21 @@ mod tests {
         crate::i18n::init(Some("en"));
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         App::new("0.0.0", "/tmp/oop-rs/work/demo", "/tmp", tx)
+    }
+
+    #[tokio::test]
+    async fn a_waiting_provider_prompt_can_terminate_or_return_on_enter() {
+        use std::future::{pending, ready};
+        use std::task::{Context, Poll, Waker};
+
+        let (end, ended) = tokio::sync::oneshot::channel();
+        let wait = return_on_enter(pending(), async { ended.await.unwrap() });
+        tokio::pin!(wait);
+        let mut cx = Context::from_waker(Waker::noop());
+        assert_eq!(wait.as_mut().poll(&mut cx), Poll::Pending);
+        end.send(()).unwrap();
+        assert_eq!(wait.as_mut().poll(&mut cx), Poll::Ready(false));
+        assert!(return_on_enter(ready(()), pending()).await);
     }
 
     #[test]

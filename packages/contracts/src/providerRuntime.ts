@@ -931,6 +931,12 @@ const ProviderRuntimeTurnCompletedEvent = Schema.Struct({
 });
 export type ProviderRuntimeTurnCompletedEvent = typeof ProviderRuntimeTurnCompletedEvent.Type;
 
+const ProviderRuntimePromptSuggestionEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: Schema.Literal("prompt.suggestion"),
+  payload: Schema.Struct({ turnId: TurnId, text: Schema.String }),
+});
+
 const ProviderRuntimeTurnAbortedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: TurnAbortedType,
@@ -1192,6 +1198,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeThreadRealtimeClosedEvent,
   ProviderRuntimeTurnStartedEvent,
   ProviderRuntimeTurnCompletedEvent,
+  ProviderRuntimePromptSuggestionEvent,
   ProviderRuntimeTurnAbortedEvent,
   ProviderRuntimeTurnPlanUpdatedEvent,
   ProviderRuntimeTurnProposedDeltaEvent,

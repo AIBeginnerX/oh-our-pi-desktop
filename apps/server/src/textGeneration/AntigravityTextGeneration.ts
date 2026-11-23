@@ -27,6 +27,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildSideAnswerPrompt,
   buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -407,6 +408,26 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
       };
     });
 
+  const generateSideAnswer: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateSideAnswer"]
+  > = (input) => {
+    const { prompt, outputSchema } = buildSideAnswerPrompt(input);
+    return runAntigravityJson({
+      operation: "generateSideAnswer",
+      prompt,
+      outputSchema,
+      modelSelection: input.modelSelection,
+    }).pipe(
+      Effect.mapError(
+        () =>
+          new TextGenerationError({
+            operation: "generateSideAnswer",
+            detail: "Could not generate an isolated side answer.",
+          }),
+      ),
+    );
+  };
+
   const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
     Effect.fn("AntigravityTextGeneration.generateWorkLessons")(function* (input) {
       const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
@@ -434,6 +455,7 @@ export const makeAntigravityTextGeneration = Effect.fn("makeAntigravityTextGener
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateSideAnswer,
     generateWorkLessons,
     generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];

@@ -2,6 +2,7 @@
  * Pure rules for OOP Crew: how a delegated or audit thread is named and prompted, how its
  * progress reads from a thread shell, and which finished turns earn an audit.
  */
+import { CommandId, type ThreadId } from "@t3tools/contracts";
 import type {
   ComposerContextId,
   ComposerContextRecord,
@@ -24,6 +25,9 @@ export { CREW_ROLE_LABEL, isCrewThreadTitle };
 
 import { scopeSegments } from "./crewScope.ts";
 import { todoPromptLines, type TodoItem } from "./crewTodos.ts";
+
+export const crewThreadCreationCommandId = (threadId: ThreadId) =>
+  CommandId.make(`server:crew-create:${threadId}`);
 
 const CREW_TITLE_PREFIX = "Crew ";
 

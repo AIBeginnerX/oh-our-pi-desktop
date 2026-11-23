@@ -197,11 +197,19 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  yield* Effect.addFinalizer(() =>
+    flush.pipe(
+      Effect.timeoutOrElse({
+        duration: "2 seconds",
+        orElse: () => Ref.set(bufferRef, []),
+      }),
+      Effect.interruptible,
+    ),
+  );
+
   yield* Effect.forever(Effect.sleep(1000).pipe(Effect.flatMap(() => flush)), {
     disableYield: true,
   }).pipe(Effect.forkScoped);
-
-  yield* Effect.addFinalizer(() => flush);
 
   return AnalyticsService.of({ record, flush });
 });

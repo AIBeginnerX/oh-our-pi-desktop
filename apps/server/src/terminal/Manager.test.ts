@@ -880,6 +880,42 @@ it.layer(
     }),
   );
 
+  it.effect("preserves replacement PTY output queued while the old drain finishes", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      const oldOutputStarted = yield* Deferred.make<void>();
+      const releaseOldOutput = yield* Deferred.make<void>();
+      const markerDelivered = yield* Deferred.make<void>();
+      const output: string[] = [];
+      const unsubscribe = yield* manager.subscribe((event) =>
+        Effect.gen(function* () {
+          if (event.type === "output") {
+            output.push(event.data);
+            if (event.data === "old output") {
+              yield* Deferred.succeed(oldOutputStarted, undefined);
+              yield* Deferred.await(releaseOldOutput);
+            } else if (event.data === "marker") {
+              yield* Deferred.succeed(markerDelivered, undefined);
+            }
+          } else if (event.type === "restarted") {
+            ptyAdapter.processes[1]!.emitData("replacement output");
+            yield* Deferred.succeed(releaseOldOutput, undefined);
+            // Let the old drain resume before startup activates the replacement drain.
+            yield* Effect.yieldNow;
+          }
+        }),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+      yield* manager.open(openInput());
+      ptyAdapter.processes[0]!.emitData("old output");
+      yield* Deferred.await(oldOutputStarted);
+      yield* manager.restart(restartInput());
+      ptyAdapter.processes[1]!.emitData("marker");
+      yield* Deferred.await(markerDelivered);
+      expect(output).toEqual(["old output", "replacement output", "marker"]);
+    }),
+  );
+
   it.effect("restarts a running session when open is called with a different cwd", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter, logsDir, baseDir } = yield* createManager();

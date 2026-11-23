@@ -1,6 +1,7 @@
 import {
   ConnectionTransientError,
   PrimaryConnectionTarget,
+  RelayConnectionTarget,
 } from "@t3tools/client-runtime/connection";
 import { EnvironmentId } from "@t3tools/contracts";
 import { ConnectionCatalogDocument } from "@t3tools/client-runtime/platform";
@@ -69,6 +70,89 @@ describe("makeCatalogStore", () => {
 });
 
 describe("makeCatalogBackend", () => {
+  it.effect("loads an empty catalog when IndexedDB cannot commit corrupt catalog recovery", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", {});
+      const put = vi.fn();
+      const backend = makeCatalogBackend({
+        transaction: (_name: string, mode: IDBTransactionMode) => {
+          const transaction = new EventTarget();
+          return Object.assign(transaction, {
+            error: new DOMException("Quota exceeded", "QuotaExceededError"),
+            objectStore: () => ({
+              get: () => {
+                const request = Object.assign(new EventTarget(), { result: "{not-json" });
+                queueMicrotask(() => {
+                  request.dispatchEvent(new Event("success"));
+                  if (mode === "readwrite") transaction.dispatchEvent(new Event("abort"));
+                });
+                return request;
+              },
+              put,
+            }),
+          });
+        },
+      } as unknown as IDBDatabase);
+      const store = yield* makeCatalogStore(backend);
+
+      expect(yield* store.read).toEqual(emptyCatalog);
+      expect(put).toHaveBeenCalledTimes(2);
+    }),
+  );
+
+  it.effect("keeps connections saved by two tabs after both read the same catalog", () =>
+    Effect.gen(function* () {
+      vi.stubGlobal("window", {});
+      let raw = encodeCatalog(emptyCatalog);
+      const openTab = () =>
+        makeCatalogStore(
+          makeCatalogBackend({
+            transaction: () => {
+              const transaction = new EventTarget();
+              return Object.assign(transaction, {
+                objectStore: () => ({
+                  get: () => {
+                    const request = Object.assign(new EventTarget(), { result: raw });
+                    queueMicrotask(() => request.dispatchEvent(new Event("success")));
+                    return request;
+                  },
+                  put: (value: string) => {
+                    raw = value;
+                    queueMicrotask(() => transaction.dispatchEvent(new Event("complete")));
+                  },
+                }),
+              });
+            },
+          } as unknown as IDBDatabase),
+        );
+      const first = yield* openTab();
+      const second = yield* openTab();
+      yield* first.read;
+      yield* second.read;
+
+      for (const [store, id] of [
+        [first, "first"],
+        [second, "second"],
+      ] as const) {
+        yield* store.update((catalog) => ({
+          ...catalog,
+          targets: [
+            ...catalog.targets,
+            new RelayConnectionTarget({
+              environmentId: EnvironmentId.make(id),
+              label: id,
+            }),
+          ],
+        }));
+      }
+
+      expect(decodeCatalog(raw).targets.map((target) => target.environmentId)).toEqual([
+        "first",
+        "second",
+      ]);
+    }),
+  );
+
   it.effect("fails writes when desktop secure storage declines the catalog", () =>
     Effect.gen(function* () {
       const setConnectionCatalog = vi.fn().mockResolvedValue(false);

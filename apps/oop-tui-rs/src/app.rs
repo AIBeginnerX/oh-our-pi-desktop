@@ -3,26 +3,26 @@
 //! one. Commands go out through the builders in `commands.rs`.
 
 use crate::clipboard::{self, Why};
-use crate::commands::{self, Bootstrap, Ctx, Turn};
+use crate::commands::{self, Ctx};
 use crate::i18n::tr;
-use crate::input::{Input, Move};
+use crate::input::Input;
 use crate::link::Target;
 use crate::panels_common::{fill, s};
 use crate::pet;
-use crate::selection::{self, End, Pos, Selection};
+use crate::selection::Selection;
 use crate::settings::{self, Settings};
 use crate::side;
-use crate::sidebar::{self, Nav, SETTLED_PAGE, Section, View};
+use crate::sidebar::{self, Nav, View};
 use crate::state::{
-    Choice, Conversation, EffortControl, PendingApproval, PendingInput, Shell, ThreadShell,
-    effort_control, effort_of, first_usable_model, model_name, usable_models, with_option,
+    Conversation, EffortControl, PendingApproval, PendingInput, Shell, ThreadShell, effort_control,
+    effort_of, model_name, usable_models,
 };
 use crate::text::{iso_now, new_id, parse_iso_ms};
 use crate::theme::{self, Symbols, Theme};
 use crate::transcript::Transcript;
-use crate::wire::{Rpc, RpcStream, StreamMsg};
+use crate::wire::{CallError, Rpc};
 use ratatui::crossterm::event::{
-    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use ratatui::layout::Rect;
 use serde_json::{Value, json};
@@ -30,13 +30,33 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tokio::time::Instant;
+
+mod connection;
+mod interaction;
+mod submission;
+
+const SHELL_RETRY_MIN: Duration = Duration::from_millis(250);
+const SHELL_RETRY_MAX: Duration = Duration::from_secs(4);
 
 pub const SHELL_RPC: &str = "orchestration.subscribeShell";
 pub const THREAD_RPC: &str = "orchestration.subscribeThread";
 pub const DISPATCH_RPC: &str = "orchestration.dispatchCommand";
 pub const CONFIG_RPC: &str = "server.getConfig";
+
+pub(crate) async fn call_dispatch(rpc: &Rpc, command: Value) -> Result<Value, CallError> {
+    rpc.start_call(DISPATCH_RPC, command)?.await
+}
+
+pub(crate) fn dispatch_notice(error: CallError) -> String {
+    match error {
+        CallError::TimedOut => tr("notice.dispatchUnconfirmed").into(),
+        error => error.to_string(),
+    }
+}
 
 /// Turns a thread opens with, and the size of each page of older ones.
 pub const TURN_WINDOW: u32 = 20;
@@ -98,7 +118,8 @@ pub enum Msg {
     },
     Dispatched {
         result: Result<(), String>,
-        open: Option<String>,
+        /// The new thread and the draft view that submitted it.
+        open: Option<(String, u64)>,
         /// A request the command answered; forgotten again when the command failed.
         answered: Option<String>,
         /// The id of the message the command sent, if it was a turn start.
@@ -275,6 +296,7 @@ pub struct App {
     pub question: QuestionState,
     pub view: View,
     pub notice: Option<String>,
+    shell_retry_notice: Option<String>,
     /// `/provider`: the request the main loop runs in the foreground (`cmd_provider::take_request`),
     /// and the server and home this session was started with, which it talks to.
     pub pending_provider: Option<crate::provider_args::ProviderRequest>,
@@ -292,6 +314,8 @@ pub struct App {
     pub term_size: Cell<(u16, u16)>,
     /// What slash commands said under the conversation (see `notes.rs`).
     pub notes: Vec<crate::notes::Note>,
+    /// Changes on leaving a thread, even when the user comes back before an RPC returns.
+    pub thread_view_epoch: u64,
     /// A full-body screen over the conversation, when one is open (see `screen.rs`).
     pub screen: Option<Box<dyn crate::screen::Screen>>,
     /// The Replay Theater view and its button (see `replay.rs`).
@@ -393,6 +417,10 @@ pub struct App {
     recent: Vec<Conversation>,
     tx: UnboundedSender<Msg>,
     shell_task: Option<JoinHandle<()>>,
+    shell_epoch: u64,
+    shell_retry_at: Option<Instant>,
+    shell_backoff: Duration,
+    shell_started: Instant,
     thread_task: Option<JoinHandle<()>>,
     /// The server's config events (settings, provider statuses), folded into `config`.
     config_task: Option<JoinHandle<()>>,
@@ -402,23 +430,6 @@ pub struct App {
     /// Every command built, for the tests.
     #[cfg(test)]
     pub log: Vec<Value>,
-}
-
-/// Forwards one subscription's items into the app's message queue. Aborting the task drops the
-/// stream, which tells the server to stop.
-fn forward(
-    mut stream: RpcStream,
-    tx: UnboundedSender<Msg>,
-    wrap: impl Fn(StreamMsg) -> Msg + Send + 'static,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        while let Some(message) = stream.rx.recv().await {
-            let end = matches!(message, StreamMsg::End(_));
-            if tx.send(wrap(message)).is_err() || end {
-                break;
-            }
-        }
-    })
 }
 
 pub(crate) fn now_ms() -> i64 {
@@ -455,12 +466,14 @@ impl App {
             question: QuestionState::default(),
             view: View::default(),
             notice: None,
+            shell_retry_notice: None,
             pending_provider: None,
             provider_server: None,
             provider_home: None,
             tasks_on: false,
             term_size: Cell::new((0, 0)),
             notes: Vec::new(),
+            thread_view_epoch: 0,
             screen: None,
             replay: Default::default(),
             misc: Default::default(),
@@ -525,6 +538,10 @@ impl App {
             recent: Vec::new(),
             tx,
             shell_task: None,
+            shell_epoch: 0,
+            shell_retry_at: None,
+            shell_backoff: SHELL_RETRY_MIN,
+            shell_started: Instant::now(),
             thread_task: None,
             config_task: None,
             draft_id: None,
@@ -802,6 +819,7 @@ impl App {
                 if switched {
                     self.reset_for_computer();
                 }
+                self.abort_shell();
                 self.remote = remote;
                 self.host_label = label;
                 self.rpc = Some(rpc);
@@ -819,20 +837,44 @@ impl App {
             }
             Msg::Shell(item) => {
                 self.shell.apply(&item);
+                self.clear_shell_retry_notice();
                 self.on_shell_changed();
             }
             Msg::ShellEnd(reason) => {
-                if let (Some(reason), true) = (reason, self.rpc.is_some()) {
-                    self.notice = Some(reason);
+                if self.shell_task.take().is_none() || self.rpc.as_ref().is_none_or(Rpc::is_closed)
+                {
+                    return;
                 }
+                if let Some(reason) = reason
+                    && self.shell_retry_notice.is_none()
+                {
+                    self.notice = Some(reason.clone());
+                    self.shell_retry_notice = Some(reason);
+                }
+                let now = Instant::now();
+                if now - self.shell_started >= SHELL_RETRY_MAX {
+                    self.shell_backoff = SHELL_RETRY_MIN;
+                }
+                self.shell_retry_at = Some(now + self.shell_backoff);
+                self.shell_backoff = (self.shell_backoff * 2).min(SHELL_RETRY_MAX);
             }
             Msg::Thread { id, item } => {
                 if self.thread_id().as_deref() == Some(id.as_str()) {
-                    self.conv.apply(&item);
+                    if let Some(error) = self.conv.apply(&item) {
+                        self.notice = Some(format!("{}: {error}", tr("notice.threadFailed")));
+                        return;
+                    }
                     if self.conv.deleted {
-                        // Its draft goes with it: there is no thread left to return to.
+                        // The draft remains available in input history after the thread is gone.
+                        if self.memory_edit.is_some() {
+                            while self.input.history_forward() {}
+                            self.input.take(true);
+                        }
                         crate::cmd_memory::leave_edit(self);
-                        self.input.take(false);
+                        while self.input.history_forward() {}
+                        self.input.take(true);
+                        self.park_conversation();
+                        self.leave_thread();
                         self.side_settings.remove(&id);
                         self.pinned_flow = None;
                         self.panel_scroll.set(0);
@@ -861,7 +903,10 @@ impl App {
                 sent,
             } => match result {
                 Ok(()) => {
-                    if let Some(id) = open.filter(|_| matches!(self.active, Active::Draft(_))) {
+                    if let Some((id, epoch)) = open
+                        && self.thread_view_epoch == epoch
+                        && matches!(self.active, Active::Draft(_))
+                    {
                         // The draft became this thread: what was typed since the send comes along.
                         let carried = self.input.stash_draft();
                         self.open_thread(&id);
@@ -887,13 +932,16 @@ impl App {
                 if self.thread_id().as_deref() != Some(id.as_str()) {
                     return;
                 }
-                let failure = result.as_ref().err().cloned();
-                match result {
-                    Ok(snapshot) => self.conv.apply_older(&snapshot),
-                    Err(reason) => {
-                        self.conv.loading_older = false;
-                        self.notice = Some(format!("{}: {reason}", tr("notice.olderFailed")));
-                    }
+                let failure = match result {
+                    Ok(snapshot) => self
+                        .conv
+                        .apply_older(&snapshot)
+                        .map(|error| error.to_string()),
+                    Err(reason) => Some(reason),
+                };
+                if let Some(reason) = &failure {
+                    self.conv.loading_older = false;
+                    self.notice = Some(format!("{}: {reason}", tr("notice.olderFailed")));
                 }
                 crate::cmd_history::on_older(self, failure);
             }
@@ -922,10 +970,12 @@ impl App {
             && self.approval().is_none()
             && self.pending_input().is_none()
             && !crate::cmd_history::undo_active(self)
+            && !crate::cmd_attach::blocks_queue(self)
+            && self.has_connection()
             && let Some(text) = self.queue.pop_front()
+            && self.send(&text)
         {
             self.awaiting = Some(self.tick);
-            self.send(&text);
         }
     }
 
@@ -1027,62 +1077,8 @@ impl App {
         self.tx.clone()
     }
 
-    /// Which computer the session talks to, for the tests of the picker.
-    #[cfg(test)]
-    pub fn link_target(&self) -> Target {
-        self.target.borrow().clone()
-    }
-
-    /// What the link needs to reach another computer: the target it reconnects on, and the nudge
-    /// that drops the live session so the reconnect starts at once (`link::supervise`).
-    pub fn link_control(
-        &self,
-    ) -> (
-        tokio::sync::watch::Sender<Target>,
-        std::sync::Arc<tokio::sync::Notify>,
-    ) {
-        (self.target.clone(), self.switch.clone())
-    }
-
-    /// The picker's answer: the link drops the session and comes back on `target`, whose projects
-    /// screen opens when it is connected. An unchanged choice does nothing.
-    pub fn use_computer(&mut self, target: Target) {
-        if *self.target.borrow() == target {
-            return;
-        }
-        self.notice = Some(s("Switching computer…", "컴퓨터를 전환하는 중…").to_string());
-        self.target.send_replace(target);
-        self.switch.notify_one();
-    }
-
-    /// The last session's view of a computer is not the next one's: the conversation, the project
-    /// list, everything drafted and every pending question go, and the new computer's project
-    /// list opens as soon as its snapshot arrives.
-    fn reset_for_computer(&mut self) {
-        crate::cmd_memory::leave_edit(self);
-        self.leave_thread();
-        self.recent.clear();
-        self.drafts.clear();
-        self.attachments = Default::default();
-        self.side_settings.clear();
-        self.visited.clear();
-        self.answered.clear();
-        self.cwd_project = None;
-        self.draft_project = None;
-        self.adding = None;
-        self.auto_selected = false;
-        self.threadops = Default::default();
-        self.shell = Shell::default();
-        self.conv = Conversation::default();
-        self.active = Active::None;
-        self.selected = 0;
-        self.scroll.set(0);
-        self.input.take(false);
-        self.notice = None;
-        crate::lists::open_projects(self);
-    }
-
     fn leave_thread(&mut self) {
+        self.thread_view_epoch += 1;
         crate::cmd_history::on_leave(self);
         self.notes.clear();
         crate::cmd_goal::drop_draft_goal(self);
@@ -1194,174 +1190,6 @@ impl App {
         }
     }
 
-    // --- subscriptions ----------------------------------------------------------------------
-
-    fn abort_thread(&mut self) {
-        if let Some(task) = self.thread_task.take() {
-            task.abort();
-        }
-    }
-
-    fn abort_streams(&mut self) {
-        self.abort_thread();
-        if let Some(task) = self.shell_task.take() {
-            task.abort();
-        }
-        if let Some(task) = self.config_task.take() {
-            task.abort();
-        }
-    }
-
-    /// Follows the server's config events for the rest of the session, so the crew line, the model
-    /// lists and the goals stay current when settings change (here or in another client).
-    fn subscribe_config(&mut self) {
-        if let Some(task) = self.config_task.take() {
-            task.abort();
-        }
-        let Some(rpc) = self.rpc.clone() else { return };
-        let stream = rpc.stream(crate::config_fold::CONFIG_STREAM, json!({}));
-        self.config_task = Some(forward(stream, self.tx.clone(), |message| match message {
-            StreamMsg::Item(event) => Msg::Ext(Box::new(move |app| app.apply_config_event(&event))),
-            // The socket's own end is what the link watches; a stream that ends alone just stops
-            // updating until the next connect.
-            StreamMsg::End(_) => Msg::Ext(Box::new(|_| {})),
-        }));
-    }
-
-    /// Folds one config event into `config`.
-    pub fn apply_config_event(&mut self, event: &Value) {
-        crate::config_fold::fold(&mut self.config, event);
-    }
-
-    fn subscribe_shell(&mut self) {
-        let Some(rpc) = self.rpc.clone() else { return };
-        let payload = if self.shell.loaded {
-            json!({"afterSequence": self.shell.sequence})
-        } else {
-            json!({})
-        };
-        let stream = rpc.stream(SHELL_RPC, payload);
-        self.shell_task = Some(forward(stream, self.tx.clone(), |m| match m {
-            StreamMsg::Item(item) => Msg::Shell(item),
-            StreamMsg::End(reason) => Msg::ShellEnd(reason),
-        }));
-    }
-
-    /// Opens a thread's stream. A thread already on screen resumes after the last event applied;
-    /// a new one opens on its latest turns (the older ones are read as they are scrolled to).
-    fn subscribe_thread(&mut self, id: &str) {
-        self.abort_thread();
-        // The usage line is this thread's, not the last one's, and is asked for afresh.
-        crate::usage_footer::opened(self, id);
-        let Some(rpc) = self.rpc.clone() else { return };
-        let mut payload = json!({"threadId": id});
-        let flags = [
-            ("reasoningMessages", "reasoningMessages"),
-            ("threadResumeCompletionMarker", "requestCompletionMarker"),
-        ];
-        for (offered, field) in flags {
-            if self.config[offered] == Value::Bool(true) {
-                payload[field] = Value::Bool(true);
-            }
-        }
-        if let (true, Some(sequence)) = (
-            self.conv.loaded && self.conv.thread_id == id,
-            self.conv.sequence,
-        ) {
-            payload["afterSequence"] = json!(sequence);
-        } else if self.config["threadSnapshotPagination"] == Value::Bool(true) {
-            payload["turnLimit"] = json!(TURN_WINDOW);
-        }
-        let stream = rpc.stream(THREAD_RPC, payload);
-        let thread_id = id.to_string();
-        self.thread_task = Some(forward(stream, self.tx.clone(), move |m| match m {
-            StreamMsg::Item(item) => Msg::Thread {
-                id: thread_id.clone(),
-                item,
-            },
-            StreamMsg::End(reason) => Msg::ThreadEnd {
-                id: thread_id.clone(),
-                reason,
-            },
-        }));
-    }
-
-    /// Reads the page of turns before the oldest one held, over HTTP.
-    pub(crate) fn request_older(&mut self) {
-        let (Some(id), Some(cursor), Some(origin), Some(bearer)) = (
-            self.thread_id(),
-            self.conv.older_cursor.clone(),
-            self.origin.clone(),
-            self.bearer.clone(),
-        ) else {
-            return;
-        };
-        if !self.conv.has_more || self.conv.loading_older {
-            return;
-        }
-        self.conv.loading_older = true;
-        self.conv.revision += 1;
-        let tx = self.tx.clone();
-        // On another computer the environment's HTTP answers behind the gateway path of the host.
-        let prefix = self.remote.as_ref().map_or(String::new(), |r| {
-            crate::gateway::environment_prefix(&r.environment_id)
-        });
-        tokio::spawn(async move {
-            let path = format!(
-                "{prefix}/api/orchestration/threads/{id}?reasoningMessages=true&turnLimit={TURN_WINDOW}&beforeCursor={}",
-                crate::http::form_encode(&cursor)
-            );
-            let headers = [("Authorization", format!("Bearer {bearer}"))];
-            let result = crate::http::request(
-                "GET",
-                &origin,
-                &path,
-                &headers,
-                None,
-                std::time::Duration::from_secs(20),
-            )
-            .await
-            .and_then(|answer| {
-                if answer.status == 200 {
-                    answer.json()
-                } else {
-                    Err(format!("the server answered {}", answer.status))
-                }
-            });
-            let _ = tx.send(Msg::Older { id, result });
-        });
-    }
-
-    pub(crate) fn dispatch(
-        &mut self,
-        command: Value,
-        open: Option<String>,
-        answered: Option<String>,
-    ) {
-        #[cfg(test)]
-        self.log.push(command.clone());
-        let Some(rpc) = self.rpc.clone() else {
-            if let Some(request) = answered {
-                self.answered.remove(&request);
-            }
-            self.notice = Some(tr("notice.offline").into());
-            return;
-        };
-        let tx = self.tx.clone();
-        let sent = (command["type"] == "thread.turn.start")
-            .then(|| command["message"]["messageId"].as_str().map(str::to_string))
-            .flatten();
-        tokio::spawn(async move {
-            let result = rpc.call(DISPATCH_RPC, command).await.map(|_| ());
-            let _ = tx.send(Msg::Dispatched {
-                result,
-                open,
-                answered,
-                sent,
-            });
-        });
-    }
-
     // --- panels, list and pet ---------------------------------------------------------------
 
     /// The thread list is open (it gives way on a narrow screen).
@@ -1376,24 +1204,126 @@ impl App {
         self.side_open && self.active != Active::None && self.side_rect.get().width > 0
     }
 
-    fn flip_side(&mut self) {
-        self.side_view = self.side_view.next();
-    }
-
-    /// A click on a title of the panel's tab bar shows that view.
-    fn click_side_tab(&mut self, column: u16, row: u16) {
-        let rect = self.side_rect.get();
-        // The bar is the panel's first row, inside the border on the left and a one-cell margin.
-        if row != rect.y {
-            return;
+    /// Runs a `/command`; false when it is not one.
+    fn run_slash(&mut self, name: &str, argument: &str) -> bool {
+        match name {
+            "exit" | "quit" => self.quit = true,
+            "model" | "models" => {
+                if self.config.is_null() {
+                    self.notice = Some(tr("notice.offline").into());
+                } else if usable_models(&self.config).is_empty() {
+                    self.notice = Some(tr("notice.noProvider").into());
+                } else {
+                    let matches = self.filtered_models(argument);
+                    if !argument.is_empty() && matches.len() == 1 {
+                        self.pick_model(&matches[0].instance_id, &matches[0].slug);
+                    } else {
+                        self.modal = Some(Modal::Models {
+                            filter: argument.to_string(),
+                            cursor: 0,
+                        });
+                    }
+                }
+            }
+            "mode" => {
+                if argument.is_empty() {
+                    let current = self.runtime_mode();
+                    let cursor = commands::RUNTIME_MODES
+                        .iter()
+                        .position(|(value, ..)| *value == current)
+                        .unwrap_or(0);
+                    self.modal = Some(Modal::Mode { cursor });
+                } else if let Some(mode) = commands::parse_runtime_mode(argument) {
+                    self.set_runtime_mode(mode);
+                } else {
+                    self.notice = Some(tr("notice.modeWords").into());
+                }
+            }
+            "effort" => match self.effort_choices() {
+                None => self.notice = Some(tr("notice.noEffort").into()),
+                Some(control) if argument.is_empty() => {
+                    let current = self.effort_display();
+                    let cursor = control
+                        .choices
+                        .iter()
+                        .position(|(v, _)| Some(v) == current.as_ref())
+                        .unwrap_or(0);
+                    self.modal = Some(Modal::Effort { cursor });
+                }
+                Some(control) => {
+                    let wanted = argument.to_lowercase();
+                    match control
+                        .choices
+                        .iter()
+                        .find(|(v, l)| v.to_lowercase() == wanted || l.to_lowercase() == wanted)
+                    {
+                        Some((value, _)) => self.pick_effort(&control.descriptor_id, value),
+                        None => {
+                            let words: Vec<&str> =
+                                control.choices.iter().map(|(v, _)| v.as_str()).collect();
+                            self.notice = Some(format!(
+                                "{}: {}",
+                                tr("notice.effortWords"),
+                                words.join(", ")
+                            ));
+                        }
+                    }
+                }
+            },
+            "plan" => self.set_interaction_mode("plan"),
+            "default" => self.set_interaction_mode("default"),
+            "new" => {
+                self.new_thread();
+                self.focus = Focus::Composer;
+            }
+            "help" => self.notice = Some(tr("notice.help").into()),
+            "sidebar" => match flag_word(argument) {
+                Some(on) => self.set_list(on),
+                None => self.notice = Some(tr("notice.sidebarUsage").into()),
+            },
+            "panel" => match flag_word(argument) {
+                Some(on) => self.set_panel(on),
+                None => self.notice = Some(tr("notice.panelToggleUsage").into()),
+            },
+            "pet" => match flag_word(argument) {
+                Some(on) => {
+                    self.settings.pet = on.unwrap_or(!self.settings.pet);
+                    self.notice = Some(
+                        tr(if self.settings.pet {
+                            "notice.petOn"
+                        } else {
+                            "notice.petOff"
+                        })
+                        .into(),
+                    );
+                }
+                None => self.notice = Some(tr("notice.petUsage").into()),
+            },
+            "usage" => match flag_word(argument) {
+                Some(on) => crate::cmd_misc::set_usage(self, on),
+                None => self.notice = Some(tr("notice.usageUsage").into()),
+            },
+            "mouse" => match flag_word(argument) {
+                Some(on) => {
+                    self.mouse = on.unwrap_or(!self.mouse);
+                    self.selection.clear();
+                    self.notice = Some(
+                        tr(if self.mouse {
+                            "notice.mouseOn"
+                        } else {
+                            "notice.mouseOff"
+                        })
+                        .into(),
+                    );
+                }
+                None => self.notice = Some(tr("notice.mouseUsage").into()),
+            },
+            "dag-workflow" | "workflow" => return self.panel_command(Side::Workflow, argument),
+            "savvy" => return self.panel_command(Side::Savvy, argument),
+            "files" => return self.panel_command(Side::Files, argument),
+            _ => return crate::cmd::run(self, name, argument),
         }
-        let offset = usize::from(column.saturating_sub(rect.x + 2));
-        if column >= rect.x + 2
-            && let Some(view) = crate::panels_common::tab_at(offset)
-        {
-            self.side_view = Side::of(view);
-            self.panel_scroll.set(0);
-        }
+        true
     }
 
     /// `/dag-workflow`, `/savvy` and `/files`: each shows its own view; with the panel closed it opens,
@@ -1644,353 +1574,6 @@ impl App {
         self.pet_memory.observe(&observation, self.pet_now());
     }
 
-    // --- mouse, selection and copying -------------------------------------------------------
-
-    /// The conversation row and cell under a pointer; `None` outside the conversation or over the
-    /// blank rows above a short one. With `clamp`, a pointer past an edge counts as that edge.
-    fn pos_at(&self, x: u16, y: u16, clamp: bool) -> Option<Pos> {
-        let g = self.geo.get();
-        let a = g.area;
-        if a.width == 0 || a.height == 0 {
-            return None;
-        }
-        let inside = x >= a.x && x < a.right() && y >= a.y && y < a.bottom();
-        if !inside && !clamp {
-            return None;
-        }
-        let x = x.clamp(a.x, a.right() - 1);
-        let y = y.clamp(a.y, a.bottom() - 1);
-        let line = usize::from(y - a.y);
-        let row = if line < g.pad {
-            if !clamp {
-                return None;
-            }
-            g.start
-        } else {
-            g.start + line - g.pad
-        };
-        if g.rows == 0 {
-            return None;
-        }
-        Some(Pos {
-            row: row.min(g.rows - 1),
-            col: usize::from(x - a.x),
-        })
-    }
-
-    fn on_mouse(&mut self, m: MouseEvent) {
-        self.on_mouse_at(m, std::time::Instant::now());
-    }
-
-    /// `on_mouse` with the time of the event, which a double click is told by.
-    pub(crate) fn on_mouse_at(&mut self, m: MouseEvent, now: std::time::Instant) {
-        if crate::composer::mouse(self, m, now) {
-            return;
-        }
-        if self.modal.is_some() {
-            self.on_modal_mouse(m);
-            return;
-        }
-        let at =
-            |r: Rect| m.column >= r.x && m.column < r.right() && m.row >= r.y && m.row < r.bottom();
-        match m.kind {
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
-                let up = m.kind == MouseEventKind::ScrollUp;
-                if let Some(screen) = self.screen.as_mut() {
-                    screen.wheel(up);
-                    return;
-                }
-                if crate::replay::on_wheel(self, up) {
-                    return;
-                }
-                // Over the right-hand panel the wheel moves the panel's body.
-                if self.side_shown() && at(self.side_rect.get()) {
-                    let step = WHEEL_LINES as i32;
-                    self.panel_scroll
-                        .set(self.panel_scroll.get() + if up { -step } else { step });
-                    return;
-                }
-                // The panel follows the live work and windows itself; the wheel is the
-                // conversation's.
-                if up {
-                    self.scroll_up(WHEEL_LINES)
-                } else {
-                    self.scroll_down(WHEEL_LINES)
-                }
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if crate::replay::on_click(self, m.column, m.row) {
-                    self.selection.press(None);
-                    return;
-                }
-                let list = self.list_hits.borrow().clone();
-                if self.list_shown() && at(list.0) {
-                    self.selection.press(None);
-                    if let Some((_, index)) = list.1.iter().find(|(y, _)| *y == m.row) {
-                        self.selected = *index;
-                        self.focus = Focus::List;
-                        self.activate_row();
-                    }
-                    return;
-                }
-                if self.side_shown() && at(self.side_rect.get()) {
-                    self.selection.press(None);
-                    self.click_side_tab(m.column, m.row);
-                    return;
-                }
-                self.selection.press(self.pos_at(m.column, m.row, false));
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                let a = self.geo.get().area;
-                if m.row < a.y {
-                    self.scroll_up(1);
-                } else if m.row >= a.bottom() {
-                    self.scroll_down(1);
-                }
-                if let Some(pos) = self.pos_at(m.column, m.row, true) {
-                    self.selection.drag(pos);
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) => match self.selection.release() {
-                End::Select => self.copy_selection(),
-                End::Click | End::None => {}
-            },
-            _ => {}
-        }
-    }
-
-    /// Queues `text` for the clipboard: OSC 52 and the platform's tool, as the main loop carries out.
-    pub fn copy_text(&mut self, text: String) {
-        self.copy_named(text, None);
-    }
-
-    /// `copy_text`, with a name for the notice to give the text.
-    pub fn copy_named(&mut self, text: String, what: Option<String>) {
-        let osc52 = clipboard::osc52(&text, self.clip_plan.tmux, clipboard::OSC52_MAX_BASE64);
-        self.copy_job = Some(CopyJob {
-            text,
-            osc52,
-            plan: self.clip_plan.clone(),
-            what,
-        });
-    }
-
-    /// Takes the selected text from the conversation and queues it for the clipboard.
-    fn copy_selection(&mut self) {
-        let Some(range) = self.selection.range() else {
-            return;
-        };
-        let width = usize::from(self.geo.get().area.width);
-        let (lines, meta) = self.transcript(width).rows();
-        let text = selection::text(&lines, &meta, range);
-        if text.is_empty() {
-            self.selection.clear();
-            return;
-        }
-        self.copy_text(text);
-    }
-
-    /// The copy the main loop has to carry out, if any.
-    pub fn take_copy(&mut self) -> Option<CopyJob> {
-        self.copy_job.take()
-    }
-
-    // --- scrolling --------------------------------------------------------------------------
-
-    pub fn scroll_up(&mut self, lines: usize) {
-        let next = self.scroll.get() + lines;
-        self.scroll.set(next);
-        if next >= self.scroll_max.get() {
-            self.request_older();
-        }
-    }
-
-    pub fn scroll_down(&mut self, lines: usize) {
-        self.scroll.set(self.scroll.get().saturating_sub(lines));
-    }
-
-    // --- keys -------------------------------------------------------------------------------
-
-    fn on_key(&mut self, key: KeyEvent) {
-        self.selection.clear();
-        self.pet_memory.touch(self.pet_now());
-        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
-            crate::composer::ctrl_c(self);
-            return;
-        }
-        #[cfg(unix)]
-        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('z')) {
-            self.suspend_requested = true;
-            return;
-        }
-        // The side panel's two tabs: Shift-Tab flips them, and Tab too where the list is not open
-        // to take it.
-        if self.side_shown()
-            && self.modal.is_none()
-            && (key.code == KeyCode::BackTab || (key.code == KeyCode::Tab && !self.list_shown()))
-        {
-            self.flip_side();
-            return;
-        }
-        if crate::replay::on_key(self, key) {
-            return;
-        }
-        if let Some(mut screen) = self.screen.take() {
-            if !screen.key(key, self) && self.screen.is_none() {
-                self.screen = Some(screen);
-            }
-            return;
-        }
-        if self.modal.is_some() {
-            self.on_modal_key(key);
-            return;
-        }
-        if self.pane_key(key) {
-            return;
-        }
-        match self.focus {
-            Focus::Composer if self.approval().is_some() => self.on_approval_key(key),
-            Focus::Composer if self.pending_input().is_some() => self.on_question_key(key),
-            Focus::Composer => self.on_composer_key(key),
-            Focus::List => self.on_list_key(key),
-        }
-    }
-
-    pub(crate) fn on_paste(&mut self, text: &str) {
-        match &mut self.modal {
-            Some(Modal::Models { filter, cursor }) => {
-                filter.push_str(&text.replace(['\n', '\r'], " "));
-                *cursor = 0;
-                return;
-            }
-            Some(_) => return,
-            None => {}
-        }
-        if self.pending_input().is_some() && self.focus == Focus::Composer {
-            self.question
-                .text
-                .push_str(&text.replace(['\n', '\r'], " "));
-            return;
-        }
-        self.focus = Focus::Composer;
-        self.input.paste(text);
-    }
-
-    fn on_composer_key(&mut self, key: KeyEvent) {
-        if crate::composer::key(self, key) {
-            return;
-        }
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let sup = key.modifiers.contains(KeyModifiers::SUPER);
-        let alt = key
-            .modifiers
-            .intersects(KeyModifiers::ALT | KeyModifiers::SHIFT);
-        match key.code {
-            KeyCode::Enter if alt => self.input.newline(),
-            KeyCode::Enter => self.submit(),
-            KeyCode::Char('j') if ctrl => self.input.newline(),
-            KeyCode::Tab if self.list_shown() => self.focus = Focus::List,
-            KeyCode::Esc => {
-                if self.conv.busy() && self.thread_id().is_some() {
-                    self.interrupt();
-                } else {
-                    self.focus = Focus::List;
-                }
-            }
-            KeyCode::Char('u') if ctrl => self.input.kill_to_start(),
-            KeyCode::Char('k') if ctrl => self.input.kill_to_end(),
-            KeyCode::Char('w') if ctrl => self.input.kill_word(),
-            KeyCode::Char('e') if ctrl => self.input.end(),
-            KeyCode::Char(ch) if !ctrl && !sup => self.input.insert(ch),
-            KeyCode::Backspace => self.input.backspace(),
-            KeyCode::Delete => self.input.delete(),
-            KeyCode::Left => {
-                self.input.mv(Move::Left, false);
-            }
-            KeyCode::Right => {
-                self.input.mv(Move::Right, false);
-            }
-            KeyCode::Home => {
-                self.input.mv(Move::Home, false);
-            }
-            KeyCode::End => {
-                self.input.mv(Move::End, false);
-            }
-            KeyCode::Up => {
-                if !self.input.mv(Move::Up, false) {
-                    self.input.history_back();
-                }
-            }
-            KeyCode::Down => {
-                if !self.input.mv(Move::Down, false) {
-                    self.input.history_forward();
-                }
-            }
-            KeyCode::PageUp => self.scroll_up(self.page.get().max(1)),
-            KeyCode::PageDown => self.scroll_down(self.page.get().max(1)),
-            _ => {}
-        }
-    }
-
-    fn on_list_key(&mut self, key: KeyEvent) {
-        let rows = self.rows();
-        let step = |from: usize, forward: bool| -> usize {
-            let mut at = from;
-            loop {
-                let next = if forward {
-                    (at + 1).min(rows.len().saturating_sub(1))
-                } else {
-                    at.saturating_sub(1)
-                };
-                if next == at || rows.get(next).is_some_and(Row::selectable) {
-                    return if rows.get(next).is_some_and(Row::selectable) {
-                        next
-                    } else {
-                        from
-                    };
-                }
-                at = next;
-            }
-        };
-        match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.selected = step(self.selected, false),
-            KeyCode::Down | KeyCode::Char('j') => self.selected = step(self.selected, true),
-            KeyCode::PageUp => self.scroll_up(self.page.get().max(1)),
-            KeyCode::PageDown => self.scroll_down(self.page.get().max(1)),
-            KeyCode::Char('q') => self.quit = true,
-            // The composer is reachable with no thread open: slash commands (`/provider`, `/theme`,
-            // `/projects`, ...) need no thread, and a plain message there says to pick one first.
-            KeyCode::Tab | KeyCode::Esc => self.focus = Focus::Composer,
-            KeyCode::Char('n') => {
-                let project = match rows.get(self.selected) {
-                    Some(Row::Item(Nav::Thread(row))) => {
-                        self.thread_shell(&row.id).map(|t| t.project_id.clone())
-                    }
-                    _ => None,
-                };
-                self.new_thread_in(project);
-            }
-            KeyCode::Enter => self.activate_row(),
-            _ => {}
-        }
-    }
-
-    /// Opens the selected row of the list: a thread, a new thread, a shelf, "show more".
-    fn activate_row(&mut self) {
-        let rows = self.rows();
-        match rows.get(self.selected).cloned() {
-            Some(Row::AddFolder) => self.add_folder(),
-            Some(Row::Item(Nav::New { .. })) => self.new_thread(),
-            Some(Row::Item(Nav::Thread(row))) => self.open_thread(&row.id),
-            Some(Row::Item(Nav::Shelf { section, .. })) => match section {
-                Section::Snoozed => self.view.snoozed_open = !self.view.snoozed_open,
-                _ => self.view.settled_open = !self.view.settled_open,
-            },
-            Some(Row::Item(Nav::More { .. })) => self.view.settled_shown += SETTLED_PAGE,
-            _ => {}
-        }
-    }
-
     /// A new thread: the folder is chosen first (see `folder.rs`), the project in use leading.
     pub(crate) fn new_thread(&mut self) {
         self.new_thread_in(None);
@@ -2039,617 +1622,13 @@ impl App {
         self.dispatch(command, None, None);
     }
 
-    // --- approvals and questions ------------------------------------------------------------
-
-    fn on_approval_key(&mut self, key: KeyEvent) {
-        let Some(pending) = self.approval() else {
-            return;
-        };
-        let options = self.approval_options(&pending);
-        let last = options.len().saturating_sub(1);
-        self.approval_cursor = self.approval_cursor.min(last);
-        let pick = match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.approval_cursor = self.approval_cursor.saturating_sub(1);
-                None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.approval_cursor = (self.approval_cursor + 1).min(last);
-                None
-            }
-            KeyCode::Char(c @ '1'..='9') => {
-                let index = c as usize - '1' as usize;
-                (index <= last).then_some(index)
-            }
-            KeyCode::Enter => Some(self.approval_cursor),
-            KeyCode::Tab | KeyCode::Esc => {
-                self.focus = Focus::List;
-                None
-            }
-            KeyCode::PageUp => {
-                self.scroll_up(self.page.get().max(1));
-                None
-            }
-            KeyCode::PageDown => {
-                self.scroll_down(self.page.get().max(1));
-                None
-            }
-            _ => None,
-        };
-        let (Some(index), Some(thread_id)) = (pick, self.thread_id()) else {
-            return;
-        };
-        self.answered.insert(pending.request_id.clone());
-        self.approval_cursor = 0;
-        let command = commands::approval_respond(
-            &Ctx::fresh(),
-            &thread_id,
-            &pending.request_id,
-            &options[index].0,
-        );
-        self.dispatch(command, None, Some(pending.request_id));
-    }
-
-    fn on_question_key(&mut self, key: KeyEvent) {
-        let Some(pending) = self.pending_input() else {
-            return;
-        };
-        if self.question.request_id != pending.request_id {
-            self.question = QuestionState {
-                request_id: pending.request_id.clone(),
-                ..Default::default()
-            };
-        }
-        let index = self.question.index.min(pending.questions.len() - 1);
-        let question = &pending.questions[index];
-        let own = question.options.len();
-        if self.question.picked.len() != own {
-            self.question.picked = vec![false; own];
-        }
-        let state = &mut self.question;
-        match key.code {
-            KeyCode::Up => state.cursor = state.cursor.saturating_sub(1),
-            KeyCode::Down => state.cursor = (state.cursor + 1).min(own),
-            KeyCode::Tab | KeyCode::Esc => self.focus = Focus::List,
-            KeyCode::PageUp => self.scroll_up(self.page.get().max(1)),
-            KeyCode::PageDown => self.scroll_down(self.page.get().max(1)),
-            KeyCode::Char(' ') if question.multi_select && state.cursor < own => {
-                state.picked[state.cursor] = !state.picked[state.cursor];
-            }
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                state.cursor = own;
-                state.text.push(ch);
-            }
-            KeyCode::Backspace => {
-                state.text.pop();
-            }
-            KeyCode::Enter => {
-                let label = |i: usize| question.options[i].0.clone();
-                let typed = state.text.trim().to_string();
-                let answer = if question.multi_select {
-                    let mut chosen: Vec<String> =
-                        (0..own).filter(|i| state.picked[*i]).map(label).collect();
-                    if !typed.is_empty() {
-                        chosen.push(typed);
-                    }
-                    if chosen.is_empty() && state.cursor < own {
-                        chosen.push(label(state.cursor));
-                    }
-                    (!chosen.is_empty()).then(|| json!(chosen))
-                } else if !typed.is_empty() {
-                    Some(json!(typed))
-                } else if state.cursor < own {
-                    Some(json!(label(state.cursor)))
-                } else {
-                    None
-                };
-                let Some(answer) = answer else { return };
-                state.answers.insert(question.id.clone(), answer);
-                state.index += 1;
-                state.cursor = 0;
-                state.text.clear();
-                state.picked.clear();
-                if state.index >= pending.questions.len() {
-                    let answers = Value::Object(std::mem::take(&mut state.answers));
-                    *state = QuestionState::default();
-                    let Some(thread_id) = self.thread_id() else {
-                        return;
-                    };
-                    self.answered.insert(pending.request_id.clone());
-                    let command = commands::user_input_respond(
-                        &Ctx::fresh(),
-                        &thread_id,
-                        &pending.request_id,
-                        &answers,
-                    );
-                    self.dispatch(command, None, Some(pending.request_id));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // --- pickers ----------------------------------------------------------------------------
-
-    fn on_modal_key(&mut self, key: KeyEvent) {
-        let Some(modal) = self.modal.clone() else {
-            return;
-        };
-        let count = match &modal {
-            Modal::Models { filter, .. } => self.filtered_models(filter).len(),
-            Modal::Mode { .. } => commands::RUNTIME_MODES.len(),
-            Modal::Effort { .. } => self.effort_choices().map_or(0, |c| c.choices.len()),
-            Modal::Pick(pick) => pick.items.len(),
-        };
-        let cursor_of = |m: &Modal| match m {
-            Modal::Models { cursor, .. } | Modal::Mode { cursor } | Modal::Effort { cursor } => {
-                *cursor
-            }
-            Modal::Pick(pick) => pick.cursor,
-        };
-        let cursor = cursor_of(&modal).min(count.saturating_sub(1));
-        let set_cursor = |app: &mut App, to: usize| match &mut app.modal {
-            Some(
-                Modal::Models { cursor, .. } | Modal::Mode { cursor } | Modal::Effort { cursor },
-            ) => *cursor = to,
-            Some(Modal::Pick(pick)) => pick.cursor = to,
-            None => {}
-        };
-        match key.code {
-            KeyCode::Esc => self.modal = None,
-            KeyCode::Up => set_cursor(self, cursor.saturating_sub(1)),
-            KeyCode::Down => set_cursor(self, (cursor + 1).min(count.saturating_sub(1))),
-            KeyCode::Backspace => match &mut self.modal {
-                Some(Modal::Models { filter, cursor }) => {
-                    filter.pop();
-                    *cursor = 0;
-                }
-                Some(Modal::Pick(pick)) => crate::folder::backspace(pick),
-                _ => {}
-            },
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                match &mut self.modal {
-                    Some(Modal::Models { filter, cursor }) => {
-                        filter.push(ch);
-                        *cursor = 0;
-                    }
-                    Some(Modal::Pick(pick)) => crate::folder::type_char(pick, ch),
-                    _ => {}
-                }
-            }
-            // No path typed yet: the list waits for one instead of closing.
-            KeyCode::Enter if matches!(&modal, Modal::Pick(pick) if crate::folder::waits_for_path(pick, cursor)) =>
-                {}
-            KeyCode::Enter if count > 0 => {
-                self.modal = None;
-                match modal {
-                    Modal::Models { filter, .. } => {
-                        if let Some(model) = self.filtered_models(&filter).get(cursor).cloned() {
-                            self.pick_model(&model.instance_id, &model.slug);
-                        }
-                    }
-                    Modal::Mode { .. } => self.set_runtime_mode(commands::RUNTIME_MODES[cursor].0),
-                    Modal::Effort { .. } => {
-                        if let Some(control) = self.effort_choices() {
-                            let value = control.choices[cursor].0.clone();
-                            self.pick_effort(&control.descriptor_id, &value);
-                        }
-                    }
-                    Modal::Pick(pick) => crate::cmd::picked(self, &pick, cursor),
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// The mouse over an open list: a click on a row picks it, the wheel moves the pointer; the
-    /// rest does nothing, so a list is never answered by a click that was meant for what is behind it.
-    fn on_modal_mouse(&mut self, m: MouseEvent) {
-        match m.kind {
-            MouseEventKind::ScrollUp => self.on_modal_key(KeyEvent::from(KeyCode::Up)),
-            MouseEventKind::ScrollDown => self.on_modal_key(KeyEvent::from(KeyCode::Down)),
-            MouseEventKind::Down(MouseButton::Left) => {
-                let (rect, rows) = self.modal_hits.borrow().clone();
-                let inside = m.column >= rect.x
-                    && m.column < rect.right()
-                    && m.row >= rect.y
-                    && m.row < rect.bottom();
-                let Some((_, index)) = rows.iter().find(|(y, _)| inside && *y == m.row) else {
-                    return;
-                };
-                match &mut self.modal {
-                    Some(
-                        Modal::Models { cursor, .. }
-                        | Modal::Mode { cursor }
-                        | Modal::Effort { cursor },
-                    ) => *cursor = *index,
-                    Some(Modal::Pick(pick)) => pick.cursor = *index,
-                    None => return,
-                }
-                self.on_modal_key(KeyEvent::from(KeyCode::Enter));
-            }
-            _ => {}
-        }
-    }
-
-    fn pick_model(&mut self, instance_id: &str, model: &str) {
-        let selection = json!({"instanceId": instance_id, "model": model});
-        settings::write_last_model(&self.last_model_path, &selection);
-        self.notice = Some(format!(
-            "{}: {}",
-            tr("notice.model"),
-            model_name(&selection)
-        ));
-        self.model_override = Some(selection);
-    }
-
-    fn pick_effort(&mut self, descriptor_id: &str, value: &str) {
-        let Some(model) = self.current_model() else {
-            return;
-        };
-        let selection = with_option(&model, descriptor_id, value);
-        settings::write_last_model(&self.last_model_path, &selection);
-        self.notice = Some(format!("{}: {value}", tr("notice.effort")));
-        self.model_override = Some(selection);
-    }
-
-    fn set_runtime_mode(&mut self, mode: &str) {
-        if self.thread_id().is_some()
-            && mode != self.conv.thread.runtime_mode
-            && let Some(refusal) = crate::cmd_goal::mode_refusal(self, "session.c.whatPermission")
-        {
-            self.notice = Some(refusal);
-            return;
-        }
-        let label = tr(&format!("mode.{mode}"));
-        self.notice = Some(format!("{}: {label}", tr("notice.mode")));
-        match self.thread_id() {
-            Some(id) => {
-                let command = commands::runtime_mode_set(&Ctx::fresh(), &id, mode);
-                self.runtime_intent = Some(mode.to_string());
-                self.dispatch(command, None, None);
-            }
-            None => self.draft_runtime_mode = mode.to_string(),
-        }
-    }
-
-    fn set_interaction_mode(&mut self, mode: &str) {
-        if self.thread_id().is_some()
-            && mode != self.conv.thread.interaction_mode
-            && let Some(refusal) = crate::cmd_goal::mode_refusal(self, "session.c.whatWorkMode")
-        {
-            self.notice = Some(refusal);
-            return;
-        }
-        self.notice = Some(
-            tr(if mode == "plan" {
-                "notice.planOn"
-            } else {
-                "notice.planOff"
-            })
-            .into(),
-        );
-        match self.thread_id() {
-            Some(id) => {
-                let command = commands::interaction_mode_set(&Ctx::fresh(), &id, mode);
-                self.interaction_intent = Some(mode.to_string());
-                self.dispatch(command, None, None);
-            }
-            None => self.draft_interaction_mode = mode.to_string(),
-        }
-    }
-
-    fn interrupt(&mut self) {
-        let Some(id) = self.thread_id() else {
-            self.notice = Some(tr("notice.nothingRunning").into());
-            return;
-        };
-        let turn = self.conv.session().and_then(|s| s.active_turn_id.clone());
-        self.notice = Some(tr("notice.stopping").into());
-        self.notifier.stop_requested(&id);
-        let command = commands::turn_interrupt(&Ctx::fresh(), &id, turn.as_deref());
-        self.dispatch(command, None, None);
-    }
-
-    // --- sending ----------------------------------------------------------------------------
-
-    /// What a new thread in `project_id` runs on: the last model picked (when this server still
-    /// has it), else the project's default, else the first usable provider's default.
-    fn model_for(&self, project_id: &str) -> Option<Value> {
-        if let Some(selection) = settings::read_last_model(&self.last_model_path)
-            && usable_models(&self.config).iter().any(|m| {
-                selection["instanceId"] == m.instance_id.as_str()
-                    && selection["model"] == m.slug.as_str()
-            })
-        {
-            return Some(selection);
-        }
-        let project = self.shell.projects.iter().find(|p| p.id == project_id)?;
-        if let Some(selection) = project
-            .default_model_selection
-            .clone()
-            .filter(|s| !s.is_null())
-        {
-            return Some(selection);
-        }
-        first_usable_model(&self.config)
-            .map(|Choice { instance_id, model }| json!({"instanceId": instance_id, "model": model}))
-    }
-
-    pub(crate) fn submit(&mut self) {
-        if self.memory_edit.is_some() {
-            crate::cmd_memory::save_edit(self);
-            return;
-        }
-        let text = self.input.text();
-        let mut trimmed = text.trim().to_string();
-        if trimmed.is_empty() {
-            return;
-        }
-        let word = trimmed.split_whitespace().next().unwrap_or_default();
-        if word.starts_with('/') && self.input.starts_with_slash() && !word[1..].contains('/') {
-            let argument = trimmed[word.len()..].trim().to_string();
-            if self.run_slash(&word[1..].to_lowercase(), &argument) {
-                self.input.take(true);
-                return;
-            }
-            // Not ours: an installed provider skill goes out as the `$name` mention the composer
-            // inserts, which each provider turns into its own invocation.
-            let Some(name) = self.provider_skill(&word[1..]) else {
-                self.notice = Some(tr("notice.unknownCommand").into());
-                return;
-            };
-            trimmed = format!("${name} {argument}").trim_end().to_string();
-        }
-        if crate::cmd_attach::line(self).is_some() && self.conv.busy() {
-            self.notice = Some(
-                crate::panels_common::s(
-                    "Wait for the current turn before sending attachments.",
-                    "현재 작업이 끝난 뒤 첨부를 전송하세요.",
-                )
-                .into(),
-            );
-            return;
-        }
-        match &self.active {
-            Active::None => self.notice = Some(tr("notice.pickFirst").into()),
-            Active::Thread(_) if self.conv.busy() => {
-                self.queue.push_back(trimmed);
-                self.input.take(true);
-                self.notice = Some(tr("notice.queued").into());
-            }
-            _ => {
-                if self.send(&trimmed) {
-                    self.input.take(true);
-                }
-            }
-        }
-    }
-
-    /// The name of the provider skill a typed `/word` calls, if some provider lists it as enabled
-    /// and invocable by the user.
-    fn provider_skill(&self, word: &str) -> Option<String> {
-        let model = self.current_model();
-        let current = model.as_ref().and_then(|m| m["instanceId"].as_str());
-        let providers = self.config["providers"].as_array()?;
-        providers
-            .iter()
-            .filter(|p| p["instanceId"].as_str() == current)
-            .chain(
-                providers
-                    .iter()
-                    .filter(|p| p["instanceId"].as_str() != current),
-            )
-            .flat_map(|p| p["skills"].as_array().into_iter().flatten())
-            .filter(|k| k["enabled"].as_bool().unwrap_or(true) && k["userInvocable"] != false)
-            .filter_map(|k| k["name"].as_str())
-            .find(|name| name.eq_ignore_ascii_case(word))
-            .map(str::to_string)
-    }
-
-    /// Runs a `/command`; false when it is not one.
-    fn run_slash(&mut self, name: &str, argument: &str) -> bool {
-        match name {
-            "exit" | "quit" => self.quit = true,
-            "model" | "models" => {
-                if self.config.is_null() {
-                    self.notice = Some(tr("notice.offline").into());
-                } else if usable_models(&self.config).is_empty() {
-                    self.notice = Some(tr("notice.noProvider").into());
-                } else {
-                    let matches = self.filtered_models(argument);
-                    if !argument.is_empty() && matches.len() == 1 {
-                        self.pick_model(&matches[0].instance_id, &matches[0].slug);
-                    } else {
-                        self.modal = Some(Modal::Models {
-                            filter: argument.to_string(),
-                            cursor: 0,
-                        });
-                    }
-                }
-            }
-            "mode" => {
-                if argument.is_empty() {
-                    let current = self.runtime_mode();
-                    let cursor = commands::RUNTIME_MODES
-                        .iter()
-                        .position(|(value, ..)| *value == current)
-                        .unwrap_or(0);
-                    self.modal = Some(Modal::Mode { cursor });
-                } else if let Some(mode) = commands::parse_runtime_mode(argument) {
-                    self.set_runtime_mode(mode);
-                } else {
-                    self.notice = Some(tr("notice.modeWords").into());
-                }
-            }
-            "effort" => match self.effort_choices() {
-                None => self.notice = Some(tr("notice.noEffort").into()),
-                Some(control) if argument.is_empty() => {
-                    let current = self.effort_display();
-                    let cursor = control
-                        .choices
-                        .iter()
-                        .position(|(v, _)| Some(v) == current.as_ref())
-                        .unwrap_or(0);
-                    self.modal = Some(Modal::Effort { cursor });
-                }
-                Some(control) => {
-                    let wanted = argument.to_lowercase();
-                    match control
-                        .choices
-                        .iter()
-                        .find(|(v, l)| v.to_lowercase() == wanted || l.to_lowercase() == wanted)
-                    {
-                        Some((value, _)) => self.pick_effort(&control.descriptor_id, value),
-                        None => {
-                            let words: Vec<&str> =
-                                control.choices.iter().map(|(v, _)| v.as_str()).collect();
-                            self.notice = Some(format!(
-                                "{}: {}",
-                                tr("notice.effortWords"),
-                                words.join(", ")
-                            ));
-                        }
-                    }
-                }
-            },
-            "plan" => self.set_interaction_mode("plan"),
-            "default" => self.set_interaction_mode("default"),
-            "new" => {
-                self.new_thread();
-                self.focus = Focus::Composer;
-            }
-            "help" => self.notice = Some(tr("notice.help").into()),
-            "sidebar" => match flag_word(argument) {
-                Some(on) => self.set_list(on),
-                None => self.notice = Some(tr("notice.sidebarUsage").into()),
-            },
-            "panel" => match flag_word(argument) {
-                Some(on) => self.set_panel(on),
-                None => self.notice = Some(tr("notice.panelToggleUsage").into()),
-            },
-            "pet" => match flag_word(argument) {
-                Some(on) => {
-                    self.settings.pet = on.unwrap_or(!self.settings.pet);
-                    self.notice = Some(
-                        tr(if self.settings.pet {
-                            "notice.petOn"
-                        } else {
-                            "notice.petOff"
-                        })
-                        .into(),
-                    );
-                }
-                None => self.notice = Some(tr("notice.petUsage").into()),
-            },
-            "usage" => match flag_word(argument) {
-                Some(on) => crate::cmd_misc::set_usage(self, on),
-                None => self.notice = Some(tr("notice.usageUsage").into()),
-            },
-            "mouse" => match flag_word(argument) {
-                Some(on) => {
-                    self.mouse = on.unwrap_or(!self.mouse);
-                    self.selection.clear();
-                    self.notice = Some(
-                        tr(if self.mouse {
-                            "notice.mouseOn"
-                        } else {
-                            "notice.mouseOff"
-                        })
-                        .into(),
-                    );
-                }
-                None => self.notice = Some(tr("notice.mouseUsage").into()),
-            },
-            "dag-workflow" | "workflow" => return self.panel_command(Side::Workflow, argument),
-            "savvy" => return self.panel_command(Side::Savvy, argument),
-            "files" => return self.panel_command(Side::Files, argument),
-            _ => return crate::cmd::run(self, name, argument),
-        }
-        true
-    }
-
-    /// Builds and sends one user message to the open thread or, from a draft, starts the thread.
-    pub(crate) fn send(&mut self, text: &str) -> bool {
-        if crate::cmd_attach::before_send(self, text) {
-            return false;
-        }
-        if let Some(refusal) = crate::cmd_history::sending_blocked(self) {
-            self.notice = Some(refusal);
-            return false;
-        }
-        let runtime_mode = self.runtime_mode();
-        let interaction_mode = self.interaction_mode();
-        let message_id = new_id();
-        let ctx = Ctx::fresh();
-        let mut command = match self.active.clone() {
-            Active::None => {
-                self.notice = Some(tr("notice.pickFirst").into());
-                return false;
-            }
-            Active::Draft(project_id) => {
-                let Some(model) = self
-                    .model_override
-                    .clone()
-                    .or_else(|| self.model_for(&project_id))
-                else {
-                    self.notice = Some(tr("notice.noProvider").into());
-                    return false;
-                };
-                let thread_id = self.draft_id.take().unwrap_or_else(new_id);
-                let crew = self.draft_crew.clone();
-                let mut command = commands::turn_start(
-                    &ctx,
-                    &Turn {
-                        thread_id: &thread_id,
-                        message_id: &message_id,
-                        text,
-                        model: Some(&model),
-                        runtime_mode: &runtime_mode,
-                        interaction_mode: &interaction_mode,
-                        bootstrap: Some(Bootstrap {
-                            project_id: &project_id,
-                            crew: crew.as_ref(),
-                        }),
-                    },
-                );
-                command["message"]["attachments"] = json!(self.attachments.ready);
-                self.notice = None;
-                self.dispatch(command, Some(thread_id), None);
-                return true;
-            }
-            Active::Thread(thread_id) => commands::turn_start(
-                &ctx,
-                &Turn {
-                    thread_id: &thread_id,
-                    message_id: &message_id,
-                    text,
-                    model: self.model_override.as_ref(),
-                    runtime_mode: &runtime_mode,
-                    interaction_mode: &interaction_mode,
-                    bootstrap: None,
-                },
-            ),
-        };
-        command["message"]["attachments"] = json!(self.attachments.ready);
-        self.notice = None;
-        self.scroll.set(0);
-        self.sent = Some((message_id, self.tick));
-        self.dispatch(command, None, None);
-        true
-    }
-
-    /// A request was sent and its message has not come back yet: no work of it exists, and the
-    /// work before it is not this one's.
-    pub fn request_pending(&self) -> bool {
-        self.sent
-            .as_ref()
-            .is_some_and(|(id, _)| !self.conv.thread.messages.iter().any(|m| &m.id == id))
-    }
-
     /// Advances the spinner; true when the screen changes by it.
     pub fn on_tick(&mut self) -> bool {
         self.tick = self.tick.wrapping_add(1);
+        if self.shell_retry_at.is_some_and(|at| Instant::now() >= at) {
+            self.shell_retry_at = None;
+            self.subscribe_shell();
+        }
         self.refresh_pet();
         // A tip moves the screen only when the next one is another tip.
         let tip_changed = self

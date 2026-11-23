@@ -1,5 +1,6 @@
 import {
   type DeviceListInput,
+  EnvironmentAuthorizationError,
   AuthAccessReadScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -12,6 +13,9 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as Stream from "effect/Stream";
+import * as RpcSchema from "effect/unstable/rpc/RpcSchema";
 import type * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
@@ -171,12 +175,14 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.projectsSearchEntries]: AuthOrchestrationReadScope,
   [WS_METHODS.projectsWriteFile]: AuthOrchestrationOperateScope,
   [WS_METHODS.shellOpenInEditor]: AuthOrchestrationOperateScope,
-  [WS_METHODS.filesystemBrowse]: AuthOrchestrationReadScope,
-  [WS_METHODS.agentSessionsScan]: AuthOrchestrationReadScope,
+  [WS_METHODS.filesystemBrowse]: AuthOrchestrationOperateScope,
+  [WS_METHODS.agentSessionsScan]: AuthOrchestrationOperateScope,
   [WS_METHODS.agentSessionsImport]: AuthOrchestrationOperateScope,
   [WS_METHODS.assetsCreateUrl]: AuthOrchestrationReadScope,
   [WS_METHODS.attachmentsCreateUploadUrl]: AuthOrchestrationOperateScope,
   [WS_METHODS.attachmentsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.threadSideQuestion]: AuthOrchestrationOperateScope,
+  [WS_METHODS.providerContextBreakdown]: AuthOrchestrationReadScope,
   [WS_METHODS.providerUploadFeedback]: AuthOrchestrationOperateScope,
   [WS_METHODS.subscribeVcsStatus]: AuthOrchestrationReadScope,
   [WS_METHODS.subscribeWorktreeSetup]: AuthOrchestrationReadScope,
@@ -244,6 +250,31 @@ export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope 
     throw new Error(`RPC method ${method} has no declared authorization scope.`);
   }
   return requiredScope;
+}
+
+/** Install denials before registering handlers, including handlers without instrumentation. */
+export function authorizeWsRpcHandlers<
+  Handlers extends RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof WsRpcGroup>>,
+>(scopes: ReadonlyArray<AuthEnvironmentScope>, handlers: Handlers): Handlers {
+  const denied = Object.fromEntries(
+    Array.from(WsRpcGroup.requests).flatMap(([method, rpc]) => {
+      const requiredScope = requiredScopeForRpcMethod(method);
+      if (scopes.includes(requiredScope)) return [];
+      const error = new EnvironmentAuthorizationError({
+        message: `The authenticated token is missing required scope: ${requiredScope}.`,
+        requiredScope,
+      });
+      return [
+        [
+          method,
+          RpcSchema.isStreamSchema(rpc.successSchema)
+            ? () => Stream.fail(error)
+            : () => Effect.fail(error),
+        ],
+      ];
+    }),
+  );
+  return Object.assign({}, handlers, denied);
 }
 
 /** Retrying can install or restart tools even though ordinary listing is readable. */

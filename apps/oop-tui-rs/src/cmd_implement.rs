@@ -3,7 +3,7 @@
 //! the server marks it built. The thread leaves plan mode first, as the app's does. Ported from
 //! `implementPlan` of the former TypeScript terminal.
 
-use crate::app::{App, DISPATCH_RPC, Msg};
+use crate::app::{App, Msg, call_dispatch, dispatch_notice};
 use crate::commands::{self, Ctx, Turn};
 use crate::panels_common::s;
 use crate::text::new_id;
@@ -144,10 +144,10 @@ pub fn run(app: &mut App) {
     tokio::spawn(async move {
         let mut result = Ok(());
         if let Some(set) = set_mode {
-            result = rpc.call(DISPATCH_RPC, set).await.map(|_| ());
+            result = call_dispatch(&rpc, set).await.map(|_| ());
         }
         if result.is_ok() {
-            result = rpc.call(DISPATCH_RPC, command).await.map(|_| ());
+            result = call_dispatch(&rpc, command).await.map(|_| ());
         }
         let msg = match result {
             Ok(()) => Msg::Dispatched {
@@ -165,7 +165,7 @@ pub fn run(app: &mut App) {
                 if app.sent.as_ref().map(|(id, _)| id) == Some(&sent_id) {
                     app.sent = None;
                 }
-                app.notice = Some(reason);
+                app.notice = Some(dispatch_notice(reason));
             })),
         };
         let _ = tx.send(msg);
@@ -182,6 +182,7 @@ fn no_plan() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::DISPATCH_RPC;
     use crate::cmd_history::testkit::{connected, next, serve, two_turns};
     use serde_json::json;
 

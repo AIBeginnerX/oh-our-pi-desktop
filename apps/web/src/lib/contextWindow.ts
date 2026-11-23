@@ -1,4 +1,38 @@
-import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@t3tools/contracts";
+import type {
+  OrchestrationThreadActivity,
+  ProviderContextCategory,
+  ThreadTokenUsageSnapshot,
+} from "@t3tools/contracts";
+
+export function shapeContextBreakdown(
+  categories: ReadonlyArray<ProviderContextCategory>,
+  maxTokens?: number | null,
+) {
+  const windowSize = asFiniteNumber(maxTokens);
+  const share = (tokens: number) =>
+    windowSize !== null && windowSize > 0 ? asFiniteNumber((tokens / windowSize) * 100) : null;
+  type Row = ProviderContextCategory & { key: string; share: number | null };
+  const rows: Record<ProviderContextCategory["kind"], Row[]> = {
+    used: [],
+    free: [],
+    buffer: [],
+    deferred: [],
+  };
+  const occurrences = new Map<string, number>();
+  for (const category of categories) {
+    if (!Number.isFinite(category.tokens) || category.tokens < 0) continue;
+    const label = `${category.kind}:${category.name}`;
+    const occurrence = (occurrences.get(label) ?? 0) + 1;
+    occurrences.set(label, occurrence);
+    rows[category.kind].push({
+      ...category,
+      key: `${label}:${occurrence}`,
+      share: category.kind === "deferred" ? null : share(category.tokens),
+    });
+  }
+  const usedTokens = rows.used.reduce((total, row) => total + row.tokens, 0);
+  return { rows, usedTokens, usedShare: share(usedTokens) };
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;

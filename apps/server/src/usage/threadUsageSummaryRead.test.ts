@@ -604,6 +604,8 @@ describe("deriveThreadUsageSummary", () => {
       [],
       { turnIds: new Set(["user", "follow-up"]), children: new Set([childThreadId]) },
     );
+    expect(read.requestAggregated).toBe(true);
+    expect(derive([row()], THREAD_USAGE_MAX_ROWS)).not.toHaveProperty("requestAggregated");
     expect(read.models.map(({ model, turns }) => [model, turns])).toEqual([
       ["claude-opus-4-5", 2],
       ["crew", 1],

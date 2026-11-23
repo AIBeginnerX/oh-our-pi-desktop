@@ -54,6 +54,7 @@ import { ProjectionProjectRepositoryLive } from "./persistence/Layers/Projection
 import { ProjectionThreadRepositoryLive } from "./persistence/Layers/ProjectionThreads.ts";
 import * as ProjectMemoryAnalyser from "./memory/ProjectMemoryAnalyser.ts";
 import * as ProjectMemoryDreaming from "./memory/ProjectMemoryDreaming.ts";
+import * as ScheduledPrompts from "./scheduledPrompts/ScheduledPrompts.ts";
 import * as ProjectMemoryService from "./memory/ProjectMemoryService.ts";
 import * as SelectedChecks from "./selectedChecks/SelectedChecks.ts";
 import * as TaskResult from "./selectedChecks/TaskResult.ts";
@@ -124,6 +125,7 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
 import * as ThreadSettlementReactor from "./orchestration/ThreadSettlementReactor.ts";
 import * as ThreadGoalReactor from "./orchestration/ThreadGoalReactor.ts";
+import * as PullRequestAutoFixReactor from "./orchestration/PullRequestAutoFixReactor.ts";
 import * as ThreadPlanContinuationReactor from "./orchestration/ThreadPlanContinuationReactor.ts";
 import * as StorageCleanup from "./storageCleanup.ts";
 import * as PullRequestSyncReactor from "./orchestration/PullRequestSyncReactor.ts";
@@ -328,6 +330,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ThreadDeletionReactorLive),
   Layer.provideMerge(ThreadSettlementReactor.layer),
   Layer.provideMerge(ThreadGoalReactor.layer),
+  Layer.provideMerge(PullRequestAutoFixReactor.layer),
   Layer.provideMerge(ThreadPlanContinuationReactor.layer),
   Layer.provideMerge(PullRequestSyncReactor.layer),
   Layer.provideMerge(ThreadPullRequestReactor.layer),
@@ -792,6 +795,7 @@ export const makeRoutesLayer = Layer.mergeAll(
       Layer.provide(ProjectMemoryAnalyser.layer.pipe(Layer.provide(ProjectMemories.layer))),
     ),
   ),
+  Layer.provide(ScheduledPrompts.layer),
   Layer.provide(PreviewAutomationBroker.layer),
   Layer.provide(ServerSelfUpdate.layer.pipe(Layer.provide(DesktopAppUpdateLayerLive))),
   Layer.provide(commandReadinessLayer),

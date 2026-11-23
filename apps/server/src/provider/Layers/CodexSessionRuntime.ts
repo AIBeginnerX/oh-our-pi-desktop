@@ -2712,10 +2712,26 @@ export const makeCodexSessionRuntime = (
           if (!effectiveTurnId) {
             return;
           }
-          yield* client.request("turn/interrupt", {
-            threadId: providerThreadId,
-            turnId: effectiveTurnId,
-          });
+          // A missing acknowledgement is a failed Stop. The reactor can
+          // close the session through its interrupt failure recovery path.
+          yield* client
+            .request("turn/interrupt", {
+              threadId: providerThreadId,
+              turnId: effectiveTurnId,
+            })
+            .pipe(
+              Effect.timeoutOrElse({
+                duration: "10 seconds",
+                orElse: () =>
+                  Effect.fail(
+                    CodexErrors.CodexAppServerRequestError.internalError(
+                      "Codex turn interrupt timed out waiting for acknowledgement.",
+                      undefined,
+                      { method: "turn/interrupt", operation: "receive-response" },
+                    ),
+                  ),
+              }),
+            );
         }),
       readThread: Effect.gen(function* () {
         const providerThreadId = yield* readProviderThreadId;

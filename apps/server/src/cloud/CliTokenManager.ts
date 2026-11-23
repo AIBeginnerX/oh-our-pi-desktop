@@ -450,7 +450,7 @@ export const make = Effect.gen(function* () {
       grant_type: "refresh_token",
       refresh_token: token.refreshToken,
       client_id: metadata.clientId,
-    });
+    }).pipe(Effect.timeout(Duration.seconds(30)));
     return refreshed.identity === undefined && token.identity !== undefined
       ? { ...refreshed, identity: token.identity }
       : refreshed;

@@ -54,10 +54,19 @@ pub struct Message {
     pub id: String,
     pub role: Role,
     pub text: String,
+    pub attachments: Option<Vec<Attachment>>,
     pub turn_id: Option<String>,
     pub streaming: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Hash)]
+#[serde(default)]
+pub struct Attachment {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -207,6 +216,43 @@ impl Thread {
         self.session
             .as_ref()
             .is_some_and(|s| matches!(s.status.as_str(), "starting" | "running"))
+    }
+
+    pub fn prompt_suggestion(&self) -> Option<(&str, &str)> {
+        use crate::text::parse_iso_ms;
+
+        let turn = self.latest_turn.as_ref()?;
+        if turn.state != "completed" || self.session_running() {
+            return None;
+        }
+        // Mirrors the shared selector's turn-adoption check.
+        let turn_at = [
+            Some(turn.requested_at.as_str()),
+            turn.started_at.as_deref(),
+            turn.completed_at.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(parse_iso_ms)
+        .max();
+        if self.messages.iter().any(|m| {
+            m.role == Role::User
+                && !m.id.starts_with("import:")
+                && parse_iso_ms(&m.created_at)
+                    .zip(turn_at)
+                    .is_some_and(|(sent, adopted)| sent > adopted)
+        }) {
+            return None;
+        }
+        self.activities.iter().rev().find_map(|activity| {
+            if activity.kind != "prompt.suggestion"
+                || activity.payload["turnId"].as_str()? != turn.turn_id
+            {
+                return None;
+            }
+            let text = activity.payload["text"].as_str()?;
+            (!text.is_empty()).then_some((activity.id.as_str(), text))
+        })
     }
 
     pub fn apply_event(&mut self, event: &Value) -> Outcome {
@@ -621,6 +667,9 @@ impl Thread {
                 } else if !incoming.text.is_empty() {
                     entry.text = incoming.text.clone();
                 }
+                if incoming.attachments.is_some() {
+                    entry.attachments = incoming.attachments.clone();
+                }
                 entry.streaming = incoming.streaming;
                 if incoming.turn_id.is_some() {
                     entry.turn_id = incoming.turn_id.clone();
@@ -769,6 +818,20 @@ fn resolvable_context_window(activity: &Activity) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn prompt_suggestion_matches_shared_vectors() {
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../fixtures/vectors/prompt-suggestion.json"))
+                .unwrap();
+        for case in cases {
+            let thread: Thread = serde_json::from_value(case["thread"].clone()).unwrap();
+            let actual = thread
+                .prompt_suggestion()
+                .map(|(id, text)| json!({ "id": id, "text": text }));
+            assert_eq!(actual.unwrap_or(Value::Null), case["expected"]);
+        }
+    }
 
     fn event(sequence: u64, kind: &str, payload: Value) -> Value {
         json!({"sequence": sequence, "type": kind, "occurredAt": "2026-01-01T00:00:00.000Z", "commandId": null, "payload": payload})

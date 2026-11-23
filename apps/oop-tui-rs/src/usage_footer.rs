@@ -42,9 +42,10 @@ pub struct Model {
 pub struct Summary {
     /// `ok`, or `too-large` when the thread is bigger than the server will total up.
     pub status: String,
-    /// `Some("turn")` when the numbers describe the request the asked-for turn belongs to. `None`
-    /// is what an older server answers with, for the whole thread.
+    /// `Some("turn")` for a scoped response. Older servers may omit the scope.
     pub scope: Option<String>,
+    /// The server confirms that a turn-scoped response covers the whole request.
+    pub request_aggregated: bool,
     pub models: Vec<Model>,
 }
 
@@ -62,6 +63,7 @@ pub fn parse(value: &Value) -> Option<Summary> {
     Some(Summary {
         status: value["status"].as_str().unwrap_or("ok").to_string(),
         scope: value["scope"].as_str().map(str::to_string),
+        request_aggregated: value["requestAggregated"].as_bool() == Some(true),
         models: value["models"]
             .as_array()
             .into_iter()
@@ -146,7 +148,7 @@ pub fn footer(summary: Option<&Summary>, context: Option<(f64, Option<f64>)>, ko
     let rows = usable.map(|s| s.models.as_slice()).unwrap_or_default();
     let mut parts = Vec::new();
     let request = usable.and_then(|s| s.scope.as_deref()) == Some("turn");
-    if request {
+    if request && usable.is_some_and(|s| s.request_aggregated) {
         parts.push(tr_in_lang("usage.thisRequest", ko).to_string());
     }
     if !request
@@ -354,8 +356,19 @@ mod tests {
 
     #[test]
     fn request_label_matches_web() {
-        let summary = parse(&json!({"status":"ok", "scope":"turn", "models":[]})).unwrap();
-        assert_eq!(footer(Some(&summary), None, false), "This request");
+        let mut response = json!({"status":"ok", "scope":"turn", "models":[], "futureField": 1});
+        for (confirmation, expected) in [
+            (None, ""),
+            (Some(json!(false)), ""),
+            (Some(json!("true")), ""),
+            (Some(json!(true)), "This request"),
+        ] {
+            if let Some(confirmation) = confirmation {
+                response["requestAggregated"] = confirmation;
+            }
+            let summary = parse(&response).unwrap();
+            assert_eq!(footer(Some(&summary), None, false), expected, "{response}");
+        }
     }
 
     #[test]
@@ -467,7 +480,7 @@ mod tests {
 
     #[test]
     fn lead_and_two_crew_rows() {
-        let summary = parse(&json!({"status":"ok", "scope":"turn", "totals":{"cacheRate":0.1},
+        let summary = parse(&json!({"status":"ok", "scope":"turn","requestAggregated":true, "totals":{"cacheRate":0.1},
             "models":[
                 {"model":"claude-opus-5-5","turns":1,"cost":{"kind":"estimated","usd":4.12},
                  "cacheRate":0.92,"context":{"usedTokens":182000,"maxTokens":1000000}},
@@ -484,9 +497,11 @@ mod tests {
         assert!(
             footer(Some(&summary), None, true).starts_with("이번 요청 · opus-5.5 ≈$4.12 캐시 92%")
         );
-        let unreported = parse(&json!({"status":"ok", "scope":"turn", "models":[
-            {"model":"gpt-6.2-astra","turns":0,"context":{"usedTokens":2000,"maxTokens":10000}}
-        ]}))
+        let unreported = parse(
+            &json!({"status":"ok", "scope":"turn","requestAggregated":true, "models":[
+                {"model":"gpt-6.2-astra","turns":0,"context":{"usedTokens":2000,"maxTokens":10000}}
+            ]}),
+        )
         .unwrap();
         assert_eq!(
             footer(Some(&unreported), None, false),
@@ -496,9 +511,11 @@ mod tests {
 
     #[test]
     fn context_fallback_and_no_label_without_scope() {
-        let mut summary = parse(&json!({"status":"ok","scope":"turn","models":[
-            {"model":"opus","cost":{"kind":"reported","usd":4.12}}
-        ]}))
+        let mut summary = parse(
+            &json!({"status":"ok","scope":"turn","requestAggregated":true,"models":[
+                {"model":"opus","cost":{"kind":"reported","usd":4.12}}
+            ]}),
+        )
         .unwrap();
         // The thread's latest context may come from an earlier request.
         assert_eq!(

@@ -28,6 +28,7 @@ import { ChatComposer } from "./chat/ChatComposer";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
+import { BesideThreadPane } from "./chat/BesideThreadPane";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
@@ -389,7 +390,6 @@ export default function ChatView(props: ChatViewProps) {
     handleSwitchCheckoutToThread,
     addPullRequestSurface,
     pullRequestSurfaceAvailable,
-    activeWorktreePath,
     closeExpandedImage,
   } = threadStatus;
   const shortcutsAndRevert = useChatViewShortcutsAndRevert({
@@ -513,7 +513,16 @@ export default function ChatView(props: ChatViewProps) {
     </div>
   );
   const rightPanelContent = activeThreadRef ? (
-    renderedRightPanelSurface?.kind === "preview" ? (
+    renderedRightPanelSurface?.kind === "chat" ? (
+      rightPanelOpen && activeRightPanelSurface === renderedRightPanelSurface ? (
+        <BesideThreadPane
+          key={activeThreadKey}
+          hostRef={activeThreadRef}
+          displayedThreadKey={displayedTimelineKey}
+          target={renderedRightPanelSurface.target}
+        />
+      ) : null
+    ) : renderedRightPanelSurface?.kind === "preview" ? (
       <Suspense fallback={null}>
         <PreviewPanel
           mode="embedded"
@@ -701,6 +710,10 @@ export default function ChatView(props: ChatViewProps) {
     ) : null
   ) : null;
 
+  const attachContext = (mention: string) => {
+    composerRef.current?.insertTextAtEnd(`${mention} `, { ensureLeadingBoundary: true });
+  };
+
   const workspaceFileDropHandlers = makeWorkspaceFileDropHandlers({
     setDragActive: setIsWorkspaceFileDragActive,
     addFiles: (files) => composerRef.current?.addDroppedFiles(files),
@@ -834,6 +847,7 @@ export default function ChatView(props: ChatViewProps) {
                 citationHistoryLoading={threadDetailLoading}
                 {...(!paintOnlyDisplayedTimeline
                   ? {
+                      onAttachContext: attachContext,
                       onCiteAssistantText: citeAssistantText,
                       agentPanelModel,
                       onOpenAgents: addAgentsSurface,
@@ -1349,6 +1363,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddWorkflows={addWorkflowsSurface}
           workflowsAvailable={workflowsSurfaceAvailable}
           onAddDevice={addDeviceSurface}
+          onAddChat={() => useRightPanelStore.getState().open(activeThreadRef, "chat")}
           browserAvailable={isPreviewSupportedInRuntime()}
           terminalAvailable={activeProject !== null}
           diffAvailable={isServerThread && isGitRepo}
@@ -1408,6 +1423,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddWorkflows={addWorkflowsSurface}
             workflowsAvailable={workflowsSurfaceAvailable}
             onAddDevice={addDeviceSurface}
+            onAddChat={() => useRightPanelStore.getState().open(activeThreadRef, "chat")}
             browserAvailable={isPreviewSupportedInRuntime()}
             terminalAvailable={activeProject !== null}
             diffAvailable={isServerThread && isGitRepo}
@@ -1434,31 +1450,16 @@ export default function ChatView(props: ChatViewProps) {
             <AlertDialogTitle>Edit from here?</AlertDialogTitle>
             <AlertDialogDescription>
               Rewind chat to before this message. Your prompt and attachments return to the
-              composer.
-              {activeWorktreePath === null
-                ? " Files stay as they are because this thread shares the project directory."
-                : null}
+              composer. Files stay as they are.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            {activeWorktreePath !== null ? (
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
-                  setPendingRevert(null);
-                  void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, true);
-                }}
-              >
-                Revert files too
-              </Button>
-            ) : null}
             <Button
               onClick={() => {
                 if (!pendingRevert || pendingRevert.routeThreadKey !== routeThreadKey) return;
                 setPendingRevert(null);
-                void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, false);
+                void onRevertToTurnCount(pendingRevert.turnCount, pendingRevert.messageId, true);
               }}
             >
               Revert and keep changes

@@ -44,6 +44,7 @@ import {
 } from "./ChatComposer.constants";
 
 export function useComposerMenuModel(args: {
+  sideQuestionDescription: string;
   activeComposerMenuItemRef: RefObject<ComposerCommandItem | null>;
   activePendingApproval: PendingApproval | null;
   activePendingIsResponding: boolean;
@@ -280,6 +281,7 @@ export function useComposerMenuModel(args: {
   supportsQuestionAttachments: boolean;
 }) {
   const {
+    sideQuestionDescription,
     activeComposerMenuItemRef,
     activePendingApproval,
     activePendingIsResponding,
@@ -449,6 +451,17 @@ export function useComposerMenuModel(args: {
     }
     if (composerTrigger.kind === "slash-command") {
       const builtInSlashCommandItems = [
+        ...(composerTrigger.rangeStart === 0
+          ? [
+              {
+                id: "slash:btw",
+                type: "slash-command",
+                command: "btw",
+                label: "/btw",
+                description: sideQuestionDescription,
+              } as const,
+            ]
+          : []),
         {
           id: "slash:model",
           type: "slash-command",
@@ -503,7 +516,9 @@ export function useComposerMenuModel(args: {
           (skill.scope ? `${skill.scope} skill` : ""),
       }));
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
-        (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
+        (item) =>
+          item.command.name.toLowerCase() !== "btw" &&
+          (item.command.name !== "compact" || compactSlashCommandAvailable),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
@@ -577,6 +592,7 @@ export function useComposerMenuModel(args: {
     }
     return [];
   }, [
+    sideQuestionDescription,
     compactSlashCommandAvailable,
     composerTrigger,
     exactPullRequestLookup.data,

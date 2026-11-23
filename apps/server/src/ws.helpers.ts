@@ -199,10 +199,13 @@ export function projectSetupScriptCompatibilityDetail(
   }
 }
 
+export const BOOTSTRAP_THREAD_DELETE_TAG = "bootstrap-thread-delete";
+
 export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
   OrchestrationEvent,
   {
     type:
+      | "thread.deleted"
       | "thread.message-sent"
       | "thread.proposed-plan-upserted"
       | "thread.activity-appended"
@@ -212,6 +215,8 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   }
 > {
   return (
+    (event.type === "thread.deleted" &&
+      !event.commandId?.startsWith(`server:${BOOTSTRAP_THREAD_DELETE_TAG}:`)) ||
     event.type === "thread.message-sent" ||
     event.type === "thread.proposed-plan-upserted" ||
     event.type === "thread.activity-appended" ||

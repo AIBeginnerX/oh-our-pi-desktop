@@ -1,6 +1,8 @@
 import { SshDeviceHostConfigs } from "./device.ts";
 import { CrewSettings, DEFAULT_CREW_SETTINGS } from "./crew.ts";
+import { ScheduledPromptOperation, ScheduledPrompts } from "./scheduledPrompts.ts";
 import { ThreadGoals } from "./threadGoal.ts";
+import { ThreadPullRequestAutoFixSettings } from "./threadPullRequestAutoFix.ts";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
@@ -320,6 +322,9 @@ export const DiffColorScheme = Schema.Literals(["red-green", "blue-orange"]);
 export const ChatWidth = Schema.Literals(["comfortable", "wide", "full"]);
 export type ChatWidth = typeof ChatWidth.Type;
 
+export const TranscriptViewMode = Schema.Literals(["normal", "thinking", "verbose"]);
+export type TranscriptViewMode = typeof TranscriptViewMode.Type;
+
 export const ClientSettingsSchema = Schema.Struct({
   loadLinkIcons: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   notificationMode: NotificationMode.pipe(
@@ -480,6 +485,7 @@ export const ClientSettingsSchema = Schema.Struct({
   // default UI; this beta flag restores it (plus the /plan and /default slash
   // commands) for users who still rely on the old workflow.
   planModeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  transcriptViewMode: TranscriptViewMode.pipe(Schema.withDecodingDefault(Effect.succeed("normal"))),
   // Legacy context window meter. The composer hides it by default; users who
   // still want the old usage indicator can restore it from Settings.
   contextWindowMeterEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1519,12 +1525,19 @@ export const ServerSettings = Schema.Struct({
   ),
   /** The default OOP Crew, which threads without a crew of their own run; see `crew.ts`. */
   crew: CrewSettings.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_CREW_SETTINGS))),
+  scheduledPrompts: ScheduledPrompts.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   threadGoals: ThreadGoals.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  threadPullRequestAutoFix: ThreadPullRequestAutoFixSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
   /**
    * Opt-in. When a turn ends normally with the agent's own plan or todo list unfinished and no
    * goal active, the server sends up to two automatic continuations per user message.
    */
   continueUnfinishedPlans: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  claudePromptSuggestionsEnabled: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
   /**
    * The user's own standing instructions, added to every agent session in this
    * environment whichever provider runs it. Empty adds nothing.
@@ -1701,23 +1714,40 @@ const OpenCodeSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(CustomModelSetting)),
 });
 
-export const ServerSettingsPatch = Schema.Struct({
-  worktreeCleanup: Schema.optionalKey(
-    Schema.NullOr(
-      Schema.Union([
-        Schema.Struct({ mode: Schema.Literal("off") }),
-        Schema.Struct({
-          mode: Schema.Literal("custom"),
-          rules: Schema.Struct({
-            worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
-            worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
-            worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
-            worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
-          }),
-        }),
-      ]),
-    ),
+const ProjectWorktreeCleanupPatch = Schema.Union([
+  Schema.Struct({ mode: Schema.Literal("off") }),
+  Schema.Struct({
+    mode: Schema.Literal("custom"),
+    rules: Schema.Struct({
+      worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
+      worktreeOnMerge: Schema.optionalKey(Schema.Boolean),
+      worktreeOnDelete: Schema.optionalKey(Schema.Boolean),
+      worktreeUnchanged: Schema.optionalKey(Schema.Boolean),
+    }),
+  }),
+]);
+const SourceControlWritingStylePatch = Schema.Struct({
+  mode: Schema.optionalKey(SourceControlWritingStyleMode),
+  customInstructions: Schema.optionalKey(TrimmedString),
+  followChangeRequestTemplates: Schema.optionalKey(Schema.Boolean),
+});
+
+const ProjectSettingsOverridePatch = Schema.Struct({
+  set: Schema.optionalKey(
+    Schema.Struct({
+      ...ProjectSettingsOverrides.fields,
+      worktreeCleanup: Schema.optionalKey(ProjectWorktreeCleanupPatch),
+      sourceControlWritingStyle: Schema.optionalKey(SourceControlWritingStylePatch),
+      textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+    }),
   ),
+  // When a key appears in both set and unset, unset wins.
+  unset: Schema.optionalKey(Schema.Array(Schema.Literals(PROJECT_SCOPED_SERVER_SETTING_KEYS))),
+});
+export type ProjectSettingsOverridePatch = typeof ProjectSettingsOverridePatch.Type;
+
+export const ServerSettingsPatch = Schema.Struct({
+  worktreeCleanup: Schema.optionalKey(Schema.NullOr(ProjectWorktreeCleanupPatch)),
   storageCleanup: Schema.optionalKey(
     Schema.Struct({
       worktreeAfterDays: Schema.optionalKey(StorageRetentionDays),
@@ -1761,6 +1791,14 @@ export const ServerSettingsPatch = Schema.Struct({
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(ProjectId, Schema.NullOr(ProjectSettingsOverrides)),
   ),
+  /**
+   * Update selected keys against current project entries. When present, this
+   * supersedes projectSettingsOverrides and the legacy per-key maps in the same
+   * request. Clients can include replacements for servers predating operations.
+   */
+  projectSettingsOverridePatches: Schema.optionalKey(
+    Schema.Record(ProjectId, ProjectSettingsOverridePatch),
+  ),
   enableAgentDeviceAccess: Schema.optionalKey(Schema.Boolean),
   enableDeviceSupport: Schema.optionalKey(Schema.Boolean),
   deviceOnboardingCompleted: Schema.optionalKey(Schema.Boolean),
@@ -1785,13 +1823,7 @@ export const ServerSettingsPatch = Schema.Struct({
   worktreeSubmodules: Schema.optionalKey(Schema.NullOr(WorktreeSubmodules)),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
-  sourceControlWritingStyle: Schema.optionalKey(
-    Schema.Struct({
-      mode: Schema.optionalKey(SourceControlWritingStyleMode),
-      customInstructions: Schema.optionalKey(TrimmedString),
-      followChangeRequestTemplates: Schema.optionalKey(Schema.Boolean),
-    }),
-  ),
+  sourceControlWritingStyle: Schema.optionalKey(SourceControlWritingStylePatch),
   sourceControlWriterModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   pullRequestMergeMethod: Schema.optionalKey(Schema.NullOr(PullRequestMergeMethod)),
   observability: Schema.optionalKey(
@@ -1840,8 +1872,13 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   /** Replaces the whole default crew; clients send the complete next value. */
   crew: Schema.optionalKey(CrewSettings),
+  scheduledPrompts: Schema.optionalKey(ScheduledPrompts),
+  /** When present, apply to the current list and ignore the scheduledPrompts compatibility fallback. */
+  scheduledPromptOperations: Schema.optionalKey(Schema.Array(ScheduledPromptOperation)),
   threadGoals: Schema.optionalKey(ThreadGoals),
+  threadPullRequestAutoFix: Schema.optionalKey(ThreadPullRequestAutoFixSettings),
   continueUnfinishedPlans: Schema.optionalKey(Schema.Boolean),
+  claudePromptSuggestionsEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
@@ -1920,6 +1957,7 @@ export const ClientSettingsPatch = Schema.Struct({
     Schema.Record(TrimmedNonEmptyString, PullRequestMergeMethod),
   ),
   planModeEnabled: Schema.optionalKey(Schema.Boolean),
+  transcriptViewMode: Schema.optionalKey(TranscriptViewMode),
   contextWindowMeterEnabled: Schema.optionalKey(Schema.Boolean),
   composerCollapseOnScroll: Schema.optionalKey(Schema.Boolean),
   composerRichTextEnabled: Schema.optionalKey(Schema.Boolean),

@@ -46,7 +46,11 @@ import {
   ZapIcon,
 } from "lucide-react";
 import { useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
-import { toolGroupAction, workEntryDisplayLabel } from "./MessagesTimeline.logic";
+import {
+  resolveTranscriptExpanded,
+  toolGroupAction,
+  workEntryDisplayLabel,
+} from "./MessagesTimeline.logic";
 import { useLinkIconsEnabled } from "~/hooks/useSettings";
 import { cn } from "~/lib/utils";
 import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
@@ -57,6 +61,7 @@ import {
   TimelineRowCtx,
   TimelineWorkEntry,
   WorkGroupViewCtx,
+  type WorkGroupViewState,
   TimelineRowTimestamp,
 } from "./MessagesTimeline.shared";
 import {
@@ -445,13 +450,24 @@ export const AgentSpawnRow = memo(function AgentSpawnRow(props: {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry } = props;
-  const { agentPanelModel, expandedSpawnEntryIds, onToggleSpawnRow, onOpenAgents } =
-    use(TimelineRowCtx);
+  const {
+    agentPanelModel,
+    disclosureChoices,
+    expandedSpawnEntryIds,
+    onToggleSpawnRow,
+    onOpenAgents,
+    transcriptViewMode,
+  } = use(TimelineRowCtx);
   const spawn = workEntry.agentSpawn;
   if (!spawn) {
     return null;
   }
-  const expanded = expandedSpawnEntryIds.has(workEntry.id);
+  const expanded = resolveTranscriptExpanded(
+    transcriptViewMode,
+    "work",
+    disclosureChoices.get(`spawn:${workEntry.id}`) ??
+      (expandedSpawnEntryIds.has(workEntry.id) ? true : undefined),
+  );
 
   const memberIds = new Set(spawn.agentTaskIds);
   const workflowGroup = spawn.workflowId
@@ -656,6 +672,9 @@ export const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   );
 });
 
+// Explicit closes share the same lifetime as the remembered open entries.
+const collapsedWorkEntries = new WeakMap<WorkGroupViewState, Set<string>>();
+
 const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   workEntry: TimelineWorkEntry;
   workspaceRoot: string | undefined;
@@ -664,21 +683,33 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   onToggleEntry?: ((collapsed: boolean) => void) | undefined;
 }) {
   const { workEntry, workspaceRoot, isExpandedToolGroupEntry, displayLabel } = props;
-  const { threadRef, onImageExpand, timestampFormat } = use(TimelineRowCtx);
+  const { threadRef, onImageExpand, timestampFormat, transcriptViewMode, workGroupViewState } =
+    use(TimelineRowCtx);
   const groupView = use(WorkGroupViewCtx);
-  const [expanded, setExpanded] = useState(
-    () => groupView?.state.expandedEntries.has(workEntry.id) ?? false,
+  const [manualChoice, setManualChoice] = useState(() =>
+    workGroupViewState.expandedEntries.has(workEntry.id)
+      ? true
+      : collapsedWorkEntries.get(workGroupViewState)?.has(workEntry.id)
+        ? false
+        : undefined,
   );
+  const expanded = resolveTranscriptExpanded(transcriptViewMode, "work", manualChoice);
   const toggleExpanded = () => {
     const next = !expanded;
-    if (groupView) {
-      groupView.onToggleEntry(!next);
-      if (next) groupView.state.expandedEntries.add(workEntry.id);
-      else groupView.state.expandedEntries.delete(workEntry.id);
+    (groupView?.onToggleEntry ?? props.onToggleEntry)?.(!next);
+    let collapsed = collapsedWorkEntries.get(workGroupViewState);
+    if (next) {
+      workGroupViewState.expandedEntries.add(workEntry.id);
+      collapsed?.delete(workEntry.id);
     } else {
-      props.onToggleEntry?.(!next);
+      workGroupViewState.expandedEntries.delete(workEntry.id);
+      if (!collapsed) {
+        collapsed = new Set();
+        collapsedWorkEntries.set(workGroupViewState, collapsed);
+      }
+      collapsed.add(workEntry.id);
     }
-    setExpanded(next);
+    setManualChoice(next);
   };
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";

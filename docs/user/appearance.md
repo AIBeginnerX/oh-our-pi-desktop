@@ -21,6 +21,14 @@ Android uses **Material You Layout** by default unless you have turned it off in
 It changes shapes, spacing, and controls independently
 of the selected theme.
 
+## Transcript view
+
+On web and desktop, choose **Normal**, **Thinking**, or **Verbose** under
+**Settings → Appearance → Transcript view**. Thinking opens reasoning by default, and Verbose also
+opens tool groups and individual tool details. An item you open or close by hand keeps that choice.
+Use **Cycle transcript view** in the command palette to switch without leaving chat, or assign a
+shortcut to it under **Settings → Keybindings**.
+
 ## Motion
 
 The main sidebar, right panel, and terminal drawer open and close immediately by default. Move the

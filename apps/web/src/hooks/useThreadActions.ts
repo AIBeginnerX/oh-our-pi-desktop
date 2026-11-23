@@ -4,9 +4,19 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import {
+  executeAtomQuery,
+  settlePromise,
+  squashAtomCommandFailure,
+  type AtomCommandResult,
+} from "@t3tools/client-runtime/state/runtime";
 import { canSnooze, threadWokeAt } from "@t3tools/client-runtime/state/thread-settled";
-import { EnvironmentId, type ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  type ScopedProjectRef,
+  type ScopedThreadRef,
+  ThreadId,
+} from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
@@ -16,6 +26,10 @@ import { useCallback, useMemo, useRef } from "react";
 
 import { getFallbackThreadIdAfterDelete, pinOrderKeyBetween } from "../components/Sidebar.logic";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { useBrowserHistoryStore } from "../browserHistoryStore";
+import { useDiffPanelStore } from "../diffPanelStore";
+import { useRightPanelStore } from "../rightPanelStore";
+import { orchestrationEnvironment } from "../state/orchestration";
 import { terminalEnvironment } from "../state/terminal";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "../state/server";
@@ -188,6 +202,42 @@ export async function navigateAfterThreadDeletion(navigate: () => Promise<void>)
       }),
     );
   }
+}
+
+export function clearDeletedThreadViewState(ref: ScopedThreadRef): void {
+  useRightPanelStore.getState().removeThread(ref);
+  useDiffPanelStore.getState().removeThread(ref);
+  useBrowserHistoryStore.getState().removeThread(ref);
+}
+
+export async function deleteProjectAndClearThreadViewState<A, E>(
+  project: ScopedProjectRef,
+  remove: () => Promise<AtomCommandResult<A, E>>,
+): Promise<AtomCommandResult<A, E>> {
+  const { environmentId, projectId } = project;
+  const archived = await executeAtomQuery(
+    appAtomRegistry,
+    orchestrationEnvironment.archivedShellSnapshot({ environmentId, input: {} }),
+    { refresh: true, reportFailure: false, reportDefect: false },
+  );
+  const threadIds = new Set(
+    readThreadShells()
+      .filter((thread) => thread.environmentId === environmentId && thread.projectId === projectId)
+      .map((thread) => thread.id),
+  );
+  if (archived._tag === "Success") {
+    for (const thread of archived.value.threads) {
+      if (thread.projectId === projectId) threadIds.add(thread.id);
+    }
+  }
+  const result = await remove();
+  if (result._tag === "Success") {
+    for (const threadId of threadIds) {
+      clearDeletedThreadViewState(scopeThreadRef(environmentId, threadId));
+    }
+    refreshArchivedThreadsForEnvironment(environmentId);
+  }
+  return result;
 }
 
 export function useThreadActions() {
@@ -366,6 +416,7 @@ export function useThreadActions() {
           input: { threadId: target.threadId },
         });
         if (result._tag === "Success") {
+          clearDeletedThreadViewState(target);
           refreshArchivedThreadsForEnvironment(target.environmentId);
         }
         return result;
@@ -456,6 +507,7 @@ export function useThreadActions() {
       if (deleteResult._tag === "Failure") {
         return deleteResult;
       }
+      clearDeletedThreadViewState(threadRef);
       refreshArchivedThreadsForEnvironment(threadRef.environmentId);
       releaseComposerDraftUploads(threadRef);
       clearComposerDraftForThread(threadRef);

@@ -127,6 +127,7 @@ export interface CreateWorktreeProgress {
     completed: number;
     total: number;
   }) => Effect.Effect<void, never>;
+  readonly onLocalFilesCopied?: (input: { count: number }) => Effect.Effect<void, never>;
   readonly onSubmodulesStarted?: () => Effect.Effect<void, never>;
   /** Fires when `.gitmodules` exists but the resolved submodule mode is `"none"`. */
   readonly onSubmodulesDisabled?: (input: {
@@ -1361,82 +1362,6 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       resolveCheckpointCommit(input.cwd, input.checkpointRef).pipe(
         Effect.map((commit) => commit !== null),
       ),
-
-    restoreCheckpoint: Effect.fn("GitVcsDriver.checkpoints.restoreCheckpoint")(function* (input) {
-      const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
-
-      let commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
-
-      if (!commitOid && input.fallbackToHead === true) {
-        commitOid = yield* resolveHeadCommit(input.cwd);
-      }
-
-      if (!commitOid) {
-        return false;
-      }
-
-      const tracked = yield* execute({
-        operation,
-        cwd: input.cwd,
-        args: ["ls-files", "--cached", `--with-tree=${commitOid}`, "-z", "--", "."],
-      });
-      // An empty index and checkpoint have nothing for git restore's pathspec to match.
-      if (tracked.stdout.length > 0) {
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
-        });
-      }
-      // Restoring away the last tracked file can remove a nested workspace directory.
-      yield* fileSystem.makeDirectory(input.cwd, { recursive: true }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new VcsProcessExitError({
-              operation,
-              command: "git restore",
-              cwd: input.cwd,
-              exitCode: 0,
-              detail: `Could not recreate the checkpoint workspace: ${cause.message}`,
-            }),
-        ),
-      );
-      const cleaned = yield* execute({
-        operation,
-        cwd: input.cwd,
-        args: ["clean", "-fd", "--", "."],
-        allowNonZeroExit: true,
-      });
-      if (cleaned.exitCode !== 0) {
-        // Git can remove every child, then fail trying to remove './' itself.
-        const emptiedWorkspace =
-          cleaned.exitCode === 1 &&
-          /^warning: failed to remove \.\/: [^\n]+$/.test(cleaned.stderr.trim()) &&
-          (yield* fileSystem.readDirectory(input.cwd).pipe(
-            Effect.map((entries) => entries.length === 0),
-            Effect.orElseSucceed(() => false),
-          ));
-        if (!emptiedWorkspace)
-          return yield* new VcsProcessExitError({
-            operation,
-            command: "git clean",
-            cwd: input.cwd,
-            exitCode: cleaned.exitCode,
-            detail: cleaned.stderr.trim() || "Could not clean the checkpoint workspace.",
-          });
-      }
-
-      const headExists = yield* hasHeadCommit(input.cwd);
-      if (headExists) {
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["reset", "--quiet", "--", "."],
-        });
-      }
-
-      return true;
-    }),
 
     diffCheckpoints: Effect.fn("GitVcsDriver.checkpoints.diffCheckpoints")(function* (input) {
       const operation = "GitVcsDriver.checkpoints.diffCheckpoints";

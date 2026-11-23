@@ -3,6 +3,7 @@ import {
   type Options as ClaudeQueryOptions,
   type PermissionMode,
   type PermissionUpdate,
+  type Query,
   type SDKMessage,
   type SDKResultMessage,
   type SDKUserMessage,
@@ -316,12 +317,14 @@ export interface ClaudeSessionContext {
   readonly sendTurnLock: Semaphore.Semaphore;
   /** Completed by stop so a send parked on the SDK or the lock fails instead. */
   readonly closed: Deferred.Deferred<void>;
+  promptSuggestionCandidate?: { readonly turnId: TurnId } | undefined;
   stopped: boolean;
 }
 
 export interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   /** SDK Query.interrupt — present on real queries; optional for test doubles. */
   readonly interrupt?: () => Promise<unknown>;
+  readonly getContextUsage?: Query["getContextUsage"];
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;

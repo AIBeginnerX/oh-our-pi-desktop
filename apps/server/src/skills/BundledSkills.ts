@@ -73,6 +73,9 @@ const skillRoot = (path: Path.Path, host: BundledSkillHost, target: BundledSkill
   );
 };
 
+const stagingFileName =
+  /^\.SKILL\.md\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 const statusAt = Effect.fn("BundledSkills.statusAt")(function* (
   skillDirectory: string,
   markdown: string,
@@ -98,7 +101,8 @@ const statusAt = Effect.fn("BundledSkills.statusAt")(function* (
   const entries = yield* fileSystem
     .readDirectory(skillDirectory)
     .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => ["unreadable"]));
-  return entries.length === 0 ? "not-installed" : "different";
+  // A crashed installer can leave an unpublished staging file in this folder.
+  return entries.every((entry) => stagingFileName.test(entry)) ? "not-installed" : "different";
 });
 
 export const listBundledSkills = Effect.fn("BundledSkills.list")(function* (
@@ -146,14 +150,18 @@ export const installBundledSkill = Effect.fn("BundledSkills.install")(function* 
     // appeared meanwhile, so nothing another writer put there is ever overwritten.
     const stagingId = yield* (yield* Crypto.Crypto).randomUUIDv4.pipe(Effect.mapError(writeFailed));
     const staging = path.join(skillDirectory, `.SKILL.md.${stagingId}`);
-    yield* fileSystem
-      .writeFileString(staging, skill.markdown, { flag: "wx" })
-      .pipe(Effect.mapError(writeFailed));
-    const published = yield* fileSystem.link(staging, path.join(skillDirectory, "SKILL.md")).pipe(
-      Effect.as(true),
-      Effect.orElseSucceed(() => false),
+    const published = yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        yield* fileSystem
+          .writeFileString(staging, skill.markdown, { flag: "wx" })
+          .pipe(Effect.mapError(writeFailed));
+        return yield* restore(fileSystem.link(staging, path.join(skillDirectory, "SKILL.md"))).pipe(
+          Effect.as(true),
+          Effect.orElseSucceed(() => false),
+          Effect.ensuring(fileSystem.remove(staging).pipe(Effect.ignore)),
+        );
+      }),
     );
-    yield* fileSystem.remove(staging).pipe(Effect.ignore);
     if (!published) return yield* new BundledSkillError({ reason: "conflict" });
   }
   return yield* listBundledSkills(host);

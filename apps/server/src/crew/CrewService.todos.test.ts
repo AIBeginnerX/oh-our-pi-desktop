@@ -35,6 +35,7 @@ import { CheckpointDiffQuery } from "../checkpointing/CheckpointDiffQuery.ts";
 import * as ServerConfig from "../config.ts";
 import { OrchestrationEngineService } from "../orchestration/Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import { PersistenceSqlError } from "../persistence/Errors.ts";
 import * as CrewRuntimeStateLive from "../persistence/Layers/CrewRuntimeState.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
@@ -196,12 +197,14 @@ const makeWorldIn = (
     };
 
     const store = yield* CrewRuntimeStateLive.make;
+    const saveTask = yield* Ref.make(store.saveTask);
     // The leads whose pending deliveries the service looked up.
     const pendingReads: string[] = [];
     // Every thread whose shell the service read.
     const shellReads: string[] = [];
     const countingStore: typeof store = {
       ...store,
+      saveTask: (checkpoint) => Ref.get(saveTask).pipe(Effect.flatMap((save) => save(checkpoint))),
       readPendingFollowUps: (leadId) => {
         pendingReads.push(leadId);
         return store.readPendingFollowUps(leadId);
@@ -420,6 +423,7 @@ const makeWorldIn = (
       write,
       run,
       store,
+      saveTask,
       start,
       finishTurn,
       nextMemberTurn,
@@ -1247,6 +1251,44 @@ describe("crew todos: fallback", () => {
 });
 
 describe("crew todos: persistence and recovery", () => {
+  it.effect("removes the isolated worktree when saving the initial task fails", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld;
+      const fs = yield* FileSystem.FileSystem;
+      const worktreesBefore = (yield* world.run(["worktree", "list", "--porcelain"])).stdout;
+      let worktreePath: string | undefined;
+      yield* Ref.set(world.saveTask, (checkpoint) =>
+        Effect.gen(function* () {
+          const record = yield* decodeTask(checkpoint.record_json).pipe(Effect.orDie);
+          worktreePath = record.worktree?.path;
+          assert.isDefined(worktreePath);
+          assert.isTrue(yield* fs.exists(worktreePath!).pipe(Effect.orDie));
+          return yield* new PersistenceSqlError({ operation: "saveTask" });
+        }),
+      );
+      const { crew, close } = yield* world.start;
+      const error = yield* crew
+        .delegate({
+          threadId: LEAD,
+          role: "worker",
+          task: "Do it",
+          title: TASK_TITLE,
+          isolation: "worktree",
+        })
+        .pipe(Effect.flip);
+
+      assert.strictEqual(error.reason, "Could not persist crew state.");
+      assert.isDefined(worktreePath);
+      assert.isFalse(yield* fs.exists(worktreePath!));
+      assert.strictEqual(
+        (yield* world.run(["worktree", "list", "--porcelain"])).stdout,
+        worktreesBefore,
+      );
+      assert.deepStrictEqual(yield* world.store.readTasks, []);
+      yield* close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+  );
+
   it.effect("persists every change under the task id and restores it", () =>
     Effect.gen(function* () {
       const world = yield* makeWorld;

@@ -13,6 +13,7 @@
  */
 import type {
   ProviderDriverKind,
+  ProviderContextBreakdownResult,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
@@ -260,7 +261,7 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderServiceError>;
 
   /**
-   * Reject unsupported rewind before files change, without resuming the session.
+   * Reject unsupported rewind without resuming the session.
    */
   readonly assertConversationRollbackSupported: (
     threadId: ThreadId,
@@ -273,6 +274,11 @@ export interface ProviderServiceShape {
     readonly threadId: ThreadId;
     readonly numTurns: number;
   }) => Effect.Effect<void, ProviderServiceError>;
+
+  /** Read the current context allocation from a live session. */
+  readonly getContextBreakdown?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ProviderContextBreakdownResult>;
 
   /**
    * Upload a thread and return the provider's shareable feedback identifier.

@@ -10,7 +10,7 @@ import {
 } from "./composer-editor-mentions";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "default";
+export type ComposerSlashCommand = "model" | "plan" | "default" | "btw";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {
@@ -279,7 +279,7 @@ export function composerStateAtPromptEnd(text: string): {
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
+): Exclude<ComposerSlashCommand, "model" | "btw"> | null {
   const match = /^\/(plan|default)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
@@ -287,6 +287,29 @@ export function parseStandaloneComposerSlashCommand(
   const command = match[1]?.toLowerCase();
   if (command === "plan") return "plan";
   return "default";
+}
+
+type SideQuestionPromptRef = { current: string };
+// Both send entry points share the composer prompt ref and its mounted local handler.
+const sideQuestionHandlers = new WeakMap<SideQuestionPromptRef, (question: string) => void>();
+
+export function registerComposerSideQuestion(
+  prompt: SideQuestionPromptRef,
+  ask: (question: string) => void,
+): () => void {
+  sideQuestionHandlers.set(prompt, ask);
+  return () => {
+    if (sideQuestionHandlers.get(prompt) === ask) sideQuestionHandlers.delete(prompt);
+  };
+}
+
+/** Claims the local command even when the question is empty or the composer is unavailable. */
+export function handleComposerSideQuestion(prompt: SideQuestionPromptRef): boolean {
+  const match = /^\/btw(?:\s+([\s\S]*))?$/i.exec(prompt.current.trim());
+  if (!match) return false;
+  const question = match[1]?.trim();
+  if (question) sideQuestionHandlers.get(prompt)?.(question);
+  return true;
 }
 
 export function replaceTextRange(

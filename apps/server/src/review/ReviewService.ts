@@ -22,6 +22,7 @@ import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 export class ReviewService extends Context.Service<
   ReviewService,
   {
+    readonly assertReviewableCwd: (cwd: string) => Effect.Effect<void, VcsRepositoryDetectionError>;
     readonly getDiffPreview: (
       input: ReviewDiffPreviewInput,
     ) => Effect.Effect<ReviewDiffPreviewResult, ReviewDiffPreviewError>;
@@ -60,11 +61,18 @@ export const make = Effect.gen(function* () {
 
   const isWithinRoot = (candidate: string, root: string) => {
     const relative = path.relative(root, candidate);
-    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+    return (
+      relative === "" ||
+      (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
   };
 
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
-    operation: "ReviewService.getDiffPreview" | "ReviewService.getDiffFileContents",
+    operation:
+      | "ReviewService.assertReviewableCwd"
+      | "ReviewService.getDiffPreview"
+      | "ReviewService.getDiffFileContents",
+    detail: string,
     cwd: string,
   ) {
     const [candidate, workspaceRoot, worktreesRoot] = yield* Effect.all([
@@ -80,17 +88,25 @@ export const make = Effect.gen(function* () {
     return yield* new VcsRepositoryDetectionError({
       operation,
       cwd,
-      detail:
-        operation === "ReviewService.getDiffPreview"
-          ? "Review diff preview cwd must stay within the configured workspace root."
-          : "Review diff file contents cwd must stay within the configured workspace root.",
+      detail,
     });
   });
+
+  const assertReviewableCwd = (cwd: string) =>
+    assertWorkspaceBoundCwd(
+      "ReviewService.assertReviewableCwd",
+      "Reviewable cwd must stay within the configured workspace root.",
+      cwd,
+    );
 
   const getDiffPreview: ReviewService["Service"]["getDiffPreview"] = Effect.fn(
     "ReviewService.getDiffPreview",
   )(function* (input) {
-    yield* assertWorkspaceBoundCwd("ReviewService.getDiffPreview", input.cwd);
+    yield* assertWorkspaceBoundCwd(
+      "ReviewService.getDiffPreview",
+      "Review diff preview cwd must stay within the configured workspace root.",
+      input.cwd,
+    );
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
     if (!handle) {
@@ -119,7 +135,11 @@ export const make = Effect.gen(function* () {
   const getDiffFileContents: ReviewService["Service"]["getDiffFileContents"] = Effect.fn(
     "ReviewService.getDiffFileContents",
   )(function* (input) {
-    yield* assertWorkspaceBoundCwd("ReviewService.getDiffFileContents", input.cwd);
+    yield* assertWorkspaceBoundCwd(
+      "ReviewService.getDiffFileContents",
+      "Review diff file contents cwd must stay within the configured workspace root.",
+      input.cwd,
+    );
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
     if (handle?.kind !== "git") {
@@ -134,6 +154,7 @@ export const make = Effect.gen(function* () {
   });
 
   return ReviewService.of({
+    assertReviewableCwd,
     getDiffPreview,
     getDiffFileContents,
   });

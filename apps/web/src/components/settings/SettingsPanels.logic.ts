@@ -17,7 +17,6 @@ import {
   resolveServerBackgroundActivitySettings,
 } from "@t3tools/shared/backgroundActivitySettings";
 import * as Duration from "effect/Duration";
-import * as Equal from "effect/Equal";
 
 export function isProjectGroupingEnabled(mode: SidebarProjectGroupingMode): boolean {
   return mode !== "separate";
@@ -50,63 +49,6 @@ export function rememberEnabledProjectGroupingMode(mode: SidebarProjectGroupingM
   } catch {
     // Storage can be unavailable in restricted browser contexts.
   }
-}
-
-export function hasChangedBackgroundActivitySettings(
-  settings: Pick<
-    UnifiedSettings,
-    | "backgroundActivity"
-    | "backgroundActivityProfile"
-    | "automaticGitFetchInterval"
-    | "providerHealthRefreshInterval"
-  >,
-): boolean {
-  return (
-    !Equal.equals(settings.backgroundActivity, DEFAULT_UNIFIED_SETTINGS.backgroundActivity) ||
-    settings.backgroundActivityProfile !== DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile ||
-    !Equal.equals(
-      settings.automaticGitFetchInterval,
-      DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-    ) ||
-    !Equal.equals(
-      settings.providerHealthRefreshInterval,
-      DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
-    )
-  );
-}
-
-type TypographySettings = Pick<
-  UnifiedSettings,
-  | "fontFamilySans"
-  | "fontFamilyComposer"
-  | "fontFamilyCode"
-  | "fontFamilyTerminal"
-  | "fontSizeInterface"
-  | "fontSizePrompt"
-  | "fontSizeCode"
-  | "fontSizeTerminal"
->;
-
-/** Labels the font rows whose family or size differs from the defaults. */
-export function getChangedTypographySettingLabels(settings: TypographySettings): string[] {
-  return [
-    ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans ||
-    settings.fontSizeInterface !== DEFAULT_UNIFIED_SETTINGS.fontSizeInterface
-      ? ["Interface font"]
-      : []),
-    ...(settings.fontFamilyComposer !== DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer ||
-    settings.fontSizePrompt !== DEFAULT_UNIFIED_SETTINGS.fontSizePrompt
-      ? ["Prompt font"]
-      : []),
-    ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ||
-    settings.fontSizeCode !== DEFAULT_UNIFIED_SETTINGS.fontSizeCode
-      ? ["Code font"]
-      : []),
-    ...(settings.fontFamilyTerminal !== DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal ||
-    settings.fontSizeTerminal !== DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal
-      ? ["Terminal font"]
-      : []),
-  ];
 }
 
 export type BrowserDefaultSettings = Pick<

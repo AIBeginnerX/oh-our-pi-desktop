@@ -32,7 +32,13 @@ import {
 import * as Option from "effect/Option";
 import { cn } from "../../lib/utils";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
-import { applyWslEnableSelection, isWslSettingsRowVisible } from "./ConnectionsSettings.logic";
+import {
+  applyWslEnableSelection,
+  findSshHostSuggestion,
+  isSavedSshHostSuggestion,
+  isWslSettingsRowVisible,
+  sshHostSuggestionKey,
+} from "./ConnectionsSettings.logic";
 import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
 import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
@@ -261,8 +267,8 @@ export function ConnectionsSettings() {
     ],
     [primaryEnvironment, savedEnvironments],
   );
-  const savedDesktopSshEnvironmentKeys = useMemo(() => {
-    const keys = new Set<string>();
+  const savedDesktopSshTargets = useMemo(() => {
+    const targets: Array<{ alias: string; port: number | null }> = [];
     for (const environment of savedEnvironments) {
       const profile = environment.entry.profile;
       if (
@@ -273,10 +279,9 @@ export function ConnectionsSettings() {
         continue;
       }
       const target = profile.value.target;
-      keys.add(target.alias);
-      keys.add(formatDesktopSshTarget(target));
+      targets.push(target);
     }
-    return keys;
+    return targets;
   }, [savedEnvironments]);
   const [desktopServerExposureMutationError, setDesktopServerExposureMutationError] = useState<
     string | null
@@ -395,14 +400,10 @@ export function ConnectionsSettings() {
   const discoveredSshHosts = desktopSshHosts.data ?? EMPTY_DISCOVERED_SSH_HOSTS;
   const unsavedDiscoveredSshHosts = useMemo(
     () =>
-      discoveredSshHosts.filter((target) => {
-        const address = formatDesktopSshTarget(target);
-        return (
-          !savedDesktopSshEnvironmentKeys.has(target.alias) &&
-          !savedDesktopSshEnvironmentKeys.has(address)
-        );
-      }),
-    [discoveredSshHosts, savedDesktopSshEnvironmentKeys],
+      discoveredSshHosts.filter(
+        (target) => !isSavedSshHostSuggestion(target, savedDesktopSshTargets),
+      ),
+    [discoveredSshHosts, savedDesktopSshTargets],
   );
   const filteredDiscoveredSshHosts = useMemo(
     () => filterDiscoveredSshHosts(unsavedDiscoveredSshHosts, savedBackendSshHost),
@@ -769,6 +770,7 @@ export function ConnectionsSettings() {
       let resolved: DesktopSshEnvironmentTarget;
       try {
         resolved = await desktopBridge.resolveSshHost(target.alias);
+        resolved = { ...resolved, port: target.port ?? resolved.port };
       } catch (error) {
         setSavedBackendError(formatDesktopSshConnectionError(error));
         setIsAddingSavedBackend(false);
@@ -1055,7 +1057,7 @@ export function ConnectionsSettings() {
           </label>
           <Autocomplete
             items={filteredDiscoveredSshHosts}
-            itemToStringValue={(target) => target.alias}
+            itemToStringValue={sshHostSuggestionKey}
             mode="none"
             openOnInputClick
             open={sshHostSuggestionsOpen}
@@ -1065,10 +1067,12 @@ export function ConnectionsSettings() {
             }}
             value={savedBackendSshHost}
             onValueChange={(value, eventDetails) => {
-              setSavedBackendSshHost(value);
-              if (eventDetails.reason !== "item-press") return;
+              if (eventDetails.reason !== "item-press") {
+                setSavedBackendSshHost(value);
+                return;
+              }
 
-              const target = filteredDiscoveredSshHosts.find((host) => host.alias === value);
+              const target = findSshHostSuggestion(filteredDiscoveredSshHosts, value);
               if (target) void handleSelectSshHostSuggestion(target);
             }}
           >
@@ -1093,7 +1097,7 @@ export function ConnectionsSettings() {
                         : null;
                       return (
                         <AutocompleteItem
-                          key={`${target.alias}:${target.hostname}:${target.port ?? ""}`}
+                          key={sshHostSuggestionKey(target)}
                           value={target}
                           className="h-8 min-h-8 whitespace-nowrap"
                         >

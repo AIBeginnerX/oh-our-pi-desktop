@@ -1,6 +1,72 @@
 {
   "versions": [
     {
+      "version": "0.0.163",
+      "date": "2026-11-23",
+      "highlights": [
+        {
+          "en": "Rewinding no longer changes files. Restoring them could delete files that no checkpoint recorded, such as .env, or discard edits made by hand, so \"Revert files too\" and the terminal's \"Undo files and conversation\" are removed, including in worktrees. Edit from here and /undo rewind only the conversation; to undo file changes, review them in Diff before rewinding and revert them yourself. Older apps that ask to restore files are refused without changing anything. A crew member's conversation can no longer be rewound, because that could hand its unfinished work to the lead or delete it.",
+          "ko": "되감기가 더 이상 파일을 바꾸지 않습니다. 파일을 복원할 때 .env처럼 체크포인트에 기록되지 않은 파일이 삭제되거나 직접 고친 내용이 사라질 수 있어, 워크트리를 포함해 \"Revert files too\"와 터미널의 \"파일과 대화 되돌리기\"를 없앴습니다. Edit from here와 /undo는 대화만 되감습니다. 파일 변경을 되돌리려면 되감기 전에 Diff에서 확인한 뒤 직접 되돌리세요. 이전 버전 앱이 보낸 파일 복원 요청은 아무것도 바꾸지 않고 거절합니다. 크루 멤버의 대화는 되감을 수 없습니다. 되감으면 끝나지 않은 작업이 리드에 반영되거나 삭제될 수 있었기 때문입니다."
+        },
+        {
+          "en": "Read-only connections are now restricted to registered project folders and existing threads’ worktrees, and cannot change the host’s Codex login. The desktop app also restricts app-only commands to its own window, and relayed pages run with tighter isolation.",
+          "ko": "읽기 전용 연결에서 읽을 수 있는 범위를 등록된 프로젝트 폴더와 기존 스레드의 워크트리로 제한하고, 호스트의 Codex 로그인을 바꿀 수 없게 했습니다. 데스크톱 전용 명령은 앱 창에서만 호출할 수 있으며, 중계된 페이지의 실행 권한도 더 엄격하게 격리합니다."
+        },
+        {
+          "en": "On web and desktop, remote images and videos in agent replies now show their host and load only when you click. Local files, attachments and GitHub media served through OOP load as before.",
+          "ko": "웹과 데스크톱에서 에이전트 답변의 원격 이미지와 동영상은 호스트를 표시하고 클릭한 뒤에 불러옵니다. 로컬 파일, 첨부 파일, OOP를 통해 제공되는 GitHub 미디어는 기존처럼 표시합니다."
+        },
+        {
+          "en": "A failed send now keeps your message without overwriting a newer draft; if you have already typed more, OOP offers to restore the failed text. Saving connections in one browser tab also keeps connections just added in another tab.",
+          "ko": "메시지 전송이 실패해도 새로 쓰던 초안을 덮어쓰지 않고 실패한 메시지를 보관합니다. 이미 새 글을 입력했다면 이전 글을 복원할 수 있도록 안내합니다. 브라우저의 한 탭에서 연결을 저장해도 다른 탭에서 막 추가한 연결이 사라지지 않습니다."
+        },
+        {
+          "en": "A provider process that exits or stops accepting input no longer leaves its requests waiting indefinitely. Codex Stop has a deadline, and OpenCode 2 can proceed with stopping when cancelling a form stalls, helping stuck sessions recover.",
+          "ko": "공급자 프로세스가 종료되거나 입력을 받지 못할 때 요청이 끝없이 대기하지 않도록 했습니다. Codex의 중지 요청에 대기 제한을 두고, OpenCode 2에서 양식 취소가 멈춰도 중지를 이어 가도록 해 세션이 멈춘 상태에서 벗어나기 쉬워졌습니다."
+        },
+        {
+          "en": "The terminal app keeps typed messages and commands when you press Enter offline, preserves text when an attachment upload fails, and can render Korean or emoji diagram headings without crashing. It also reconnects the project list when its update stream ends; a thread deleted elsewhere closes while keeping your draft in input history.",
+          "ko": "터미널 앱에서 오프라인 상태로 Enter를 눌러도 메시지와 명령을 유지하고, 첨부 파일 업로드가 실패해도 글을 보관합니다. 한글이나 이모지가 들어간 다이어그램 제목으로 앱이 종료되는 문제도 고쳤습니다. 프로젝트 목록의 갱신 연결이 끊기면 다시 연결하며, 다른 기기에서 삭제한 스레드는 닫고 입력하던 글은 입력 기록에 남깁니다."
+        },
+        {
+          "en": "Settings → Project → Scheduled prompts can now run a saved prompt daily in a new thread, using the project’s default model and permission mode. Times follow the selected environment’s local clock while its server is running; runs more than an hour late are skipped, and restarting does not replay missed runs.",
+          "ko": "설정 → 프로젝트 → 예약 프롬프트에서 매일 정해진 시각에 새 스레드를 열어 저장한 프롬프트를 실행할 수 있습니다. 프로젝트의 기본 모델과 권한 모드를 사용하며, 선택한 환경의 서버가 실행 중일 때 그 환경의 현지 시각을 따릅니다. 한 시간 넘게 늦은 실행은 건너뛰고, 재시작해도 놓친 실행을 다시 돌리지 않습니다."
+        },
+        {
+          "en": "For a linked GitHub pull request on the thread’s own branch, enable Auto-fix failed checks below the pull request list, or /autofix on in the terminal. When idle, the thread can start work to fix failed checks, verify the change and push it, using its own model and mode. It tries each commit once, up to three attempts in a row, and uses provider usage.",
+          "ko": "스레드 자체 브랜치의 연결된 GitHub 풀 리퀘스트에 대해 목록 아래의 실패한 검사 자동 수정이나 터미널의 /autofix on을 켤 수 있습니다. 스레드가 쉬고 있을 때 기존 모델과 모드로 실패 원인을 수정하고 검증한 뒤 푸시하는 작업을 시작합니다. 커밋마다 한 번씩, 연속 세 번까지 시도하며 공급자 사용량이 발생합니다."
+        },
+        {
+          "en": "In Claude, Codex, OpenCode and Antigravity threads, /btw <question> asks about the recent conversation even while the agent works, without adding a turn to the thread. Web and desktop show the answer above the composer; the terminal shows it below the conversation. It uses provider usage and is unavailable in threads that have recalled project memory.",
+          "ko": "Claude, Codex, OpenCode, Antigravity 스레드에서 /btw <질문>으로 에이전트가 작업 중일 때도 최근 대화에 관해 물을 수 있습니다. 스레드에 턴을 추가하지 않으며, 웹과 데스크톱은 입력창 위에, 터미널은 대화 아래에 답을 표시합니다. 공급자 사용량이 발생하며 프로젝트 메모리를 불러온 스레드에서는 사용할 수 없습니다."
+        },
+        {
+          "en": "After a Claude turn, the empty input may suggest your next prompt in the app and terminal. Tab, or a tap on a phone, adds it to your draft without sending. Turn it off in Settings → General → Prompt suggestions; suggestions use Claude usage and are hidden in threads that used project memory.",
+          "ko": "Claude 턴이 끝나면 앱과 터미널의 빈 입력창에 다음 프롬프트 제안이 나타날 수 있습니다. Tab을 누르거나 휴대폰에서 제안을 누르면 전송하지 않고 초안에 넣습니다. 설정 → 일반 → 프롬프트 제안에서 끌 수 있으며, 제안에는 Claude 사용량이 발생하고 프로젝트 메모리를 사용한 스레드에서는 표시하지 않습니다."
+        },
+        {
+          "en": "On web and desktop, Chat beside in the right panel lets you follow another chat while keeping your current one open. Settings → Appearance → Transcript view can open reasoning or tool details by default, and Claude’s context meter now offers Show breakdown for category token counts when its session is open.",
+          "ko": "웹과 데스크톱의 오른쪽 패널에 있는 옆 채팅에서 현재 채팅을 열어 둔 채 다른 채팅을 읽을 수 있습니다. 설정 → 모양 → 대화 표시 모드에서 추론이나 도구 세부 정보를 기본으로 펼칠 수 있고, Claude 세션이 열려 있으면 컨텍스트 게이지의 세부 내역 보기에서 항목별 토큰 수를 확인할 수 있습니다."
+        },
+        {
+          "en": "Agents can now read recent conversations in other threads of the same project, message an idle thread with compatible permissions, and suggest a task. On web and desktop, Open in new thread on a suggestion puts its prompt in a draft for you to send; the terminal shows suggestions as activity text.",
+          "ko": "에이전트가 같은 프로젝트의 다른 스레드에서 최근 대화를 읽고, 권한이 맞는 대기 중인 스레드에 메시지를 보내거나 새 작업을 제안할 수 있습니다. 웹과 데스크톱의 제안에서 새 스레드에서 열기를 누르면 직접 전송할 수 있도록 프롬프트를 초안에 넣습니다. 터미널은 제안을 활동 텍스트로 표시합니다."
+        },
+        {
+          "en": "New thread and crew worktrees can copy local files selected by .worktreeinclude when Git ignores them in both checkouts. Project Actions can import .claude/launch.json without running its commands, excluding environment variables and automatic port selection. A workspace file path’s menu in web and desktop chat also offers Attach as context to add it to your draft.",
+          "ko": "새 스레드와 크루의 워크트리를 만들 때 .worktreeinclude로 고른 로컬 파일을 복사할 수 있습니다. 원본과 새 체크아웃 양쪽에서 Git이 무시하는 파일만 해당합니다. 프로젝트 Actions에서는 환경 변수와 자동 포트 선택을 제외하고 .claude/launch.json을 명령 실행 없이 가져올 수 있습니다. 웹과 데스크톱 채팅의 작업 공간 파일 경로 메뉴에서는 Attach as context로 파일을 초안에 추가할 수도 있습니다."
+        },
+        {
+          "en": "SSH host suggestions now retain non-standard ports and distinguish connections to different ports on the same host. Restoring settings defaults also reaches the connected environments you selected, and concurrent edits to per-project settings preserve changes to different keys.",
+          "ko": "SSH 호스트 제안이 기본값이 아닌 포트를 유지하고 같은 호스트의 서로 다른 포트 연결을 구분합니다. 설정 기본값 복원도 선택한 연결된 환경에 적용하며, 여러 곳에서 프로젝트 설정을 수정해도 서로 다른 항목의 변경을 보존합니다."
+        },
+        {
+          "en": "Messages in the terminal app now list attachment names and types, failed /undo reports the server’s reason, and request totals say This request only when the server confirms they include the request. On web and desktop, deleting a thread elsewhere closes its open view, and streaming replies do less work to update the conversation minimap.",
+          "ko": "터미널 앱의 메시지에 첨부 파일 이름과 종류를 표시하고, /undo가 실패하면 서버의 이유를 알려 줍니다. 사용량은 서버가 요청 전체 합산을 확인한 경우에만 이번 요청으로 표시합니다. 웹과 데스크톱에서는 다른 곳에서 삭제한 스레드의 열린 화면을 닫으며, 답변 스트리밍 중 대화 미니맵을 갱신하는 작업도 줄였습니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.162",
       "date": "2026-11-20",
       "highlights": [

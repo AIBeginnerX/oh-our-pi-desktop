@@ -1,5 +1,18 @@
 import { Button } from "../ui/button";
-import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
+import { useParams, useRouter } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
+import type { ProviderContextBreakdownResult, ScopedThreadRef } from "@t3tools/contracts";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { useT } from "~/i18n";
+import {
+  type ContextWindowSnapshot,
+  formatContextWindowTokens,
+  shapeContextBreakdown,
+} from "~/lib/contextWindow";
+import { threadEnvironment, useIsClaudeThread } from "~/state/threads";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { resolveThreadRouteRef } from "~/threadRoutes";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import {
   formatContextWindowCompactionMessage,
@@ -19,7 +32,7 @@ function formatPercentage(value: number | null): string | null {
   return `${Math.round(value)}%`;
 }
 
-export function ContextWindowMeter(props: {
+type ContextWindowMeterProps = {
   usage: ContextWindowSnapshot;
   modelDisplayName?: string | null;
   onCompact?: (() => void) | undefined;
@@ -27,8 +40,27 @@ export function ContextWindowMeter(props: {
   compactDisabledReason?: string | null | undefined;
   /** Set when the provider cannot compact and the window is nearly full; offers a fresh start. */
   onContinueInNewThread?: (() => void) | undefined;
-}) {
+};
+
+export function ContextWindowMeter(props: ContextWindowMeterProps) {
+  const router = useRouter({ warn: false });
+  return router ? <RoutedContextWindowMeter {...props} /> : <Meter {...props} />;
+}
+
+function RoutedContextWindowMeter(props: ContextWindowMeterProps) {
+  const params = useParams({
+    strict: false,
+    select: ({ environmentId, threadId }) => ({ environmentId, threadId }),
+    structuralSharing: true,
+  });
+  const threadRef = useMemo(() => resolveThreadRouteRef(params), [params]);
+  const isClaude = useIsClaudeThread(threadRef);
+  return <Meter {...props} breakdownThread={isClaude ? threadRef : null} />;
+}
+
+function Meter(props: ContextWindowMeterProps & { breakdownThread?: ScopedThreadRef | null }) {
   const {
+    breakdownThread,
     usage,
     modelDisplayName,
     onCompact,
@@ -58,7 +90,7 @@ export function ContextWindowMeter(props: {
       <PopoverTrigger
         openOnHover
         delay={150}
-        closeDelay={onCompact || onContinueInNewThread ? 150 : 0}
+        closeDelay={onCompact || onContinueInNewThread || breakdownThread ? 150 : 0}
         render={
           <Button
             size={showPercentageLabel ? "sm" : "icon-sm"}
@@ -166,6 +198,9 @@ export function ContextWindowMeter(props: {
               {formatContextWindowCompactionMessage(modelDisplayName, usage.autoCompactThreshold)}
             </div>
           ) : null}
+          {breakdownThread ? (
+            <ContextBreakdown key={scopedThreadKey(breakdownThread)} threadRef={breakdownThread} />
+          ) : null}
           {onContinueInNewThread ? (
             <>
               <div className="mt-1 text-pretty text-secondary-label text-2xs">
@@ -205,6 +240,107 @@ export function ContextWindowMeter(props: {
         </div>
       </PopoverPopup>
     </Popover>
+  );
+}
+
+function ContextBreakdown({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const t = useT();
+  const request = useAtomCommand(threadEnvironment.getContextBreakdown, {
+    reportFailure: false,
+    reportDefect: false,
+  });
+  const [state, setState] = useState<ProviderContextBreakdownResult | "loading" | null>(null);
+
+  async function showBreakdown() {
+    setState("loading");
+    try {
+      const result = await request({
+        environmentId: threadRef.environmentId,
+        input: { threadId: threadRef.threadId },
+      });
+      setState(AsyncResult.isSuccess(result) ? result.value : { status: "unavailable" });
+    } catch {
+      setState({ status: "unavailable" });
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Button size="xs" variant="outline" disabled={state === "loading"} onClick={showBreakdown}>
+        {state === "loading" ? t("Loading breakdown…") : t("Show breakdown")}
+      </Button>
+      {state && state !== "loading" ? (
+        state.status === "available" ? (
+          <ContextBreakdownTable usage={state} />
+        ) : (
+          <p role="status" className="text-secondary-label text-2xs">
+            {t("Breakdown is available while a Claude session is open.")}
+          </p>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+function ContextBreakdownTable({
+  usage,
+}: {
+  usage: Extract<ProviderContextBreakdownResult, { status: "available" }>;
+}) {
+  const t = useT();
+  const { rows, usedTokens, usedShare } = shapeContextBreakdown(usage.categories, usage.maxTokens);
+  const orderedRows = [
+    ...rows.used,
+    ...(rows.used.length > 0
+      ? [
+          {
+            key: "subtotal",
+            name: t("Used subtotal"),
+            tokens: usedTokens,
+            share: usedShare,
+            kind: "subtotal",
+          },
+        ]
+      : []),
+    ...rows.free,
+    ...rows.buffer,
+    ...rows.deferred,
+  ];
+  return (
+    <div className="max-h-56 overflow-y-auto">
+      <table className="w-full text-2xs tabular-nums">
+        <thead className="text-secondary-label">
+          <tr>
+            <th scope="col" className="text-left">
+              {t("Category")}
+            </th>
+            <th scope="col" className="pl-2 text-right">
+              {t("Tokens")}
+            </th>
+            <th scope="col" className="pl-2 text-right">
+              {t("Share of window")}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {orderedRows.map((row) => (
+            <tr
+              key={row.key}
+              className={cn(
+                row.kind === "deferred" && "text-muted-foreground",
+                row.kind === "subtotal" && "border-t font-medium",
+              )}
+            >
+              <th scope="row" className="break-all py-0.5 text-left font-normal">
+                {row.name}
+              </th>
+              <td className="whitespace-nowrap pl-2 text-right">{row.tokens.toLocaleString()}</td>
+              <td className="pl-2 text-right">{formatPercentage(row.share)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

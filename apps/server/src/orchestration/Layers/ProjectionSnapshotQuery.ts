@@ -32,6 +32,7 @@ import {
   toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from "../../persistence/Errors.ts";
+import { readLegacyCrewMember } from "../crewMembership.ts";
 import { ThreadBackgroundLivenessService } from "../ThreadBackgroundLiveness.ts";
 import { ThreadPlanProgressService } from "../ThreadPlanProgress.ts";
 import {
@@ -357,6 +358,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     readProjectionCounts,
     readEventReplayStats,
     searchActiveThreadRows,
+    listActiveWorkspaceRootRows,
+    getActiveThreadRowByWorktreePath,
     getActiveProjectRowByWorkspaceRoot,
     getActiveProjectRowById,
     getFirstActiveThreadIdByProject,
@@ -1157,6 +1160,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             const thread = threads.get(row.threadId) ?? {
               id: row.threadId,
               projectId: row.projectId,
+              branch: row.branch,
               settledOverride: row.settledOverride,
               settledAt: row.settledAt,
               pullRequests: [],
@@ -1398,6 +1402,29 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       })),
     };
   });
+
+  const getActiveThreadIdByWorktreePath: ProjectionSnapshotQueryShape["getActiveThreadIdByWorktreePath"] =
+    (worktreePath) =>
+      getActiveThreadRowByWorktreePath(worktreePath).pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getActiveThreadIdByWorktreePath:query",
+            "ProjectionSnapshotQuery.getActiveThreadIdByWorktreePath:decodeRow",
+          ),
+        ),
+        Effect.map(Option.map((row) => row.threadId)),
+      );
+
+  const listActiveWorkspaceRoots: ProjectionSnapshotQueryShape["listActiveWorkspaceRoots"] = () =>
+    listActiveWorkspaceRootRows(undefined).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.listActiveWorkspaceRoots:query",
+          "ProjectionSnapshotQuery.listActiveWorkspaceRoots:decodeRow",
+        ),
+      ),
+      Effect.map((rows) => rows.map((row) => row.workspaceRoot)),
+    );
 
   const getActiveProjectByWorkspaceRoot: ProjectionSnapshotQueryShape["getActiveProjectByWorkspaceRoot"] =
     (workspaceRoot) =>
@@ -1823,7 +1850,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   ),
                 ),
               ),
-              activityRead.query?.activityKinds === undefined
+              activityRead.query?.activityKinds === undefined ||
+              activityRead.query.includePinnedActivities === true
                 ? listPinnedThreadActivityRowsByThread({ threadId }).pipe(
                     Effect.mapError(
                       toPersistenceSqlOrDecodeError(
@@ -1928,6 +1956,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         return Option.none<OrchestrationThread>();
       }
 
+      const createdAsCrewMember = yield* readLegacyCrewMember(sql, threadId).pipe(
+        Effect.mapError(
+          toPersistenceSqlError("ProjectionSnapshotQuery.getThreadDetailById:readCrewMembership"),
+        ),
+      );
+
       const thread = {
         id: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
@@ -1960,6 +1994,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         activeOrderKey: threadRow.value.activeOrderKey ?? null,
         autoSettleDisabledAt: threadRow.value.autoSettleDisabledAt ?? null,
         parentThreadId: threadRow.value.parentThreadId ?? null,
+        ...(createdAsCrewMember ? { createdAsCrewMember: true } : {}),
         crew: threadRow.value.crew ?? null,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
         titleState: threadRow.value.titleState,
@@ -2174,6 +2209,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getSnapshotSequence,
     getCounts,
     getEventReplayStats,
+    getActiveThreadIdByWorktreePath,
+    listActiveWorkspaceRoots,
     getActiveProjectByWorkspaceRoot,
     getProjectShellById,
     getProjectShells,

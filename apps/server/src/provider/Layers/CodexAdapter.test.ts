@@ -3087,6 +3087,33 @@ usageLimitLayer("CodexAdapterLive usage limits", (it) => {
   );
 });
 
+it.effect("reports a closed session when Codex stdout ends before the process exits", () => {
+  const cause = new CodexErrors.CodexAppServerInputStreamEndedError({});
+  const layer = Layer.effect(
+    CodexAdapter,
+    makeCodexAdapter(decodeCodexSettings({}), {
+      makeRuntime: (options) =>
+        Effect.succeed(
+          Object.assign(new FakeCodexRuntime(options), { sendTurn: () => Effect.fail(cause) }),
+        ),
+    }),
+  ).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest()),
+    Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  return Effect.gen(function* () {
+    const adapter = yield* CodexAdapter;
+    const threadId = asThreadId("codex-stdout-ended");
+    yield* adapter.startSession({ threadId, runtimeMode: "full-access" });
+    const error = yield* adapter.sendTurn({ threadId, input: "hello" }).pipe(Effect.flip);
+    NodeAssert.equal(error._tag, "ProviderAdapterSessionClosedError");
+    NodeAssert.match(error.message, /adapter thread is closed/);
+    NodeAssert.strictEqual(error.cause, cause);
+  }).pipe(Effect.provide(layer));
+});
+
 it.effect("managed runtime rotation restarts app-server and resumes the same native thread", () => {
   const runtimes: FakeCodexRuntime[] = [];
   let revision = "first";

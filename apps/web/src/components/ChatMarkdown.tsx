@@ -1,3 +1,4 @@
+import { fileLinkContextMention } from "./ChatMarkdown.logic";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -121,6 +122,7 @@ import { openInEditorMenuLabel } from "../editorLabels";
 import { resolveDiffThemeName } from "../lib/diffRendering";
 import { GitHubIcon } from "./Icons";
 import { RenderErrorBoundary } from "./RenderErrorBoundary";
+import { useT } from "../i18n";
 import { useTheme } from "../hooks/useTheme";
 import { useClientSettings, useLinkIconsEnabled } from "../hooks/useSettings";
 import { chatMarkdownClipboardPayload } from "../markdown-clipboard";
@@ -221,8 +223,10 @@ interface ChatMarkdownProps {
   lineBreaks?: boolean;
   /** Parse sanitized raw HTML instead of displaying its source text. */
   parseRawHtml?: boolean;
+  messageRole?: "assistant" | "user";
   /** Append a prompt that invokes a newly created artifact-template skill. */
   onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
+  onAttachContext?: ((mention: string) => void) | undefined;
   onRunShellCommand?: ((command: string) => void) | undefined;
   /** Directory that anchors relative links and images; defaults to `cwd`. Set
       to the file's own directory when rendering a markdown file. */
@@ -391,6 +395,22 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
+const CHAT_MARKDOWN_CLICK_TO_LOAD_REHYPE_PLUGINS = [
+  rehypeRaw,
+  rehypePreserveImageSourceMeta,
+  [
+    rehypeSanitize,
+    {
+      ...CHAT_MARKDOWN_SANITIZE_SCHEMA,
+      // Unwrap picture so its fallback is handled by MarkdownImage. Alternate
+      // sources can otherwise bypass the per-image consent and host label.
+      tagNames: (defaultSchema.tagNames ?? []).filter(
+        (tagName) => tagName !== "picture" && tagName !== "source",
+      ),
+    },
+  ],
+] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
+
 /** GitHub's own five alert kinds, in its colors: the glyph names the urgency, the title says it. */
 const GITHUB_ALERT_PRESENTATIONS: Record<
   string,
@@ -442,6 +462,8 @@ interface MarkdownFileLinkProps {
   theme: "light" | "dark";
   threadRef?: ScopedThreadRef | undefined;
   onOpen?: ((targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
+  onAttachContext?: ((mention: string) => void) | undefined;
+  contextMention: string | null;
   onOpenInPanel: (panelPath: string, line: number | undefined) => void;
   openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
@@ -616,6 +638,32 @@ const CHAT_MARKDOWN_IMAGE_FRAME_CLASS_NAME = cn(
   CHAT_MARKDOWN_MEDIA_MAX_WIDTH_CLASS_NAME,
   CHAT_MARKDOWN_MEDIA_FRAME_CLASS_NAME,
 );
+
+function RemoteMarkdownImage(props: { host: string; copyMarkdown: string; children: ReactNode }) {
+  const t = useT();
+  const [allowed, setAllowed] = useState(false);
+  if (allowed) return props.children;
+
+  return (
+    <span className="inline-grid max-w-full grid-cols-[minmax(0,1fr)]">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        data-markdown-copy={props.copyMarkdown}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setAllowed(true);
+        }}
+      >
+        <span className="min-w-0 truncate select-none">
+          {t("Load image from {host}", { host: props.host })}
+        </span>
+      </Button>
+    </span>
+  );
+}
 
 /**
  * A standalone image holds a 16:9 slot (or its authored size) until it has
@@ -1024,6 +1072,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   threadRef,
   onOpen,
   onOpenInPanel,
+  onAttachContext,
+  contextMention,
   openInEditorMenuLabel,
   onOpenInBrowser,
   onOpenMedia,
@@ -1203,6 +1253,9 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       try {
         const clicked = await api.contextMenu.show(
           [
+            ...(onAttachContext && contextMention
+              ? ([{ id: "attach-context", label: "Attach as context" }] as const)
+              : []),
             ...(onOpenMedia ? ([{ id: "preview-media", label: "Preview media" }] as const) : []),
             ...(onOpen ? ([{ id: "open", label: openInEditorMenuLabel }] as const) : []),
             ...(onOpenInBrowser
@@ -1215,6 +1268,10 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           position,
         );
 
+        if (clicked === "attach-context" && contextMention) {
+          onAttachContext?.(contextMention);
+          return;
+        }
         if (clicked === "preview-media") {
           onOpenMedia?.();
           return;
@@ -1247,6 +1304,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     },
     [
       displayPath,
+      onAttachContext,
+      contextMention,
       handleCopy,
       handleOpenInBrowser,
       handleOpenInEditor,
@@ -1352,6 +1411,8 @@ function areMarkdownFileLinkPropsEqual(
   next: Readonly<MarkdownFileLinkProps>,
 ): boolean {
   return (
+    previous.onAttachContext === next.onAttachContext &&
+    previous.contextMention === next.contextMention &&
     previous.href === next.href &&
     previous.targetPath === next.targetPath &&
     previous.iconPath === next.iconPath &&
@@ -1383,12 +1444,14 @@ function useChatMarkdownState({
   skills = EMPTY_MARKDOWN_SKILLS,
   onUseArtifactTemplate,
   onRunShellCommand,
+  onAttachContext,
   imageBaseDir,
   onImageExpand,
   renderContextReference,
   headingLevelOffset = 0,
   githubMedia = false,
-}: ChatMarkdownProps) {
+  requireImageConsent,
+}: ChatMarkdownProps & { requireImageConsent: boolean }) {
   const { resolvedTheme } = useTheme();
   const [localMediaPreview, setLocalMediaPreview] = useState<ExpandedImagePreview | null>(null);
   const markdownRef = useRef<HTMLDivElement>(null);
@@ -1723,6 +1786,8 @@ function useChatMarkdownState({
 
       return (
         <MarkdownFileLink
+          onAttachContext={onAttachContext}
+          contextMention={fileLinkContextMention(fileLinkMeta.targetPath, cwd)}
           href={fileLinkMeta.targetPath}
           targetPath={fileLinkMeta.targetPath}
           iconPath={fileLinkMeta.filePath}
@@ -1759,6 +1824,8 @@ function useChatMarkdownState({
     },
     [
       canUseShellActions,
+      cwd,
+      onAttachContext,
       fileLinkParentSuffixByPath,
       openFileInPanel,
       openInPreferredEditor,
@@ -1788,6 +1855,7 @@ function useChatMarkdownState({
       linkTargetPreference,
       markdownFileLinkMetaByHref,
       onTaskListChange,
+      requireImageConsent,
       onUseArtifactTemplate,
       onRunShellCommand,
       openChangeRequestLink,
@@ -1819,6 +1887,7 @@ function useChatMarkdownState({
       linkTargetPreference,
       markdownFileLinkMetaByHref,
       onTaskListChange,
+      requireImageConsent,
       onUseArtifactTemplate,
       onRunShellCommand,
       openChangeRequestLink,
@@ -2223,6 +2292,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       environmentId,
       githubMedia,
       imageBaseDir,
+      requireImageConsent,
       threadRef,
       renderContextReference,
     } = use(ChatMarkdownRendererContext);
@@ -2286,8 +2356,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
     if (imageSource._tag === "Direct") {
       const mediaSrc = resolveProtocolRelativeMediaUrl(imageSource.uri);
+      const host = resolveExternalWebLinkHost(mediaSrc);
       const originalUrl =
-        resolveExternalWebLinkHost(imageSource.uri) !== null ? imageSource.uri : undefined;
+        !imageSource.uri.startsWith("//") && resolveExternalWebLinkHost(imageSource.uri) !== null
+          ? imageSource.uri
+          : undefined;
       const reference = mediaUrlReference(imageSource.uri);
       const actionsSource: MediaActionSource = {
         kind,
@@ -2295,8 +2368,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
         src: mediaSrc,
         ...(reference ? { reference } : {}),
       };
-      if (kind === "video") {
-        return (
+      const media =
+        kind === "video" ? (
           <ChatMarkdownVideo
             src={mediaSrc}
             alt={altText}
@@ -2305,22 +2378,27 @@ const CHAT_MARKDOWN_COMPONENTS = {
             style={authoredSizeStyle}
             actionsSource={actionsSource}
           />
+        ) : (
+          <ChatMarkdownImage
+            key={mediaSrc}
+            src={mediaSrc}
+            alt={altText}
+            copyMarkdown={copyMarkdown}
+            standalone={standalone}
+            className={className}
+            style={authoredSizeStyle}
+            imageProps={imageProps}
+            actionsSource={actionsSource}
+            originalUrl={originalUrl}
+            onImageExpand={imageExpand}
+          />
         );
-      }
-      return (
-        <ChatMarkdownImage
-          key={mediaSrc}
-          src={mediaSrc}
-          alt={altText}
-          copyMarkdown={copyMarkdown}
-          standalone={standalone}
-          className={className}
-          style={authoredSizeStyle}
-          imageProps={imageProps}
-          actionsSource={actionsSource}
-          originalUrl={originalUrl}
-          onImageExpand={imageExpand}
-        />
+      return host !== null && requireImageConsent ? (
+        <RemoteMarkdownImage key={mediaSrc} host={host} copyMarkdown={copyMarkdown}>
+          {media}
+        </RemoteMarkdownImage>
+      ) : (
+        media
       );
     }
     if (imageSource._tag === "WorkspaceFile" && threadRef) {
@@ -2417,9 +2495,11 @@ function ChatMarkdown({
   className,
   lineBreaks = false,
   parseRawHtml = true,
+  messageRole,
   extraRemarkPlugins = EMPTY_REMARK_PLUGINS,
   ...props
 }: ChatMarkdownProps) {
+  const requireImageConsent = messageRole === "assistant";
   const {
     componentState,
     handleCopy,
@@ -2427,7 +2507,7 @@ function ChatMarkdown({
     markdownUrlTransform,
     localMediaPreview,
     setLocalMediaPreview,
-  } = useChatMarkdownState({ text, ...props });
+  } = useChatMarkdownState({ text, requireImageConsent, ...props });
   const incrementalParsing =
     props.isStreaming === true &&
     extraRemarkPlugins.length === 0 &&
@@ -2440,6 +2520,10 @@ function ChatMarkdown({
     ],
     [extraRemarkPlugins, incrementalParsing, lineBreaks],
   );
+
+  const rehypePlugins = requireImageConsent
+    ? CHAT_MARKDOWN_CLICK_TO_LOAD_REHYPE_PLUGINS
+    : CHAT_MARKDOWN_REHYPE_PLUGINS;
 
   // react-markdown converts unparsed HTML nodes to text when skipHtml is false.
   // Keep that behavior explicit because literal mode depends on escaping the
@@ -2458,7 +2542,7 @@ function ChatMarkdown({
       <ChatMarkdownRendererContext value={componentState}>
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
-          rehypePlugins={parseRawHtml ? CHAT_MARKDOWN_REHYPE_PLUGINS : undefined}
+          rehypePlugins={parseRawHtml ? rehypePlugins : undefined}
           skipHtml={false}
           components={CHAT_MARKDOWN_COMPONENTS}
           urlTransform={markdownUrlTransform}

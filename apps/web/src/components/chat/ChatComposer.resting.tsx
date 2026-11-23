@@ -132,6 +132,7 @@ export function useComposerRestingChrome(args: {
       | "composer.branch"
       | "chat.new"
       | "chat.newLocal"
+      | "chat.cycleTranscriptView"
       | "editor.openFavorite"
       | "usage.cost"
       | "usage.tokens"

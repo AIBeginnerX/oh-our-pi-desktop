@@ -148,15 +148,28 @@ describe("threadRoutes", () => {
     ).toBe("missing");
   });
 
-  it("redirects deleted shell-only threads", () => {
+  it("redirects deleted threads without a live shell even when stale detail is present", () => {
     expect(
       resolveThreadRouteRenderState({
         bootstrapComplete: true,
-        serverThreadShellExists: true,
-        serverThreadDetailExists: false,
+        serverThreadShellExists: false,
+        serverThreadDetailExists: true,
         serverThreadDetailDeleted: true,
         draftThreadExists: false,
       }),
     ).toBe("missing");
   });
+  for (const detailExists of [false, true]) {
+    it(`lets a live shell supersede cached deletion with detail ${detailExists}`, () => {
+      expect(
+        resolveThreadRouteRenderState({
+          bootstrapComplete: true,
+          serverThreadShellExists: true,
+          serverThreadDetailExists: detailExists,
+          serverThreadDetailDeleted: true,
+          draftThreadExists: false,
+        }),
+      ).toBe(detailExists ? "ready" : "loading");
+    });
+  }
 });

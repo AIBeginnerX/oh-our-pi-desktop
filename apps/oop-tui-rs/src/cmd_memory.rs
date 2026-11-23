@@ -830,7 +830,7 @@ fn analyse(app: &mut App) {
     let tx = app.sender();
     tokio::spawn(async move {
         let result = rpc
-            .call("projectMemory.analyse", json!({"projectId":project}))
+            .call_with_timeout("projectMemory.analyse", json!({"projectId":project}), None)
             .await;
         let _ = tx.send(Msg::Ext(Box::new(move |app| {
             if crate::lists::current_project(app).as_deref() != Some(&project) {
@@ -1546,6 +1546,29 @@ mod tests {
                 .contains("Could not list memory suggestions")
         );
         assert!(app.notice.as_deref().unwrap().contains("Unavailable"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn memory_analysis_accepts_an_answer_after_ninety_seconds() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new("0.0.0", "/tmp", "/tmp", tx);
+        app.start_draft("p1");
+        caps(&mut app);
+        let (rpc, peer) = crate::wire::fake_socket().await;
+        app.rpc = Some(rpc.clone());
+        analyse(&mut app);
+        crate::wire::delayed_reply(
+            &rpc,
+            peer,
+            "projectMemory.analyse",
+            json!({"threadsAnalysed": 4, "memoriesProposed": 2, "tidiesSuggested": 1}),
+        )
+        .await;
+        app.handle(rx.recv().await.unwrap());
+        assert_eq!(
+            app.notice.as_deref(),
+            Some("Analysed 4 threads · 2 memory suggestions · 1 tidy-ups")
+        );
     }
 
     #[tokio::test]

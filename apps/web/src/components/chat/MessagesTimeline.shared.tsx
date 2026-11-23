@@ -17,7 +17,7 @@ import { type AssistantCitationTarget } from "./AssistantCitationSource";
 import { type MessagesTimelineRow, type WorkGroupScrollAnchor } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat, type TranscriptViewMode } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 
 // ---------------------------------------------------------------------------
@@ -40,17 +40,20 @@ export interface TimelineRowSharedState {
   activeThreadEnvironmentId: EnvironmentId;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
+  onAttachContext: ((mention: string) => void) | undefined;
   onRunShellCommand: ((command: string) => void) | undefined;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
   openPullRequest: (event: MouseEvent<HTMLElement>, url: string) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-  onToggleTurnFold: (turnId: TurnId) => void;
-  onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
+  onToggleTurnFold: (turnId: TurnId, expanded: boolean) => void;
+  onToggleWorkGroup: (groupId: string, anchorKey: string, includesReasoning?: boolean) => void;
   onToggleWorkEntry: (anchorKey: string, collapsed: boolean) => void;
   onToggleSpawnRow: (entryId: string, expanded: boolean) => void;
   onToggleReasoning: (messageId: string, expanded: boolean, anchorKey: string) => void;
+  transcriptViewMode: TranscriptViewMode;
+  disclosureChoices: ReadonlyMap<string, boolean>;
   expandedReasoningMessageIds: ReadonlySet<string>;
   workGroupViewState: WorkGroupViewState;
   agentPanelModel: AgentPanelModel;

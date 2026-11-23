@@ -266,6 +266,16 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
+    askSideQuestion: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:side-question",
+      tag: WS_METHODS.threadSideQuestion,
+    }),
+    getContextBreakdown: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:commands:thread:get-context-breakdown",
+      tag: WS_METHODS.providerContextBreakdown,
+      scheduler,
+      concurrency,
+    }),
     uploadFeedback: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:commands:thread:upload-feedback",
       tag: WS_METHODS.providerUploadFeedback,

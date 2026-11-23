@@ -287,7 +287,6 @@ const unusedCheckpointStore: CheckpointStore.CheckpointStore["Service"] = {
   isGitRepository: () => Effect.succeed(false),
   captureCheckpoint: () => Effect.die("unused"),
   hasCheckpointRef: () => Effect.die("unused"),
-  restoreCheckpoint: () => Effect.die("unused"),
   diffCheckpoints: () => Effect.die("unused"),
   deleteCheckpointRefs: () => Effect.die("unused"),
   deleteThreadCheckpointRefs: () => Effect.die("unused"),

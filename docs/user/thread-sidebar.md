@@ -13,6 +13,18 @@ an existing worktree, use **New thread in this worktree** from the branch toolba
 When you change a new thread's project, OOP stays in the current environment
 if that project exists there. Otherwise it selects an environment that has it.
 
+### Copy local files into a new worktree
+
+To bring files such as `.env` into new worktrees, add a `.worktreeinclude` file to the
+source checkout's root with one pattern per line, such as `.env` or `config/secrets.json`.
+It uses `.gitignore` syntax and is the same file Claude Code reads. OOP copies a file when
+it matches a pattern and is gitignored in both the source checkout and the new worktree,
+so an ignore rule that exists only in the source checkout, such as an untracked
+`.gitignore` file, does not count. The copy happens once at creation, before any setup
+script, and applies to crew worktrees too. For a directory that Git ignores as a whole,
+name the directory in a pattern, such as `vendor/**/config.json`, since `**/config.json`
+alone won't look inside it.
+
 ### Start in the background
 
 In a desktop browser or the desktop app, press `Cmd+Enter` on macOS or `Ctrl+Enter`
@@ -151,6 +163,14 @@ Use **Settings → Keybindings** to find or customize shortcuts for searching fi
 and copying a thread reference. A copied reference uses the thread's pull request
 link when available, otherwise its thread ID. See [keybindings](./keybindings.md)
 for custom configuration.
+
+## Read another chat beside the current one
+
+On web and desktop, open the right panel, choose **Chat beside**, and pick a recent chat from the
+current environment. You can also right-click a chat in the sidebar and choose
+**Open beside current chat**. The panel shows a read-only transcript that follows the latest
+messages. Use **Switch chat** to pick a different chat or **Open** to move it into the main view.
+Each chat remembers the chat last shown beside it; use **Clear selection** to forget it.
 
 ## Inspect agent work
 

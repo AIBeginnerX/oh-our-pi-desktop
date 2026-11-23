@@ -233,6 +233,16 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
       }),
     }).pipe(Effect.asVoid);
 
+  // A closed pipe can precede delivery of the child exit status.
+  const preferProcessExit = (fallback: AcpError.AcpError) => {
+    const fallbackEffect = Effect.succeed(fallback);
+    return (
+      options.terminationError?.pipe(
+        Effect.timeoutOrElse({ duration: "3 seconds", orElse: () => fallbackEffect }),
+      ) ?? fallbackEffect
+    );
+  };
+
   const handleTermination = (classify: () => Effect.Effect<AcpError.AcpError>) =>
     Ref.modify(terminationHandled, (handled) => {
       if (handled) {
@@ -507,15 +517,22 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
         return handleTermination(() => Effect.succeed(normalized));
       },
       onSuccess: () =>
-        handleTermination(
-          () =>
-            options.terminationError ?? Effect.succeed(new AcpError.AcpInputStreamEndedError({})),
-        ),
+        handleTermination(() => preferProcessExit(new AcpError.AcpInputStreamEndedError({}))),
     }),
     Effect.forkScoped,
   );
 
-  yield* Stream.fromQueue(outgoing).pipe(Stream.run(options.stdio.stdout()), Effect.forkScoped);
+  yield* Stream.fromQueue(outgoing).pipe(
+    Stream.run(options.stdio.stdout()),
+    Effect.catch((cause) =>
+      handleTermination(() =>
+        preferProcessExit(
+          new AcpError.AcpTransportError({ operation: "write-output-stream", cause }),
+        ),
+      ),
+    ),
+    Effect.forkScoped,
+  );
 
   const clientProtocol = RpcClient.Protocol.of({
     run: (_clientId, f) =>

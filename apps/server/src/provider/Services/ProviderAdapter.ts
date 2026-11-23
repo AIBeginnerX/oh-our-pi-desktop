@@ -11,6 +11,7 @@ import type {
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderDriverKind,
+  ProviderContextBreakdownResult,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
@@ -231,6 +232,11 @@ export interface ProviderAdapterShape<TError> {
     threadId: ThreadId,
     numTurns: number,
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /** Read the current context allocation from a live session. */
+  readonly getContextBreakdown?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ProviderContextBreakdownResult>;
 
   /**
    * Upload a thread to the provider when the adapter supports feedback.

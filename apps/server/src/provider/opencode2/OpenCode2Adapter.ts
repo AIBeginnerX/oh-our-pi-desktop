@@ -1379,15 +1379,21 @@ export function makeOpenCode2Adapter(
             Effect.forkIn(context.scope),
           );
         }
-        for (const [requestId, pending] of [...context.pending]) {
-          if (pending.type === "form") {
-            yield* runOpenCodeSdk("session.form.cancel", (signal) =>
-              context.client.session.form.cancel(
-                { sessionID: pending.sessionId, formID: pending.form.id },
-                { signal },
-              ),
-            ).pipe(Effect.ignore);
-          }
+        const pendingRequests = [...context.pending];
+        yield* Effect.forEach(
+          pendingRequests,
+          ([, pending]) =>
+            pending.type === "form"
+              ? runOpenCodeSdk("session.form.cancel", (signal) =>
+                  context.client.session.form.cancel(
+                    { sessionID: pending.sessionId, formID: pending.form.id },
+                    { signal },
+                  ),
+                ).pipe(Effect.ignore)
+              : Effect.void,
+          { concurrency: 8, discard: true },
+        ).pipe(Effect.timeoutOption("3 seconds"));
+        for (const [requestId] of pendingRequests) {
           yield* resolvePending(context, requestId);
         }
         yield* runOpenCodeSdk("session.interrupt", (signal) =>

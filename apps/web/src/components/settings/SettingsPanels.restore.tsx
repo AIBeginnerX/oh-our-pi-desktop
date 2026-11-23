@@ -1,5 +1,9 @@
 import { useCallback, useMemo } from "react";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_SERVER_SETTINGS,
+  DEFAULT_UNIFIED_SETTINGS,
+  type UnifiedSettings,
+} from "@t3tools/contracts/settings";
 import * as Equal from "effect/Equal";
 import {
   readAppearanceModePreference,
@@ -7,14 +11,107 @@ import {
   readThemePreference,
   useTheme,
 } from "../../hooks/useTheme";
-import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
+import {
+  mergeEnvironmentSettings,
+  persistClientSettingsPatch,
+  useClientSettings,
+} from "../../hooks/useSettings";
+import { serverEnvironment } from "../../state/server";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { useSettingsScope } from "./SettingsScopeContext";
+import {
+  persistScopedSettingsPatch,
+  planScopedSettingsPatch,
+  type ScopedSettingsPatch,
+} from "./scopedSettings";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import {
-  getChangedBrowserSettingLabels,
-  getChangedTypographySettingLabels,
-  hasChangedBackgroundActivitySettings,
-} from "./SettingsPanels.logic";
+import { getChangedBrowserSettingLabels } from "./SettingsPanels.logic";
+
+const restoreLabels = {
+  appearanceContrast: "Contrast",
+  diffColorScheme: "Diff colors",
+  chatWidth: "Chat width",
+  transcriptViewMode: "Transcript view",
+  timestampFormat: "Time format",
+  notificationMode: "Thread notifications",
+  inAppNotificationsEnabled: "In-app notifications",
+  noActivityAlertMinutes: "No-activity alerts",
+  setupNotificationsEnabled: "Setup notifications",
+  wordWrap: "Word wrap",
+  diffFilesCollapsed: "Default diff file state",
+  diffIgnoreWhitespace: "Diff whitespace changes",
+  diffLayout: "Diff layout",
+  proactivePanelsEnabled: "Proactive panels",
+  turnStallNoticeEnabled: "Quiet turn notice",
+  showSkillsInSlashMenu: "Show skills in slash menu",
+  composerCollapseOnScroll: "Collapse composer on scroll",
+  composerRichTextEnabled: "Rich text composer",
+  sendShortcut: "Send shortcut",
+  followUpBehavior: "Follow-up behavior",
+  contextWindowMeterEnabled: "Context window indicator",
+  environmentIdentificationMode: "Environment identification",
+  glassOpacity: "Glass opacity",
+  panelAnimationDurationMs: "Panel animations",
+  sidebarThreadPreviewCount: "Visible threads",
+  sidebarRunningThreadsFirst: "Running threads first",
+  sidebarProjectGroupingMode: "Project Grouping",
+  sidebarAutoSettleAfterDays: "Auto-settle inactive threads",
+  sidebarAutoSettleOnMerge: "Auto-settle merged threads",
+  sidebarAutoArchiveAfterDays: "Auto-archive settled threads",
+  responseStreamingMode: "Response streaming",
+  enableProviderUpdateChecks: "Provider update checks",
+  autoSelectProjectMemories: "Auto-select related memories",
+  projectMemoryTidy: "Memory tidy-up",
+  projectMemoryAnalyser: "Work analyser",
+  projectMemoryDreaming: "Dreaming",
+  projectMemoryDreamingHour: "Dreaming",
+  continueThreadsAfterServerUpdate: "Continue threads after restarts",
+  continueUnfinishedPlans: "Continue unfinished plans",
+  backgroundActivity: "Background activity",
+  backgroundActivityProfile: "Background activity",
+  automaticGitFetchInterval: "Background activity",
+  providerHealthRefreshInterval: "Background activity",
+  defaultThreadEnvMode: "New thread mode",
+  newWorktreesStartFromOrigin: "New worktrees start from origin",
+  addProjectBaseDirectory: "Add project base directory",
+  confirmThreadArchive: "Archive confirmation",
+  confirmThreadDelete: "Delete confirmation",
+  confirmThreadUnpin: "Unpin confirmation",
+  confirmQuit: "Quit shortcut",
+  textGenerationModelSelection: "Text generation model",
+  fontFamilySans: "Interface font",
+  fontFamilyComposer: "Prompt font",
+  fontFamilyCode: "Code font",
+  fontFamilyTerminal: "Terminal font",
+  fontSizeInterface: "Interface font",
+  fontSizePrompt: "Prompt font",
+  fontSizeCode: "Code font",
+  fontSizeTerminal: "Terminal font",
+  browserDefaultViewport: "Browser viewport",
+  browserDefaultZoomFactor: "Browser zoom",
+  browserDefaultAppearance: "Browser appearance",
+  browserRecordingFrameRate: "Recording frame rate",
+  browserRecordingShowKeyPresses: "Recording key presses",
+  browserRecordingShowMousePresses: "Recording mouse presses",
+  browserLinkTarget: "Open links in",
+  browserAutoShowFloatingPreview: "Floating preview",
+  enableAgentBrowserAccess: "Agent browser access",
+} satisfies Partial<Record<keyof UnifiedSettings, string>>;
+
+const restoreKeys = Object.keys(restoreLabels) as (keyof typeof restoreLabels)[];
+
+function changedRestoreKeys(settings: UnifiedSettings) {
+  return restoreKeys.filter((key) =>
+    key === "browserDefaultViewport"
+      ? getChangedBrowserSettingLabels(settings).includes(restoreLabels[key])
+      : !Equal.equals(settings[key] ?? null, DEFAULT_UNIFIED_SETTINGS[key] ?? null),
+  );
+}
+
+function defaultsPatch(keys: ReturnType<typeof changedRestoreKeys>): ScopedSettingsPatch {
+  return Object.fromEntries(keys.map((key) => [key, DEFAULT_UNIFIED_SETTINGS[key]]));
+}
 
 export function useSettingsRestore(onRestored?: () => void) {
   const {
@@ -26,226 +123,38 @@ export function useSettingsRestore(onRestored?: () => void) {
     clearThemeHalves,
     themeHalves,
   } = useTheme();
-  const settings = useScopedSettings();
-  const updateSettings = useUpdateScopedSettings();
-
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
-  const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
-
+  const { scope, connectedEnvironments } = useSettingsScope();
+  const clientSettings = useClientSettings();
+  const persistServer = useAtomCommand(serverEnvironment.updateSettings, { reportFailure: false });
+  const { plan, settingLabels } = useMemo(() => {
+    const deviceKeys = changedRestoreKeys(
+      mergeEnvironmentSettings(DEFAULT_SERVER_SETTINGS, clientSettings),
+    );
+    const devicePlan = planScopedSettingsPatch(scope, [], defaultsPatch(deviceKeys));
+    const labels = new Set(deviceKeys.map((key) => restoreLabels[key]));
+    const serverWrites = connectedEnvironments.flatMap((environment) => {
+      if (!environment.serverConfig || (scope.kind !== "all" && scope.kind !== "environment")) {
+        return [];
+      }
+      const keys = changedRestoreKeys(
+        mergeEnvironmentSettings(environment.serverConfig.settings, clientSettings),
+      ).filter((key) => !deviceKeys.includes(key));
+      const { serverWrites } = planScopedSettingsPatch(scope, [environment], defaultsPatch(keys));
+      if (serverWrites.length > 0) {
+        for (const key of keys) labels.add(restoreLabels[key]);
+      }
+      return serverWrites;
+    });
+    return { plan: { ...devicePlan, serverWrites }, settingLabels: [...labels] };
+  }, [clientSettings, connectedEnvironments, scope]);
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
       ...(!followSystem ? ["Follow system"] : []),
       ...(themeHalves !== null ? ["Theme mix"] : []),
-      ...(settings.appearanceContrast !== DEFAULT_UNIFIED_SETTINGS.appearanceContrast
-        ? ["Contrast"]
-        : []),
-      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
-      ...(settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme
-        ? ["Diff colors"]
-        : []),
-      ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["Chat width"] : []),
-      ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
-        ? ["Panel animations"]
-        : []),
-      ...(settings.environmentIdentificationMode !==
-      DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
-        ? ["Environment identification"]
-        : []),
-      ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
-        ? ["Time format"]
-        : []),
-      ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
-        ? ["Thread notifications"]
-        : []),
-      ...(settings.inAppNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled
-        ? ["In-app notifications"]
-        : []),
-      ...(settings.noActivityAlertMinutes !== DEFAULT_UNIFIED_SETTINGS.noActivityAlertMinutes
-        ? ["No-activity alerts"]
-        : []),
-      ...(settings.setupNotificationsEnabled !== DEFAULT_UNIFIED_SETTINGS.setupNotificationsEnabled
-        ? ["Setup notifications"]
-        : []),
-      ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-        ? ["Visible threads"]
-        : []),
-      ...(settings.sidebarRunningThreadsFirst !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarRunningThreadsFirst
-        ? ["Running threads first"]
-        : []),
-      ...(settings.sidebarProjectGroupingMode !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
-        ? ["Project Grouping"]
-        : []),
-      ...(settings.sidebarAutoSettleAfterDays !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-        ? ["Auto-settle inactive threads"]
-        : []),
-      ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
-        ? ["Auto-settle merged threads"]
-        : []),
-      ...(settings.sidebarAutoArchiveAfterDays !==
-      DEFAULT_UNIFIED_SETTINGS.sidebarAutoArchiveAfterDays
-        ? ["Auto-archive settled threads"]
-        : []),
-      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
-      ...getChangedTypographySettingLabels(settings),
-      ...(settings.diffFilesCollapsed !== DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed
-        ? ["Default diff file state"]
-        : []),
-      ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
-        ? ["Diff whitespace changes"]
-        : []),
-      ...(settings.diffLayout !== DEFAULT_UNIFIED_SETTINGS.diffLayout ? ["Diff layout"] : []),
-      ...(settings.proactivePanelsEnabled !== DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled
-        ? ["Proactive panels"]
-        : []),
-      ...(settings.turnStallNoticeEnabled !== DEFAULT_UNIFIED_SETTINGS.turnStallNoticeEnabled
-        ? ["Quiet turn notice"]
-        : []),
-      ...(settings.showSkillsInSlashMenu !== DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu
-        ? ["Show skills in slash menu"]
-        : []),
-      ...(settings.composerCollapseOnScroll !== DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll
-        ? ["Collapse composer on scroll"]
-        : []),
-      ...(settings.composerRichTextEnabled !== DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled
-        ? ["Rich text composer"]
-        : []),
-      ...(settings.sendShortcut !== DEFAULT_UNIFIED_SETTINGS.sendShortcut ? ["Send shortcut"] : []),
-      ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
-        ? ["Follow-up behavior"]
-        : []),
-      ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
-        ? ["Context window indicator"]
-        : []),
-      ...(settings.responseStreamingMode !== DEFAULT_UNIFIED_SETTINGS.responseStreamingMode
-        ? ["Response streaming"]
-        : []),
-      ...(settings.enableProviderUpdateChecks !==
-      DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
-        ? ["Provider update checks"]
-        : []),
-      ...(settings.autoSelectProjectMemories !== DEFAULT_UNIFIED_SETTINGS.autoSelectProjectMemories
-        ? ["Auto-select related memories"]
-        : []),
-      ...(settings.projectMemoryTidy !== DEFAULT_UNIFIED_SETTINGS.projectMemoryTidy
-        ? ["Memory tidy-up"]
-        : []),
-      ...(settings.projectMemoryAnalyser !== DEFAULT_UNIFIED_SETTINGS.projectMemoryAnalyser
-        ? ["Work analyser"]
-        : []),
-      ...(settings.projectMemoryDreaming !== DEFAULT_UNIFIED_SETTINGS.projectMemoryDreaming ||
-      settings.projectMemoryDreamingHour !== DEFAULT_UNIFIED_SETTINGS.projectMemoryDreamingHour
-        ? ["Dreaming"]
-        : []),
-      ...(settings.continueThreadsAfterServerUpdate !==
-      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
-        ? ["Continue threads after restarts"]
-        : []),
-      ...(settings.continueUnfinishedPlans !== DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans
-        ? ["Continue unfinished plans"]
-        : []),
-      ...(isBackgroundActivityDirty ? ["Background activity"] : []),
-      ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-        ? ["New thread mode"]
-        : []),
-      ...(settings.newWorktreesStartFromOrigin !==
-      DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
-        ? ["New worktrees start from origin"]
-        : []),
-      ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
-        : []),
-      ...(settings.confirmThreadUnpin !== DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin
-        ? ["Unpin confirmation"]
-        : []),
-      ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-        ? ["Archive confirmation"]
-        : []),
-      ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-        ? ["Delete confirmation"]
-        : []),
-      ...(settings.confirmQuit !== DEFAULT_UNIFIED_SETTINGS.confirmQuit ? ["Quit shortcut"] : []),
-      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
-      ...getChangedBrowserSettingLabels(settings),
-      ...(settings.enableAgentBrowserAccess !== DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess
-        ? ["Agent browser access"]
-        : []),
+      ...settingLabels,
     ],
-    [
-      isTextGenerationModelDirty,
-      isBackgroundActivityDirty,
-      settings.browserDefaultViewport,
-      settings.browserDefaultZoomFactor,
-      settings.browserDefaultAppearance,
-      settings.browserRecordingFrameRate,
-      settings.browserRecordingShowKeyPresses,
-      settings.browserRecordingShowMousePresses,
-      settings.browserLinkTarget,
-      settings.browserAutoShowFloatingPreview,
-      settings.appearanceContrast,
-      settings.diffColorScheme,
-      settings.chatWidth,
-      settings.enableAgentBrowserAccess,
-      settings.confirmQuit,
-      settings.confirmThreadArchive,
-      settings.confirmThreadDelete,
-      settings.confirmThreadUnpin,
-      settings.composerCollapseOnScroll,
-      settings.composerRichTextEnabled,
-      settings.sendShortcut,
-      settings.followUpBehavior,
-      settings.addProjectBaseDirectory,
-      settings.defaultThreadEnvMode,
-      settings.newWorktreesStartFromOrigin,
-      settings.diffFilesCollapsed,
-      settings.diffIgnoreWhitespace,
-      settings.diffLayout,
-      settings.proactivePanelsEnabled,
-      settings.turnStallNoticeEnabled,
-      settings.environmentIdentificationMode,
-      settings.contextWindowMeterEnabled,
-      settings.fontFamilyCode,
-      settings.fontFamilyComposer,
-      settings.fontFamilySans,
-      settings.fontFamilyTerminal,
-      settings.fontSizeCode,
-      settings.fontSizeInterface,
-      settings.fontSizePrompt,
-      settings.fontSizeTerminal,
-      settings.glassOpacity,
-      settings.panelAnimationDurationMs,
-      settings.responseStreamingMode,
-      settings.enableProviderUpdateChecks,
-      settings.autoSelectProjectMemories,
-      settings.projectMemoryTidy,
-      settings.projectMemoryAnalyser,
-      settings.projectMemoryDreaming,
-      settings.projectMemoryDreamingHour,
-      settings.continueThreadsAfterServerUpdate,
-      settings.continueUnfinishedPlans,
-      settings.sidebarAutoSettleAfterDays,
-      settings.sidebarAutoSettleOnMerge,
-      settings.sidebarAutoArchiveAfterDays,
-      settings.sidebarProjectGroupingMode,
-      settings.sidebarThreadPreviewCount,
-      settings.sidebarRunningThreadsFirst,
-      settings.showSkillsInSlashMenu,
-      settings.timestampFormat,
-      settings.notificationMode,
-      settings.inAppNotificationsEnabled,
-      settings.noActivityAlertMinutes,
-      settings.setupNotificationsEnabled,
-      settings.wordWrap,
-      followSystem,
-      theme,
-      themeHalves,
-    ],
+    [theme, followSystem, themeHalves, settingLabels],
   );
 
   const restoreDefaults = useCallback(async () => {
@@ -310,78 +219,21 @@ export function useSettingsRestore(onRestored?: () => void) {
       notifyThemeRestoreFailure();
       return;
     }
-    updateSettings({
-      appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
-      diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme,
-      chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
-      timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
-      notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
-      inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
-      noActivityAlertMinutes: DEFAULT_UNIFIED_SETTINGS.noActivityAlertMinutes,
-      setupNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.setupNotificationsEnabled,
-      wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
-      diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
-      diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
-      diffLayout: DEFAULT_UNIFIED_SETTINGS.diffLayout,
-      proactivePanelsEnabled: DEFAULT_UNIFIED_SETTINGS.proactivePanelsEnabled,
-      turnStallNoticeEnabled: DEFAULT_UNIFIED_SETTINGS.turnStallNoticeEnabled,
-      showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
-      composerCollapseOnScroll: DEFAULT_UNIFIED_SETTINGS.composerCollapseOnScroll,
-      composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
-      sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
-      followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
-      contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
-      environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
-      glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
-      panelAnimationDurationMs: DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs,
-      sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
-      sidebarRunningThreadsFirst: DEFAULT_UNIFIED_SETTINGS.sidebarRunningThreadsFirst,
-      sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
-      sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
-      sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
-      sidebarAutoArchiveAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoArchiveAfterDays,
-      responseStreamingMode: DEFAULT_UNIFIED_SETTINGS.responseStreamingMode,
-      enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
-      autoSelectProjectMemories: DEFAULT_UNIFIED_SETTINGS.autoSelectProjectMemories,
-      projectMemoryTidy: DEFAULT_UNIFIED_SETTINGS.projectMemoryTidy,
-      projectMemoryAnalyser: DEFAULT_UNIFIED_SETTINGS.projectMemoryAnalyser,
-      projectMemoryDreaming: DEFAULT_UNIFIED_SETTINGS.projectMemoryDreaming,
-      projectMemoryDreamingHour: DEFAULT_UNIFIED_SETTINGS.projectMemoryDreamingHour,
-      continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
-      continueUnfinishedPlans: DEFAULT_UNIFIED_SETTINGS.continueUnfinishedPlans,
-      backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
-      backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
-      automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-      providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
-      defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
-      newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
-      addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
-      confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
-      confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-      confirmThreadUnpin: DEFAULT_UNIFIED_SETTINGS.confirmThreadUnpin,
-      confirmQuit: DEFAULT_UNIFIED_SETTINGS.confirmQuit,
-      textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-      fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
-      fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
-      fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
-      fontFamilyTerminal: DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal,
-      fontSizeInterface: DEFAULT_UNIFIED_SETTINGS.fontSizeInterface,
-      fontSizePrompt: DEFAULT_UNIFIED_SETTINGS.fontSizePrompt,
-      fontSizeCode: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
-      fontSizeTerminal: DEFAULT_UNIFIED_SETTINGS.fontSizeTerminal,
-      browserDefaultViewport: DEFAULT_UNIFIED_SETTINGS.browserDefaultViewport,
-      browserDefaultZoomFactor: DEFAULT_UNIFIED_SETTINGS.browserDefaultZoomFactor,
-      browserDefaultAppearance: DEFAULT_UNIFIED_SETTINGS.browserDefaultAppearance,
-      browserRecordingFrameRate: DEFAULT_UNIFIED_SETTINGS.browserRecordingFrameRate,
-      browserRecordingShowKeyPresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowKeyPresses,
-      browserRecordingShowMousePresses: DEFAULT_UNIFIED_SETTINGS.browserRecordingShowMousePresses,
-      browserLinkTarget: DEFAULT_UNIFIED_SETTINGS.browserLinkTarget,
-      browserAutoShowFloatingPreview: DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
-      // Re-granted like any other default. The confirmation dialog lists it by
-      // name, so a user restoring defaults is told the agent regains access
-      // rather than discovering it later.
-      enableAgentBrowserAccess: DEFAULT_UNIFIED_SETTINGS.enableAgentBrowserAccess,
-    });
+    const { failedEnvironments, savedEnvironmentCount } = await persistScopedSettingsPatch(
+      plan,
+      persistServer,
+      persistClientSettingsPatch,
+    );
+    if (failedEnvironments.length > 0) {
+      toastManager.add({
+        type: "error",
+        title:
+          savedEnvironmentCount > 0
+            ? "Settings restored on some environments"
+            : "Settings not restored",
+        description: `Could not update ${failedEnvironments.map((environment) => environment.label).join(", ")}.`,
+      });
+    }
     onRestored?.();
   }, [
     changedSettingLabels,
@@ -391,8 +243,8 @@ export function useSettingsRestore(onRestored?: () => void) {
     setTheme,
     setThemeHalf,
     theme,
-    themeHalves,
-    updateSettings,
+    plan,
+    persistServer,
   ]);
 
   return {

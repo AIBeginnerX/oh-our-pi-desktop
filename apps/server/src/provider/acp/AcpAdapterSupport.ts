@@ -9,6 +9,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
+  ProviderAdapterSessionClosedError,
   type ProviderAdapterError,
 } from "../Errors.ts";
 import type { ProviderSendTurnAdmission } from "../Services/ProviderAdapter.ts";
@@ -28,6 +29,12 @@ export function mapAcpToAdapterError(
       detail: error.message,
       cause: error,
     });
+  }
+  if (
+    error._tag === "AcpInputStreamEndedError" ||
+    (error._tag === "AcpTransportError" && error.operation === "write-output-stream")
+  ) {
+    return new ProviderAdapterSessionClosedError({ provider, threadId, cause: error });
   }
   if (isAcpRequestError(error)) {
     return new ProviderAdapterRequestError({

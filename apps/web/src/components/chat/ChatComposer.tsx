@@ -1,3 +1,8 @@
+import { SIDE_QUESTION_MAX_LENGTH, type SideQuestionResult } from "@t3tools/contracts";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { threadEnvironment } from "~/state/threads";
+import { useAtomCommand } from "~/state/use-atom-command";
 import { useComposerImperativeHandle } from "./ChatComposer.handle";
 import { useComposerAttachmentHandlers } from "./ChatComposer.attachments";
 import { useComposerRestingChrome } from "./ChatComposer.resting";
@@ -14,6 +19,8 @@ import { useRestingComposerControlsLayout } from "./ChatComposer.restingLayout";
 import { ComposerFooterPrimaryActions } from "./ChatComposer.footer";
 import type { ChatComposerProps } from "./ChatComposer.types";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
+import { selectPromptSuggestion } from "@t3tools/shared/promptSuggestion";
+import { useThreadDetailValue } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
@@ -28,13 +35,19 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
 import { createPortal } from "react-dom";
-import { collapseExpandedComposerCursor, detectComposerTrigger } from "../../composer-logic";
+import {
+  collapseExpandedComposerCursor,
+  detectComposerTrigger,
+  handleComposerSideQuestion,
+  registerComposerSideQuestion,
+} from "../../composer-logic";
 import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import {
   dataTransferHasComposerMention,
@@ -62,6 +75,7 @@ import {
   ComposerTasksDrawer,
 } from "./ComposerTasksBadge";
 import { ComposerActivityRow } from "./ComposerActivityStatus";
+import { SideQuestionCard } from "./SideQuestionCard";
 import { ComposerBanner } from "./ComposerBanner";
 import { ComposerSurface } from "./ComposerSurface";
 import { ComposerBannerStack, type ComposerBannerStackContent } from "./ComposerBannerStack";
@@ -145,6 +159,12 @@ import { useMediaQuery } from "../../hooks/useMediaQuery";
 // --------------------------------------------------------------------------
 
 export type { ChatComposerHandle, ChatComposerProps } from "./ChatComposer.types";
+
+type SuggestionThread = Parameters<typeof selectPromptSuggestion>[0] | null;
+const selectSuggestionId = (thread: SuggestionThread) =>
+  (thread && selectPromptSuggestion(thread)?.id) ?? null;
+const selectSuggestionText = (thread: SuggestionThread) =>
+  (thread && selectPromptSuggestion(thread)?.text) ?? null;
 
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
   const {
@@ -245,7 +265,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onFileOpen,
   } = props;
   const t = useT();
+  const askSideQuestion = useAtomCommand(threadEnvironment.askSideQuestion, {
+    reportFailure: false,
+    reportDefect: false,
+  });
+  const sideQuestionThreadKey = `${routeKind}:${scopedThreadKey(routeThreadRef)}`;
+  const [sideQuestionScope, setSideQuestionScope] = useState(sideQuestionThreadKey);
+  const [sideQuestion, setSideQuestion] = useState<{
+    request: { question: string };
+    result: SideQuestionResult | null;
+  } | null>(null);
+  if (sideQuestionScope !== sideQuestionThreadKey) {
+    setSideQuestionScope(sideQuestionThreadKey);
+    setSideQuestion(null);
+  }
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const suggestionThreadRef = routeKind === "server" ? routeThreadRef : null;
+  const suggestionId = useThreadDetailValue(suggestionThreadRef, selectSuggestionId);
+  const suggestionText = useThreadDetailValue(suggestionThreadRef, selectSuggestionText);
+  const currentPromptSuggestion =
+    settings.claudePromptSuggestionsEnabled && suggestionId !== null && suggestionText !== null
+      ? { id: suggestionId, text: suggestionText }
+      : null;
+  const [dismissedPromptSuggestionIds, setDismissedPromptSuggestionIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   // Opening a running thread resyncs for a few frames. Show the sync row, and
   // hide the tasks row for it, only when the sync lasts. Logic that depends on
@@ -738,6 +782,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isComposerMenuLoading,
     composerMenuEmptyState,
   } = useComposerMenuModel({
+    sideQuestionDescription: t("Ask about this thread without sending a message"),
     activeComposerMenuItemRef,
     activePendingApproval,
     activePendingIsResponding,
@@ -1019,6 +1064,83 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setPrompt,
   });
 
+  const hasPromptSuggestionDraft =
+    prompt.length > 0 ||
+    composerImages.length > 0 ||
+    composerFiles.length > 0 ||
+    composerContextRecords.size > 0;
+  const promptSuggestionId = currentPromptSuggestion?.id;
+  if (
+    promptSuggestionId &&
+    hasPromptSuggestionDraft &&
+    !dismissedPromptSuggestionIds.has(promptSuggestionId)
+  ) {
+    setDismissedPromptSuggestionIds(new Set([...dismissedPromptSuggestionIds, promptSuggestionId]));
+  }
+
+  const visiblePromptSuggestion =
+    currentPromptSuggestion &&
+    !dismissedPromptSuggestionIds.has(currentPromptSuggestion.id) &&
+    !hasPromptSuggestionDraft &&
+    !composerMenuOpen &&
+    !isStashMenuOpen &&
+    !isComposerModelPickerOpen &&
+    phase === "ready" &&
+    props.threadSyncPhase === null &&
+    environmentUnavailable === null &&
+    !isConnecting &&
+    !isSendBusy &&
+    !isSendDisabled &&
+    !isComposerApprovalState &&
+    pendingUserInputs.length === 0 &&
+    !(showPlanFollowUpPrompt && activeProposedPlan) &&
+    !projectSelectionRequired &&
+    !showProviderUnavailable
+      ? currentPromptSuggestion
+      : null;
+
+  useLayoutEffect(
+    () =>
+      registerComposerSideQuestion(promptRef, (question) => {
+        const request = { question };
+        if (routeKind !== "server" || question.length > SIDE_QUESTION_MAX_LENGTH) {
+          setSideQuestion({ request, result: { status: "unavailable" } });
+          return;
+        }
+        const currentPrompt = promptRef.current;
+        applyPromptReplacement(0, currentPrompt.length, "", { expectedText: currentPrompt });
+        setSideQuestion({ request, result: null });
+        const finish = (result: SideQuestionResult) =>
+          setSideQuestion((current) =>
+            current?.request === request ? { request, result } : current,
+          );
+
+        void askSideQuestion({
+          environmentId: routeThreadRef.environmentId,
+          input: { threadId: routeThreadRef.threadId, question },
+        }).then(
+          (result) =>
+            finish(AsyncResult.isSuccess(result) ? result.value : { status: "unavailable" }),
+          () => finish({ status: "unavailable" }),
+        );
+      }),
+    [applyPromptReplacement, askSideQuestion, promptRef, routeKind, routeThreadRef],
+  );
+
+  const closeSideQuestion = useCallback(() => setSideQuestion(null), []);
+
+  function dismissPromptSuggestion() {
+    if (!visiblePromptSuggestion) return;
+    setDismissedPromptSuggestionIds((ids) => new Set([...ids, visiblePromptSuggestion.id]));
+  }
+
+  function acceptPromptSuggestion() {
+    if (!visiblePromptSuggestion || promptRef.current.length > 0) return false;
+    if (!applyPromptReplacement(0, 0, visiblePromptSuggestion.text)) return false;
+    dismissPromptSuggestion();
+    return true;
+  }
+
   const {
     submitComposer,
     submitCitationAndSend,
@@ -1026,6 +1148,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     expandMobileComposer,
     onComposerCommandKey,
   } = useComposerSubmitHandlers({
+    acceptPromptSuggestion,
     activeComposerMenuItemRef,
     activePendingApproval,
     activePendingProgress,
@@ -1565,7 +1688,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   return (
     <form
       ref={composerFormRef}
-      onSubmit={submitComposer}
+      onSubmit={(event) => {
+        if (handleComposerSideQuestion(promptRef)) {
+          event.preventDefault();
+          return;
+        }
+        submitComposer(event);
+      }}
       onPointerDownCapture={(event) => {
         const target = event.target;
         if (isInsideRestingComposerControlScope(target)) return;
@@ -1645,6 +1774,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             restingControlsHost,
           )
         : null}
+      {sideQuestion ? (
+        <SideQuestionCard
+          question={sideQuestion.request.question}
+          result={sideQuestion.result}
+          onClose={closeSideQuestion}
+        />
+      ) : null}
       <ComposerBanner.Dock>
         <ComposerBanner.Column>
           <ComposerBannerStack
@@ -1845,16 +1981,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       : "text-placeholder",
                   )}
                   onPointerDown={(event) => event.preventDefault()}
-                  onClick={isChoiceOnlyPendingQuestion ? undefined : expandMobileComposer}
+                  onClick={
+                    isChoiceOnlyPendingQuestion
+                      ? undefined
+                      : () => {
+                          acceptPromptSuggestion();
+                          expandMobileComposer();
+                        }
+                  }
                   disabled={isChoiceOnlyPendingQuestion}
-                  aria-label="Expand composer"
+                  aria-label={visiblePromptSuggestion ? "Use suggested prompt" : "Expand composer"}
                 >
                   {activePendingProgress
                     ? isChoiceOnlyPendingQuestion
                       ? "Choose an option above"
                       : activePendingProgress.customAnswer ||
                         "Type your own answer, or leave this blank to use the selected option"
-                    : prompt.trim() ||
+                    : visiblePromptSuggestion?.text ||
+                      prompt.trim() ||
                       (showProviderUnavailable
                         ? "Enable a provider in Settings"
                         : (runningComposerPlaceholder ?? "Ask anything..."))}
@@ -1869,7 +2013,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   onPointerDown={(event) => event.preventDefault()}
                   onClick={(event) => {
                     event.stopPropagation();
-                    submitComposer();
+                    if (!handleComposerSideQuestion(promptRef)) submitComposer();
                   }}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -2340,14 +2484,35 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         isComposerResting &&
                           "flex items-center overflow-hidden whitespace-nowrap leading-8",
                       )}
-                      onChange={onPromptChange}
+                      onChange={(value, ...args) => {
+                        if (value.length > 0) dismissPromptSuggestion();
+                        onPromptChange(value, ...args);
+                      }}
                       onVisibleSelectionChange={expandComposerForEditorChange}
-                      onCommandKeyDown={onComposerCommandKey}
+                      onCommandKeyDown={(key, event, isTaskItem) => {
+                        // An open menu takes Escape first, then the side answer.
+                        if (onComposerCommandKey(key, event, isTaskItem)) return true;
+                        if (
+                          key === "Escape" &&
+                          sideQuestion &&
+                          !event.isComposing &&
+                          event.keyCode !== 229
+                        ) {
+                          closeSideQuestion();
+                          return true;
+                        }
+                        return false;
+                      }}
                       onPageScrollKeyDown={onPageScrollKeyDown}
                       onPageScrollKeyUp={onPageScrollKeyUp}
                       onPageScrollRelease={onPageScrollRelease}
                       onCitationSubmitAndSend={submitCitationAndSend}
-                      onPaste={onComposerPaste}
+                      onPaste={(event) => {
+                        dismissPromptSuggestion();
+                        onComposerPaste(event);
+                      }}
+                      promptSuggestion={visiblePromptSuggestion?.text}
+                      onAcceptPromptSuggestion={acceptPromptSuggestion}
                       placeholder={
                         isComposerApprovalState
                           ? "Resolve this approval request to continue"

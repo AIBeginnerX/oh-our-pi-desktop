@@ -289,6 +289,7 @@ function makeHarness(config?: {
   readonly isShuttingDown?: ClaudeAdapterLiveOptions["isShuttingDown"];
   /** Wire the production settings reader, so tests can set `agentInstructions`. */
   readonly readAgentInstructions?: boolean;
+  readonly promptSuggestionsEnabled?: ClaudeAdapterLiveOptions["promptSuggestionsEnabled"];
 }) {
   const query = new FakeClaudeQuery();
   const queries = [query];
@@ -307,6 +308,9 @@ function makeHarness(config?: {
     ...(config?.getSessionMessages ? { getSessionMessages: config.getSessionMessages } : {}),
     ...(config?.forkSession ? { forkSession: config.forkSession } : {}),
     ...(config?.isShuttingDown ? { isShuttingDown: config.isShuttingDown } : {}),
+    ...(config?.promptSuggestionsEnabled
+      ? { promptSuggestionsEnabled: config.promptSuggestionsEnabled }
+      : {}),
     createQuery: (input) => {
       if (createInput && config?.getSessionMessages) queries.push(new FakeClaudeQuery());
       createInput = input;
@@ -6080,6 +6084,90 @@ describe("ClaudeAdapterLive", () => {
     );
   });
 
+  it.layer(Layer.empty)("on-demand context breakdown", (it) => {
+    it.effect("queries summary once and returns only bounded categories", () => {
+      const harness = makeHarness();
+      const calls: unknown[] = [];
+      Object.assign(harness.query, {
+        getContextUsage: async (options: unknown) => {
+          calls.push(options);
+          return {
+            model: "claude-sonnet",
+            totalTokens: 500,
+            rawMaxTokens: 200_000,
+            maxTokens: 1_000_000,
+            categories: [
+              { name: "negative", tokens: -1, kind: "used" },
+              { name: "NaN", tokens: NaN, kind: "used" },
+              { name: "infinite", tokens: Infinity, kind: "used" },
+              ...Array.from({ length: 34 }, (_, index) => ({
+                name: index === 0 ? "a".repeat(100) : `category ${index}`,
+                tokens: index + 1,
+                kind: "used",
+                color: "blue",
+              })),
+            ],
+            mcpTools: [{ name: "mcp__test__tool" }],
+            memoryFiles: [{ path: "/test/CLAUDE.md" }],
+            mcp_tools: [{ name: "mcp__test__tool" }],
+            memory_files: [{ path: "/test/CLAUDE.md" }],
+          };
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        assert.deepEqual(calls, []);
+        const result = yield* adapter.getContextBreakdown!(THREAD_ID);
+        assert.deepEqual(calls, [{ detail: "summary" }]);
+        const measuredAt = DateTime.formatIso(yield* DateTime.now);
+        assert.deepEqual(result, {
+          status: "available",
+          model: "claude-sonnet",
+          totalTokens: 500,
+          maxTokens: 200_000,
+          measuredAt,
+          categories: Array.from({ length: 32 }, (_, index) => ({
+            name: index === 0 ? "a".repeat(80) : `category ${index}`,
+            tokens: index + 1,
+            kind: "used" as const,
+          })),
+        });
+      }).pipe(Effect.provide(harness.layer));
+    });
+
+    it.effect("returns unavailable for a missing, rejected or stopped session", () => {
+      const harness = makeHarness();
+      let calls = 0;
+      Object.assign(harness.query, {
+        getContextUsage: async () => {
+          calls += 1;
+          throw new Error("SDK query closed");
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const unavailable = { status: "unavailable" };
+        assert.deepEqual(yield* adapter.getContextBreakdown!(THREAD_ID), unavailable);
+        assert.equal(calls, 0);
+        yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        assert.deepEqual(yield* adapter.getContextBreakdown!(THREAD_ID), unavailable);
+        assert.equal(calls, 1);
+        yield* adapter.stopSession(THREAD_ID);
+        assert.deepEqual(yield* adapter.getContextBreakdown!(THREAD_ID), unavailable);
+        assert.equal(calls, 1);
+      }).pipe(Effect.provide(harness.layer));
+    });
+  });
+
   it.effect("completes with result usage without querying current context usage", () => {
     const harness = makeHarness();
     let getContextUsageCalls = 0;
@@ -11323,6 +11411,112 @@ describe("ClaudeAdapterLive", () => {
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),
     );
+  });
+
+  it.layer(Layer.empty)("prompt suggestion SDK frames", (it) => {
+    it.effect.each([
+      "success",
+      "before-result",
+      "failed",
+      "success-with-error",
+      "interrupted",
+      "disabled",
+      "disabled-mid-session",
+      "too-long",
+      "control",
+      "memory-envelope",
+      "duplicate",
+    ] as const)("handles %s", (scenario) => {
+      let enabled = scenario !== "disabled";
+      const nativeRecords: unknown[] = [];
+      const harness = makeHarness({
+        promptSuggestionsEnabled: Effect.sync(() => enabled),
+        nativeEventLogger: {
+          filePath: "memory://prompt-suggestions",
+          write: (record) =>
+            Effect.sync(() => {
+              nativeRecords.push(record);
+            }),
+          close: () => Effect.void,
+        },
+      });
+      return Effect.gen(function* () {
+        const adapter = yield* ClaudeAdapter;
+        const eventsFiber = yield* Stream.takeUntil(
+          adapter.streamEvents,
+          (event) => event.type === "session.exited",
+        ).pipe(Stream.runCollect, Effect.forkChild({ startImmediately: true }));
+        const session = yield* adapter.startSession({
+          threadId: THREAD_ID,
+          provider: ProviderDriverKind.make("claudeAgent"),
+          runtimeMode: "full-access",
+        });
+        assert.equal(
+          harness.getLastCreateQueryInput()?.options.promptSuggestions,
+          enabled ? true : undefined,
+        );
+        const turn = yield* adapter.sendTurn({
+          threadId: session.threadId,
+          input: "hello",
+          attachments: [],
+        });
+        if (scenario === "disabled-mid-session") enabled = false;
+        const idle = untilStreamIdle(harness.query);
+        if (scenario === "failed") {
+          emitFailedResult(harness, "result");
+        } else if (scenario === "success-with-error") {
+          harness.query.emit({
+            type: "result",
+            subtype: "success",
+            is_error: true,
+            errors: [],
+            uuid: "result",
+          } as unknown as SDKMessage);
+        } else if (scenario === "interrupted") {
+          harness.query.emit({
+            type: "result",
+            subtype: "error_during_execution",
+            is_error: true,
+            terminal_reason: "aborted_tools",
+            errors: [],
+            uuid: "result",
+          } as unknown as SDKMessage);
+        } else if (scenario !== "before-result") {
+          emitBareResult(harness, "result");
+        }
+        const suggest = (suggestion: string) =>
+          harness.query.emit({
+            type: "prompt_suggestion",
+            session_id: "sdk-session",
+            uuid: "raw-suggestion-id",
+            suggestion,
+          } as unknown as SDKMessage);
+        const text = "Next step\nCheck\ttests";
+        suggest(
+          scenario === "too-long"
+            ? "x".repeat(1_001)
+            : scenario === "control"
+              ? "control\u001bcharacter"
+              : scenario === "memory-envelope"
+                ? '<context kind="memory" version="1">canary</context>'
+                : `  ${text}  `,
+        );
+        if (scenario === "duplicate") suggest("duplicate text");
+        yield* Effect.promise(() => idle);
+        yield* adapter.stopSession(session.threadId);
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        const suggestions = events.filter((event) => event.type === "prompt.suggestion");
+        const accepted = scenario === "success" || scenario === "duplicate";
+        assert.lengthOf(suggestions, accepted ? 1 : 0);
+        if (accepted) assert.deepEqual(suggestions[0]?.payload, { turnId: turn.turnId, text });
+        assert.notInclude(encodeUnknownJsonString(events), "raw-suggestion-id");
+        assert.notInclude(encodeUnknownJsonString(nativeRecords), "raw-suggestion-id");
+        assert.notInclude(encodeUnknownJsonString(nativeRecords), "prompt_suggestion");
+      }).pipe(
+        Effect.provideService(Random.Random, makeDeterministicRandomService()),
+        Effect.provide(harness.layer),
+      );
+    });
   });
 
   it.effect("A-ECHO C3: marker-bearing prompt_suggestion yields no runtime event", () => {

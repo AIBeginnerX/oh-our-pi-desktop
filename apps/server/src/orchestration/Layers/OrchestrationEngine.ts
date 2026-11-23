@@ -74,6 +74,7 @@ import {
   type OrchestrationDispatchError,
   type OrchestrationProjectorDecodeError,
 } from "../Errors.ts";
+import { readLegacyCrewMember } from "../crewMembership.ts";
 import { decideOrchestrationCommand } from "../decider.ts";
 import { createEmptyReadModel, projectEvent } from "../projector.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
@@ -911,9 +912,29 @@ const makeOrchestrationEngine = Effect.gen(function* () {
                 envelope.command.requestSequence,
               )
             : undefined;
+        let threadCreatedAsCrewMember = false;
+        if (
+          envelope.command.type === "thread.conversation.revert" ||
+          envelope.command.type === "thread.checkpoint.revert"
+        ) {
+          const threadId = envelope.command.threadId;
+          const thread = commandReadModel.threads.find((thread) => thread.id === threadId);
+          if (thread !== undefined) {
+            threadCreatedAsCrewMember = yield* readLegacyCrewMember(sql, threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationCommandStateUnavailableError({
+                    commandType: envelope.command.type,
+                    cause,
+                  }),
+              ),
+            );
+          }
+        }
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
           readModel: commandReadModel,
+          threadCreatedAsCrewMember,
           ...(Option.isSome(userInputActivity)
             ? { userInputActivity: userInputActivity.value }
             : {}),

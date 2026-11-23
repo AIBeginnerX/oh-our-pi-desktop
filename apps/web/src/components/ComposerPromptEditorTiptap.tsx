@@ -121,6 +121,8 @@ export interface ComposerPromptEditorProps {
   skills: ReadonlyArray<ServerProviderSkill>;
   disabled: boolean;
   placeholder: string;
+  promptSuggestion?: string | undefined;
+  onAcceptPromptSuggestion?: () => void;
   containerClassName?: string;
   className?: string;
   placeholderClassName?: string;
@@ -592,6 +594,8 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
     skills,
     disabled,
     placeholder,
+    promptSuggestion,
+    onAcceptPromptSuggestion,
     containerClassName,
     className,
     placeholderClassName,
@@ -1351,7 +1355,23 @@ function ComposerPromptEditorTiptapInner(props: ComposerPromptEditorProps) {
                   placeholderClassName,
                 )}
               >
-                {placeholder}
+                {promptSuggestion ? (
+                  <>
+                    <span className="block truncate max-sm:hidden pointer-coarse:hidden">
+                      {promptSuggestion}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label="Use suggested prompt"
+                      className="pointer-events-auto hidden w-full truncate text-left max-sm:block pointer-coarse:block"
+                      onClick={onAcceptPromptSuggestion}
+                    >
+                      {promptSuggestion}
+                    </button>
+                  </>
+                ) : (
+                  placeholder
+                )}
               </div>
             ) : null}
           </div>

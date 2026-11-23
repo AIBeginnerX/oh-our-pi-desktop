@@ -25,6 +25,7 @@ import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import type * as ServerSettings from "./serverSettings.ts";
 import type * as TerminalManager from "./terminal/Manager.ts";
 import {
+  BOOTSTRAP_THREAD_DELETE_TAG,
   isOrchestrationDispatchCommandError,
   nowIso,
   projectSetupScriptCompatibilityDetail,
@@ -44,6 +45,18 @@ export interface BootstrapTurnStartDeps {
   readonly threadDeletionReactor: ThreadDeletionReactor["Service"];
   readonly terminalManager: TerminalManager.TerminalManager["Service"];
   readonly refreshGitStatus: (cwd: string) => Effect.Effect<void>;
+}
+
+export function formatWorktreeCheckoutDetail(
+  checkoutTotal: number | null,
+  localFilesCopied: number,
+): string | null {
+  const total = checkoutTotal === null ? null : `${checkoutTotal.toLocaleString("en-US")} files`;
+  const copied =
+    localFilesCopied === 0
+      ? null
+      : `${localFilesCopied.toLocaleString("en-US")} local files copied`;
+  return total && copied ? `${total}, ${copied}` : (total ?? copied);
 }
 
 /**
@@ -212,7 +225,7 @@ export const makeBootstrapTurnStart = ({
         });
       const cleanupCreatedThread = () =>
         createdThread
-          ? serverCommandId("bootstrap-thread-delete").pipe(
+          ? serverCommandId(BOOTSTRAP_THREAD_DELETE_TAG).pipe(
               Effect.flatMap((commandId) =>
                 dispatchFromClient({
                   type: "thread.delete",
@@ -588,6 +601,7 @@ export const makeBootstrapTurnStart = ({
           }
           yield* worktreeSetupTracker.stageStatus(threadId, "checkout", "running");
           let checkoutTotal: number | null = null;
+          let localFilesCopied = 0;
           const submodules = yield* resolveBootstrapWorktreeSubmodules({
             threadId,
             projectId: targetProjectId ?? null,
@@ -616,15 +630,17 @@ export const makeBootstrapTurnStart = ({
                     detail: `${completed.toLocaleString("en-US")} / ${total.toLocaleString("en-US")} files`,
                   });
                 },
+                onLocalFilesCopied: ({ count }) =>
+                  Effect.sync(() => {
+                    localFilesCopied = count;
+                  }),
                 onSubmodulesStarted: () =>
                   worktreeSetupTracker
                     .stageStatus(
                       threadId,
                       "checkout",
                       "done",
-                      checkoutTotal === null
-                        ? null
-                        : `${checkoutTotal.toLocaleString("en-US")} files`,
+                      formatWorktreeCheckoutDetail(checkoutTotal, localFilesCopied),
                     )
                     .pipe(
                       Effect.andThen(
@@ -668,9 +684,7 @@ export const makeBootstrapTurnStart = ({
                   percent: 100,
                   endedAt: checkoutEndedAt,
                   detail:
-                    checkoutTotal === null
-                      ? stage.detail
-                      : `${checkoutTotal.toLocaleString("en-US")} files`,
+                    formatWorktreeCheckoutDetail(checkoutTotal, localFilesCopied) ?? stage.detail,
                 };
               }
               if (stage.id === "submodules" && stage.status === "pending") {

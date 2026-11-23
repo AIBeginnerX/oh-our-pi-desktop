@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   EventId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ProviderInstanceId,
@@ -114,7 +115,7 @@ function testSession(
     client,
     initialConfig: Effect.succeed(
       options?.completionMarker === true
-        ? ({ threadResumeCompletionMarker: true } as never)
+        ? ({ threadResumeCompletionMarker: true, threadSnapshotPagination: true } as never)
         : ({} as never),
     ),
     subscribeServerConfig: (input) => client.subscribeServerConfig(input),
@@ -136,12 +137,14 @@ function awaitThreadState(
 }
 
 const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (options?: {
+  readonly onStreamFailure?: Effect.Effect<void>;
   readonly cached?: OrchestrationThread;
   readonly httpSnapshot?: Option.Option<OrchestrationThreadDetailSnapshot>;
   readonly completionMarker?: boolean;
   readonly resumeCache?: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]>;
   readonly loadCached?: Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>>;
   readonly saveThread?: Persistence.EnvironmentCacheStore["Service"]["saveThread"];
+  readonly removeThread?: Persistence.EnvironmentCacheStore["Service"]["removeThread"];
 }) {
   const inputs = yield* Queue.unbounded<TestThreadInput>();
   const observed = yield* Queue.unbounded<EnvironmentThreadState>();
@@ -168,7 +171,10 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
           return Stream.fromArray(chunk as ReadonlyArray<OrchestrationThreadStreamItem>);
         }
         const prefix = chunk.slice(0, errorIndex) as ReadonlyArray<OrchestrationThreadStreamItem>;
-        const failure = Stream.fail(chunk[errorIndex] as Error);
+        const failure = Stream.fromEffect(options?.onStreamFailure ?? Effect.void).pipe(
+          Stream.drain,
+          Stream.concat(Stream.fail(chunk[errorIndex] as Error)),
+        );
         return prefix.length === 0 ? failure : Stream.concat(Stream.fromArray(prefix), failure);
       }),
     );
@@ -176,12 +182,22 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     [ORCHESTRATION_WS_METHODS.subscribeThread]: (input: {
       readonly afterSequence?: number;
       readonly requestCompletionMarker?: boolean;
+      readonly threadDeletion?: boolean;
     }) =>
       Stream.unwrap(
         Ref.updateAndGet(subscriptionCount, (count) => count + 1).pipe(
           Effect.andThen(Ref.set(lastSubscribeAfterSequence, input.afterSequence)),
           Effect.andThen(Ref.set(lastRequestCompletionMarker, input.requestCompletionMarker)),
-          Effect.as(streamFrom(inputs)),
+          Effect.as(
+            streamFrom(inputs).pipe(
+              Stream.filter(
+                (item) =>
+                  item.kind !== "event" ||
+                  item.event.type !== "thread.deleted" ||
+                  input.threadDeletion === true,
+              ),
+            ),
+          ),
         ),
       ),
   } as unknown as WsRpcProtocolClient;
@@ -232,8 +248,10 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       Ref.update(savedThreads, (current) => [...current, thread]).pipe(
         Effect.andThen(options?.saveThread?.(environmentId, thread) ?? Effect.void),
       ),
-    removeThread: (_environmentId, threadId) =>
-      Ref.update(removedThreads, (current) => [...current, threadId]),
+    removeThread: (environmentId, threadId) =>
+      Ref.update(removedThreads, (current) => [...current, threadId]).pipe(
+        Effect.andThen(options?.removeThread?.(environmentId, threadId) ?? Effect.void),
+      ),
     loadServerConfig: () => Effect.succeedNone,
     saveServerConfig: () => Effect.void,
     loadVcsRefs: () => Effect.succeedNone,
@@ -778,6 +796,69 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  for (const inFlight of [false, true]) {
+    it.effect(
+      `keeps the disk cache empty after deletion with a ${inFlight ? "running" : "debounced"} write`,
+      () =>
+        Effect.gen(function* () {
+          const disk = yield* Ref.make<OrchestrationThreadDetailSnapshot | undefined>(undefined);
+          const writing = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const harness = yield* makeHarness({
+            saveThread: (_environmentId, next) =>
+              Deferred.succeed(writing, undefined).pipe(
+                Effect.andThen(inFlight ? Deferred.await(release) : Effect.void),
+                Effect.andThen(Ref.set(disk, next)),
+              ),
+            removeThread: () => Ref.set(disk, undefined),
+          });
+          yield* Queue.offer(harness.inputs, snapshot(BASE_THREAD));
+          yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+          if (inFlight) {
+            yield* TestClock.adjust("500 millis");
+            yield* Deferred.await(writing);
+          }
+          yield* Queue.offerAll(harness.inputs, [deleted(), synchronized()]);
+          const state = yield* awaitThreadState(
+            harness.observed,
+            (value) => value.status === "deleted",
+          );
+          expect(Option.isNone(state.data)).toBe(true);
+          yield* Deferred.succeed(release, undefined);
+          yield* TestClock.adjust("500 millis");
+          expect(yield* Ref.get(disk)).toBeUndefined();
+        }),
+    );
+  }
+
+  it.effect("does not retry not-found failures while a deleted thread stays mounted", () =>
+    Effect.gen(function* () {
+      const failed = yield* Deferred.make<void>();
+      const resumeCache: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]> = {
+        snapshot: undefined,
+        owner: undefined,
+      };
+      const harness = yield* makeHarness({
+        cached: BASE_THREAD,
+        resumeCache,
+        onStreamFailure: Deferred.succeed(failed, undefined).pipe(Effect.asVoid),
+      });
+      yield* Queue.offer(harness.inputs, snapshot(BASE_THREAD));
+      yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+      yield* Queue.offer(harness.inputs, deleted());
+      yield* awaitThreadState(harness.observed, (value) => value.status === "deleted");
+      yield* Queue.offer(harness.inputs, new Error("Thread was not found"));
+      yield* Deferred.await(failed);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Ref.get(harness.subscriptionCount)).toBe(1);
+      const reopened = yield* makeHarness({ resumeCache });
+      yield* Queue.offer(reopened.inputs, snapshot(BASE_THREAD));
+      yield* awaitThreadState(reopened.observed, (value) => value.status === "live");
+      expect(yield* Ref.get(reopened.subscriptionCount)).toBe(1);
+      expect(Option.getOrThrow((yield* Ref.get(reopened.latest)).data)).toEqual(BASE_THREAD);
+    }),
+  );
+
   it.effect("does not resurrect a deleted thread when the app returns to the foreground", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
@@ -921,6 +1002,77 @@ describe("EnvironmentThreads", () => {
       expect((yield* Ref.get(harness.latest)).status).toBe("live");
     }),
   );
+
+  for (const batched of [false, true]) {
+    it.effect(`applies crew membership from a ${batched ? "batched" : "standalone"} marker`, () =>
+      Effect.gen(function* () {
+        const cached: OrchestrationThreadDetailSnapshot = {
+          snapshotSequence: CACHED_SNAPSHOT_SEQUENCE,
+          page: {
+            beforeCursor: "older-1",
+            hasMore: true,
+            snapshotSequence: CACHED_SNAPSHOT_SEQUENCE,
+          },
+          thread: {
+            ...BASE_THREAD,
+            messages: ["older", "recent"].map((id) => ({
+              id: MessageId.make(id),
+              role: "user",
+              text: id,
+              turnId: TurnId.make(id),
+              streaming: false,
+              createdAt: BASE_THREAD.createdAt,
+              updatedAt: BASE_THREAD.updatedAt,
+            })),
+          },
+        };
+        const expectedSequence = CACHED_SNAPSHOT_SEQUENCE + (batched ? 1 : 0);
+        const expectedThread = {
+          ...cached.thread,
+          title: batched ? "Replayed title" : cached.thread.title,
+          updatedAt: batched ? "2026-04-01T01:00:00.000Z" : cached.thread.updatedAt,
+          createdAsCrewMember: true,
+        };
+        const savedThreads = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const harness = yield* makeHarness({
+              loadCached: Effect.succeedSome(cached),
+              completionMarker: true,
+            });
+            const before = yield* awaitThreadState(
+              harness.observed,
+              (value) => value.status === "synchronizing" && Option.isSome(value.page),
+            );
+            const marker = { kind: "synchronized", createdAsCrewMember: true } as const;
+            if (batched) {
+              yield* Queue.offerAll(harness.inputs, [
+                titleUpdated(expectedThread.title, expectedSequence),
+                marker,
+              ]);
+            } else {
+              yield* Queue.offer(harness.inputs, marker);
+            }
+            const live = yield* awaitThreadState(
+              harness.observed,
+              (value) => value.status === "live",
+            );
+            expect(Option.getOrThrow(live.data)).toEqual(expectedThread);
+            expect(live.page).toEqual(before.page);
+            expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(
+              CACHED_SNAPSHOT_SEQUENCE,
+            );
+            expect(yield* Ref.get(harness.loaderCalls)).toBe(0);
+            return harness.savedThreads;
+          }),
+        );
+        expect((yield* Ref.get(savedThreads)).at(-1)).toEqual({
+          snapshotSequence: expectedSequence,
+          thread: expectedThread,
+          page: { ...cached.page, snapshotSequence: expectedSequence },
+        });
+      }),
+    );
+  }
 
   it.effect("keeps replayed updates synchronizing until the completion marker arrives", () =>
     Effect.gen(function* () {
@@ -1067,3 +1219,21 @@ describe("EnvironmentThreads", () => {
       }),
   );
 });
+
+it.effect("receives opted-in deletion before the synchronization receipt", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness({ completionMarker: true });
+    yield* Queue.offer(harness.inputs, snapshot(BASE_THREAD));
+    yield* awaitThreadState(
+      harness.observed,
+      (value) => value.status === "synchronizing" && Option.isSome(value.data),
+    );
+    yield* Queue.offerAll(harness.inputs, [deleted(), synchronized()]);
+    const state = yield* awaitThreadState(
+      harness.observed,
+      (value) => value.status === "deleted" || value.status === "live",
+    );
+    expect(state.status).toBe("deleted");
+    expect(Option.isNone(state.data)).toBe(true);
+  }),
+);

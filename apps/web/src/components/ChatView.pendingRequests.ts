@@ -2,7 +2,11 @@ import {
   questionAttachmentDraftId,
   useQuestionAttachmentPreparation,
 } from "../questionAttachments";
-import { type ApprovalRequestId, type ProviderApprovalDecision } from "@t3tools/contracts";
+import {
+  type ApprovalRequestId,
+  type MessageId,
+  type ProviderApprovalDecision,
+} from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { useCallback } from "react";
 import {
@@ -17,7 +21,6 @@ import {
   setPendingUserInputCustomAnswer,
   togglePendingUserInputOptionSelection,
 } from "../pendingUserInput";
-import { newMessageId } from "~/lib/utils";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { serializeLegacyContextMessage } from "@t3tools/shared/composerContextLegacySend";
 import { buildMessageContext } from "../lib/composerContextRecords";
@@ -26,6 +29,7 @@ import { readPostPreparationMemoryDispatchHold, sendQueuedMessage } from "./chat
 import { environmentServerConfigsAtom } from "../state/server";
 import { getUploadedAttachments } from "../lib/attachmentUploadQueue";
 import { appAtomRegistry } from "../rpc/atomRegistry";
+import { stackedThreadToast, toastManager } from "./ui/toast";
 import { formatOutgoingPrompt } from "./ChatView.helpers";
 import type { useChatViewThreadState } from "./ChatView.threadState";
 import type { useChatViewTimelineData } from "./ChatView.timelineData";
@@ -79,6 +83,7 @@ export function useChatViewPendingRequests({
     setComposerDraftInteractionMode,
     startThreadTurn,
     routeThreadKey,
+    currentRouteThreadKeyRef,
   } = threadState;
   const {
     activePendingApproval,
@@ -387,15 +392,17 @@ export function useChatViewPendingRequests({
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
+      messageId: messageIdForSend,
       text,
       context,
       interactionMode: nextInteractionMode,
+      onFailure,
     }: {
+      messageId: MessageId;
       text: string;
       context?: ReturnType<typeof buildMessageContext>;
       interactionMode: "default" | "plan";
-      // Whether the message actually went out. A `false` return tells the caller to put the
-      // composer back, because it cleared it before awaiting this.
+      onFailure?: (message: string) => boolean;
     }): Promise<boolean> => {
       if (
         !activeThread ||
@@ -425,7 +432,6 @@ export function useChatViewPendingRequests({
       } = sendCtx;
 
       const threadIdForSend = activeThread.id;
-      const messageIdForSend = newMessageId();
       const messageCreatedAt = new Date().toISOString();
       // Memory references must find the same send support as any other direct
       // dispatch; returning false puts the composer back, untouched.
@@ -534,25 +540,31 @@ export function useChatViewPendingRequests({
         }
       }
 
+      const isSendingThreadVisible = currentRouteThreadKeyRef.current === routeThreadKey;
       if (failure === null) {
         clearUsageLimitsFor(routeThreadKey);
-        acknowledgeActiveThreadWoke();
+        if (isSendingThreadVisible) acknowledgeActiveThreadWoke();
         sendInFlightRef.current = false;
         return true;
       }
 
-      setOptimisticUserMessages((existing) =>
-        existing.filter((message) => message.id !== messageIdForSend),
-      );
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
-        setThreadError(
-          threadIdForSend,
-          error instanceof Error ? error.message : "Failed to send plan follow-up.",
-        );
+        const message = error instanceof Error ? error.message : "Failed to send plan follow-up.";
+        setThreadError(threadIdForSend, message);
+        const recoveryOffered = onFailure?.(message) ?? false;
+        if (!isSendingThreadVisible && !recoveryOffered) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Plan follow-up could not be sent",
+              description: message,
+            }),
+          );
+        }
       }
       sendInFlightRef.current = false;
-      resetLocalDispatch();
+      if (isSendingThreadVisible) resetLocalDispatch();
       return false;
     },
     [
@@ -574,6 +586,7 @@ export function useChatViewPendingRequests({
       environmentId,
       composerRef,
       clearUsageLimitsFor,
+      currentRouteThreadKeyRef,
       routeThreadKey,
     ],
   );

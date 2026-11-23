@@ -13,56 +13,12 @@ import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
   getChangedBrowserSettingLabels,
-  getChangedTypographySettingLabels,
-  hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
 } from "./SettingsPanels.logic";
 
-describe("typography settings restore", () => {
-  it("detects family and size changes by font row", () => {
-    expect(getChangedTypographySettingLabels(DEFAULT_UNIFIED_SETTINGS)).toEqual([]);
-    expect(
-      getChangedTypographySettingLabels({
-        ...DEFAULT_UNIFIED_SETTINGS,
-        fontSizeInterface: 18,
-        fontFamilyCode: "Fira Code",
-      }),
-    ).toEqual(["Interface font", "Code font"]);
-  });
-});
-
 describe("background activity settings restore", () => {
-  it("detects legacy interval values even when the structured setting is at its default", () => {
-    expect(
-      hasChangedBackgroundActivitySettings({
-        backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
-        backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
-        automaticGitFetchInterval: Duration.seconds(45),
-        providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
-      }),
-    ).toBe(true);
-    expect(
-      hasChangedBackgroundActivitySettings({
-        backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
-        backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
-        automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-        providerHealthRefreshInterval: Duration.minutes(7),
-      }),
-    ).toBe(true);
-    expect(hasChangedBackgroundActivitySettings(DEFAULT_UNIFIED_SETTINGS)).toBe(false);
-  });
-
-  it("detects a legacy profile override so restoring defaults clears it", () => {
-    expect(
-      hasChangedBackgroundActivitySettings({
-        ...DEFAULT_UNIFIED_SETTINGS,
-        backgroundActivityProfile: "performance",
-      }),
-    ).toBe(true);
-  });
-
   it("shows the effective legacy preset and marks custom legacy intervals as advanced", () => {
     const performance = getBackgroundActivityPresetSettings("performance");
     expect(

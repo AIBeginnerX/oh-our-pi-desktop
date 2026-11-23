@@ -421,6 +421,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const ownerScope = yield* Effect.scope;
     const serverConfig = yield* Effect.service(ServerConfig);
     const crypto = yield* Crypto.Crypto;
     const nativeEventLogger =
@@ -1066,7 +1067,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       return Effect.succeed(ctx);
     };
 
-    const stopSessionInternal = (ctx: GrokSessionContext) =>
+    const stopSessionInternal = (ctx: GrokSessionContext, disconnectReason?: string) =>
       Effect.gen(function* () {
         if (ctx.stopped) return;
         ctx.stopped = true;
@@ -1076,13 +1077,17 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           yield* Fiber.interrupt(ctx.notificationFiber);
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void));
+        const stamp = yield* makeEventStamp();
+        if (sessions.get(ctx.threadId) !== ctx) return;
         sessions.delete(ctx.threadId);
         yield* offerRuntimeEvent({
           type: "session.exited",
-          ...(yield* makeEventStamp()),
+          ...stamp,
           provider: PROVIDER,
           threadId: ctx.threadId,
-          payload: { exitKind: "graceful" },
+          payload: disconnectReason
+            ? { exitKind: "error", reason: disconnectReason }
+            : { exitKind: "graceful" },
         });
       });
 
@@ -1481,11 +1486,29 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             backgroundTasks: new Map(),
           };
 
+          let startupTermination: EffectAcpErrors.AcpError | undefined;
           const nf = yield* Stream.runDrain(
             Stream.mapEffect(acp.getEvents(), (event) =>
               Effect.gen(function* () {
                 if (event._tag === "EventStreamBarrier") {
                   yield* Deferred.succeed(event.acknowledge, undefined);
+                  return;
+                }
+                if (event._tag === "ConnectionTerminated") {
+                  if (sessions.get(ctx.threadId) !== ctx) {
+                    startupTermination = event.error;
+                    return;
+                  }
+                  if (isShuttingDown()) return;
+                  const reason =
+                    event.error._tag === "AcpInputStreamEndedError" ||
+                    event.error._tag === "AcpProcessExitedError"
+                      ? event.error.message
+                      : `${LABEL} process stopped.`;
+                  yield* stopSessionInternal(ctx, reason).pipe(
+                    Effect.uninterruptible,
+                    Effect.forkIn(ownerScope, { startImmediately: true }),
+                  );
                   return;
                 }
                 if (
@@ -1646,10 +1669,26 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             // as `startSession` returned and every later notification was
             // dropped. The scope is created, stored on the context and closed
             // on teardown already; only the fork target was wrong.
-            Effect.forkIn(ctx.scope),
+            Effect.forkIn(ctx.scope, { startImmediately: true }),
           );
 
           ctx.notificationFiber = nf;
+          // Recheck the connection after installing the consumer and before publishing the session.
+          yield* acp
+            .start()
+            .pipe(
+              Effect.mapError((error) =>
+                mapAcpToAdapterError(PROVIDER, input.threadId, "session/start", error),
+              ),
+            );
+          if (startupTermination !== undefined) {
+            return yield* mapAcpToAdapterError(
+              PROVIDER,
+              input.threadId,
+              "session/start",
+              startupTermination,
+            );
+          }
           sessions.set(input.threadId, ctx);
           yield* runTurnLivenessWatchdog(ctx).pipe(Effect.forkIn(ctx.scope), Effect.asVoid);
           sessionScopeTransferred = true;
@@ -2495,7 +2534,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       });
 
     const stopAll: GrokAdapterShape["stopAll"] = () =>
-      Effect.forEach(Array.from(sessions.values()), stopSessionInternal, { discard: true });
+      Effect.forEach(Array.from(sessions.values()), (ctx) => stopSessionInternal(ctx), {
+        discard: true,
+      });
 
     yield* Effect.addFinalizer(() =>
       Effect.ignore(stopAll()).pipe(

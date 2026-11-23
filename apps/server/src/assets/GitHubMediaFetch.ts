@@ -37,6 +37,7 @@ const isCredentialedHost = (url: string) => {
 const MAX_REDIRECTS = 3;
 /** Following the redirect here, rather than in `fetch`, is what keeps the token on GitHub. */
 const MANUAL_REDIRECT: RequestInit = { redirect: "manual" };
+const TOKEN_HOST = "github.com";
 const TOKEN_CACHE_TTL_MS = 5 * 60_000;
 const TOKEN_CACHE_MAX_ENTRIES = 32;
 /** Passed through so a seek in a long video costs one upstream range request, not a full download. */
@@ -115,7 +116,7 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
     // a token — deciding that from the target, not from the hop count, is what makes it so.
     const authorization =
       token !== null && isCredentialedHost(target) ? `Bearer ${Redacted.value(token)}` : null;
-    const response: HttpClientResponse.HttpClientResponse = yield* httpClient
+    const upstream: Option.Option<HttpClientResponse.HttpClientResponse> = yield* httpClient
       .execute(
         HttpClientRequest.get(target).pipe(
           HttpClientRequest.setHeaders({
@@ -126,7 +127,19 @@ const fetchFollowingRedirects = Effect.fn("GitHubMediaFetch.fetchFollowingRedire
           }),
         ),
       )
-      .pipe(Effect.provideService(FetchHttpClient.RequestInit, MANUAL_REDIRECT));
+      .pipe(
+        Effect.provideService(FetchHttpClient.RequestInit, MANUAL_REDIRECT),
+        Effect.timeoutOption("15 seconds"),
+      );
+    if (Option.isNone(upstream)) return "timeout" as const;
+    const response = upstream.value;
+    if (
+      authorization !== null &&
+      (response.status === 401 || response.status === 403 || response.status === 404) &&
+      tokenCache.get(TOKEN_HOST)?.token === token
+    ) {
+      tokenCache.delete(TOKEN_HOST);
+    }
     const location = response.headers.location;
     if (response.status < 300 || response.status >= 400) return response;
     // A chain this long is not GitHub answering with bytes, and its body is not the media.
@@ -146,7 +159,7 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
   requestHeaders: Record<string, string | undefined>,
 ) {
   // Both media hosts are served by github.com's account, which is the host `gh` stores it under.
-  const token = yield* githubToken({ cwd: asset.cwd, host: "github.com" });
+  const token = yield* githubToken({ cwd: asset.cwd, host: TOKEN_HOST });
   const forwarded: Record<string, string> = {};
   for (const name of FORWARDED_REQUEST_HEADERS) {
     const value = requestHeaders[name];
@@ -161,11 +174,16 @@ export const githubMediaResponse = Effect.fn("GitHubMediaFetch.githubMediaRespon
       remainingSeconds > 0 ? `private, max-age=${remainingSeconds}` : "private, no-store",
     "x-content-type-options": "nosniff",
   };
+  if (response === "timeout") {
+    headers["cache-control"] = "private, no-store";
+    return HttpServerResponse.empty({ status: 504, headers });
+  }
   if (response === null) return HttpServerResponse.empty({ status: 502, headers });
   // An upstream refusal is the client's answer, not this server's fault; only a broken hop is.
   // It carries none of the upstream entity headers: a `content-length` with no body behind it
   // holds the connection open until the browser gives up on it.
   if (response.status >= 400) {
+    headers["cache-control"] = "private, no-store";
     return HttpServerResponse.empty({
       status: response.status >= 500 ? 502 : response.status,
       headers,

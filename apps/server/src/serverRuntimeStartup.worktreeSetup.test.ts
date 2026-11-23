@@ -16,6 +16,14 @@ import * as Stream from "effect/Stream";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import { formatWorktreeCheckoutDetail } from "./ws.bootstrap.ts";
+
+it("formats the completed checkout detail with and without local files or a file total", () => {
+  assert.equal(formatWorktreeCheckoutDetail(2700, 3), "2,700 files, 3 local files copied");
+  assert.equal(formatWorktreeCheckoutDetail(null, 3), "3 local files copied");
+  assert.equal(formatWorktreeCheckoutDetail(2700, 0), "2,700 files");
+  assert.isNull(formatWorktreeCheckoutDetail(null, 0));
+});
 
 const startedAt = "2026-08-20T12:00:00.000Z";
 

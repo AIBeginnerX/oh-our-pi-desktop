@@ -15,6 +15,7 @@ import {
   type PullRequestSummary,
   type ThreadPullRequestLink,
   type ThreadPullRequestSnapshot,
+  type ThreadPullRequestStack,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -404,6 +405,51 @@ describe("PullRequestSyncReactor", () => {
     ),
   );
 
+  it.effect("refreshes open PR checks while the stack lookup is failing or backed off", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        let checksState: "failing" | "passing" = "failing";
+        const stack: ThreadPullRequestStack = {
+          kind: "native",
+          id: "stack",
+          number: 7,
+          url: "https://github.com/owner/repository/stacks/7",
+          base: "main",
+          layers: [{ number: 7, headBranch: "feature", state: "open" }],
+        };
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([
+            makeThread("one", {
+              pullRequests: [makeLink(7, { checksState: "pending" }, { stack })],
+            }),
+          ]),
+          summary: (input) => Effect.succeed(makeSummary(input, { checksState })),
+          stack: () =>
+            Effect.fail(new PullRequestOperationError({ operation: "stack", detail: "host down" })),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          const commands = yield* Ref.get(fixture.syncCommands);
+          assert.deepStrictEqual(
+            commands.map(({ snapshot }) => snapshot.checksState),
+            ["failing"],
+          );
+          assert.deepStrictEqual(commands[0]?.stack, stack);
+          yield* Ref.update(fixture.snapshots, (snapshot) => applySync(snapshot, commands));
+          yield* sweepAgain(fixture, reactor);
+          checksState = "passing";
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 2);
+          assert.strictEqual(
+            (yield* Ref.get(fixture.syncCommands)).at(-1)?.snapshot.checksState,
+            "passing",
+          );
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
   it.effect("backs off a stack read that keeps failing", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -421,6 +467,30 @@ describe("PullRequestSyncReactor", () => {
           assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 2);
           yield* sweepAgain(fixture, reactor); // second retry after two minutes
           assert.strictEqual((yield* Ref.get(fixture.stackCalls)).length, 3);
+        }).pipe(Effect.provide(fixture.layer));
+      }),
+    ),
+  );
+
+  it.effect("backs off summary reads during a failed terminal transition", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* TestClock.setTime(Date.parse(NOW));
+        const fixture = yield* makeHarness({
+          snapshot: makeSnapshot([makeThread("one", { pullRequests: [makeLink(7)] })]),
+          summary: (input) =>
+            Effect.succeed(makeSummary(input, { state: "merged", mergedAt: NOW })),
+          stack: () =>
+            Effect.fail(new PullRequestOperationError({ operation: "stack", detail: "host down" })),
+        });
+        yield* Effect.gen(function* () {
+          const reactor = yield* startAndSweep(fixture);
+          yield* sweepAgain(fixture, reactor); // first retry after one minute
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+          yield* sweepAgain(fixture, reactor);
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 2);
+          yield* sweepAgain(fixture, reactor); // second retry after two minutes
+          assert.strictEqual((yield* Ref.get(fixture.summaryCalls)).length, 3);
         }).pipe(Effect.provide(fixture.layer));
       }),
     ),

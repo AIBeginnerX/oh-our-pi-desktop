@@ -25,6 +25,7 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { copyWorktreeIncludes } from "./worktreeInclude.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -2375,6 +2376,24 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
     if (progress?.onWorktreeClaimed) {
       yield* progress.onWorktreeClaimed(worktreePath);
+    }
+
+    const localFilesCopied = yield* copyWorktreeIncludes(
+      execute,
+      fileSystem,
+      input.cwd,
+      worktreePath,
+    ).pipe(
+      Effect.scoped,
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not copy worktree local files", { cause }).pipe(Effect.as(0)),
+      ),
+    );
+    if (localFilesCopied > 0) {
+      yield* Effect.logInfo("Copied worktree local files", { count: localFilesCopied });
+      if (progress?.onLocalFilesCopied) {
+        yield* progress.onLocalFilesCopied({ count: localFilesCopied });
+      }
     }
 
     // `git worktree add` leaves submodules empty, so a repo that keeps agent

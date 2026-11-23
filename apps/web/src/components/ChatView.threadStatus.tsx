@@ -1074,7 +1074,6 @@ export function useChatViewThreadStatus({
     handleSwitchCheckoutToThread,
     addPullRequestSurface,
     pullRequestSurfaceAvailable,
-    activeWorktreePath,
     closeExpandedImage,
   };
 }

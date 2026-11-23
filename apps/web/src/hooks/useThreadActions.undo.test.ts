@@ -1,7 +1,16 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
+import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { useThreadActions } from "./useThreadActions";
+import { AsyncResult } from "effect/unstable/reactivity";
+import { useBrowserHistoryStore } from "../browserHistoryStore";
+import { useDiffPanelStore } from "../diffPanelStore";
+import { useRightPanelStore } from "../rightPanelStore";
+import { deleteProjectAndClearThreadViewState, useThreadActions } from "./useThreadActions";
 import { threadEnvironment } from "../state/threads";
 import { toastManager } from "../components/ui/toast";
 import { useThreadUndoNotice } from "./showThreadUndoNotice";
@@ -10,11 +19,22 @@ const commands = vi.hoisted(() => ({
   pin: vi.fn(),
   unpin: vi.fn(),
   archive: vi.fn(),
+  delete: vi.fn(),
   unarchive: vi.fn(),
   settle: vi.fn(),
   unsettle: vi.fn(),
   snooze: vi.fn(),
   unsnooze: vi.fn(),
+}));
+const projectThreadSources = vi.hoisted(() => ({
+  readThreadShells: vi.fn<
+    () => readonly { environmentId: EnvironmentId; id: ThreadId; projectId: ProjectId }[]
+  >(() => []),
+  executeAtomQuery: vi.fn(),
+}));
+vi.mock("@t3tools/client-runtime/state/runtime", async (original) => ({
+  ...(await original<typeof import("@t3tools/client-runtime/state/runtime")>()),
+  executeAtomQuery: projectThreadSources.executeAtomQuery,
 }));
 const router = vi.hoisted(() => ({
   navigate: vi.fn(async () => {}),
@@ -29,6 +49,7 @@ vi.mock("react", async (original) => ({
 vi.mock("@tanstack/react-router", () => ({ useRouter: () => router }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => false }));
 vi.mock("./useHandleNewThread", () => ({ useNewThreadHandler: () => vi.fn() }));
+vi.mock("../lib/composerDraftUploads", () => ({ releaseComposerDraftUploads: vi.fn() }));
 vi.mock("../composerDraftStore", () => ({ useComposerDraftStore: () => vi.fn() }));
 vi.mock("../terminalUiStateStore", () => ({ useTerminalUiStateStore: () => vi.fn() }));
 vi.mock("../uiStateStore", () => ({ useUiStateStore: () => vi.fn() }));
@@ -44,11 +65,13 @@ const threadShell = vi.hoisted(() => ({
 }));
 vi.mock("../state/entities", async (original) => ({
   ...(await original<typeof import("../state/entities")>()),
+  readThreadShells: projectThreadSources.readThreadShells,
   readEnvironmentSupportsPinning: () => true,
   readEnvironmentSupportsPinReorder: () => true,
   readEnvironmentSupportsSettlement: () => true,
   readEnvironmentSupportsSnooze: () => true,
-  readThreadShell: () => threadShell,
+  readThreadShell: (ref: { threadId: string }) =>
+    ref.threadId === "archived" ? null : threadShell,
 }));
 vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: (command: unknown) => {
@@ -57,6 +80,8 @@ vi.mock("../state/use-atom-command", () => ({
         return commands.pin;
       case threadEnvironment.unpin:
         return commands.unpin;
+      case threadEnvironment.delete:
+        return commands.delete;
       case threadEnvironment.archive:
         return commands.archive;
       case threadEnvironment.unarchive:
@@ -215,4 +240,78 @@ describe("settle and snooze Undo", () => {
       input: { threadId: target.threadId, reason: "user" },
     });
   });
+});
+
+describe("thread deletion", () => {
+  const archived = scopeThreadRef(target.environmentId, ThreadId.make("archived"));
+  const other = scopeThreadRef(target.environmentId, ThreadId.make("other"));
+
+  afterEach(() => {
+    for (const ref of [target, archived, other]) {
+      useRightPanelStore.getState().removeThread(ref);
+      useDiffPanelStore.getState().removeThread(ref);
+    }
+  });
+
+  it.each([target, archived])("clears panel and diff state for $threadId only", async (ref) => {
+    for (const opened of [ref, other]) {
+      useRightPanelStore.getState().open(opened, "agents");
+      useDiffPanelStore.getState().setDiffFileViewed(opened, "a:src/app.ts", true);
+    }
+    const result = await useThreadActions().deleteThread(ref);
+    expect(result._tag).toBe("Success");
+    const panels = useRightPanelStore.getState().byThreadKey;
+    const marks = useDiffPanelStore.getState().viewedMarksByThreadKey;
+    expect(panels[scopedThreadKey(ref)]).toBeUndefined();
+    expect(marks[scopedThreadKey(ref)]).toBeUndefined();
+    expect(panels[scopedThreadKey(other)]?.isOpen).toBe(true);
+    expect(marks[scopedThreadKey(other)]).toEqual(["a:src/app.ts"]);
+  });
+});
+
+it("clears active and archived thread state only for the removed checkout", async () => {
+  const projectId = ProjectId.make("project");
+  const environmentId = target.environmentId;
+  const active = target;
+  const archived = scopeThreadRef(environmentId, ThreadId.make("archived"));
+  const other = scopeThreadRef(EnvironmentId.make("another-server"), active.threadId);
+  const refs = [active, archived, other];
+  projectThreadSources.readThreadShells.mockImplementationOnce(() =>
+    [active, other].map(({ environmentId, threadId: id }) => ({ environmentId, id, projectId })),
+  );
+  projectThreadSources.executeAtomQuery.mockResolvedValueOnce(
+    AsyncResult.success({
+      threads: [{ id: archived.threadId, projectId }],
+    }),
+  );
+  for (const ref of refs) {
+    useRightPanelStore.getState().open(ref, "agents");
+    useDiffPanelStore.getState().setDiffFileViewed(ref, "a:src/app.ts", true);
+    useBrowserHistoryStore.getState().registerThreadProject(ref, "project");
+  }
+  try {
+    await deleteProjectAndClearThreadViewState(
+      scopeProjectRef(environmentId, projectId),
+      async () => AsyncResult.success(undefined),
+    );
+    for (const ref of refs) {
+      const key = scopedThreadKey(ref);
+      expect(useRightPanelStore.getState().byThreadKey[key]?.isOpen).toBe(
+        ref === other ? true : undefined,
+      );
+      expect(useDiffPanelStore.getState().viewedMarksByThreadKey[key]).toEqual(
+        ref === other ? ["a:src/app.ts"] : undefined,
+      );
+      expect(useBrowserHistoryStore.getState().projectKeyByThreadKey[key]).toBe(
+        ref === other ? "project" : undefined,
+      );
+    }
+  } finally {
+    for (const ref of refs) {
+      useRightPanelStore.getState().removeThread(ref);
+      useDiffPanelStore.getState().removeThread(ref);
+      useBrowserHistoryStore.getState().removeThread(ref);
+    }
+    projectThreadSources.executeAtomQuery.mockReset();
+  }
 });

@@ -109,10 +109,11 @@ export class WorkspaceFileSystem extends Context.Service<
   {
     /**
      * Read a UTF-8 text file relative to the workspace root, or any host file by
-     * absolute path.
+     * absolute path when workspaceOnly is false or omitted.
      */
     readonly readFile: (
       input: ProjectReadFileInput,
+      options?: { readonly workspaceOnly: boolean },
     ) => Effect.Effect<
       ProjectReadFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
@@ -164,72 +165,67 @@ export const make = Effect.gen(function* () {
     }
   });
 
-  /**
-   * Resolves the file a read targets. Workspace-relative paths must stay inside the
-   * root, symlinks included. An absolute path reads a host file in place, such as a
-   * report an agent wrote to a temp directory; it gets no root check.
-   */
   const resolveReadTarget = Effect.fn("WorkspaceFileSystem.resolveReadTarget")(function* (
     input: ProjectReadFileInput,
+    workspaceOnly: boolean,
   ) {
     const requestedPath = input.relativePath.trim();
-    if (path.isAbsolute(requestedPath)) {
-      const realTargetPath = yield* Effect.tryPromise({
-        try: () => NodeFSP.realpath(requestedPath),
-        catch: (cause) =>
-          new WorkspaceFileSystemOperationError({
-            workspaceRoot: input.cwd,
-            relativePath: input.relativePath,
-            resolvedPath: requestedPath,
-            operationPath: requestedPath,
-            operation: "realpath-target",
-            cause,
-          }),
-      });
-      return { relativePath: requestedPath, realTargetPath };
-    }
-
-    const target = yield* workspacePaths.resolveRelativePathWithinRoot({
-      workspaceRoot: input.cwd,
-      relativePath: input.relativePath,
-    });
-
-    const realWorkspaceRoot = yield* Effect.tryPromise({
-      try: () => NodeFSP.realpath(input.cwd),
-      catch: (cause) =>
-        new WorkspaceFileSystemOperationError({
+    const isAbsolute = path.isAbsolute(requestedPath);
+    const target = isAbsolute
+      ? { relativePath: requestedPath, absolutePath: requestedPath }
+      : yield* workspacePaths.resolveRelativePathWithinRoot({
           workspaceRoot: input.cwd,
           relativePath: input.relativePath,
-          resolvedPath: target.absolutePath,
-          operationPath: input.cwd,
-          operation: "realpath-workspace-root",
-          cause,
-        }),
-    });
+        });
+
+    const realWorkspaceRoot =
+      !isAbsolute || workspaceOnly
+        ? yield* Effect.tryPromise({
+            try: () => NodeFSP.realpath(input.cwd),
+            catch: (cause) =>
+              new WorkspaceFileSystemOperationError({
+                workspaceRoot: input.cwd,
+                relativePath: input.relativePath,
+                resolvedPath: target.absolutePath,
+                operationPath: input.cwd,
+                operation: "realpath-workspace-root",
+                cause,
+              }),
+          })
+        : undefined;
     const realTargetPath = yield* Effect.tryPromise({
       try: () => NodeFSP.realpath(target.absolutePath),
       catch: (cause) =>
-        new WorkspaceFileSystemOperationError({
-          workspaceRoot: input.cwd,
-          relativePath: input.relativePath,
-          resolvedPath: target.absolutePath,
-          operationPath: target.absolutePath,
-          operation: "realpath-target",
-          cause,
-        }),
+        workspaceOnly && realWorkspaceRoot !== undefined
+          ? new WorkspaceFilePathEscapeError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedWorkspaceRoot: realWorkspaceRoot,
+              resolvedPath: target.absolutePath,
+            })
+          : new WorkspaceFileSystemOperationError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: target.absolutePath,
+              operationPath: target.absolutePath,
+              operation: "realpath-target",
+              cause,
+            }),
     });
-    yield* failIfOutsideRealRoot(
-      { workspaceRoot: input.cwd, relativePath: input.relativePath },
-      realWorkspaceRoot,
-      realTargetPath,
-    );
+    if (realWorkspaceRoot !== undefined) {
+      yield* failIfOutsideRealRoot(
+        { workspaceRoot: input.cwd, relativePath: input.relativePath },
+        realWorkspaceRoot,
+        realTargetPath,
+      );
+    }
     return { relativePath: target.relativePath, realTargetPath };
   });
 
   const readFile: WorkspaceFileSystem["Service"]["readFile"] = Effect.fn(
     "WorkspaceFileSystem.readFile",
-  )(function* (input) {
-    const target = yield* resolveReadTarget(input);
+  )(function* (input, options) {
+    const target = yield* resolveReadTarget(input, options?.workspaceOnly ?? false);
     const realTargetPath = target.realTargetPath;
 
     return yield* Effect.acquireUseRelease(

@@ -314,6 +314,7 @@ export const makeProjectionListStatements = (sql: SqlClient.SqlClient) => {
     Result: ProjectionThreadPullRequestDbRowSchema.mapFields(
       Struct.assign({
         projectId: ProjectionThread.fields.projectId,
+        branch: ProjectionThread.fields.branch,
         settledOverride: ProjectionThread.fields.settledOverride,
         settledAt: ProjectionThread.fields.settledAt,
       }),
@@ -323,6 +324,7 @@ export const makeProjectionListStatements = (sql: SqlClient.SqlClient) => {
         SELECT
           links.thread_id AS "threadId",
           threads.project_id AS "projectId",
+          threads.branch,
           threads.settled_override AS "settledOverride",
           threads.settled_at AS "settledAt",
           links.host,
@@ -669,6 +671,33 @@ export const makeProjectionListStatements = (sql: SqlClient.SqlClient) => {
       `,
   });
 
+  const listActiveWorkspaceRootRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: Schema.Struct({ workspaceRoot: Schema.String }),
+    execute: () => sql`
+      SELECT workspace_root AS "workspaceRoot"
+      FROM projection_projects WHERE deleted_at IS NULL
+      UNION
+      SELECT t.worktree_path AS "workspaceRoot"
+      FROM projection_threads t
+      JOIN projection_projects p ON p.project_id = t.project_id
+      WHERE t.deleted_at IS NULL AND p.deleted_at IS NULL AND t.worktree_path IS NOT NULL
+    `,
+  });
+
+  const getActiveThreadRowByWorktreePath = SqlSchema.findOneOption({
+    Request: Schema.String,
+    Result: ProjectionThreadIdLookupRowSchema,
+    execute: (worktreePath) => sql`
+      SELECT t.thread_id AS "threadId"
+      FROM projection_threads t
+      JOIN projection_projects p ON p.project_id = t.project_id
+      WHERE t.worktree_path = ${worktreePath}
+        AND t.deleted_at IS NULL AND p.deleted_at IS NULL
+      LIMIT 1
+    `,
+  });
+
   const getActiveProjectRowByWorkspaceRoot = SqlSchema.findOneOption({
     Request: WorkspaceRootLookupInput,
     Result: ProjectionProjectLookupRowSchema,
@@ -760,6 +789,8 @@ export const makeProjectionListStatements = (sql: SqlClient.SqlClient) => {
     readProjectionCounts,
     readEventReplayStats,
     searchActiveThreadRows,
+    listActiveWorkspaceRootRows,
+    getActiveThreadRowByWorktreePath,
     getActiveProjectRowByWorkspaceRoot,
     getActiveProjectRowById,
     getFirstActiveThreadIdByProject,

@@ -783,6 +783,13 @@ export const makeClaudeRuntimeEmitters = (deps: makeClaudeRuntimeEmittersDeps) =
         },
         providerRefs: nativeProviderRefs(context),
       });
+      context.promptSuggestionCandidate =
+        status === "completed" &&
+        payloadResult?.subtype === "success" &&
+        payloadResult.is_error !== true &&
+        !context.stopped
+          ? { turnId: turnState.turnId }
+          : undefined;
       context.turnState = undefined;
       // A stopped session stays closed: Stop writes `closed` after its own take-over.
       context.session = {

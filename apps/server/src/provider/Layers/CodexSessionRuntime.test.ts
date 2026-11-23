@@ -1,8 +1,18 @@
 import * as NodeAssert from "node:assert/strict";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { describe } from "vite-plus/test";
 import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
@@ -13,12 +23,14 @@ import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
 } from "../CodexDeveloperInstructions.ts";
+import wireFixture from "../testFixtures/codexMultiAgentWire.json" with { type: "json" };
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
   describeMcpElicitation,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
+  makeCodexSessionRuntime,
   makeMemoryConsolidationNotificationFilter,
   openCodexThread,
   readCodexThread,
@@ -26,6 +38,91 @@ import {
   toMcpElicitationResponse,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+
+const decodeClientMessage = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({ method: Schema.String, id: Schema.optional(Schema.Number) }),
+  ),
+);
+const encodeServerMessage = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
+for (const [name, responds] of [
+  ["accepts a parent interrupt response after five seconds", true],
+  ["fails an unanswered parent interrupt without marking the active turn interrupted", false],
+] as const) {
+  it.effect(name, () =>
+    Effect.gen(function* () {
+      const received = yield* Deferred.make<number>();
+      const stdout = yield* Queue.unbounded<Uint8Array, Cause.Done>();
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      const spawner = ChildProcessSpawner.make(() =>
+        Effect.succeed(
+          ChildProcessSpawner.makeHandle({
+            pid: ChildProcessSpawner.ProcessId(1),
+            exitCode: Effect.never,
+            isRunning: Effect.succeed(true),
+            kill: () => Effect.void,
+            unref: Effect.succeed(Effect.void),
+            stdin: Sink.forEach((bytes: Uint8Array) => {
+              const { id, method } = decodeClientMessage(decoder.decode(bytes));
+              if (id === undefined) return Effect.void;
+              if (method === "turn/interrupt") return Deferred.succeed(received, id);
+              const result =
+                method === "initialize"
+                  ? {
+                      userAgent: "test",
+                      codexHome: "/tmp",
+                      platformFamily: "unix",
+                      platformOs: "test",
+                    }
+                  : method === "thread/start"
+                    ? wireFixture.responses.threadStart
+                    : wireFixture.responses.turnStart;
+              return Queue.offer(
+                stdout,
+                encoder.encode(encodeServerMessage({ id, result }) + "\n"),
+              );
+            }),
+            stdout: Stream.fromQueue(stdout),
+            stderr: Stream.empty,
+            all: Stream.empty,
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+          }),
+        ),
+      );
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("stop-deadline"),
+        binaryPath: "mock-codex",
+        cwd: "/tmp",
+        environment: {},
+        runtimeMode: "full-access",
+      }).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+      yield* runtime.start();
+      const turn = yield* runtime.sendTurn({ input: "Start a turn" });
+      const stop = yield* runtime.interruptTurn().pipe(Effect.forkScoped);
+      const id = yield* Deferred.await(received);
+      yield* TestClock.adjust("5 seconds");
+      NodeAssert.equal(stop.pollUnsafe(), undefined, "Stop must still wait after five seconds");
+      if (responds) {
+        yield* Queue.offer(stdout, encoder.encode(encodeServerMessage({ id, result: {} }) + "\n"));
+        yield* Fiber.join(stop);
+        return;
+      }
+      yield* TestClock.adjust("5 seconds");
+      NodeAssert.ok(stop.pollUnsafe(), "Stop must finish at the deadline");
+      const exit = yield* Fiber.await(stop);
+      NodeAssert.ok(Exit.isFailure(exit), "Stop must fail after the deadline");
+      const error = Cause.squash(exit.cause);
+      NodeAssert.ok(isCodexAppServerRequestError(error));
+      NodeAssert.match(error.message, /interrupt.*timed out/i);
+      const session = yield* runtime.getSession;
+      NodeAssert.equal(session.status, "running");
+      NodeAssert.equal(session.activeTurnId, turn.turnId);
+    }).pipe(Effect.provide(NodeCrypto.layer)),
+  );
+}
 
 describe("Codex thread history", () => {
   for (const numTurns of [1, 2, 3, 5]) {

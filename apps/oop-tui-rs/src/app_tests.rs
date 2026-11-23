@@ -39,6 +39,191 @@ pub fn app_with_project() -> App {
     app
 }
 
+#[tokio::test(start_paused = true)]
+async fn ended_shell_stream_resubscribes_with_bounded_backoff_until_the_link_changes() {
+    use futures_util::{SinkExt, StreamExt};
+    use std::time::Duration;
+    use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
+
+    let mut app = app_with_project();
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    let (tx, mut rx) = unbounded_channel();
+    app.tx = tx;
+    app.link = LinkStatus::Online;
+    app.rpc = Some(rpc);
+    app.subscribe_shell();
+    let next_request = async |peer: &mut WebSocketStream<tokio::io::DuplexStream>| -> Value {
+        loop {
+            let text = peer.next().await.unwrap().unwrap().into_text().unwrap();
+            let request: Value = serde_json::from_str(&text).unwrap();
+            if request["_tag"] == "Ping" {
+                peer.send(Message::text(r#"{"_tag":"Pong"}"#))
+                    .await
+                    .unwrap();
+                continue;
+            }
+            assert_eq!(request["tag"], SHELL_RPC);
+            assert_eq!(request["payload"]["afterSequence"], 1);
+            break request;
+        }
+    };
+    let end_stream = async |peer: &mut WebSocketStream<tokio::io::DuplexStream>,
+                            request: &Value| {
+        peer.send(Message::text(
+            json!({
+                "_tag": "Exit", "requestId": request["id"],
+                "exit": {"_tag": "Success", "value": null}
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+    };
+
+    let mut request = next_request(&mut peer).await;
+    for delay in [250, 500, 1000, 2000, 4000, 4000] {
+        let previous = app.shell_task.as_ref().map(JoinHandle::id);
+        end_stream(&mut peer, &request).await;
+        app.handle(rx.recv().await.unwrap());
+        tokio::time::advance(Duration::from_millis(delay - 1)).await;
+        app.on_tick();
+        assert!(app.shell_task.as_ref().is_none_or(JoinHandle::is_finished));
+        tokio::time::advance(Duration::from_millis(1)).await;
+        app.on_tick();
+        let restarted = app.shell_task.as_ref().map(JoinHandle::id);
+        assert!(
+            restarted.is_some() && restarted != previous,
+            "no new subscription after {delay} ms"
+        );
+        app.subscribe_shell();
+        assert_eq!(app.shell_task.as_ref().map(JoinHandle::id), restarted);
+        request = next_request(&mut peer).await;
+    }
+
+    end_stream(&mut peer, &request).await;
+    app.handle(rx.recv().await.unwrap());
+    app.use_computer(Target::Gateway(crate::link::Remote {
+        environment_id: "remote".into(),
+        label: "remote".into(),
+    }));
+    tokio::time::advance(Duration::from_secs(4)).await;
+    app.on_tick();
+    assert!(app.shell_task.is_none());
+
+    // The same cancellation applies to a lost connection with a retry waiting.
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
+    app.subscribe_shell();
+    let request = next_request(&mut peer).await;
+    end_stream(&mut peer, &request).await;
+    app.handle(rx.recv().await.unwrap());
+    app.handle(Msg::Link(LinkStatus::Reconnecting(String::new())));
+    tokio::time::advance(Duration::from_secs(4)).await;
+    app.on_tick();
+    assert!(app.shell_task.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn shell_retry_notice_is_shown_once_and_clears_on_recovery() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
+    let next_request = async |peer: &mut WebSocketStream<tokio::io::DuplexStream>| -> Value {
+        loop {
+            let value: Value =
+                serde_json::from_str(&peer.next().await.unwrap().unwrap().into_text().unwrap())
+                    .unwrap();
+            if value["_tag"] == "Ping" {
+                peer.send(Message::text(r#"{"_tag":"Pong"}"#))
+                    .await
+                    .unwrap();
+            } else if value["_tag"] == "Request" {
+                assert_eq!(value["tag"], SHELL_RPC);
+                return value;
+            }
+        }
+    };
+    let mut app = app_with_project();
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
+    app.link = LinkStatus::Online;
+    app.config["shellResumeCompletionMarker"] = json!(true);
+    app.notice = Some("previous notice".into());
+    app.subscribe_shell();
+    let _ = next_request(&mut peer).await;
+    app.handle(Msg::ShellEnd(Some("shell interrupted".into())));
+    assert_eq!(app.notice.as_deref(), Some("shell interrupted"));
+    app.notice = Some("unrelated notice".into());
+    tokio::time::advance(SHELL_RETRY_MIN).await;
+    app.on_tick();
+    let request = next_request(&mut peer).await;
+    assert_eq!(request["payload"]["requestCompletionMarker"], true);
+    app.handle(Msg::ShellEnd(Some("second failure".into())));
+    assert_eq!(app.notice.as_deref(), Some("unrelated notice"));
+    app.handle(Msg::Shell(json!({"kind": "synchronized"})));
+    assert_eq!(app.notice.as_deref(), Some("unrelated notice"));
+    app.subscribe_shell();
+    let _ = next_request(&mut peer).await;
+    app.handle(Msg::ShellEnd(Some("new outage".into())));
+    assert_eq!(app.notice.as_deref(), Some("new outage"));
+    tokio::time::advance(SHELL_RETRY_MIN * 4).await;
+    app.on_tick();
+    let request = next_request(&mut peer).await;
+    assert_eq!(request["payload"]["requestCompletionMarker"], true);
+    app.handle(Msg::Shell(json!({"kind": "synchronized"})));
+    assert_eq!(app.notice, None);
+    app.abort_shell();
+    app.config = json!({});
+    app.subscribe_shell();
+    let request = next_request(&mut peer).await;
+    assert!(request["payload"].get("requestCompletionMarker").is_none());
+}
+
+fn app_with_suggestion() -> App {
+    let mut app = app_with_project();
+    app.active = Active::Thread("t1".into());
+    app.link = LinkStatus::Online;
+    app.focus = Focus::Composer;
+    app.conv.thread = serde_json::from_value(json!({
+        "id": "t1",
+        "latestTurn": {"turnId": "turn-1", "state": "completed"},
+        "activities": [{
+            "id": "suggestion-1",
+            "kind": "prompt.suggestion",
+            "payload": {"turnId": "turn-1", "text": "Write tests"}
+        }]
+    }))
+    .unwrap();
+    app
+}
+
+#[test]
+fn tab_accepts_suggestion_into_empty_input_without_sending() {
+    let mut app = app_with_suggestion();
+    let before = app.log.len();
+    app.handle(key(KeyCode::Tab));
+    assert_eq!(app.input.text(), "Write tests");
+    assert_eq!(app.focus, Focus::Composer);
+    assert_eq!(app.log.len(), before);
+}
+
+#[test]
+fn tab_preserves_command_menu_and_nonempty_input_and_typing_dismisses_suggestion() {
+    let mut app = app_with_suggestion();
+    type_text(&mut app, "/m");
+    assert!(crate::composer::list_open(&app));
+    app.handle(key(KeyCode::Tab));
+    assert!(app.input.text().starts_with('/'));
+
+    app.input.set("draft");
+    app.handle(key(KeyCode::Tab));
+    assert_eq!(app.input.text(), "draft");
+
+    app.input.set("");
+    app.focus = Focus::Composer;
+    app.handle(key(KeyCode::Tab));
+    assert!(app.input.is_empty());
+}
+
 fn config() -> Value {
     json!({"threadSnapshotPagination": true, "providers": [{"instanceId": "codex", "displayName": "Codex", "enabled": true, "installed": true,
         "models": [
@@ -121,6 +306,8 @@ async fn sending_without_a_provider_says_so_instead_of_dispatching() {
 #[tokio::test]
 async fn the_first_message_starts_a_thread_on_the_default_model_and_is_remembered() {
     let mut app = app_with_project();
+    let (rpc, _peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
     app.config = config();
     type_text(&mut app, "build it");
     app.handle(key(KeyCode::Enter));
@@ -262,8 +449,73 @@ async fn ctrl_z_asks_to_stop_the_process_and_types_nothing() {
 }
 
 #[tokio::test]
+async fn offline_enter_keeps_the_composer_and_queued_messages() {
+    let mut app = open_thread();
+    app.handle(Msg::Link(LinkStatus::Connecting));
+    app.queue.push_back("already queued".into());
+    run_state(&mut app, 6, "ready");
+    type_text(&mut app, "keep my input");
+    app.handle(key(KeyCode::Enter));
+    assert_eq!(app.input.text(), "keep my input");
+    assert_eq!(
+        app.queue.front().map(String::as_str),
+        Some("already queued")
+    );
+    assert!(app.awaiting.is_none());
+    assert_eq!(app.notice.as_deref(), Some(tr("notice.offline")));
+}
+
+#[tokio::test]
+async fn offline_enter_keeps_server_bound_slash_input() {
+    let mut app = open_thread();
+    for closed_socket in [false, true] {
+        if closed_socket {
+            let (rpc, _peer) = crate::wire::fake_socket().await;
+            rpc.close();
+            app.rpc = Some(rpc);
+        }
+        for command in [
+            "/btw Why did the previous turn change the project?",
+            "/goal Finish the migration in this thread",
+            "/autofix on",
+            "/diff 2 src/main.rs",
+            "/memory analyse",
+            "/plan",
+        ] {
+            app.input.set(command);
+            app.submit();
+            assert_eq!(app.input.text(), command);
+            assert_eq!(app.notice.as_deref(), Some(tr("notice.offline")));
+        }
+        app.input.set("/help");
+        app.submit();
+        assert!(app.input.is_empty());
+        assert_eq!(app.notice.as_deref(), Some(tr("notice.help")));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn timed_out_turn_start_is_reported_as_not_confirmed() {
+    let mut app = open_thread();
+    let (tx, mut rx) = unbounded_channel();
+    app.tx = tx;
+    let (rpc, peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc.clone());
+    app.input.set("Start this turn");
+    app.submit();
+    crate::wire::delayed_reply(&rpc, peer, DISPATCH_RPC, json!({})).await;
+    app.handle(rx.recv().await.unwrap());
+    assert_eq!(
+        app.notice.as_deref(),
+        Some("The server did not confirm the request in time. It may still take effect."),
+    );
+}
+
+#[tokio::test]
 async fn esc_stops_a_running_turn_and_enter_queues_until_it_ends() {
     let mut app = open_thread();
+    let (rpc, _peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
     thread_event(
         &mut app,
         6,
@@ -363,6 +615,8 @@ async fn a_question_collects_its_answers_and_sends_them_together() {
 #[tokio::test]
 async fn model_mode_and_effort_pickers_change_the_next_turn() {
     let mut app = open_thread();
+    let (rpc, _peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
     let path =
         std::env::temp_dir().join(format!("oop-rs-app-{}/last-model.json", std::process::id()));
     app.last_model_path = path.clone();
@@ -419,6 +673,8 @@ fn folder_rows(app: &App) -> Vec<String> {
 #[tokio::test]
 async fn a_half_typed_message_stays_with_its_thread_through_every_switch() {
     let mut app = app_with_project();
+    let (rpc, _peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
     app.config = config();
     assert_eq!(app.active, Active::Draft("p1".into()));
     // The draft of the working folder holds a long paste and a typed word.
@@ -537,6 +793,20 @@ async fn side_pane_state_follows_thread_and_never_carries_its_data() {
 }
 
 #[tokio::test]
+async fn the_thread_subscription_opts_in_to_deletion_events() {
+    use futures_util::StreamExt;
+
+    let mut app = app_with_project();
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
+    app.open_thread("t1");
+    let text = peer.next().await.unwrap().unwrap().into_text().unwrap();
+    let request: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(request["tag"], THREAD_RPC);
+    assert_eq!(request["payload"]["threadDeletion"], true);
+}
+
+#[tokio::test]
 async fn the_draft_follows_a_server_driven_switch_a_close_and_a_delete() {
     let mut app = open_thread();
     assert_eq!(app.active, Active::Thread("t1".into()));
@@ -547,18 +817,19 @@ async fn the_draft_follows_a_server_driven_switch_a_close_and_a_delete() {
     assert!(app.input.is_empty());
     app.open_thread("t1");
     assert_eq!(app.input.text(), "keep me");
-    // A deleted thread takes its draft with it.
+    // Deletion closes the composer and keeps the draft in input history.
     app.handle(Msg::Thread {
         id: "t1".into(),
         item: json!({"kind": "event", "event": {"sequence": 9, "type": "thread.deleted", "occurredAt": "2026-01-01T00:00:00.000Z", "payload": {}}}),
     });
     assert_eq!(app.active, Active::None);
     assert!(app.input.is_empty());
+    assert_eq!(app.input.history(), vec!["keep me"]);
     app.open_thread("t1");
-    assert!(
-        app.input.is_empty(),
-        "nothing is left of the deleted thread's draft"
-    );
+    assert!(app.input.is_empty());
+    assert!(app.input.history_back());
+    assert_eq!(app.input.text(), "keep me");
+    assert!(app.input.history_forward());
     // What is typed before any thread is open follows into the first one that opens.
     app.active = Active::None;
     type_text(&mut app, "/help");
@@ -567,15 +838,183 @@ async fn the_draft_follows_a_server_driven_switch_a_close_and_a_delete() {
 }
 
 #[tokio::test]
+async fn deletion_keeps_the_draft_hidden_behind_history_recall() {
+    let mut app = open_thread();
+    type_text(&mut app, "previous");
+    app.input.take(true);
+    type_text(&mut app, "new draft");
+    app.handle(key(KeyCode::Up));
+    assert_eq!(app.input.text(), "previous");
+
+    thread_event(&mut app, 6, "thread.deleted", json!({}));
+
+    assert_eq!(app.active, Active::None);
+    assert!(app.input.is_empty());
+    assert_eq!(app.input.history(), ["previous", "new draft"]);
+}
+
+#[tokio::test]
+async fn deletion_keeps_a_memory_edit_and_the_draft_in_history() {
+    let mut app = open_thread();
+    app.input.set("previous");
+    app.input.take(true);
+    app.input.set("composer draft");
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    let (tx, mut rx) = unbounded_channel();
+    app.tx = tx;
+    app.rpc = Some(rpc);
+    app.config["environment"] = json!({"capabilities":{"projectMemory":{"manage":true}}});
+    let pick = Pick {
+        id: "memory-saved-action",
+        title: String::new(),
+        cursor: 0,
+        items: vec![],
+        typed: None,
+        data: vec![
+            json!({"decision":"edit","item":{"projectId":"p1","memoryId":"m1"}}).to_string(),
+        ],
+    };
+    crate::cmd_memory::picked(&mut app, &pick, 0);
+    let request: Value =
+        serde_json::from_str(&peer.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    peer.send(Message::text(json!({"_tag":"Exit","requestId":request["id"],"exit":{"_tag":"Success","value":{"memory":{"title":"title","body":"body"}}}}).to_string())).await.unwrap();
+    app.handle(rx.recv().await.unwrap());
+    assert!(app.memory_edit.is_some());
+    app.input.set("memory changes");
+    app.input.history_back();
+    thread_event(&mut app, 6, "thread.deleted", json!({}));
+    assert_eq!(
+        app.input.history(),
+        ["previous", "memory changes", "composer draft"]
+    );
+    assert!(app.input.is_empty());
+    assert!(app.memory_edit.is_none());
+    assert_eq!(app.active, Active::None);
+}
+
+#[tokio::test]
+async fn deletion_clears_the_threads_approval_question_and_working_state() {
+    let mut app = open_thread();
+    let (rpc, _peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
+    app.subscribe_thread("t1");
+    assert!(app.thread_task.is_some());
+    thread_event(
+        &mut app,
+        6,
+        "thread.session-set",
+        json!({"session": {"status": "running", "activeTurnId": "turn-1", "updatedAt": "x"}}),
+    );
+    type_text(&mut app, "queued");
+    app.handle(key(KeyCode::Enter));
+    assert_eq!(app.queue.len(), 1);
+    assert_eq!(app.input.history(), ["queued"]);
+    type_text(&mut app, "draft");
+    thread_event(
+        &mut app,
+        7,
+        "thread.activity-appended",
+        json!({"activity": {"id": "a", "tone": "approval", "kind": "approval.requested",
+            "payload": {"requestId": "r1", "requestKind": "command"}, "createdAt": "x"}}),
+    );
+    thread_event(
+        &mut app,
+        8,
+        "thread.activity-appended",
+        json!({"activity": {"id": "q", "tone": "info", "kind": "user-input.requested",
+            "payload": {"requestId": "r2", "questions": [
+                {"id": "q1", "header": "Q", "question": "Which?", "options": []}
+            ]}, "createdAt": "y"}}),
+    );
+    assert!(app.approval().is_some());
+    assert!(app.pending_input().is_some());
+    assert!(app.conv.busy());
+
+    thread_event(&mut app, 9, "thread.deleted", json!({}));
+
+    assert!(app.approval().is_none(), "approval panel survived deletion");
+    assert!(app.pending_input().is_none());
+    assert!(!app.conv.busy());
+    assert_eq!(app.state_key(), "state.idle");
+    assert!(app.thread_task.is_none());
+    assert!(app.queue.is_empty());
+    assert_eq!(app.input.history(), ["queued", "draft"]);
+    type_text(&mut app, "x");
+    assert_eq!(app.input.text(), "x");
+    app.handle(key(KeyCode::Up));
+    assert_eq!(app.input.text(), "draft");
+    assert_eq!(app.notice.as_deref(), Some(tr("notice.deleted")));
+}
+
+#[tokio::test]
+async fn a_late_send_reply_leaves_the_newly_opened_draft_alone() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let mut app = app_with_project();
+    app.config = config();
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
+    let (tx, mut rx) = unbounded_channel();
+    app.tx = tx;
+    type_text(&mut app, "send from p1");
+    app.handle(key(KeyCode::Enter));
+    let request: Value =
+        serde_json::from_str(&peer.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+
+    app.start_draft("p2");
+    type_text(&mut app, "keep in p2");
+    let reply = json!({"_tag": "Exit", "requestId": request["id"],
+        "exit": {"_tag": "Success", "value": null}});
+    peer.send(Message::text(reply.to_string())).await.unwrap();
+    app.handle(rx.recv().await.unwrap());
+
+    assert_eq!(app.active, Active::Draft("p2".into()));
+    assert_eq!(app.input.text(), "keep in p2");
+}
+
+#[tokio::test]
+async fn an_earlier_send_reply_leaves_the_later_submission_in_control() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let mut app = app_with_project();
+    app.config = config();
+    let (rpc, mut peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
+    let (tx, mut rx) = unbounded_channel();
+    app.tx = tx;
+    type_text(&mut app, "send from p1");
+    app.handle(key(KeyCode::Enter));
+    let request: Value =
+        serde_json::from_str(&peer.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+
+    type_text(&mut app, "second submission");
+    app.handle(key(KeyCode::Enter));
+    type_text(&mut app, "keep in p1");
+    let reply = json!({"_tag": "Exit", "requestId": request["id"],
+        "exit": {"_tag": "Success", "value": null}});
+    peer.send(Message::text(reply.to_string())).await.unwrap();
+    app.handle(rx.recv().await.unwrap());
+
+    assert_eq!(app.active, Active::Draft("p1".into()));
+    assert_eq!(app.input.text(), "keep in p1");
+}
+
+#[tokio::test]
 async fn typing_after_a_send_carries_over_when_the_draft_becomes_its_thread() {
     let mut app = app_with_project();
+    let (rpc, _peer) = crate::wire::fake_socket().await;
+    app.rpc = Some(rpc);
     app.config = config();
     type_text(&mut app, "go");
     app.handle(key(KeyCode::Enter));
     type_text(&mut app, "next");
     app.handle(Msg::Dispatched {
         result: Ok(()),
-        open: Some("new-thread".into()),
+        open: Some(("new-thread".into(), app.thread_view_epoch)),
         answered: None,
         sent: None,
     });
@@ -947,6 +1386,65 @@ async fn the_wheel_over_the_panel_moves_the_panel_and_elsewhere_the_conversation
         "left of the panel it is the conversation's"
     );
     assert_eq!(app.panel_scroll.get(), -(WHEEL_LINES as i32));
+}
+
+#[tokio::test]
+async fn a_malformed_older_page_keeps_its_cursor_and_can_be_retried() {
+    let mut app = open_thread();
+    let revision = app.conv.revision;
+    let mut page = json!({
+        "thread": {"messages": [{"id": "older", "text": false}]},
+        "page": {"hasMore": false}
+    });
+    app.conv.loading_older = true;
+    app.handle(Msg::Older {
+        id: "t1".into(),
+        result: Ok(page.clone()),
+    });
+    assert_eq!(app.conv.older_cursor.as_deref(), Some("c1"));
+    assert!(app.conv.has_more);
+    assert!(!app.conv.loading_older);
+    assert_eq!(app.conv.revision, revision);
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap()
+            .starts_with(tr("notice.olderFailed"))
+    );
+
+    page["thread"]["messages"][0]["text"] = json!("older message");
+    app.handle(Msg::Older {
+        id: "t1".into(),
+        result: Ok(page),
+    });
+    assert!(
+        app.conv
+            .thread
+            .messages
+            .iter()
+            .any(|m| m.text == "older message")
+    );
+    assert!(!app.conv.has_more);
+    assert!(app.conv.older_cursor.is_none());
+}
+
+#[tokio::test]
+async fn a_malformed_thread_snapshot_surfaces_the_decode_error() {
+    let mut app = open_thread();
+    app.open_thread("t2");
+    let revision = app.conv.revision;
+    app.handle(Msg::Thread {
+        id: "t2".into(),
+        item: json!({"kind": "snapshot", "snapshot": {"thread": {"messages": false}}}),
+    });
+    assert!(!app.conv.loaded);
+    assert_eq!(app.conv.revision, revision);
+    assert!(
+        app.notice
+            .as_deref()
+            .unwrap()
+            .starts_with(tr("notice.threadFailed"))
+    );
 }
 
 #[tokio::test]

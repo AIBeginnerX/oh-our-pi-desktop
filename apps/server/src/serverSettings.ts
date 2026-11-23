@@ -32,6 +32,7 @@ import {
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
@@ -51,6 +52,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { writeFileStringAtomically } from "./atomicWrite.ts";
 import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
+import { stampPullRequestAutoFixPatch } from "@t3tools/shared/pullRequestAutoFix";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import {
   applyServerSettingsPatch,
@@ -1133,11 +1135,22 @@ const make = Effect.gen(function* () {
   };
 
   const updateSettings = (
-    patch: ServerSettingsPatch,
+    clientPatch: ServerSettingsPatch,
   ): Effect.Effect<ServerSettings, ServerSettingsError> =>
     writeSemaphore.withPermits(1)(
       Effect.gen(function* () {
         const current = yield* getSettingsFromCache;
+        const patch =
+          clientPatch.threadPullRequestAutoFix === undefined
+            ? clientPatch
+            : {
+                ...clientPatch,
+                threadPullRequestAutoFix: stampPullRequestAutoFixPatch(
+                  current.threadPullRequestAutoFix,
+                  clientPatch.threadPullRequestAutoFix,
+                  DateTime.formatIso(yield* DateTime.now),
+                ),
+              };
         const updated = applyServerSettingsPatch(current, patch);
         const rawScope = classifySettingsMutationScope(current, updated);
         const persisted = yield* persistProviderEnvironmentSecrets(current, updated);

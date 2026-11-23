@@ -1,4 +1,7 @@
+import * as Schema from "effect/Schema";
 import {
+  ClientSettingsPatch,
+  ClientSettingsSchema,
   DEFAULT_SERVER_SETTINGS,
   ProjectId,
   ProviderDriverKind,
@@ -20,10 +23,82 @@ import {
   resolveProjectAutoPull,
 } from "./serverSettings.ts";
 
+const decodeClientSettings = Schema.decodeUnknownSync(ClientSettingsSchema);
+const decodeClientSettingsPatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+describe("transcript view settings", () => {
+  it("defaults older settings to normal without adding a value to an empty patch", () => {
+    expect(decodeClientSettings({}).transcriptViewMode).toBe("normal");
+    expect(decodeClientSettingsPatch({})).toEqual({});
+  });
+
+  it.each(["normal", "thinking", "verbose"])("accepts %s in settings and patches", (mode) => {
+    expect(decodeClientSettings({ transcriptViewMode: mode }).transcriptViewMode).toBe(mode);
+    expect(decodeClientSettingsPatch({ transcriptViewMode: mode })).toEqual({
+      transcriptViewMode: mode,
+    });
+  });
+
+  it("rejects invalid modes", () => {
+    expect(() => decodeClientSettingsPatch({ transcriptViewMode: "expanded" })).toThrow();
+  });
+});
+
 /** Settings after the server has folded legacy per-project fields into `projectSettingsOverrides`. */
 const FOLDED_SERVER_SETTINGS = { ...DEFAULT_SERVER_SETTINGS, projectSettingsFolded: true };
 
 describe("serverSettings helpers", () => {
+  it("replaces the entire scheduled prompt list, including when clearing it", () => {
+    const entry = {
+      id: "daily",
+      projectId: ProjectId.make("project"),
+      title: "Daily check",
+      prompt: " Review open issues.\n",
+      enabled: true,
+      hour: 9,
+      minute: 30,
+    };
+    const saved = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      scheduledPrompts: [entry, { ...entry, id: "other" }],
+    });
+    const replacement = { ...entry, enabled: false };
+    const replaced = applyServerSettingsPatch(saved, { scheduledPrompts: [replacement] });
+    expect(replaced.scheduledPrompts).toEqual([replacement]);
+    expect(applyServerSettingsPatch(replaced, { scheduledPrompts: [] }).scheduledPrompts).toEqual(
+      [],
+    );
+  });
+
+  it("keeps interleaved scheduled prompt edits from the same snapshot", () => {
+    const existing = {
+      id: "existing",
+      projectId: ProjectId.make("one"),
+      title: "Daily check",
+      prompt: "Review open issues.",
+      enabled: true,
+      hour: 9,
+      minute: 30,
+    };
+    const added = { ...existing, id: "new", projectId: ProjectId.make("two") };
+    const snapshot = { ...DEFAULT_SERVER_SETTINGS, scheduledPrompts: [existing] };
+    const add = {
+      scheduledPrompts: [existing, added],
+      scheduledPromptOperations: [{ type: "upsert", entry: added }],
+    } as const;
+    const toggle = {
+      scheduledPrompts: [{ ...existing, enabled: false }],
+      scheduledPromptOperations: [{ type: "update", id: existing.id, changes: { enabled: false } }],
+    } as const;
+    const remove = {
+      scheduledPrompts: [],
+      scheduledPromptOperations: [{ type: "remove", id: existing.id }],
+    } as const;
+    const afterEdits = applyServerSettingsPatch(applyServerSettingsPatch(snapshot, add), toggle);
+    expect(afterEdits.scheduledPrompts).toEqual([{ ...existing, enabled: false }, added]);
+    const afterRemoval = applyServerSettingsPatch(afterEdits, remove);
+    expect(applyServerSettingsPatch(afterRemoval, toggle).scheduledPrompts).toEqual([added]);
+  });
+
   it("changes a cleanup rule without replacing the machine's other rules", () => {
     const enabled = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
       storageCleanup: { worktreeAfterDays: 8, worktreeOnMerge: true, logsAfterDays: 30 },

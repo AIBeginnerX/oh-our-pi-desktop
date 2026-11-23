@@ -1,4 +1,6 @@
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import {
@@ -20,6 +22,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildSideAnswerPrompt,
   buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
@@ -42,6 +45,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generateBranchName",
   "generateThreadTitle",
   "generateWorkLessons",
+  "generateSideAnswer",
   "generateMemoryTidy",
 ]);
 
@@ -191,6 +195,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
   openCode2?: OpenCode2TextGenerationRoute,
 ) {
   const serverConfig = yield* ServerConfig.ServerConfig;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
   const openCodeRuntime = yield* OpenCodeRuntime.OpenCodeRuntime;
   const serverOwner = yield* OpenCodeServerOwner.OpenCodeServerOwner;
 
@@ -202,6 +208,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     readonly modelSelection: ModelSelection;
     readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
   }) {
+    const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchemaJson));
     const parsedModel = OpenCodeRuntime.parseOpenCodeModelSlug(input.modelSelection.model);
     if (!parsedModel) {
       return yield* new TextGenerationError({
@@ -271,7 +278,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         const result = yield* Effect.tryPromise({
           try: () =>
             client.session.prompt({
-              sessionID: session.data.id,
+              sessionID: promptContext.sessionId,
               model: parsedModel,
               ...(selectedAgent ? { agent: selectedAgent } : {}),
               ...(selectedVariant ? { variant: selectedVariant } : {}),
@@ -282,7 +289,13 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
               ...promptContext,
               cause,
             }),
-        });
+        }).pipe(
+          Effect.ensuring(
+            OpenCodeRuntime.runOpenCodeSdk("session.delete", (signal) =>
+              client.session.delete({ sessionID: promptContext.sessionId }, { signal }),
+            ).pipe(Effect.interruptible, Effect.timeoutOption("3 seconds"), Effect.ignore),
+          ),
+        );
         const promptFailure = getOpenCodePromptFailure(result.data?.info?.error);
         if (promptFailure) {
           return yield* new OpenCodeTextGenerationPromptResponseError({
@@ -346,7 +359,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-    // OpenCode 2 answers a one-shot prompt directly; a throwaway session holds the model.
+    // OpenCode 2 uses a throwaway session to hold the model and permissions.
     const runAgainstV2Server = (
       server: Pick<OpenCodeRuntime.OpenCodeServerConnection, "url" | "serverPassword">,
     ) =>
@@ -356,31 +369,82 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
           password: server.serverPassword ?? "",
         });
         const variant = getModelSelectionStringOptionValue(input.modelSelection, "variant");
-        const session = yield* OpenCodeRuntime.runOpenCodeSdk("session.create", (signal) =>
-          client.session.create(
-            {
-              location: { directory: input.cwd },
-              title: `OOP ${input.operation}`,
-              model: {
-                providerID: parsedModel.providerID,
-                id: parsedModel.modelID,
-                ...(variant ? { variant } : {}),
-              },
-              permissions: [{ action: "*", resource: "*", effect: "deny" }],
-            },
-            { signal },
-          ),
-        );
-        const generated = yield* OpenCodeRuntime.runOpenCodeSdk("session.generate", (signal) =>
-          client.session.generate({ sessionID: session.id, prompt: input.prompt }, { signal }),
-        ).pipe(
-          Effect.ensuring(
-            OpenCodeRuntime.runOpenCodeSdk("session.remove", (signal) =>
-              client.session.remove({ sessionID: session.id }, { signal }),
-            ).pipe(Effect.ignore),
-          ),
-        );
-        const text = generated.text.trim();
+        const files: Array<{ uri: string; name: string }> = [];
+        if (fileParts.length > 0) {
+          const root = yield* fs
+            .realPath(serverConfig.attachmentsDir)
+            .pipe(Effect.orElseSucceed(() => null));
+          if (root) {
+            for (const part of fileParts) {
+              const file = yield* path.fromFileUrl(new URL(part.url)).pipe(Effect.orDie);
+              const resolved = yield* fs.realPath(file).pipe(Effect.orElseSucceed(() => null));
+              if (resolved?.startsWith(`${root}${path.sep}`)) {
+                files.push({
+                  uri: (yield* path.toFileUrl(resolved).pipe(Effect.orDie)).href,
+                  name: part.filename ?? path.basename(file),
+                });
+              }
+            }
+          }
+        }
+        const runSession = Effect.fn("runOpenCodeJson.v2Session")(function* (withImages: boolean) {
+          const session = yield* Effect.acquireRelease(
+            OpenCodeRuntime.runOpenCodeSdk("session.create", (signal) =>
+              client.session.create(
+                {
+                  location: { directory: input.cwd },
+                  title: `OOP ${input.operation}`,
+                  model: {
+                    providerID: parsedModel.providerID,
+                    id: parsedModel.modelID,
+                    ...(variant ? { variant } : {}),
+                  },
+                  permissions: [{ action: "*", resource: "*", effect: "deny" }],
+                },
+                { signal },
+              ),
+            ),
+            (session) =>
+              OpenCodeRuntime.runOpenCodeSdk("session.remove", (signal) =>
+                client.session.remove({ sessionID: session.id }, { signal }),
+              ).pipe(Effect.interruptible, Effect.timeoutOption("3 seconds"), Effect.ignore),
+          );
+          const sessionID = session.id;
+          if (!withImages) {
+            const generated = yield* OpenCodeRuntime.runOpenCodeSdk("session.generate", (signal) =>
+              client.session.generate({ sessionID, prompt: input.prompt }, { signal }),
+            );
+            return generated.text.trim();
+          }
+          return yield* Effect.gen(function* () {
+            yield* OpenCodeRuntime.runOpenCodeSdk("session.prompt", (signal) =>
+              client.session.prompt({ sessionID, text: input.prompt, files }, { signal }),
+            );
+            yield* OpenCodeRuntime.runOpenCodeSdk("session.wait", (signal) =>
+              client.session.wait({ sessionID }, { signal }),
+            );
+            const messages = yield* OpenCodeRuntime.runOpenCodeSdk("message.list", (signal) =>
+              client.message.list(
+                { sessionID, type: "assistant", order: "desc", limit: 1 },
+                { signal },
+              ),
+            );
+            const answer = messages.data[0];
+            return answer?.type === "assistant" ? getOpenCodeTextResponse(answer.content) : "";
+          }).pipe(
+            Effect.catchTag("OpenCodeRuntimeError", () => Effect.succeed("")),
+            Effect.timeoutOption("60 seconds"),
+            Effect.map((result) => (result._tag === "Some" ? result.value : "")),
+          );
+        }, Effect.scoped);
+        const imageText = files.length > 0 ? yield* runSession(true) : "";
+        const validImage =
+          imageText.length > 0 &&
+          (yield* decodeOutput(extractJsonObject(imageText)).pipe(
+            Effect.map(() => true),
+            Effect.catchTag("SchemaError", () => Effect.succeed(false)),
+          ));
+        const text = validImage ? imageText : yield* runSession(false);
         if (text.length === 0) {
           return yield* new TextGenerationError({
             operation: input.operation,
@@ -423,7 +487,6 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       }),
     );
 
-    const decodeOutput = Schema.decodeEffect(Schema.fromJsonString(input.outputSchemaJson));
     return yield* decodeOutput(extractJsonObject(rawOutput)).pipe(
       Effect.catchTags({
         SchemaError: (cause) =>
@@ -532,6 +595,27 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const generateSideAnswer: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateSideAnswer"]
+  > = (input) => {
+    const { prompt, outputSchema } = buildSideAnswerPrompt(input);
+    return runOpenCodeJson({
+      operation: "generateSideAnswer",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    }).pipe(
+      Effect.mapError(
+        () =>
+          new TextGenerationError({
+            operation: "generateSideAnswer",
+            detail: "Could not generate an isolated side answer.",
+          }),
+      ),
+    );
+  };
+
   const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
     Effect.fn("OpenCodeTextGeneration.generateWorkLessons")(function* (input) {
       const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
@@ -561,6 +645,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateSideAnswer,
     generateWorkLessons,
     generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];

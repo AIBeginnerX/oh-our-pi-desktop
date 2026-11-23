@@ -2041,6 +2041,16 @@ describe("deriveTimelineEntries", () => {
   });
 });
 
+describe("deriveWorkLogEntries prompt suggestions", () => {
+  it("omits prompt suggestions from the work log", () => {
+    expect(
+      deriveWorkLogEntries([
+        makeActivity({ kind: "prompt.suggestion", tone: "info", turnId: "turn-1" }),
+      ]),
+    ).toEqual([]);
+  });
+});
+
 describe("deriveWorkLogEntries context window handling", () => {
   it("excludes context window updates from the work log", () => {
     const entries = deriveWorkLogEntries([

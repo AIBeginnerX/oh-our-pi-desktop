@@ -1,11 +1,27 @@
-import { describe, it, expect } from "vite-plus/test";
+import * as NodePath from "@effect/platform-node/NodePath";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import { describe, it } from "@effect/vitest";
+import { expect, vi } from "vite-plus/test";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+
+vi.mock("electron", () => ({}));
+
+import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
+import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
+import * as ElectronDialog from "../electron/ElectronDialog.ts";
+import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { pickFolder } from "../ipc/methods/window.ts";
+import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import * as DesktopWslEnvironment from "./DesktopWslEnvironment.ts";
 
 import {
   extractDistroFromUncPath,
   isValidDistroName,
   parseWslDistroList,
   resolveWslPickFolderDefaultPath,
-  wslUncPathToLinuxPath,
 } from "./wslPathParsing.ts";
 
 function makeUtf16LeBuffer(text: string): Buffer {
@@ -96,22 +112,144 @@ describe("extractDistroFromUncPath", () => {
   });
 });
 
-describe("wslUncPathToLinuxPath", () => {
-  it("maps WSL UNC paths back to Linux absolute paths", () => {
-    expect(wslUncPathToLinuxPath("\\\\wsl.localhost\\Ubuntu-22.04\\home\\josh\\repo")).toBe(
-      "/home/josh/repo",
+describe("WSL project folder selection", () => {
+  const wslInstance: DesktopBackendPool.DesktopBackendInstance = {
+    id: DesktopBackendPool.BackendInstanceId("wsl:default"),
+    label: Effect.succeed("WSL (Ubuntu)"),
+    start: Effect.void,
+    stop: () => Effect.void,
+    currentConfig: Effect.succeedSome({
+      executablePath: "wsl.exe",
+      args: ["-d", "Ubuntu", "--", "node", "/app/bin.mjs"],
+      entryPath: "/app/bin.mjs",
+      cwd: "/app",
+      env: {},
+      extendEnv: false,
+      bootstrap: {
+        mode: "desktop",
+        noBrowser: true,
+        port: 3774,
+        host: "0.0.0.0",
+        desktopBootstrapToken: "",
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+      },
+      bootstrapDelivery: "stdin",
+      httpBaseUrl: new URL("http://127.0.0.1:3774"),
+      captureOutput: true,
+      preflightFailure: Option.none(),
+      runningDistro: "Ubuntu",
+    }),
+    snapshot: Effect.succeed({
+      desiredRunning: true,
+      ready: true,
+      activePid: Option.some(123),
+      restartAttempt: 0,
+      restartScheduled: false,
+    }),
+    waitForReady: () => Effect.succeed(true),
+  };
+
+  const pickProjectFolder = (
+    folder: string,
+    targetEnvironmentId?: string,
+    showErrorBox = vi.fn(() => Effect.void),
+    wslOnly = false,
+  ) =>
+    pickFolder
+      .handler(targetEnvironmentId === undefined ? undefined : { targetEnvironmentId })
+      .pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            DesktopBackendPool.layerTest([
+              wslOnly
+                ? { ...wslInstance, id: DesktopBackendPool.PRIMARY_INSTANCE_ID }
+                : wslInstance,
+            ]),
+            DesktopEnvironment.layer({
+              dirname: "/repo/apps/desktop/dist-electron",
+              homeDirectory: "/Users/alice",
+              platform: "win32",
+              processArch: "x64",
+              appVersion: "0.0.22",
+              appPath: "/repo/apps/desktop",
+              isPackaged: false,
+              resourcesPath: "/repo/resources",
+              runningUnderArm64Translation: false,
+            }).pipe(
+              Layer.provide(
+                Layer.mergeAll(
+                  NodeServices.layer,
+                  NodePath.layerWin32,
+                  DesktopConfig.layerTest({}),
+                ),
+              ),
+            ),
+            Layer.mock(ElectronDialog.ElectronDialog)({
+              pickFolder: () => Effect.succeedSome(folder),
+              showErrorBox,
+            }),
+            Layer.mock(ElectronWindow.ElectronWindow)({ focusedMainOrFirst: Effect.succeedNone }),
+            DesktopAppSettings.layerTest({
+              ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+              localEnvironmentEnabled: true,
+              wslBackendEnabled: true,
+              wslOnly,
+            }),
+            DesktopWslEnvironment.layerTest({
+              windowsToWslPath: () => Option.some("/mnt/c/repo"),
+            }),
+          ),
+        ),
+      );
+
+  for (const folder of [String.raw`\\wsl.localhost\Debian\work\repo`, String.raw`\\wsl$\Debian`]) {
+    it.effect(`preserves the selected distro for routing when picking ${folder} from Ubuntu`, () =>
+      Effect.gen(function* () {
+        expect(yield* pickProjectFolder(folder, "wsl:default")).toBe(folder);
+      }),
     );
-  });
+  }
 
-  it("maps a distro UNC root to Linux root", () => {
-    expect(wslUncPathToLinuxPath("\\\\wsl$\\Debian")).toBe("/");
-    expect(wslUncPathToLinuxPath("\\\\wsl.localhost\\Debian\\")).toBe("/");
-  });
+  it.effect("returns a Linux path for the concrete distro running under wsl:default", () =>
+    Effect.gen(function* () {
+      const folder = String.raw`\\wsl.localhost\ubuntu\work\repo`;
+      expect(yield* pickProjectFolder(folder, "wsl:default")).toBe("/work/repo");
+    }),
+  );
 
-  it("rejects invalid distro names and non-WSL paths", () => {
-    expect(wslUncPathToLinuxPath("\\\\wsl.localhost\\bad!name\\home")).toBeNull();
-    expect(wslUncPathToLinuxPath("C:\\Users\\Josh\\repo")).toBeNull();
-  });
+  it.effect("returns a Linux root for the running distro in WSL-only mode", () =>
+    Effect.gen(function* () {
+      const folder = String.raw`\\wsl$\Ubuntu`;
+      expect(yield* pickProjectFolder(folder, "wsl:default", undefined, true)).toBe("/");
+    }),
+  );
+
+  const unroutableFolder = String.raw`\\wsl.localhost\Ubuntu Custom\repo`;
+
+  it.effect("returns the selected UNC path unchanged for the native backend", () =>
+    Effect.gen(function* () {
+      const showErrorBox = vi.fn(() => Effect.void);
+      expect(yield* pickProjectFolder(unroutableFolder, undefined, showErrorBox)).toBe(
+        unroutableFolder,
+      );
+      expect(showErrorBox).not.toHaveBeenCalled();
+    }),
+  );
+
+  it.effect("shows an error when the WSL backend cannot route the selected distro", () =>
+    Effect.gen(function* () {
+      const showErrorBox = vi.fn(() => Effect.void);
+      expect(yield* pickProjectFolder(unroutableFolder, "wsl:Ubuntu", showErrorBox)).toBeNull();
+      expect(showErrorBox).toHaveBeenCalledOnce();
+    }),
+  );
+
+  it.effect("still converts Windows drive paths for the selected backend", () =>
+    Effect.gen(function* () {
+      expect(yield* pickProjectFolder(String.raw`C:\repo`, "wsl:Ubuntu")).toBe("/mnt/c/repo");
+    }),
+  );
 });
 
 describe("resolveWslPickFolderDefaultPath", () => {

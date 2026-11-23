@@ -900,6 +900,8 @@ export const OrchestrationThread = Schema.Struct({
   autoSettleDisabledAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // The lead thread a crew sub-task belongs to; clients nest it there. Optional for older servers.
   parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  // Set on detail reads for members without a parent link. Absent means false, including on older servers.
+  createdAsCrewMember: Schema.optional(Schema.Boolean),
   // The thread's own crew; absent or null means it runs the default crew. Optional for older servers.
   crew: Schema.optional(Schema.NullOr(CrewThreadOverride)),
   // Pending-only state. Optional so older servers remain compatible.
@@ -1071,6 +1073,8 @@ export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
   /** Opt in to reasoning roles; older clients receive system messages instead. */
   reasoningMessages: Schema.optionalKey(Schema.Boolean),
+  /** Opt in to deletion events; older clients do not receive them. */
+  threadDeletion: Schema.optionalKey(Schema.Boolean),
   /**
    * When provided, the server skips the initial snapshot frame and instead
    * replays events after this sequence before streaming live events. Clients
@@ -2343,6 +2347,7 @@ export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 export const OrchestrationThreadStreamItem = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("synchronized"),
+    createdAsCrewMember: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     kind: Schema.Literal("snapshot"),

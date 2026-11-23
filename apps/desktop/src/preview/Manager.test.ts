@@ -3066,6 +3066,98 @@ describe("PreviewManager", () => {
     ),
   );
 
+  effectIt.effect("starts recording when the host capture request answers after 3 seconds", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const tabId = "tab_slow_recording";
+        const host = makeTestHostWebContents();
+        const requested = Promise.withResolvers<void>();
+        const response = Promise.withResolvers<boolean>();
+        host.executeJavaScript.mockImplementation(() => {
+          requested.resolve();
+          return response.promise;
+        });
+        const guest = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from("frame"),
+            getSize: () => ({ width: 800, height: 600 }),
+          }),
+          42,
+          host,
+        );
+        fromId.mockReturnValue(guest);
+        yield* manager.createTab(tabId);
+        yield* manager.registerWebview(tabId, 42);
+        const starting = yield* manager
+          .startRecording(tabId)
+          .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+
+        yield* Effect.promise(() => requested.promise);
+        yield* TestClock.adjust("3 seconds");
+        response.resolve(true);
+        const result = yield* Fiber.join(starting);
+        expect(result._tag).toBe("Success");
+        yield* manager.stopRecording(tabId);
+      }),
+    ),
+  );
+
+  for (const stalledAt of ["source warmup", "host capture request"] as const) {
+    effectIt.effect(`releases recording, stop, and close when the ${stalledAt} stalls`, () =>
+      withManager((manager) =>
+        Effect.gen(function* () {
+          const tabId = "tab_stalled_recording";
+          const host = makeTestHostWebContents();
+          const capturePage = vi.fn(async () => ({
+            toJPEG: () => Buffer.from("frame"),
+            getSize: () => ({ width: 800, height: 600 }),
+          }));
+          const never = new Promise<never>(() => {});
+          if (stalledAt === "source warmup") {
+            capturePage.mockReturnValue(never);
+          } else {
+            host.executeJavaScript.mockReturnValue(never);
+          }
+          const guest = makeTestPreviewWebContents(capturePage, 42, host);
+          fromId.mockReturnValue(guest);
+          yield* manager.createTab(tabId);
+          yield* manager.registerWebview(tabId, 42);
+
+          const lifecycleDeadline = stalledAt === "source warmup" ? "5 seconds" : "12 seconds";
+          const lifecycle = yield* Effect.gen(function* () {
+            const starting = yield* manager
+              .startRecording(tabId)
+              .pipe(Effect.exit, Effect.forkChild({ startImmediately: true }));
+            const stopping = yield* manager
+              .stopRecording(tabId)
+              .pipe(Effect.forkChild({ startImmediately: true }));
+            const started = yield* Fiber.join(starting);
+            yield* Fiber.join(stopping);
+            yield* manager.closeTab(tabId);
+            return started;
+          }).pipe(
+            Effect.timeout(lifecycleDeadline),
+            Effect.exit,
+            Effect.forkChild({ startImmediately: true }),
+          );
+
+          yield* TestClock.adjust(lifecycleDeadline);
+          const result = yield* Fiber.join(lifecycle);
+          expect(result._tag, "recording lifecycle exceeded its deadline").toBe("Success");
+          if (Exit.isFailure(result)) return;
+          expect(result.value._tag).toBe(stalledAt === "source warmup" ? "Success" : "Failure");
+          expect(guest.setBackgroundThrottling).toHaveBeenLastCalledWith(true);
+          if (stalledAt === "source warmup") {
+            expect(capturePage).toHaveBeenCalledTimes(2);
+          }
+          const streams: Array<{ video?: unknown }> = [];
+          host.displayMediaHandler()?.({ frame: host.mainFrame }, (value) => streams.push(value));
+          expect(streams).toEqual([{}]);
+        }),
+      ),
+    );
+  }
+
   effectIt.effect("continues native recording when the source warmup fails", () =>
     withManager((manager) =>
       Effect.gen(function* () {

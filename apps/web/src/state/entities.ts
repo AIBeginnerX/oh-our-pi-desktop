@@ -8,7 +8,12 @@ import {
   type EnvironmentThreadStatus,
   mergeEnvironmentThread,
 } from "@t3tools/client-runtime/state/threads";
-import type { ScopedProjectRef, ScopedThreadRef, ServerConfig } from "@t3tools/contracts";
+import type {
+  OrchestrationThreadActivity,
+  ScopedProjectRef,
+  ScopedThreadRef,
+  ServerConfig,
+} from "@t3tools/contracts";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
@@ -35,6 +40,9 @@ const EMPTY_THREAD_SHELL_ATOM = Atom.make<EnvironmentThreadShell | null>(null).p
 const EMPTY_THREAD_DETAIL_ATOM = Atom.make<EnvironmentThread | null>(null).pipe(
   Atom.withLabel("web-thread-detail:empty"),
 );
+const EMPTY_THREAD_ACTIVITIES_ATOM = Atom.make<ReadonlyArray<OrchestrationThreadActivity>>(
+  Object.freeze([]),
+).pipe(Atom.withLabel("web-thread-activities:empty"));
 const EMPTY_THREAD_STATUS_ATOM = Atom.make<EnvironmentThreadStatus>("empty").pipe(
   Atom.withLabel("web-thread-status:empty"),
 );
@@ -105,6 +113,30 @@ export function useThreadShell(ref: ScopedThreadRef | null): EnvironmentThreadSh
 export function useThreadDetail(ref: ScopedThreadRef | null): EnvironmentThread | null {
   return useAtomValue(
     ref === null ? EMPTY_THREAD_DETAIL_ATOM : environmentThreadDetails.detailAtom(ref),
+  );
+}
+
+/** A thread's activities alone, so the caller does not re-render while its messages stream. */
+export function useThreadActivities(
+  ref: ScopedThreadRef | null,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_ACTIVITIES_ATOM : environmentThreadDetails.activitiesAtom(ref),
+  );
+}
+
+/**
+ * Reads one value out of a thread's detail. The caller re-renders only when that value changes,
+ * so a large component can follow one field of a thread that streams. Pass a function declared
+ * at module scope and return a primitive.
+ */
+export function useThreadDetailValue<A>(
+  ref: ScopedThreadRef | null,
+  select: (thread: EnvironmentThread | null) => A,
+): A {
+  return useAtomValue(
+    ref === null ? EMPTY_THREAD_DETAIL_ATOM : environmentThreadDetails.detailAtom(ref),
+    select,
   );
 }
 

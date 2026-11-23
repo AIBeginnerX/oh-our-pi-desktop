@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
+  MAX_SCHEDULED_PROMPTS,
   ModelSelection,
   ProjectId,
   ProjectScript,
@@ -9,9 +10,11 @@ import {
   resolveProviderInstanceEnabled,
   ServerSettings,
   ServerSettingsPatch,
+  ThreadId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as FileSystem from "effect/FileSystem";
@@ -198,6 +201,30 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }),
   );
 
+  it.effect("validates the resulting scheduled prompt list before persisting", () =>
+    Effect.gen(function* () {
+      const service = yield* ServerSettingsModule.ServerSettingsService;
+      const entries = Array.from({ length: MAX_SCHEDULED_PROMPTS }, (_, index) => ({
+        id: String(index),
+        projectId: ProjectId.make("project"),
+        title: "Daily check",
+        prompt: "Review open issues.",
+        enabled: true,
+        hour: 9,
+        minute: 30,
+      }));
+      yield* service.updateSettings({ scheduledPrompts: entries });
+      const extra = { ...entries[0]!, id: "extra" };
+      const upsert = { type: "upsert", entry: extra } as const;
+      yield* service.updateSettings({ scheduledPromptOperations: [upsert] }).pipe(Effect.flip);
+      assert.deepEqual((yield* service.getSettings).scheduledPrompts, entries);
+      const saved = yield* service.updateSettings({
+        scheduledPromptOperations: [upsert, { type: "remove", id: "0" }],
+      });
+      assert.deepEqual(saved.scheduledPrompts, [...entries.slice(1), extra]);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("deep merges nested settings updates without dropping siblings", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
@@ -346,6 +373,29 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         assert.isFalse(persisted.sidebarAutoSettleOnMerge);
       }),
     ).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("stamps its own time on an auto-fix switch instead of the client's", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const first = ThreadId.make("thread-a");
+      const second = ThreadId.make("thread-b");
+      const fromClient = "2099-01-01T00:00:00.000Z";
+      const serverNow = DateTime.formatIso(yield* DateTime.now);
+
+      yield* serverSettings.updateSettings({
+        threadPullRequestAutoFix: { [first]: { enabled: true, setAt: fromClient } },
+      });
+      const next = yield* serverSettings.updateSettings({
+        threadPullRequestAutoFix: { [second]: { enabled: true, setAt: fromClient } },
+      });
+
+      // One thread's entry per patch: the other thread's switch is merged, not replaced.
+      assert.deepEqual(next.threadPullRequestAutoFix, {
+        [first]: { enabled: true, setAt: serverNow },
+        [second]: { enabled: true, setAt: serverNow },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
   it.effect("preserves model when switching providers via textGenerationModelSelection", () =>

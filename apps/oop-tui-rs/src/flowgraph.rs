@@ -342,7 +342,10 @@ pub fn parse(source: &str) -> Option<Flow> {
     let mut rest = head[keyword.len()..].trim_start();
     let mut left_right = false;
     for dir in ["TB", "TD", "BT", "RL", "LR"] {
-        if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case(dir) && !rest[2..].starts_with(is_word)
+        if rest
+            .get(..2)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(dir))
+            && !rest[2..].starts_with(is_word)
         {
             left_right = matches!(dir, "RL" | "LR");
             rest = rest[2..].trim_start();
@@ -1226,6 +1229,15 @@ pub fn render(
 mod tests {
     use super::*;
     use crate::theme::{ASCII, LAVENDER, UNICODE};
+
+    #[test]
+    fn flowgraph_accepts_non_ascii_header_suffixes() {
+        for header in ["flowchart 한글", "graph 🚀"] {
+            let source = format!("{header}\n A[Start] --> B[End]");
+            let rows = plain(&draw(&source, 60, 1.0)).join("\n");
+            assert!(rows.contains("Start") && rows.contains("End"));
+        }
+    }
 
     fn plain(lines: &[Line]) -> Vec<String> {
         lines

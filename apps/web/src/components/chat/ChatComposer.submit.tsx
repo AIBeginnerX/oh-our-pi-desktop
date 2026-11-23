@@ -34,6 +34,7 @@ import { SessionPhase, ChatMessage } from "../../types";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 
 export function useComposerSubmitHandlers(args: {
+  acceptPromptSuggestion: () => boolean;
   activeComposerMenuItemRef: RefObject<ComposerCommandItem | null>;
   activePendingApproval: PendingApproval | null;
   activePendingProgress: {
@@ -163,6 +164,7 @@ export function useComposerSubmitHandlers(args: {
     nudgeComposerMenuHighlight,
     onCompactContext,
     onSelectComposerItem,
+    acceptPromptSuggestion,
     onSend,
     pendingImageCompressionsRef,
     pendingUserInputs,
@@ -452,6 +454,18 @@ export function useComposerSubmitHandlers(args: {
         return true;
       }
     }
+    if (
+      key === "Tab" &&
+      !menuIsActive &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.isComposing &&
+      event.keyCode !== 229 &&
+      acceptPromptSuggestion()
+    )
+      return true;
     if (key === "ArrowUp" || key === "ArrowDown") {
       return navigatePromptHistory(key === "ArrowUp" ? "backward" : "forward", event);
     }

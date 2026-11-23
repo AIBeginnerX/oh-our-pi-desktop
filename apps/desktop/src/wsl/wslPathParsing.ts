@@ -38,27 +38,17 @@ export function parseWslDistroList(stdout: Buffer): readonly WslDistro[] {
   return distros;
 }
 
-// Recognizes \\wsl.localhost\<distro>\... and the legacy \\wsl$\<distro>\... so
-// `wslpath` can be invoked inside the distro that actually owns the path,
-// rather than whichever distro is configured for the desktop backend.
-export function extractDistroFromUncPath(windowsPath: string): string | null {
-  const match = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)/i.exec(windowsPath);
-  if (!match) return null;
-  const candidate = match[1]!;
-  return DISTRO_NAME_PATTERN.test(candidate) ? candidate : null;
+const WSL_UNC_HOST = /^\\\\(?:wsl\.localhost|wsl\$)(?:\\|$)/i;
+
+export function isWslUncPath(windowsPath: string): boolean {
+  return WSL_UNC_HOST.test(windowsPath);
 }
 
-export function wslUncPathToLinuxPath(windowsPath: string): string | null {
-  const match = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)(?:\\(.*))?$/i.exec(windowsPath.trim());
-  if (!match) return null;
-
-  const distro = match[1]!;
-  if (!DISTRO_NAME_PATTERN.test(distro)) return null;
-
-  const rest = match[2] ?? "";
-  if (rest.length === 0) return "/";
-
-  return `/${rest.split("\\").filter(Boolean).join("/")}`;
+export function extractDistroFromUncPath(windowsPath: string): string | null {
+  const host = WSL_UNC_HOST.exec(windowsPath);
+  if (!host) return null;
+  const candidate = windowsPath.slice(host[0].length).split("\\", 1)[0] ?? "";
+  return DISTRO_NAME_PATTERN.test(candidate) ? candidate : null;
 }
 
 function resolveWslHomeUncPath(config: WslConfig, distros: readonly WslDistro[]): string | null {

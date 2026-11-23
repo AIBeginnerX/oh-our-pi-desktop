@@ -6,6 +6,7 @@ import {
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { useClaudeLaunchFileScripts } from "../../hooks/useClaudeLaunchFileScripts";
 import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
 import { useEnvironments } from "../../state/environments";
 import {
@@ -92,6 +93,18 @@ export function ProjectActionsSettings() {
     representativeMember?.environmentId ?? EnvironmentId.make("none"),
     representativeMember?.workspaceRoot ?? null,
   );
+  const launchFile = useClaudeLaunchFileScripts(
+    representativeMember?.environmentId ?? EnvironmentId.make("none"),
+    representativeMember?.workspaceRoot ?? null,
+  );
+  const importableLaunchScripts = launchFile.scripts.filter(
+    ({ action }) =>
+      !scripts.some(
+        (script) =>
+          script.command === action.command ||
+          script.name.toLowerCase() === action.name.toLowerCase(),
+      ),
+  );
   const importableScripts = useMemo(
     () =>
       t3File.scripts.filter(
@@ -140,7 +153,7 @@ export function ProjectActionsSettings() {
         onResetOverride={() => void persist(() => null)}
         control={
           <div className="flex flex-wrap items-center gap-1.5">
-            {importableScripts.length > 0 ? (
+            {importableScripts.length > 0 || importableLaunchScripts.length > 0 ? (
               <Menu>
                 <MenuTrigger
                   render={
@@ -157,13 +170,17 @@ export function ProjectActionsSettings() {
                   <ChevronDownIcon className="size-3.5" />
                 </MenuTrigger>
                 <MenuPopup align="end">
-                  <MenuGroup>
-                    <MenuGroupLabel>Import from t3.json</MenuGroupLabel>
-                    <p className="px-2 pb-2 text-pretty text-sm text-muted-foreground">
-                      Add actions declared by this checkout without editing them first.
-                    </p>
-                  </MenuGroup>
-                  <MenuSeparator />
+                  {importableScripts.length > 0 ? (
+                    <>
+                      <MenuGroup>
+                        <MenuGroupLabel>Import from t3.json</MenuGroupLabel>
+                        <p className="px-2 pb-2 text-pretty text-sm text-muted-foreground">
+                          Add actions declared by this checkout without editing them first.
+                        </p>
+                      </MenuGroup>
+                      <MenuSeparator />
+                    </>
+                  ) : null}
                   {importableScripts.map((fileScript) => (
                     <MenuItem
                       key={`${fileScript.name} ${fileScript.command}`}
@@ -178,6 +195,38 @@ export function ProjectActionsSettings() {
                       </div>
                     </MenuItem>
                   ))}
+                  {importableScripts.length > 0 && importableLaunchScripts.length > 0 ? (
+                    <MenuSeparator />
+                  ) : null}
+                  {importableLaunchScripts.length > 0 ? (
+                    <MenuGroup>
+                      <MenuGroupLabel>Import from .claude/launch.json</MenuGroupLabel>
+                      {importableLaunchScripts.map(({ action, skippedEnvironmentVariables }) => (
+                        <MenuItem
+                          key={`launch ${action.name} ${action.command}`}
+                          onClick={() =>
+                            void importFileScript({
+                              ...action,
+                              previewUrl: action.previewUrl ?? "",
+                            })
+                          }
+                        >
+                          <ScriptIcon icon="play" className="size-4 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium">{action.name}</div>
+                            <div className="truncate font-mono text-muted-foreground">
+                              {action.command}
+                            </div>
+                            {skippedEnvironmentVariables ? (
+                              <div className="text-muted-foreground">
+                                Environment variables are not imported.
+                              </div>
+                            ) : null}
+                          </div>
+                        </MenuItem>
+                      ))}
+                    </MenuGroup>
+                  ) : null}
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -210,6 +259,13 @@ export function ProjectActionsSettings() {
         <SettingsRow
           title="t3.json is invalid"
           description="A t3.json exists in this checkout but fails to parse, so every action and icon it declares is ignored. Check the JSON syntax and icon values."
+          className="text-warning"
+        />
+      ) : null}
+      {launchFile.status === "invalid" ? (
+        <SettingsRow
+          title=".claude/launch.json is invalid"
+          description="The launch file could not be read. Check its JSON syntax and configurations."
           className="text-warning"
         />
       ) : null}

@@ -7,8 +7,15 @@ import {
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
+import * as Stream from "effect/Stream";
+import * as Headers from "effect/unstable/http/Headers";
+import { Rpc, RpcGroup, RpcMessage, RpcSchema, RpcServer } from "effect/unstable/rpc";
 
 import {
+  authorizeWsRpcHandlers,
   RPC_REQUIRED_SCOPES,
   requiredScopeForRpcMethod,
   requiredScopeForDeviceList,
@@ -17,6 +24,58 @@ import {
 describe("RPC authorization scopes", () => {
   it("declares exactly one scope for every RPC in the server group", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
+  });
+
+  it.effect("refuses every RPC above read scope even with unwrapped handlers", () => {
+    type Rpcs = RpcGroup.Rpcs<typeof WsRpcGroup>;
+    type FixtureHandlers = {
+      readonly [Current in Rpcs as Current["_tag"]]: (
+        ...args: Parameters<RpcGroup.HandlerFrom<Rpcs, Current["_tag"]>>
+      ) => Rpc.Success<Current> extends Stream.Stream<infer A, infer E>
+        ? Stream.Stream<A, E>
+        : Effect.Effect<Rpc.Success<Current>>;
+    };
+    // The fixtures have no request schema dependencies and do no work.
+    const handlers = Object.fromEntries(
+      Array.from(WsRpcGroup.requests, ([method, rpc]) => [
+        method,
+        RpcSchema.isStreamSchema(rpc.successSchema) ? () => Stream.empty : () => Effect.void,
+      ]),
+    ) as unknown as FixtureHandlers;
+    const layer = WsRpcGroup.toLayer(
+      authorizeWsRpcHandlers([AuthOrchestrationReadScope], handlers),
+    );
+    return Effect.gen(function* () {
+      const replies = yield* Queue.unbounded<RpcMessage.ResponseExit<Rpcs>>();
+      const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+        onFromServer: (response) =>
+          response._tag === "Exit"
+            ? Queue.offer(replies, response).pipe(Effect.asVoid)
+            : Effect.void,
+      });
+      for (const tag of WsRpcGroup.requests.keys()) {
+        const requiredScope = RPC_REQUIRED_SCOPES[tag as Rpcs["_tag"]];
+        if (requiredScope === AuthOrchestrationReadScope) continue;
+        const id = RpcMessage.RequestId(tag);
+        yield* server.write(0, {
+          _tag: "Request",
+          id,
+          tag: tag as Rpcs["_tag"],
+          payload: undefined as never,
+          headers: Headers.empty,
+        });
+        const reply = yield* Queue.take(replies);
+        expect(reply.requestId).toBe(id);
+        expect(reply.exit._tag, tag).toBe("Failure");
+        if (reply.exit._tag === "Failure") {
+          const error = Cause.findErrorOption(reply.exit.cause);
+          expect(error._tag === "Some" && error.value, tag).toMatchObject({
+            _tag: "EnvironmentAuthorizationError",
+            requiredScope,
+          });
+        }
+      }
+    }).pipe(Effect.scoped, Effect.provide(layer));
   });
 
   it("authorizes background policy reporting and observation deliberately", () => {
@@ -47,9 +106,9 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("requires write access to import agent session history", () => {
+  it("requires operate access to scan or import agent session history", () => {
     expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsScan)).toBe(
-      AuthOrchestrationReadScope,
+      AuthOrchestrationOperateScope,
     );
     expect(requiredScopeForRpcMethod(WS_METHODS.agentSessionsImport)).toBe(
       AuthOrchestrationOperateScope,

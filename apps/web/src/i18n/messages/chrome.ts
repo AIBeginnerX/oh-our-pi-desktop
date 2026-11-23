@@ -2,7 +2,38 @@ import type { MessageCatalog } from "./types";
 
 /** The sidebar footer, the empty start screen, and the language control itself. */
 export const CHROME_MESSAGES: MessageCatalog = {
+  "Cycle transcript view": {
+    ko: "대화 표시 모드 전환",
+    ja: "会話の表示モードを切り替え",
+    "zh-CN": "切换对话显示模式",
+    es: "Cambiar la vista de la conversación",
+  },
+  "Could not save transcript view": {
+    ko: "대화 표시 모드를 저장하지 못했습니다",
+    ja: "会話の表示モードを保存できませんでした",
+    "zh-CN": "无法保存对话显示模式",
+    es: "No se pudo guardar la vista de la conversación",
+  },
   Settings: { ko: "설정", ja: "設定", "zh-CN": "设置", es: "Configuración" },
+  "Mobile connections are off. Allowing them lets paired phones reach this computer over your network. OOP will restart once.":
+    {
+      ko: "모바일 연결이 꺼져 있습니다. 허용하면 페어링된 휴대폰이 네트워크를 통해 이 컴퓨터에 접속할 수 있습니다. OOP가 한 번 재시작됩니다.",
+      ja: "モバイル接続はオフです。許可すると、ペアリング済みのスマートフォンがネットワーク経由でこのコンピューターに接続できます。OOPが一度再起動します。",
+      "zh-CN": "手机连接已关闭。允许后，已配对的手机可以通过网络访问此计算机。OOP 将重启一次。",
+      es: "Las conexiones móviles están desactivadas. Al permitirlas, los teléfonos vinculados podrán acceder a este equipo por la red. OOP se reiniciará una vez.",
+    },
+  "Restarting…": {
+    ko: "재시작 중…",
+    ja: "再起動中…",
+    "zh-CN": "正在重启…",
+    es: "Reiniciando…",
+  },
+  "Allow mobile connections": {
+    ko: "모바일 연결 허용",
+    ja: "モバイル接続を許可",
+    "zh-CN": "允许手机连接",
+    es: "Permitir conexiones móviles",
+  },
   "Connect mobile": {
     ko: "모바일 연결",
     ja: "モバイルを接続",

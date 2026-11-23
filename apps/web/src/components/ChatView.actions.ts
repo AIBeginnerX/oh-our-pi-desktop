@@ -13,6 +13,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { clearDeletedThreadViewState } from "../hooks/useThreadActions";
 import { useDiffPanelStore } from "../diffPanelStore";
 import { buildPlanImplementationThreadTitle, buildPlanImplementationPrompt } from "../proposedPlan";
 import { useRightPanelStore } from "../rightPanelStore";
@@ -234,7 +235,9 @@ export function useChatViewActions({
           threadId: nextThreadId,
         },
       });
-      if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+      if (cleanupResult._tag === "Success") {
+        clearDeletedThreadViewState(scopeThreadRef(environmentId, nextThreadId));
+      } else if (!isAtomCommandInterrupted(cleanupResult)) {
         console.warn(
           "Failed to clean up implementation thread after start failure.",
           squashAtomCommandFailure(cleanupResult),

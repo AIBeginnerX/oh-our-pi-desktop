@@ -16,11 +16,37 @@ import {
   expandCollapsedComposerCursor,
   formatAssistantCitationForComposer,
   isCollapsedCursorAdjacentToInlineToken,
+  handleComposerSideQuestion,
+  registerComposerSideQuestion,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "./composer-logic";
 import { carryDisplacedCustomAnswerIntoPrompt } from "./pendingUserInput";
 import { formatTerminalContextReference } from "./lib/terminalContext";
+
+describe("/btw", () => {
+  it("routes side questions away from message sending and keeps empty commands", () => {
+    const prompt = { current: "" };
+    const answers: string[] = [];
+    const sends: string[] = [];
+    const unregister = registerComposerSideQuestion(prompt, (question) => answers.push(question));
+    for (const text of [
+      " /BTW  What changed?  ",
+      "/btw\nWhy?",
+      "/btw",
+      "/btw  ",
+      "/btwice",
+      "look at /btw",
+    ]) {
+      prompt.current = text;
+      if (!handleComposerSideQuestion(prompt)) sends.push(text);
+      expect(prompt.current).toBe(text);
+    }
+    unregister();
+    expect(answers).toEqual(["What changed?", "Why?"]);
+    expect(sends).toEqual(["/btwice", "look at /btw"]);
+  });
+});
 
 const terminalReference = formatTerminalContextReference({
   id: "ctx-1",

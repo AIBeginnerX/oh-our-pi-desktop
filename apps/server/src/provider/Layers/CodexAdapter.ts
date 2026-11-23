@@ -153,7 +153,11 @@ function mapCodexRuntimeError(
   method: string,
   error: CodexSessionRuntimeError,
 ): ProviderAdapterError {
-  if (isCodexAppServerProcessExitedError(error) || isCodexAppServerTransportError(error)) {
+  if (
+    isCodexAppServerProcessExitedError(error) ||
+    isCodexAppServerTransportError(error) ||
+    error._tag === "CodexAppServerInputStreamEndedError"
+  ) {
     return new ProviderAdapterSessionClosedError({
       provider: PROVIDER,
       threadId,

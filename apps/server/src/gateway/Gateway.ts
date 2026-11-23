@@ -347,6 +347,22 @@ const proxyHttp = Effect.fn("Gateway.proxyHttp")(function* (
   for (const [name, value] of Object.entries(response.headers)) {
     if (!DROPPED_RESPONSE_HEADERS.has(name) && value !== undefined) headers[name] = value;
   }
+  const isAsset = new URL(upstreamUrl).pathname.startsWith("/api/assets/");
+  const contentType = headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase();
+  const disposition = headers["content-disposition"]?.split(";", 1)[0]?.trim().toLowerCase();
+  // Chromium's inline PDF viewer requires a document without CSP sandboxing.
+  if (isAsset && contentType === "application/pdf" && (!disposition || disposition === "inline")) {
+    headers["content-type"] = contentType;
+    headers["x-content-type-options"] = "nosniff";
+  } else {
+    // Signed HTML previews run with the asset route's permissions in an opaque origin.
+    const sandbox =
+      isAsset && contentType === "text/html"
+        ? "sandbox allow-scripts allow-forms allow-popups allow-modals"
+        : "sandbox";
+    const upstreamPolicy = headers["content-security-policy"];
+    headers["content-security-policy"] = upstreamPolicy ? `${upstreamPolicy}, ${sandbox}` : sandbox;
+  }
   return HttpServerResponse.stream(response.stream, {
     status: response.status,
     headers,

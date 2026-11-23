@@ -7,6 +7,9 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as Ref from "effect/Ref";
+import * as PlatformError from "effect/PlatformError";
+import * as Sink from "effect/Sink";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { it, assert } from "@effect/vitest";
@@ -725,6 +728,79 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
       assert.equal(error.code, 0);
     }),
   );
+
+  for (const { fault, childExits } of [
+    { fault: "stdin write failure", childExits: false },
+    { fault: "stdout EOF", childExits: false },
+    { fault: "stdin write failure", childExits: true },
+    { fault: "stdout EOF", childExits: true },
+  ] as const) {
+    it.effect(
+      `fails pending requests on ${fault} ${childExits ? "with the late process exit code" : "while the child remains alive"}`,
+      () =>
+        Effect.gen(function* () {
+          const { stdio, input, output } = yield* makeInMemoryStdio();
+          const writeFailure = PlatformError.badArgument({ module: "stdin", method: "write" });
+          const releaseWrite = yield* Deferred.make<void>();
+          const childExit = yield* Deferred.make<AcpError.AcpProcessExitedError>();
+          const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+            stdio:
+              fault === "stdout EOF"
+                ? stdio
+                : {
+                    ...stdio,
+                    stdout: () =>
+                      Sink.forEach((chunk: string | Uint8Array) =>
+                        Queue.offer(output, String(chunk)).pipe(
+                          Effect.andThen(Deferred.await(releaseWrite)),
+                          Effect.andThen(Effect.fail(writeFailure)),
+                        ),
+                      ),
+                  },
+            terminationError: Deferred.await(childExit),
+            serverRequestMethods: new Set(),
+          });
+
+          const request = yield* transport.request("x/test", {}).pipe(
+            Effect.match({
+              onFailure: (error) => error,
+              onSuccess: () => assert.fail("Expected the pending request to fail."),
+            }),
+            Effect.forkScoped,
+          );
+          yield* Queue.take(output);
+          if (fault === "stdin write failure") {
+            yield* Deferred.succeed(releaseWrite, undefined);
+          } else {
+            yield* Queue.end(input);
+          }
+          if (childExits) {
+            yield* TestClock.adjust("1 second");
+            yield* Deferred.succeed(childExit, new AcpError.AcpProcessExitedError({ code: 7 }));
+          } else {
+            yield* TestClock.adjust("3 seconds");
+          }
+
+          const error = yield* Fiber.join(request);
+          if (childExits) {
+            assert.instanceOf(error, AcpError.AcpProcessExitedError);
+            assert.equal(error.code, 7);
+          } else if (fault === "stdin write failure") {
+            assert.instanceOf(error, AcpError.AcpTransportError);
+            assert.strictEqual(error.cause, writeFailure);
+          } else {
+            assert.instanceOf(error, AcpError.AcpInputStreamEndedError);
+          }
+          const laterError = yield* transport.request("x/test", {}).pipe(
+            Effect.match({
+              onFailure: (error) => error,
+              onSuccess: () => assert.fail("Expected the closed transport to reject the request."),
+            }),
+          );
+          assert.strictEqual(laterError, error);
+        }),
+    );
+  }
 
   for (const operation of ["request", "notification"] as const) {
     it.effect(`rejects a ${operation} if the connection ends while its logger is running`, () =>

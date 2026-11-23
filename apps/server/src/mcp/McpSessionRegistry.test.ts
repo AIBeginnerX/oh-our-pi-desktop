@@ -57,7 +57,7 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
 );
 
 it.effect(
-  "always grants pull-requests, crew and memory and gates browser and device access independently",
+  "always grants pull-requests, crew, memory, and threads and gates browser and device access independently",
   () =>
     Effect.gen(function* () {
       const registry = yield* makeRegistry(() => 1_000);
@@ -86,13 +86,20 @@ it.effect(
         "memory",
         "preview",
         "pull-requests",
+        "threads",
       ]);
-      expect(yield* capabilitiesOf(withoutPreview)).toEqual(["crew", "memory", "pull-requests"]);
+      expect(yield* capabilitiesOf(withoutPreview)).toEqual([
+        "crew",
+        "memory",
+        "pull-requests",
+        "threads",
+      ]);
       expect(yield* capabilitiesOf(withDevice)).toEqual([
         "crew",
         "device",
         "memory",
         "pull-requests",
+        "threads",
       ]);
     }),
 );

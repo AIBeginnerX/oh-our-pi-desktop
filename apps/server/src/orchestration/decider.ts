@@ -21,6 +21,7 @@ import {
   normalizeThreadPullRequestKey,
   threadPullRequestKeysEqual,
 } from "@t3tools/shared/threadPullRequests";
+import { isCrewMemberThread } from "@t3tools/shared/crew";
 import { compareDateTimeStrings } from "@t3tools/shared/dateTime";
 import { canonicalizeProjectMemoryReferences } from "@t3tools/shared/composerContextReferences";
 import * as DateTime from "effect/DateTime";
@@ -48,6 +49,9 @@ import {
 } from "./commandInvariants.ts";
 import { projectEvent } from "./projector.ts";
 import { threadHasQueuedTurnStart } from "./ThreadSettlementPolicy.ts";
+
+export const THREAD_MESSAGE_COMMAND_PREFIX = "server:threads:send:";
+export const THREAD_MESSAGE_BUSY_DETAIL = "The target thread is busy. Send only when it is idle.";
 
 const monogramSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -84,7 +88,7 @@ function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): b
 // Scans the read model's activities, which the projector caps at the most
 // recent 500 plus pending async questions. Async questions remain actionable
 // while the agent works, so they must not expire with the activity window.
-function openRequests(thread: Pick<OrchestrationThread, "activities">) {
+export function openRequests(thread: Pick<OrchestrationThread, "activities">) {
   const requests = new Map<string, OrchestrationThreadActivity>();
   for (const activity of thread.activities) {
     const payload =
@@ -108,8 +112,16 @@ function openRequests(thread: Pick<OrchestrationThread, "activities">) {
   return requests;
 }
 
+export function isThreadRunning(thread: Pick<OrchestrationThread, "session" | "latestTurn">) {
+  return (
+    thread.session?.status === "running" ||
+    thread.session?.status === "starting" ||
+    thread.latestTurn?.state === "running"
+  );
+}
+
 /** Apply the shared shell-level rule to the detailed command read model. */
-function hasQueuedTurnStartForThread(
+export function hasQueuedTurnStartForThread(
   thread: Pick<OrchestrationThread, "messages" | "latestTurn" | "session">,
   now: string,
 ): boolean {
@@ -273,11 +285,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   readModel,
   userInputActivity,
   turnStartFailScan,
+  threadCreatedAsCrewMember,
 }: {
   readonly command: OrchestrationCommand;
   readonly readModel: OrchestrationReadModel;
   readonly userInputActivity?: OrchestrationThreadActivity;
   readonly turnStartFailScan?: TurnStartFailScan;
+  readonly threadCreatedAsCrewMember?: boolean;
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
   OrchestrationCommandRejection | PlatformError.PlatformError,
@@ -1545,6 +1559,18 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      // Recheck the target after the MCP handler's durable pending-turn lookup.
+      if (
+        command.commandId === `${THREAD_MESSAGE_COMMAND_PREFIX}${command.message.messageId}` &&
+        (isThreadRunning(targetThread) ||
+          openRequests(targetThread).size > 0 ||
+          hasQueuedTurnStartForThread(targetThread, yield* nowIso))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: THREAD_MESSAGE_BUSY_DETAIL,
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -1989,11 +2015,24 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "thread.conversation.revert":
     case "thread.checkpoint.revert": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      // Crew tasks depend on the member's turns remaining intact.
+      if (
+        isCrewMemberThread({
+          parentThreadId: thread.parentThreadId,
+          createdAsCrewMember: threadCreatedAsCrewMember,
+        })
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "A crew member's conversation can't be rewound, because its crew task depends on those turns. Nothing was changed.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",

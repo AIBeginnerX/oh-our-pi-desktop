@@ -45,7 +45,7 @@ Los agentes de programación son buenos, pero cada uno vive en su propia termina
 
 - **Un solo lugar para muchos agentes.** Cambia entre Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode y MiniMax Code por hilo, con el mismo flujo de diff, terminal y aprobaciones.
 - **Deja que varios modelos compartan una tarea.** OOP Crew permite que un modelo "brain" (cerebro) delegue el trabajo rutinario en workers más baratos y el trabajo difícil en un expert, y que un auditor revise el resultado.
-- **Mantén el control.** Cuatro modos de permisos, un panel de diff con checkpoints que puedes restaurar y una página de uso para que los costes no te sorprendan.
+- **Mantén el control.** Cuatro modos de permisos, un panel de diff con checkpoints para revisar los cambios y una página de uso para que los costes no te sorprendan.
 - **Varios equipos con un solo OOP.** Conecta los equipos donde ya ejecutas OOP y verás sus proyectos e hilos en la misma barra lateral; los hilos nuevos se pueden repartir entre ellos según CPU y memoria. Consulta [Todos tus equipos desde un solo OOP](#todos-tus-equipos-desde-un-solo-oop).
 - **Trabaja lejos del teclado.** Empareja tu teléfono con el ordenador que ejecuta los agentes y vigila (o dirige) las tareas largas.
 - **También desde una terminal.** `oop` abre los mismos hilos en una app de terminal a pantalla completa. Funciona con la app de escritorio cerrada y comparte con ella una única carpeta de datos.
@@ -65,7 +65,7 @@ _Vista principal del chat: elige un proveedor y un modelo, define el modo de per
 1. Abre OOP e inicia sesión en un proveedor (Settings → Providers).
 2. Añade una carpeta de proyecto y empieza un hilo.
 3. Elige un modelo y un modo de permisos en el compositor y envía un mensaje.
-4. Revisa el resultado en el panel de diff; restaura desde un checkpoint si no te gusta.
+4. Revisa el resultado en el panel de diff; usa los checkpoints para comparar los cambios de cada turno.
 
 ## Novedades
 
@@ -148,12 +148,12 @@ _Add provider: presets de Z.AI y MiniMax que se ejecutan a través de OpenCode._
 
 ### Diff y revisión
 
-Mira exactamente qué cambió el agente en un hilo, revísalo y restaura desde el checkpoint creado al final de cada turno. Los checkpoints son referencias de git ocultas, así que no ensucian tus ramas.
+Mira exactamente qué cambió el agente en un hilo y revisa los diffs con el checkpoint creado al final de cada turno. Rebobinar la conversación deja los archivos tal como están.
 
 **Cómo abrirlo:** la pestaña **Diff** del panel derecho (hilos del servidor en un repositorio git). En el panel de diff, `]` y `[` pasan de un archivo a otro y `v` marca un archivo como visto.
 
 ![Panel de diff con los cambios hechos por un agente en un hilo](docs/screenshots/diff.png)
-_Panel de diff: revisa lo que cambió el agente y restaura desde los checkpoints._
+_Panel de diff: revisa lo que cambió el agente con los checkpoints de cada turno._
 
 ### Commit y control de código fuente
 
@@ -237,7 +237,7 @@ No es lo mismo que la sección **Terminal integrada** de más abajo. Esa es un s
 _La app de terminal (`oop`): una grabación de pantalla de un chat en la terminal._
 
 - **Funciona con la app cerrada.** Si la app de escritorio no está en marcha, `oop` inicia en segundo plano el servidor que viene con ella. Cuando abres la app, esta toma el control de ese servidor y `oop` se reconecta. Ambos usan la misma carpeta de datos (`~/.oop-desktop`), así que los hilos se comparten. Un turno en curso en el momento en que la app toma el control se interrumpe. Cerrar `oop` deja el servidor en marcha; `oop stop` lo detiene.
-- **Comandos con barra.** Escribe `/` para ver un menú: `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-workflow` y más. `/diff` muestra lo que cambió un turno, `/undo` deshace el último turno, y `/tasks` muestra la lista de tareas junto a la conversación. La lista de tareas y el panel `/dag-workflow` se abren solos si el terminal es lo bastante ancho, con el logo, el estado y una pequeña mascota fijos sobre la conversación; `oop config set workflow false` y `oop config set pet false` desactivan el panel y la mascota.
+- **Comandos con barra.** Escribe `/` para ver un menú: `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-workflow` y más. `/diff` muestra lo que cambió un turno, `/undo` rebobina el último turno de la conversación sin modificar los archivos, y `/tasks` muestra la lista de tareas junto a la conversación. La lista de tareas y el panel `/dag-workflow` se abren solos si el terminal es lo bastante ancho, con el logo, el estado y una pequeña mascota fijos sobre la conversación; `oop config set workflow false` y `oop config set pet false` desactivan el panel y la mascota.
 - **Cola de mensajes.** Los mensajes que envías mientras corre un turno esperan en una cola por hilo. La cola solo existe mientras `oop` está abierto.
 - **Campana de la terminal.** Suena cuando un turno termina o espera una aprobación o una respuesta. `oop config set notify false` la desactiva.
 - **Inglés y coreano.** La app de terminal sigue el ajuste `language`, o la configuración regional del sistema cuando el ajuste está vacío (`oop config set language en` o `ko`).
@@ -299,7 +299,7 @@ _Settings → Connections: acceso remoto y emparejamiento (códigos ocultos)._
 | Actualizador desde carpeta local                       | Las compilaciones empaquetadas de OOP pueden recoger paquetes más nuevos de una carpeta que les indiques  | Compilaciones empaquetadas de macOS / Windows         | Added in OOP, temprano, sin probar por terceros                |
 | Sesiones multiproveedor                                | Hilos, turnos y checkpoints entre proveedores                                                             | Por todas partes                                      | Upstream                                                   |
 | Modos de permisos                                      | Supervised, Auto-accept edits, Auto, Full access                                                          | Compositor; Settings → General                        | Upstream                                                   |
-| Panel de diff y checkpoints                            | Revisa y restaura los cambios del agente                                                                  | Panel derecho → Diff                                  | Upstream                                                   |
+| Panel de diff y checkpoints                            | Revisa los cambios del agente por turno                                                                   | Panel derecho → Diff                                  | Upstream                                                   |
 | Control de código fuente                               | Clonar, commit, publicar y pull requests mediante las CLI de los proveedores                              | Settings → Source Control                             | Upstream                                                   |
 | Terminal integrada                                     | Una terminal por hilo en la máquina del servidor                                                          | Dentro de un hilo                                     | Upstream                                                   |
 | Informes en el chat                                    | Gráficos, tarjetas de estadísticas, barras de progreso, flujos mermaid                                    | En las respuestas                                     | Upstream                                                   |

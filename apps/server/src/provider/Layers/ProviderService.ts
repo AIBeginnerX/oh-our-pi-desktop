@@ -2852,6 +2852,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     );
   });
 
+  const getContextBreakdown = Effect.fn("getContextBreakdown")(
+    function* (threadId: ThreadId) {
+      const routed = yield* resolveRoutableSession({
+        threadId,
+        operation: "ProviderService.getContextBreakdown",
+        allowRecovery: false,
+      });
+      if (!routed.isActive || !routed.adapter.getContextBreakdown) {
+        return { status: "unavailable" } as const;
+      }
+      return yield* routed.adapter.getContextBreakdown(routed.threadId);
+    },
+    Effect.orElseSucceed(() => ({ status: "unavailable" }) as const),
+  );
+
   const uploadFeedback: ProviderServiceMethod<"uploadFeedback"> = Effect.fn("uploadFeedback")(
     function* (rawInput) {
       const input = yield* decodeInputOrValidationError({
@@ -3017,6 +3032,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getInstanceInfo,
     assertConversationRollbackSupported,
     rollbackConversation,
+    getContextBreakdown,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

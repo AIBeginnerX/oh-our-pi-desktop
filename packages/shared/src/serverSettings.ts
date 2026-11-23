@@ -6,7 +6,10 @@ import {
   type ProjectId,
   type ProjectScopedServerSettingKey,
   type ProjectSettingsOverrides,
+  type ProjectSettingsOverridePatch,
   type ProviderDriverKind,
+  type ScheduledPrompt,
+  type ScheduledPromptOperation,
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
@@ -16,6 +19,7 @@ import * as Schema from "effect/Schema";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
 import { createModelSelection } from "./model.ts";
+import { resolveProjectSettings, resolveWorktreeCleanup } from "./projectSettings.ts";
 import {
   getBackgroundActivityBaseProfile,
   normalizeBackgroundActivitySettings,
@@ -262,11 +266,101 @@ function translateLegacyProjectOverridePatch(
   } as ServerSettingsPatch;
 }
 
+function applyProjectSettingsOverridePatches(
+  settings: ServerSettings,
+  patches: NonNullable<ServerSettingsPatch["projectSettingsOverridePatches"]>,
+): ServerSettings["projectSettingsOverrides"] {
+  const entries = new Map(Object.entries(settings.projectSettingsOverrides));
+  for (const [id, patch] of Object.entries<ProjectSettingsOverridePatch>(patches)) {
+    const projectId = id as ProjectId;
+    const { worktreeCleanup, sourceControlWritingStyle, textGenerationModelSelection, ...set } =
+      patch.set ?? {};
+    const next = { ...entries.get(id), ...set };
+    if (worktreeCleanup !== undefined) {
+      next.worktreeCleanup =
+        worktreeCleanup.mode === "off"
+          ? worktreeCleanup
+          : {
+              mode: "custom",
+              rules: { ...resolveWorktreeCleanup(settings, projectId), ...worktreeCleanup.rules },
+            };
+    }
+    if (sourceControlWritingStyle !== undefined || textGenerationModelSelection !== undefined) {
+      const effective = resolveProjectSettings(settings, projectId).settings;
+      if (sourceControlWritingStyle !== undefined) {
+        next.sourceControlWritingStyle = {
+          ...effective.sourceControlWritingStyle,
+          ...sourceControlWritingStyle,
+        };
+      }
+      if (textGenerationModelSelection !== undefined) {
+        next.textGenerationModelSelection = {
+          ...effective.textGenerationModelSelection,
+          ...textGenerationModelSelection,
+        };
+      }
+    }
+    for (const key of patch.unset ?? []) delete next[key];
+    if (Object.keys(next).length > 0) entries.set(id, next);
+    else entries.delete(id);
+  }
+  return Object.fromEntries(entries);
+}
+
+export function projectOverrideOperationsPatch(
+  current: ServerSettings,
+  operations: NonNullable<ServerSettingsPatch["projectSettingsOverridePatches"]>,
+): ServerSettingsPatch {
+  const next = applyProjectSettingsOverridePatches(current, operations);
+  return {
+    projectSettingsOverridePatches: operations,
+    projectSettingsOverrides: Object.fromEntries(
+      Object.keys(operations).map((id) => [
+        id,
+        Object.hasOwn(next, id) ? (next[id as ProjectId] ?? null) : null,
+      ]),
+    ),
+  };
+}
+
+export function applyScheduledPromptOperations(
+  current: readonly ScheduledPrompt[],
+  operations: readonly ScheduledPromptOperation[],
+): readonly ScheduledPrompt[] {
+  let entries = current;
+  for (const operation of operations) {
+    switch (operation.type) {
+      case "upsert": {
+        const { entry } = operation;
+        entries = entries.some(({ id }) => id === entry.id)
+          ? entries.map((item) => (item.id === entry.id ? entry : item))
+          : [...entries, entry];
+        break;
+      }
+      case "update":
+        entries = entries.map((item) =>
+          item.id === operation.id ? { ...item, ...operation.changes } : item,
+        );
+        break;
+      case "remove":
+        entries = entries.filter(({ id }) => id !== operation.id);
+        break;
+      case "removeProject":
+        entries = entries.filter(({ projectId }) => projectId !== operation.projectId);
+        break;
+    }
+  }
+  return entries;
+}
+
 export function applyServerSettingsPatch(
   current: ServerSettings,
   rawPatch: ServerSettingsPatch,
 ): ServerSettings {
-  const patch = translateLegacyProjectOverridePatch(current, rawPatch);
+  const patch =
+    rawPatch.projectSettingsOverridePatches === undefined
+      ? translateLegacyProjectOverridePatch(current, rawPatch)
+      : rawPatch;
   const selectionPatch = patch.textGenerationModelSelection;
   const {
     automaticGitFetchInterval,
@@ -279,10 +373,13 @@ export function applyServerSettingsPatch(
     usagePriceOverrides: usagePriceOverridesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
+    projectSettingsOverridePatches,
     // Whole replacement: a role the client cleared must not survive a merge.
     crew: crewPatch,
     // Whole replacement for the same reason: a cleared thread goal must not survive a merge.
     threadGoals: threadGoalsPatch,
+    scheduledPrompts: scheduledPromptsPatch,
+    scheduledPromptOperations,
     // Already translated into `projectSettingsOverrides` above; the legacy
     // maps are derived views and must never be merged directly.
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
@@ -364,7 +461,7 @@ export function applyServerSettingsPatch(
     ...(patch.providerInstances !== undefined
       ? { providerInstances: patch.providerInstances }
       : {}),
-    ...(projectSettingsOverridesPatch !== undefined
+    ...(projectSettingsOverridePatches === undefined && projectSettingsOverridesPatch !== undefined
       ? {
           projectSettingsOverrides: Object.fromEntries(
             Object.entries(
@@ -377,6 +474,16 @@ export function applyServerSettingsPatch(
       ? { defaultModelSelection: patch.defaultModelSelection }
       : {}),
     ...(crewPatch !== undefined ? { crew: crewPatch } : {}),
+    ...(scheduledPromptOperations !== undefined
+      ? {
+          scheduledPrompts: applyScheduledPromptOperations(
+            current.scheduledPrompts,
+            scheduledPromptOperations,
+          ),
+        }
+      : scheduledPromptsPatch !== undefined
+        ? { scheduledPrompts: scheduledPromptsPatch }
+        : {}),
     ...(threadGoalsPatch !== undefined ? { threadGoals: threadGoalsPatch } : {}),
     ...(patch.defaultProjectScripts !== undefined
       ? { defaultProjectScripts: patch.defaultProjectScripts }
@@ -403,6 +510,13 @@ export function applyServerSettingsPatch(
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
     ...(providerHealthRefreshInterval !== undefined ? { providerHealthRefreshInterval } : {}),
   };
+  const projectSettingsOverrides =
+    projectSettingsOverridePatches === undefined
+      ? nextWithReplacementsBase.projectSettingsOverrides
+      : applyProjectSettingsOverridePatches(
+          nextWithReplacementsBase,
+          projectSettingsOverridePatches,
+        );
   const normalizedBackgroundActivity = normalizeBackgroundActivitySettings(
     nextWithReplacementsBase.backgroundActivity,
   );
@@ -411,7 +525,8 @@ export function applyServerSettingsPatch(
   );
   const nextWithReplacements = {
     ...nextWithReplacementsBase,
-    ...deriveLegacyProjectOverrides(nextWithReplacementsBase),
+    projectSettingsOverrides,
+    ...deriveLegacyProjectOverrides({ projectSettingsOverrides }),
     backgroundActivity: normalizedBackgroundActivity,
     automaticGitFetchInterval: resolvedBackgroundActivity.automaticGitFetchInterval,
     providerHealthRefreshInterval: resolvedBackgroundActivity.providerHealthRefreshInterval,

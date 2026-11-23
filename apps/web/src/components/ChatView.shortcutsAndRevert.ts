@@ -1,3 +1,6 @@
+import { t } from "../i18n";
+import { persistClientSettingsUpdate } from "../hooks/useSettings";
+import { cycleTranscriptViewMode } from "./chat/MessagesTimeline.logic";
 import { type MessageId, PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
 import { readPastedComposerContext } from "./composerInlineTokenPaste";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
@@ -56,6 +59,15 @@ import type { useChatViewTerminalsAndScripts } from "./ChatView.terminalsAndScri
 import type { useChatViewRightPanel } from "./ChatView.rightPanel";
 import type { useChatViewTimelineScroll } from "./ChatView.timelineScroll";
 import type { useChatViewThreadStatus } from "./ChatView.threadStatus";
+
+export function cycleTranscriptView() {
+  return persistClientSettingsUpdate((settings) => ({
+    ...settings,
+    transcriptViewMode: cycleTranscriptViewMode(settings.transcriptViewMode),
+  })).catch(() => {
+    toastManager.add({ type: "warning", title: t("Could not save transcript view") });
+  });
+}
 
 export function useChatViewShortcutsAndRevert({
   threadState,
@@ -223,6 +235,13 @@ export function useChatViewShortcutsAndRevert({
         context: shortcutContext,
       });
       if (!command) return;
+
+      if (command === "chat.cycleTranscriptView") {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!event.repeat) void cycleTranscriptView();
+        return;
+      }
 
       if (command === "thread.copyReference") {
         event.preventDefault();
@@ -519,7 +538,7 @@ export function useChatViewShortcutsAndRevert({
   }
 
   const onRevertToTurnCount = useCallback(
-    async (turnCount: number, messageId: MessageId, restoreFiles?: boolean) => {
+    async (turnCount: number, messageId: MessageId, confirmed = false) => {
       const localApi = readLocalApi();
       if (!localApi || !activeThread || isRevertingCheckpoint) return;
       const message = activeThread.messages.find((message) => message.id === messageId);
@@ -543,7 +562,7 @@ export function useChatViewShortcutsAndRevert({
         setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
         return;
       }
-      if (restoreFiles === undefined) {
+      if (!confirmed) {
         setPendingRevert({ turnCount, messageId, routeThreadKey });
         return;
       }
@@ -577,7 +596,7 @@ export function useChatViewShortcutsAndRevert({
         await waitForRevertedMessage(routeThreadRef, messageId, turnCount, async () => {
           const result = await revertThreadCheckpoint({
             environmentId,
-            input: { threadId: activeThread.id, turnCount, restoreFiles },
+            input: { threadId: activeThread.id, turnCount },
           });
           if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         });

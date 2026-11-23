@@ -1,7 +1,44 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EventId, type OrchestrationThreadActivity, TurnId } from "@t3tools/contracts";
 
-import { deriveLatestContextWindowSnapshot, formatContextWindowTokens } from "./contextWindow";
+import {
+  deriveLatestContextWindowSnapshot,
+  formatContextWindowTokens,
+  shapeContextBreakdown,
+} from "./contextWindow";
+
+describe("shapeContextBreakdown", () => {
+  it("totals used rows and keeps deferred rows outside the window", () => {
+    const result = shapeContextBreakdown(
+      [
+        { name: "Messages", tokens: 50, kind: "used" },
+        { name: "Free space", tokens: 40, kind: "free" },
+        { name: "Buffer", tokens: 10, kind: "buffer" },
+        { name: "Deferred tools", tokens: 200, kind: "deferred" },
+        { name: "Negative", tokens: -1, kind: "used" },
+        { name: "NaN", tokens: NaN, kind: "used" },
+      ],
+      100,
+    );
+
+    expect(result.usedTokens).toBe(50);
+    expect(result.usedShare).toBe(50);
+    expect(result.rows.used.map((row) => row.name)).toEqual(["Messages"]);
+    expect(result.rows.free[0]?.share).toBe(40);
+    expect(result.rows.buffer[0]?.share).toBe(10);
+    expect(result.rows.deferred[0]?.share).toBeNull();
+  });
+
+  it.each([undefined, 0])("preserves token counts with max %s", (maxTokens) => {
+    const result = shapeContextBreakdown(
+      [{ name: "Messages", tokens: 50, kind: "used" }],
+      maxTokens,
+    );
+    expect(result.usedTokens).toBe(50);
+    expect(result.usedShare).toBeNull();
+    expect(result.rows.used[0]?.share).toBeNull();
+  });
+});
 
 function makeActivity(id: string, kind: string, payload: unknown): OrchestrationThreadActivity {
   return {

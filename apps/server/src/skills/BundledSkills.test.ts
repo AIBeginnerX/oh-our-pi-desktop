@@ -5,7 +5,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { BundledSkillListResult } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as FileSystem from "effect/FileSystem";
 
 import { discoverClaudeSkills } from "../provider/Drivers/ClaudeSkills.ts";
 import { PIXELGUI_SKILL_MARKDOWN } from "./bundled/pixelguiSkill.ts";
@@ -219,6 +222,52 @@ describe("BundledSkills", () => {
       yield* Effect.promise(() =>
         NodeFSP.stat(NodePath.join(configDir, "skills", "pixelgui", "SKILL.md")),
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reinstalls a skill when an earlier install left only a staging file", () =>
+    Effect.gen(function* () {
+      const home = yield* tempHome;
+      const directory = NodePath.join(home, ".claude", "skills", "pixelgui");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(directory, { recursive: true });
+        await NodeFSP.writeFile(
+          NodePath.join(directory, ".SKILL.md.1c122da0-aff4-4d2e-bd4c-703eb63bb68f"),
+          "partial write",
+        );
+      });
+      assert.equal(statuses(yield* listBundledSkills(hostAt(home))).claude, "not-installed");
+
+      const result = yield* installBundledSkill(hostAt(home), {
+        name: "pixelgui",
+        target: "claude",
+      });
+      assert.equal(statuses(result).claude, "installed");
+      assert.equal(
+        yield* Effect.promise(() => NodeFSP.readFile(NodePath.join(directory, "SKILL.md"), "utf8")),
+        PIXELGUI_SKILL_MARKDOWN,
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("cleans up staging when installation is interrupted before publication", () =>
+    Effect.gen(function* () {
+      const home = yield* tempHome;
+      const directory = NodePath.join(home, ".claude", "skills", "pixelgui");
+      const fileSystem = yield* FileSystem.FileSystem;
+      const linking = yield* Deferred.make<void>();
+      const install = installBundledSkill(hostAt(home), { name: "pixelgui", target: "claude" });
+      const fiber = yield* install.pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fileSystem,
+          link: () => Deferred.succeed(linking, undefined).pipe(Effect.andThen(Effect.never)),
+        }),
+        Effect.forkScoped,
+      );
+      yield* Deferred.await(linking);
+      yield* Fiber.interrupt(fiber);
+      assert.deepEqual(yield* Effect.promise(() => NodeFSP.readdir(directory)), []);
+      assert.equal(statuses(yield* install).claude, "installed");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 

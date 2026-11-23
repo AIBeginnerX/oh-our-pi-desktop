@@ -6,13 +6,14 @@
 //! thread itself, so a report is a note under the conversation (`notes.rs`), and `/history` loads
 //! the older turns into the thread (the way scrolling to the top does) and scrolls there.
 
-use crate::app::{Active, App, Modal, Msg, Pick};
-use crate::checkpoints::{self, Restore, UndoPlan};
+use crate::app::{Active, App, Modal, Msg, Pick, call_dispatch, dispatch_notice};
+use crate::checkpoints::{self, UndoPlan};
 use crate::commands::{self, Ctx};
 use crate::notes::Tone;
 use crate::panels_common::{fill, flat, s};
-use crate::text::{iso_now, parse_iso_ms};
+use crate::text::{iso_now, parse_iso_ms, sanitize};
 use crate::thread::{Role, Thread};
+use crate::wire::CallError;
 use serde_json::{Value, json};
 use std::collections::HashSet;
 
@@ -42,7 +43,6 @@ pub struct State {
 struct Pending {
     thread_id: String,
     plan: UndoPlan,
-    restore_files: bool,
     started_at: i64,
     /// Failures already in the thread when it was sent: they are not this request's answer.
     known_failures: HashSet<String>,
@@ -117,8 +117,8 @@ pub fn on_leave(app: &mut App) {
 }
 
 enum Outcome {
-    Done { plan: UndoPlan, restore_files: bool },
-    Failed { restore_files: bool },
+    Done { plan: UndoPlan },
+    Failed { detail: Option<String> },
 }
 
 /// Reads the thread for the answer to the undo that was sent; once it is found the request is over.
@@ -127,22 +127,22 @@ fn observe(state: &mut State, thread: &Thread) -> Option<Outcome> {
     if pending.thread_id != thread.id {
         return None;
     }
-    let failed = thread
+    if let Some(failed) = thread
         .activities
         .iter()
-        .any(|a| a.kind == FAILURE_KIND && !pending.known_failures.contains(&a.id));
-    let restore_files = pending.restore_files;
-    if failed {
+        .rfind(|a| a.kind == FAILURE_KIND && !pending.known_failures.contains(&a.id))
+    {
+        let detail = failed.payload["detail"]
+            .as_str()
+            .map(sanitize)
+            .filter(|detail| !detail.trim().is_empty());
         state.undo = None;
-        return Some(Outcome::Failed { restore_files });
+        return Some(Outcome::Failed { detail });
     }
     if checkpoints::turn_count_of(thread) <= pending.plan.target {
         let plan = pending.plan.clone();
         state.undo = None;
-        return Some(Outcome::Done {
-            plan,
-            restore_files,
-        });
+        return Some(Outcome::Done { plan });
     }
     None
 }
@@ -166,26 +166,23 @@ pub fn on_thread(app: &mut App) {
     let count = checkpoints::turn_count_of(&app.conv.thread);
     let before = app.threadops.turn_count.replace(count);
     let outcome = observe(&mut app.threadops, &app.conv.thread);
-    if let Some(Outcome::Failed { restore_files }) = &outcome {
-        let text = if *restore_files {
-            s(
-                "Could not undo (the reason is in the server message above). The conversation is unchanged. Check the files with /diff; to undo only the conversation, choose \"conversation only\" in /undo.",
-                "되돌리지 못했습니다 (이유는 위의 서버 메시지). 대화는 그대로입니다. 파일 상태는 /diff 로 확인하고, 대화만 되돌리려면 /undo 에서 \"대화만\"을 고르세요.",
-            )
-        } else {
-            s(
-                "Could not undo (the reason is in the server message above). The conversation is unchanged.",
-                "되돌리지 못했습니다 (이유는 위의 서버 메시지). 대화는 그대로입니다.",
-            )
-        };
-        app.say(Tone::Error, text);
+    if let Some(Outcome::Failed { detail }) = &outcome {
+        let text = s(
+            "Could not undo. The conversation is unchanged.",
+            "되돌리지 못했습니다. 대화는 그대로입니다.",
+        );
+        let mut body = vec![text.to_string()];
+        if let Some(detail) = detail {
+            body.push(format!(
+                "{} · {detail}",
+                s("Server reason", "서버가 전한 이유")
+            ));
+        }
+        app.note(Tone::Error, "", body);
         return;
     }
     let mine = match outcome {
-        Some(Outcome::Done {
-            plan,
-            restore_files,
-        }) => Some((plan, restore_files)),
+        Some(Outcome::Done { plan }) => Some(plan),
         _ => None,
     };
     if mine.is_none() && !before.is_some_and(|b| count < b) {
@@ -193,7 +190,7 @@ pub fn on_thread(app: &mut App) {
     }
     let from = mine
         .as_ref()
-        .map(|(plan, _)| plan.turn)
+        .map(|plan| plan.turn)
         .or(before)
         .unwrap_or(count);
     let mut body = vec![
@@ -203,26 +200,8 @@ pub fn on_thread(app: &mut App) {
         )
         .to_string(),
     ];
-    if let Some((plan, restore_files)) = mine {
-        body.push(if restore_files {
-            let state = if plan.target == 0 {
-                s("before the thread started", "스레드를 시작하기 전").to_string()
-            } else {
-                fill(
-                    s("the end of turn {target}", "턴 {target} 이 끝난"),
-                    &[("target", plan.target.to_string())],
-                )
-            };
-            fill(
-                s(
-                    "Files: restored to the state at {state}.",
-                    "파일: {state} 상태로 복원했습니다.",
-                ),
-                &[("state", state)],
-            )
-        } else {
-            s("Files: left as they were.", "파일: 그대로 두었습니다.").to_string()
-        });
+    if let Some(plan) = mine {
+        body.push(s("Files: left as they were.", "파일: 그대로 두었습니다.").to_string());
         // What waited in the queue may rest on the turn that is gone: it goes back to the composer
         // too, behind the question that was asked before it, to be read before anything is sent.
         let queued: Vec<String> = app.queue.drain(..).collect();
@@ -272,16 +251,12 @@ pub fn on_thread(app: &mut App) {
 // --- /undo ----------------------------------------------------------------------------------
 
 /// What the confirmation offers, in the order it lists them: the first is the safe one.
-fn undo_choices(plan: &UndoPlan) -> Vec<&'static str> {
-    if plan.restore == Restore::Possible {
-        vec!["cancel", "files", "conversation"]
-    } else {
-        vec!["cancel", "conversation"]
-    }
+fn undo_choices() -> Vec<&'static str> {
+    vec!["cancel", "conversation"]
 }
 
-fn undo_items(plan: &UndoPlan) -> Vec<String> {
-    undo_choices(plan)
+fn undo_items() -> Vec<String> {
+    undo_choices()
         .into_iter()
         .map(|choice| {
             let (label, note) = match choice {
@@ -289,20 +264,8 @@ fn undo_items(plan: &UndoPlan) -> Vec<String> {
                     s("Cancel", "취소").to_string(),
                     s("Changes nothing", "아무것도 바꾸지 않습니다").to_string(),
                 ),
-                "files" => (
-                    s("Undo files and conversation", "파일과 대화 되돌리기").to_string(),
-                    fill(
-                        s("Back to the end of turn {target}", "턴 {target} 끝 상태로"),
-                        &[("target", plan.target.to_string())],
-                    ),
-                ),
                 _ => (
-                    if plan.restore == Restore::Possible {
-                        s("Undo conversation only", "대화만 되돌리기")
-                    } else {
-                        s("Undo conversation", "대화 되돌리기")
-                    }
-                    .to_string(),
+                    s("Undo conversation", "대화 되돌리기").to_string(),
                     s("Leaves your files as they are", "파일은 그대로 둡니다").to_string(),
                 ),
             };
@@ -361,37 +324,13 @@ fn undo_summary(plan: &UndoPlan, queued: usize) -> Vec<String> {
             &[("queued", queued.to_string())],
         ));
     }
-    rows.push(match plan.restore {
-        Restore::Possible => {
-            let state = if plan.target == 0 {
-                s("before this thread started", "이 스레드를 시작하기 전").to_string()
-            } else {
-                fill(
-                    s("the end of turn {target}", "턴 {target} 이 끝난"),
-                    &[("target", plan.target.to_string())],
-                )
-            };
-            fill(
-                s(
-                    "Files: choosing \"Undo files and conversation\" restores the whole folder, including {counts}, to the state at {state}, and discards any edits you made by hand since. Choosing \"conversation only\" leaves your files as they are.",
-                    "파일: \"파일과 대화\"를 고르면 {counts} 를 포함해 폴더 전체가 {state} 상태로 돌아가고, 그 사이 직접 고친 내용도 사라집니다. \"대화만\"을 고르면 파일은 그대로입니다.",
-                ),
-                &[("counts", counts), ("state", state)],
-            )
-        }
-        Restore::SharedFolder => fill(
-            s(
-                "Files: left as they are. This thread shares the project folder with other threads, so restoring files is not supported (the desktop app works the same way). View the {counts} this turn changed with /diff {turn} and revert them yourself.",
-                "파일: 그대로 둡니다. 이 스레드는 프로젝트 폴더를 다른 스레드와 함께 쓰므로 파일 복원은 지원되지 않습니다 (데스크톱 앱도 같습니다). 이 턴이 바꾼 {counts} 는 /diff {turn} 으로 보고 직접 되돌리세요.",
-            ),
-            &[("counts", counts), ("turn", turn)],
+    rows.push(fill(
+        s(
+            "Files stay as they are. Review this turn's changes ({counts}) with /diff {turn} before undoing.",
+            "파일은 그대로 둡니다. 되돌리기 전에 /diff {turn} 으로 이 턴의 변경({counts})을 확인하세요.",
         ),
-        Restore::CheckpointUnusable => s(
-            "Files: left as they are. No checkpoint is available to go back to.",
-            "파일: 그대로 둡니다. 되돌아갈 체크포인트를 쓸 수 없습니다.",
-        )
-        .to_string(),
-    });
+        &[("counts", counts), ("turn", turn)],
+    ));
     rows.push(
         s(
             "Undoing an undo is not possible, even in the desktop app.",
@@ -493,8 +432,8 @@ pub fn undo(app: &mut App) {
     let mut rows = undo_summary(&plan, app.queue.len());
     let heading = rows.remove(0);
     app.note(Tone::Warning, &heading, rows);
-    let items = undo_items(&plan);
-    let data = undo_choices(&plan).into_iter().map(String::from).collect();
+    let items = undo_items();
+    let data = undo_choices().into_iter().map(String::from).collect();
     app.threadops.offer = Some(plan);
     app.modal = Some(Modal::Pick(Pick {
         id: "undo",
@@ -509,11 +448,9 @@ pub fn undo(app: &mut App) {
 /// The list was answered: the plan is read again from the thread, since it may have moved on, and sent.
 pub fn undo_picked(app: &mut App, pick: &Pick, index: usize) {
     let offered = app.threadops.offer.take();
-    let restore_files = match pick.data.get(index).map(String::as_str) {
-        Some("files") => true,
-        Some("conversation") => false,
-        _ => return,
-    };
+    if pick.data.get(index).map(String::as_str) != Some("conversation") {
+        return;
+    }
     let changed = || {
         s(
             "The conversation changed, so the undo was cancelled. Run /undo again.",
@@ -527,10 +464,8 @@ pub fn undo_picked(app: &mut App, pick: &Pick, index: usize) {
         app.notice = Some(changed());
         return;
     };
-    // What the choice was offered for must still hold: a folder restore the thread lost is not
-    // carried out.
+    // The turn offered must still be current.
     if again.turn != plan.turn
-        || again.restore != plan.restore
         || app.conv.busy()
         || app.awaiting.is_some()
         || undo_active(app)
@@ -553,25 +488,29 @@ pub fn undo_picked(app: &mut App, pick: &Pick, index: usize) {
     app.threadops.undo = Some(Pending {
         thread_id: id.clone(),
         plan: again.clone(),
-        restore_files,
         started_at: now,
         known_failures,
         away: false,
     });
     app.say(Tone::Info, s("Undoing…", "되돌리는 중…"));
-    let command = commands::revert(&Ctx::fresh(), &id, again.target, restore_files);
+    let command = commands::revert(&Ctx::fresh(), &id, again.target);
     #[cfg(test)]
     app.log.push(command.clone());
     let tx = app.sender();
     tokio::spawn(async move {
-        let result = rpc.call(crate::app::DISPATCH_RPC, command).await;
+        let result = call_dispatch(&rpc, command).await;
         let _ = tx.send(Msg::Ext(Box::new(move |app| undo_sent(app, &id, result))));
     });
 }
 
 /// The server answered the request itself (not yet the undo, which is read from the thread).
-fn undo_sent(app: &mut App, thread_id: &str, result: Result<Value, String>) {
-    let Err(reason) = result else { return };
+fn undo_sent(app: &mut App, thread_id: &str, result: Result<Value, CallError>) {
+    let Err(error) = result else { return };
+    if error == CallError::TimedOut {
+        app.notice = Some(dispatch_notice(error));
+        return;
+    }
+    let reason = error.to_string();
     if app
         .threadops
         .undo
@@ -589,8 +528,8 @@ fn undo_sent(app: &mut App, thread_id: &str, result: Result<Value, String>) {
         app.say(
             Tone::Warning,
             s(
-                "It is not certain the request reached the server. Check the files with /diff and reopen the conversation to check its state.",
-                "서버에 닿았는지 확실하지 않습니다. /diff 로 파일을, 대화를 다시 열어 상태를 확인하세요.",
+                "It is not certain the request reached the server. Reopen the conversation to check its state.",
+                "서버에 닿았는지 확실하지 않습니다. 대화를 다시 열어 상태를 확인하세요.",
             ),
         );
     }
@@ -724,7 +663,7 @@ pub fn diff(app: &mut App, argument: &str) {
         .push(json!({"rpc": call, "payload": payload.clone()}));
     let tx = app.sender();
     tokio::spawn(async move {
-        let result = rpc.call(call, payload).await;
+        let result = rpc.call_with_timeout(call, payload, None).await;
         let job = DiffJob {
             thread_id: id,
             turn,
@@ -896,6 +835,20 @@ pub fn loading(app: &App) -> bool {
 
 /// A page of older turns arrived (or failed): `/history` asks for the next one until it has enough.
 pub fn on_older(app: &mut App, failure: Option<String>) {
+    if failure.is_none()
+        && let Some(pending) = app.threadops.undo.as_mut()
+        && pending.thread_id == app.conv.thread_id
+    {
+        // Failures discovered by paging predate the pending undo.
+        pending.known_failures.extend(
+            app.conv
+                .thread
+                .activities
+                .iter()
+                .filter(|a| a.kind == FAILURE_KIND)
+                .map(|a| a.id.clone()),
+        );
+    }
     let Some(mut job) = app.threadops.history.take() else {
         return;
     };
@@ -1125,7 +1078,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn undo_lists_cancel_first_and_offers_files_only_where_they_can_be_restored() {
+    async fn undo_always_lists_cancel_then_conversation() {
         let (port, _) = serve(|_, _| None).await;
         let (mut app, _rx) = connected(port, two_turns(json!({})), false).await;
         undo(&mut app);
@@ -1133,7 +1086,7 @@ mod tests {
             panic!("a list opens: {:?}", app.notice);
         };
         assert_eq!(pick.id, "undo");
-        assert_eq!(pick.data, ["cancel", "files", "conversation"]);
+        assert_eq!(pick.data, ["cancel", "conversation"]);
         assert_eq!(pick.cursor, 0);
         // what is deleted is said under the conversation
         let said = note_text(&app);
@@ -1199,14 +1152,14 @@ mod tests {
         };
         undo_picked(&mut app, &pick, 0);
         assert!(app.log.is_empty() && app.threadops.undo.is_none());
-        // files and conversation
+        // conversation
         undo(&mut app);
         let Some(Modal::Pick(pick)) = app.modal.take() else {
             panic!()
         };
         undo_picked(&mut app, &pick, 1);
         assert_eq!(app.log.len(), 1);
-        assert_eq!(app.log[0]["type"], "thread.checkpoint.revert");
+        assert_eq!(app.log[0]["type"], "thread.conversation.revert");
         assert_eq!(app.log[0]["turnCount"], 1);
         assert!(undo_active(&app));
         assert!(sending_blocked(&app).is_some());
@@ -1263,7 +1216,10 @@ mod tests {
         let typed = app.input.text();
         assert_eq!(typed, "second question\n\nlater\n\nhello");
         assert!(app.queue.is_empty());
-        assert!(said.contains(s("Files: restored", "파일: ")), "{said}");
+        assert!(
+            said.contains(s("Files: left as they were.", "파일: 그대로 두었습니다.")),
+            "{said}"
+        );
     }
 
     #[tokio::test]
@@ -1277,7 +1233,7 @@ mod tests {
         let Some(Modal::Pick(pick)) = app.modal.take() else {
             panic!()
         };
-        undo_picked(&mut app, &pick, 2);
+        undo_picked(&mut app, &pick, 1);
         assert_eq!(app.log[0]["type"], "thread.conversation.revert");
         next(&mut app, &mut rx).await;
         assert!(app.threadops.undo.is_none());
@@ -1286,22 +1242,90 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_revert_shows_in_the_thread_and_leaves_the_conversation() {
-        let (port, _) = serve(|_, _| None).await;
-        let (mut app, _rx) = connected(port, two_turns(json!({})), false).await;
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let (rpc, _peer) = crate::wire::fake_socket().await;
+        let mut app = App::new("0.0.0", "/tmp/oop-rs/work/demo", "/tmp", tx);
+        app.active = Active::Thread("t1".into());
+        app.rpc = Some(rpc);
+        app.conv = crate::state::Conversation::new("t1");
+        let old_failure = json!({"id": "old", "tone": "error", "kind": "checkpoint.revert.failed",
+            "payload": {"detail": "older failure"}, "createdAt": "2026-01-01T00:00:08.000Z"});
+        let mut thread = two_turns(json!({"activities": [old_failure.clone()]}));
+        app.handle(Msg::Thread {
+            id: "t1".into(),
+            item: json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 5, "thread": thread}}),
+        });
         undo(&mut app);
         let Some(Modal::Pick(pick)) = app.modal.take() else {
             panic!()
         };
         undo_picked(&mut app, &pick, 1);
-        let mut failed = two_turns(json!({}));
-        failed["activities"] = json!([{"id": "f1", "tone": "error", "kind": "checkpoint.revert.failed",
+        assert!(undo_active(&app));
+        thread["activities"] = json!([old_failure, {"id": "f1", "tone": "error", "kind": "checkpoint.revert.failed",
             "summary": "x", "payload": {"detail": "dirty tree\nsecond line"}, "createdAt": "2026-01-01T00:00:09.000Z"}]);
         app.handle(Msg::Thread {
             id: "t1".into(),
-            item: json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 6, "thread": failed}}),
+            item: json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 6, "thread": thread}}),
         });
         assert!(!undo_active(&app));
-        assert!(note_text(&app).contains(s("Could not undo", "되돌리지 못했습니다")));
+        assert_eq!(checkpoints::turn_count_of(&app.conv.thread), 2);
+        let note = note_text(&app);
+        assert!(note.contains(s("Could not undo", "되돌리지 못했습니다")));
+        assert!(note.contains("dirty tree\nsecond line"), "{note}");
+        assert!(!note.contains("older failure"));
+    }
+
+    #[tokio::test]
+    async fn an_older_page_failure_is_not_the_pending_undo_result() {
+        let mut notes = Vec::new();
+        for (kind, payload) in [
+            (
+                "thread.activity-appended",
+                json!({"activity": {"id": "new", "tone": "error", "kind": FAILURE_KIND,
+                    "payload": {"detail": "dirty tree"}, "createdAt": "2026-01-01T00:00:09.000Z"}}),
+            ),
+            ("thread.reverted", json!({"turnCount": 1})),
+        ] {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            let (rpc, _peer) = crate::wire::fake_socket().await;
+            let mut app = App::new("0.0.0", "/tmp/oop-rs/work/demo", "/tmp", tx);
+            app.active = Active::Thread("t1".into());
+            app.rpc = Some(rpc);
+            app.conv = crate::state::Conversation::new("t1");
+            app.handle(Msg::Thread {
+                id: "t1".into(),
+                item: json!({"kind": "snapshot", "snapshot": {"snapshotSequence": 5, "thread": two_turns(json!({}))}}),
+            });
+            undo(&mut app);
+            let Some(Modal::Pick(pick)) = app.modal.take() else {
+                panic!()
+            };
+            undo_picked(&mut app, &pick, 1);
+            assert!(undo_active(&app));
+
+            app.handle(Msg::Older {
+                id: "t1".into(),
+                result: Ok(json!({"thread": {"id": "t1", "activities": [
+                    {"id": "old", "tone": "error", "kind": FAILURE_KIND,
+                        "payload": {"detail": "older failure"}, "createdAt": "2026-01-01T00:00:00.000Z"}
+                ]}})),
+            });
+            assert!(undo_active(&app));
+            assert_eq!(app.conv.thread.activities[0].id, "old");
+            app.handle(Msg::Thread {
+                id: "t1".into(),
+                item: json!({"kind": "event", "event": {"sequence": 6, "type": kind,
+                    "occurredAt": "2026-01-01T00:00:09.000Z", "payload": payload}}),
+            });
+            assert!(!undo_active(&app));
+            notes.push(note_text(&app));
+        }
+        assert!(
+            notes[0].contains("dirty tree")
+                && notes[1].contains(s("Undone from turn 2", "턴 2부터 되돌림"))
+                && notes.iter().all(|note| !note.contains("older failure")),
+            "failure and success outcomes: {notes:?}"
+        );
     }
 
     #[tokio::test]
@@ -1312,7 +1336,7 @@ mod tests {
         let Some(Modal::Pick(pick)) = app.modal.take() else {
             panic!()
         };
-        undo_picked(&mut app, &pick, 2);
+        undo_picked(&mut app, &pick, 1);
         on_leave(&mut app);
         assert!(app.threadops.undo.as_ref().unwrap().away);
         // an old request is not dropped while away

@@ -2,7 +2,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeHttpPlatform from "@effect/platform-node/NodeHttpPlatform";
 import * as NodeFSP from "node:fs/promises";
-import { AssetAccessError, AssetPreviewTypeValidationError, ThreadId } from "@t3tools/contracts";
+import {
+  AssetAccessError,
+  AssetPreviewTypeValidationError,
+  AuthOrchestrationOperateScope,
+  EnvironmentAuthorizationError,
+  ThreadId,
+} from "@t3tools/contracts";
 import { PROJECT_FAVICON_FALLBACK_MARKER } from "@t3tools/shared/projectFavicon";
 import { describe, expect, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
@@ -96,6 +102,28 @@ describe("AssetAccess", () => {
       Effect.scoped,
     );
   });
+
+  it.effect("does not disclose whether an unauthorized media file exists", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const outside = yield* fs.makeTempDirectoryScoped();
+      const filePath = path.join(outside, "outside.png");
+      const denied = new EnvironmentAuthorizationError({
+        requiredScope: AuthOrchestrationOperateScope,
+        message: "Access denied.",
+      });
+      const issue = () =>
+        issueAssetUrl({
+          resource: { _tag: "media-file", threadId: ThreadId.make("thread"), path: filePath },
+          authorizeCanonicalFile: () => Effect.fail(denied),
+        }).pipe(Effect.flip);
+      const missing = yield* issue();
+      yield* fs.writeFileString(filePath, "outside");
+      expect(yield* issue()).toEqual(denied);
+      expect(missing).toEqual(denied);
+    }).pipe(Effect.provide(testLayer)),
+  );
 
   it.effect("issues exact URLs for media and browser documents outside the workspace", () =>
     Effect.gen(function* () {

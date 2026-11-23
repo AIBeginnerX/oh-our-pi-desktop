@@ -960,14 +960,19 @@ impl ThreadsScreen {
         let follow = self.follow.clone();
         let tx = app.sender();
         tokio::spawn(async move {
-            let result = rpc.call(crate::app::DISPATCH_RPC, command).await;
-            if let Err(reason) = result {
-                let detail = sanitize(&reason).lines().next().unwrap_or("").to_string();
+            let result = crate::app::call_dispatch(&rpc, command).await;
+            if let Err(error) = result {
                 let _ = tx.send(crate::app::Msg::Ext(Box::new(move |app: &mut App| {
                     if let Ok(mut f) = follow.lock() {
                         *f = None;
                     }
-                    app.say(Tone::Error, &format!("{failure}: {detail}"));
+                    if error == crate::wire::CallError::TimedOut {
+                        app.notice = Some(crate::app::dispatch_notice(error));
+                    } else {
+                        let reason = sanitize(&error.to_string());
+                        let detail = reason.lines().next().unwrap_or("");
+                        app.say(Tone::Error, &format!("{failure}: {detail}"));
+                    }
                 })));
             }
         });

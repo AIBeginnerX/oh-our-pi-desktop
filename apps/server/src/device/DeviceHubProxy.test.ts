@@ -28,6 +28,7 @@ const fixture = (
   scopes: ReadonlyArray<AuthEnvironmentScope>,
   fail = false,
   authError?: ServerAuthCredentialError | ServerAuthInternalError,
+  upstreamResponse = () => new Response("frame"),
 ) => {
   let finalized = 0;
   const requests: string[] = [];
@@ -38,7 +39,7 @@ const fixture = (
         finalized++;
       });
       if (fail) return yield* Effect.die(new Error("upstream failed"));
-      return HttpClientResponse.fromWeb(request, new Response("frame"));
+      return HttpClientResponse.fromWeb(request, upstreamResponse());
     }),
   );
   const { handler, dispose } = HttpRouter.toWebHandler(
@@ -80,6 +81,26 @@ describe("device hub proxy", () => {
     expect(await response.text()).toBe("frame");
     expect(requests).toEqual(["http://hub.test/api/devices"]);
     expect(finalized()).toBe(1);
+  });
+
+  it("adds a sandbox to HTML relayed from the hub", async () => {
+    const { handler } = fixture(
+      [AuthOrchestrationReadScope],
+      false,
+      undefined,
+      () =>
+        new Response("<p>Hub document</p>", {
+          headers: {
+            "content-type": "text/html",
+            "content-security-policy": "sandbox allow-same-origin allow-scripts",
+          },
+        }),
+    );
+    const response = await handler(new Request("http://t3.test/api/device-hub/api/devices"));
+    expect(response.headers.get("content-security-policy")).toBe(
+      "sandbox allow-same-origin allow-scripts, sandbox",
+    );
+    expect(await response.text()).toBe("<p>Hub document</p>");
   });
 
   it("releases resources when upstream acquisition fails", async () => {

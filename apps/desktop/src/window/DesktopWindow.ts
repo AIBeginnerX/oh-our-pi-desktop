@@ -18,6 +18,7 @@ import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
+import { registerAppWindow } from "../ipc/DesktopIpc.ts";
 import {
   LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANGED_CHANNEL,
   MENU_ACTION_CHANNEL,
@@ -427,6 +428,9 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
+
+    // Custom schemes give URL.origin "null", so strip the trailing slash from getDesktopUrl.
+    registerAppWindow(window.webContents, applicationUrl.slice(0, -1));
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);

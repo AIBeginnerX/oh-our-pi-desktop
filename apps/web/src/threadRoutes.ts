@@ -30,11 +30,11 @@ export function resolveThreadRouteRenderState(input: {
   if (!input.bootstrapComplete) {
     return "loading";
   }
+  if (input.serverThreadDetailDeleted && !input.serverThreadShellExists) {
+    return "missing";
+  }
   if (input.serverThreadDetailExists || input.draftThreadExists) {
     return "ready";
-  }
-  if (input.serverThreadDetailDeleted) {
-    return "missing";
   }
   return input.serverThreadShellExists ? "loading" : "missing";
 }

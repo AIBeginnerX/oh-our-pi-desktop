@@ -91,6 +91,8 @@ const StoredVcsRefsJson = Schema.fromJsonString(StoredVcsRefs);
 const ConnectionCatalogDocumentJson = Schema.fromJsonString(ConnectionCatalogDocument);
 const decodeConnectionCatalogDocument = Schema.decodeUnknownEffect(ConnectionCatalogDocumentJson);
 const encodeConnectionCatalogDocument = Schema.encodeEffect(ConnectionCatalogDocumentJson);
+const decodeCatalogSync = Schema.decodeUnknownResult(ConnectionCatalogDocumentJson);
+const encodeCatalogSync = Schema.encodeSync(ConnectionCatalogDocumentJson);
 const decodeStoredShellSnapshot = Schema.decodeUnknownEffect(StoredShellSnapshotJson);
 const decodeStoredThreadSnapshot = Schema.decodeUnknownEffect(StoredThreadSnapshotJson);
 const encodeStoredThreadSnapshot = Schema.encodeEffect(StoredThreadSnapshotJson);
@@ -271,6 +273,9 @@ export interface CatalogBackend {
   readonly read: Effect.Effect<string | null, ConnectionTransientError>;
   readonly write: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
   readonly quarantine?: (raw: string) => Effect.Effect<void, ConnectionTransientError>;
+  readonly update?: (
+    transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
+  ) => Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
 }
 
 export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
@@ -305,8 +310,45 @@ export function makeCatalogBackend(database: IDBDatabase): CatalogBackend {
       Effect.map((value) => (typeof value === "string" ? value : null)),
     ),
     write: (raw) => writeDatabaseValue(database, CATALOG_STORE_NAME, CATALOG_KEY, raw),
-    quarantine: (raw) =>
-      writeDatabaseValue(database, CATALOG_STORE_NAME, `${CATALOG_KEY}:corrupt:${Date.now()}`, raw),
+    update: (transform) =>
+      Effect.callback<ConnectionCatalogDocumentType, ConnectionTransientError>((resume) => {
+        const transaction = database.transaction(CATALOG_STORE_NAME, "readwrite");
+        const store = transaction.objectStore(CATALOG_STORE_NAME);
+        let next = EMPTY_CONNECTION_CATALOG_DOCUMENT;
+        let failure: ConnectionTransientError | undefined;
+        transaction.addEventListener("abort", () => {
+          resume(
+            Effect.fail(
+              failure ?? catalogError("update", transaction.error ?? "IndexedDB update aborted"),
+            ),
+          );
+        });
+        transaction.addEventListener("complete", () => resume(Effect.succeed(next)));
+        const request = store.get(CATALOG_KEY);
+        request.addEventListener("success", () => {
+          try {
+            const raw: unknown = request.result;
+            let current = EMPTY_CONNECTION_CATALOG_DOCUMENT;
+            let recovered = false;
+            if (typeof raw === "string" && raw.trim() !== "") {
+              const decoded = decodeCatalogSync(raw);
+              if (decoded._tag === "Success") {
+                current = decoded.success;
+              } else {
+                store.put(raw, `${CATALOG_KEY}:corrupt:${Date.now()}`);
+                recovered = true;
+              }
+            }
+            next = transform(current);
+            if (recovered || next !== current) {
+              store.put(encodeCatalogSync(next), CATALOG_KEY);
+            }
+          } catch {
+            failure = catalogError("update", "Could not transform or store the catalog.");
+            transaction.abort();
+          }
+        });
+      }),
   };
 }
 
@@ -320,6 +362,30 @@ interface CatalogStore {
 export const makeCatalogStore = Effect.fn("web.connectionStorage.makeCatalogStore")(function* (
   backend: CatalogBackend,
 ) {
+  if (backend.update !== undefined) {
+    const update = backend.update;
+    return {
+      read: backend.read.pipe(
+        Effect.flatMap((raw) =>
+          raw === null || raw.trim() === ""
+            ? Effect.succeed(EMPTY_CONNECTION_CATALOG_DOCUMENT)
+            : decodeCatalog(raw).pipe(
+                Effect.catch(() =>
+                  update((catalog) => catalog).pipe(
+                    Effect.catch(() =>
+                      Effect.logWarning(
+                        "Could not persist the recovered web connection catalog.",
+                      ).pipe(Effect.as(EMPTY_CONNECTION_CATALOG_DOCUMENT)),
+                    ),
+                  ),
+                ),
+              ),
+        ),
+      ),
+      update: (transform) => update(transform).pipe(Effect.asVoid),
+    } satisfies CatalogStore;
+  }
+
   const state = yield* Ref.make<Option.Option<ConnectionCatalogDocumentType>>(Option.none());
   const lock = yield* Semaphore.make(1);
 

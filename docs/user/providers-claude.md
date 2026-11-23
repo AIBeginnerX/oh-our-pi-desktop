@@ -51,7 +51,8 @@ window. Leave it empty for Claude Code's default.
 You can also send `/compact` in an existing conversation. Web and desktop offer
 **Compact context** from the context meter and may suggest it when you return to
 a large older thread. See [commands and skills](./composer.md#commands-and-skills)
-for using composer commands.
+for using composer commands. While a Claude session is open, select
+**Show breakdown** in the meter to see estimated token counts by category.
 
 ## Usage limits
 

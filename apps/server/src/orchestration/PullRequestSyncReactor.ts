@@ -138,16 +138,17 @@ export const make = Effect.gen(function* () {
 
   const lastSyncedAt = new Map<string, number>();
   const failures = new Map<string, { fingerprint: string; delay: number; retryAt: number }>();
+  const stackFailures = new Map<string, { fingerprint: string; delay: number; retryAt: number }>();
   const keyProjects = new Map<string, ReadonlySet<string>>();
   const linkIdentities = new Map<string, string>();
   const isUnavailable = Schema.is(PullRequestUnavailableError);
-  const recordFailure = <E>(key: string, cause: Cause.Cause<E>) =>
+  const recordFailure = <E>(key: string, cause: Cause.Cause<E>, target = failures) =>
     Effect.gen(function* () {
       if (Cause.hasInterruptsOnly(cause)) return yield* Effect.failCause(cause);
       const error = Cause.squash(cause);
       // Error messages identify the cause without including trace locations that change per call.
       const fingerprint = error instanceof Error ? `${error.name}:${error.message}` : String(error);
-      const previous = failures.get(key);
+      const previous = target.get(key);
       const delay =
         isUnavailable(error) && error.reason === "provider-unsupported"
           ? MAX_FAILURE_DELAY_MS
@@ -156,7 +157,7 @@ export const make = Effect.gen(function* () {
               previous === undefined ? INITIAL_FAILURE_DELAY_MS : previous.delay * 2,
             );
       const now = yield* DateTime.now;
-      failures.set(key, { fingerprint, delay, retryAt: DateTime.toEpochMillis(now) + delay });
+      target.set(key, { fingerprint, delay, retryAt: DateTime.toEpochMillis(now) + delay });
       yield* (previous?.fingerprint === fingerprint ? Effect.logDebug : Effect.logWarning)(
         "pull request sync skipped",
         { key, reason: fingerprint },
@@ -171,7 +172,7 @@ export const make = Effect.gen(function* () {
     if (requested.has(key)) return true;
     const failure = failures.get(key);
     if (failure !== undefined && nowMs < failure.retryAt) return false;
-    if (retryStacks.has(key)) return true;
+    if (retryStacks.has(key) && nowMs >= (stackFailures.get(key)?.retryAt ?? 0)) return true;
     if (entries.some((entry) => entry.link.snapshot === null)) return true;
     if (entries.every((entry) => entry.link.snapshot?.state === "merged")) return false;
     if (entries.some((entry) => entry.link.snapshot?.state === "open" && isUnsettled(entry.thread)))
@@ -209,7 +210,10 @@ export const make = Effect.gen(function* () {
         )
         .sort()
         .join("\n");
-      if (linkIdentities.get(key) !== identity) failures.delete(key);
+      if (linkIdentities.get(key) !== identity) {
+        failures.delete(key);
+        stackFailures.delete(key);
+      }
       linkIdentities.set(key, identity);
       keyProjects.set(key, new Set(entries.map(({ thread }) => thread.projectId)));
     }
@@ -218,6 +222,7 @@ export const make = Effect.gen(function* () {
         linkIdentities.delete(key);
         keyProjects.delete(key);
         failures.delete(key);
+        stackFailures.delete(key);
       }
     for (const key of lastSyncedAt.keys()) if (!groups.has(key)) lastSyncedAt.delete(key);
     for (const key of retryStacks) if (!groups.has(key)) retryStacks.delete(key);
@@ -309,24 +314,32 @@ export const make = Effect.gen(function* () {
           (entry) =>
             entry.link.snapshot === null || !snapshotFieldsEqual(entry.link.snapshot, fields),
         );
-      const fetchedStack = needsStack
-        ? yield* pullRequests.stack(ref, { includeDetails: false }).pipe(
-            Effect.map((stack) => ({
-              stack: stack === null ? null : ({ kind: "native", ...stack } as const),
-            })),
-            // A failing stack read backs off like any other failed read of this key.
-            Effect.catchCauseIf(
-              (cause) => !Cause.hasInterruptsOnly(cause),
-              (cause) => recordFailure(key, cause).pipe(Effect.as(null)),
-            ),
-          )
-        : null;
+      const fetchedStack =
+        needsStack && (generation !== undefined || nowMs >= (stackFailures.get(key)?.retryAt ?? 0))
+          ? yield* pullRequests.stack(ref, { includeDetails: false }).pipe(
+              Effect.map((stack) => ({
+                stack: stack === null ? null : ({ kind: "native", ...stack } as const),
+              })),
+              // A failing stack read backs off like any other failed read of this key.
+              Effect.catchCauseIf(
+                (cause) => !Cause.hasInterruptsOnly(cause),
+                (cause) => recordFailure(key, cause, stackFailures).pipe(Effect.as(null)),
+              ),
+            )
+          : null;
       if (needsStack) {
         if (fetchedStack === null) {
           retryStacks.add(key);
-          return;
+          // Terminal snapshots wait until siblings are linked before settlement.
+          if (fields.state !== "open") {
+            const failure = stackFailures.get(key);
+            if (failure !== undefined) failures.set(key, failure);
+            return;
+          }
+        } else {
+          retryStacks.delete(key);
+          stackFailures.delete(key);
         }
-        retryStacks.delete(key);
       }
       // The host answered, so the cadence clock ticks even if a dispatch below is rejected.
       lastSyncedAt.set(key, nowMs);
@@ -374,6 +387,7 @@ export const make = Effect.gen(function* () {
       Stream.runForEach(events, (event) => {
         if (event.type === "thread.pull-request-linked") {
           failures.delete(threadPullRequestKeyOf(event.payload.link));
+          stackFailures.delete(threadPullRequestKeyOf(event.payload.link));
           return requestSync(event.payload.link);
         }
         if (
@@ -382,7 +396,10 @@ export const make = Effect.gen(function* () {
             event.payload.repositoryIdentity !== undefined)
         ) {
           for (const [key, projects] of keyProjects) {
-            if (projects.has(event.payload.projectId)) failures.delete(key);
+            if (projects.has(event.payload.projectId)) {
+              failures.delete(key);
+              stackFailures.delete(key);
+            }
           }
         }
         return Effect.void;

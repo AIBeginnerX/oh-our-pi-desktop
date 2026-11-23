@@ -18,9 +18,7 @@ import { makeLiveStreamBudget, type RetainedLiveItem } from "./LiveStreamBudget.
 const COALESCE_WINDOW = Duration.millis(50);
 const MAX_PENDING_UPDATES = 512;
 
-export type ThreadLiveInput =
-  | { readonly kind: "event"; readonly event: OrchestrationEvent }
-  | { readonly kind: "synchronized" };
+export type ThreadLiveInput = Exclude<OrchestrationThreadStreamItem, { kind: "snapshot" }>;
 
 function isToolUpdated(event: OrchestrationEvent): boolean {
   return (
@@ -192,7 +190,7 @@ export const makeThreadLiveEventCoalescer = Effect.fn("makeThreadLiveEventCoales
               // that boundary after the final update from the run.
               yield* flushPending();
               if (input.kind === "synchronized") {
-                yield* budget.retain({ kind: "synchronized" as const }).pipe(
+                yield* budget.retain(input).pipe(
                   Effect.flatMap((marker) => Queue.offer(output, marker)),
                   Effect.uninterruptible,
                 );

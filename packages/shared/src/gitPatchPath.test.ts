@@ -32,6 +32,7 @@ describe("quoteGitPatchPath", () => {
 describe("a name written into a header and read back out", () => {
   const names = [
     "src/app.ts",
+    "\uFEFFtab\tfile.txt",
     "with space.txt",
     "café/résumé.ts",
     "🚀.ts",
@@ -68,6 +69,11 @@ describe("a name written into a header and read back out", () => {
 });
 
 describe("unquoteGitPatchPath", () => {
+  it("preserves a leading BOM in octal-escaped paths", () => {
+    expect(unquoteGitPatchPath('"\\357\\273\\277report.ts"')).toBe("\uFEFFreport.ts");
+    expect(unquoteGitPatchPath("\\357\\273\\277report.ts")).toBe("\uFEFFreport.ts");
+  });
+
   it("leaves a token git saw no need to quote alone", () => {
     expect(unquoteGitPatchPath("src/app.ts")).toBe("src/app.ts");
     expect(unquoteGitPatchPath("with space.txt")).toBe("with space.txt");

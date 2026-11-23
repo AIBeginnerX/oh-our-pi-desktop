@@ -404,6 +404,9 @@ export function withRateLimitBackoff(
           listChangeRequestStats: wrap("listChangeRequestStats", api.listChangeRequestStats),
         }),
     getChangeRequest: wrap("getChangeRequest", api.getChangeRequest),
+    ...(api.getChangeRequestChecks === undefined
+      ? {}
+      : { getChangeRequestChecks: wrap("getChangeRequestChecks", api.getChangeRequestChecks) }),
     ...(api.getChangeRequestPreview === undefined
       ? {}
       : { getChangeRequestPreview: wrap("getChangeRequestPreview", api.getChangeRequestPreview) }),

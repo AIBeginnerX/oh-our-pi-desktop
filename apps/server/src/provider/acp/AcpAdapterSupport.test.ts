@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import * as EffectAcpErrors from "effect-acp/errors";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, ThreadId } from "@t3tools/contracts";
 
 import {
   acpPermissionOutcome,
@@ -30,6 +30,36 @@ describe("AcpAdapterSupport", () => {
 
     expect(error._tag).toBe("ProviderAdapterRequestError");
     expect(error.message).toContain("Invalid params");
+  });
+
+  it("reports a closed session when ACP stdout ends before the process exits", () => {
+    const cause = new EffectAcpErrors.AcpInputStreamEndedError({});
+    const error = mapAcpToAdapterError(
+      ProviderDriverKind.make("cursor"),
+      ThreadId.make("acp-stdout-ended"),
+      "session/prompt",
+      cause,
+    );
+
+    expect(error._tag).toBe("ProviderAdapterSessionClosedError");
+    expect(error.message).toContain("adapter thread is closed");
+    expect(error.cause).toBe(cause);
+  });
+
+  it("reports a closed session when writing to ACP fails", () => {
+    const cause = new EffectAcpErrors.AcpTransportError({
+      operation: "write-output-stream",
+      cause: new Error("Pipe closed"),
+    });
+    const error = mapAcpToAdapterError(
+      ProviderDriverKind.make("cursor"),
+      ThreadId.make("acp-write-failed"),
+      "session/prompt",
+      cause,
+    );
+
+    expect(error._tag).toBe("ProviderAdapterSessionClosedError");
+    expect(error.cause).toBe(cause);
   });
 
   it("maps ACP process exits without stderr to a process error instead of a closed session", () => {

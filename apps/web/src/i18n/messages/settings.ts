@@ -1,6 +1,81 @@
 import type { MessageCatalog } from "./types";
 
 export const SETTINGS_MESSAGES: MessageCatalog = {
+  "Transcript view": {
+    ko: "대화 표시 모드",
+    ja: "会話の表示モード",
+    "zh-CN": "对话显示模式",
+    es: "Vista de la conversación",
+  },
+  "Choose which reasoning and tool details start expanded.": {
+    ko: "기본으로 펼쳐서 보여 줄 추론 및 도구 세부 정보를 선택합니다.",
+    ja: "推論やツールの詳細を初期状態でどこまで展開するか選びます。",
+    "zh-CN": "选择默认展开的推理内容和工具详情。",
+    es: "Elige qué detalles de razonamiento y de herramientas se muestran desplegados de inicio.",
+  },
+  Normal: { ko: "기본", ja: "標準", "zh-CN": "普通", es: "Normal" },
+  Thinking: { ko: "추론", ja: "推論", "zh-CN": "推理", es: "Razonamiento" },
+  Verbose: { ko: "상세", ja: "詳細", "zh-CN": "详细", es: "Detallada" },
+  "Scheduled prompts": {
+    ko: "예약 프롬프트",
+    ja: "プロンプトの予約",
+    "zh-CN": "定时提示词",
+    es: "Prompts programados",
+  },
+  "Choose one environment to manage scheduled prompts.": {
+    ko: "예약 프롬프트를 관리할 환경을 하나 선택하세요.",
+    ja: "予約を管理する環境を1つ選択してください。",
+    "zh-CN": "请选择一个环境来管理定时提示词。",
+    es: "Elige un entorno para gestionar los prompts programados.",
+  },
+  "Choose one checkout to manage scheduled prompts.": {
+    ko: "예약 프롬프트를 관리할 체크아웃을 하나 선택하세요.",
+    ja: "予約を管理するチェックアウトを1つ選択してください。",
+    "zh-CN": "请选择一个检出目录来管理定时提示词。",
+    es: "Elige una copia de trabajo para gestionar los prompts programados.",
+  },
+  "Connect to this environment to manage scheduled prompts.": {
+    ko: "예약 프롬프트를 관리하려면 이 환경에 연결하세요.",
+    ja: "予約を管理するには、この環境に接続してください。",
+    "zh-CN": "请连接到此环境以管理定时提示词。",
+    es: "Conéctate a este entorno para gestionar los prompts programados.",
+  },
+  "Could not save scheduled prompts.": {
+    ko: "예약 프롬프트를 저장하지 못했습니다.",
+    ja: "プロンプトの予約を保存できませんでした。",
+    "zh-CN": "无法保存定时提示词。",
+    es: "No se pudieron guardar los prompts programados.",
+  },
+  "Runs daily at the environment’s local time while its OOP server is running.": {
+    ko: "이 환경의 OOP 서버가 실행 중이면 매일 환경의 현지 시각에 실행합니다.",
+    ja: "この環境のOOPサーバーが稼働中に、現地時刻で毎日実行します。",
+    "zh-CN": "在此环境的 OOP 服务器运行时，每天按环境的当地时间执行。",
+    es: "Se ejecuta a diario a la hora local del entorno mientras su servidor OOP esté en marcha.",
+  },
+  "Add scheduled prompt": {
+    ko: "예약 프롬프트 추가",
+    ja: "予約を追加",
+    "zh-CN": "添加定时提示词",
+    es: "Añadir prompt programado",
+  },
+  "Edit scheduled prompt": {
+    ko: "예약 프롬프트 편집",
+    ja: "予約を編集",
+    "zh-CN": "编辑定时提示词",
+    es: "Editar prompt programado",
+  },
+  "Enable scheduled prompt {title}": {
+    ko: "예약 프롬프트 {title} 활성화",
+    ja: "予約「{title}」を有効にする",
+    "zh-CN": "启用定时提示词 {title}",
+    es: "Activar el prompt programado {title}",
+  },
+  "Time of day": { ko: "실행 시각", ja: "実行時刻", "zh-CN": "执行时间", es: "Hora de ejecución" },
+  Edit: { ko: "편집", ja: "編集", "zh-CN": "编辑", es: "Editar" },
+  Title: { ko: "제목", ja: "タイトル", "zh-CN": "标题", es: "Título" },
+  Prompt: { ko: "프롬프트", ja: "プロンプト", "zh-CN": "提示词", es: "Prompt" },
+  Enabled: { ko: "활성화", ja: "有効", "zh-CN": "已启用", es: "Activado" },
+  Save: { ko: "저장", ja: "保存", "zh-CN": "保存", es: "Guardar" },
   "Crew scorecard · Last 30 days": {
     ko: "크루 성과표 · 최근 30일",
     ja: "クルー成績表 · 過去30日",
@@ -647,6 +722,20 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "重启后继续会话",
     es: "Continuar hilos tras reiniciar",
   },
+  "Prompt suggestions": {
+    ko: "프롬프트 제안",
+    ja: "プロンプトの提案",
+    "zh-CN": "提示词建议",
+    es: "Sugerencias de prompts",
+  },
+  "After Claude finishes a turn, suggest the next prompt in the composer. Press Tab to use it. Suggestions count toward Claude usage.":
+    {
+      ko: "Claude가 턴을 마치면 입력창에 다음 프롬프트를 제안합니다. Tab 키로 입력할 수 있습니다. 제안은 Claude 사용량에 포함됩니다.",
+      ja: "Claude がターンを終えると、入力欄に次のプロンプトを提案します。Tab キーで入力できます。提案は Claude の使用量に含まれます。",
+      "zh-CN":
+        "Claude 完成一轮后，会在输入框中建议下一条提示词。按 Tab 键即可使用。建议计入 Claude 用量。",
+      es: "Cuando Claude termine un turno, sugiere el siguiente prompt en el campo de escritura. Pulsa Tab para usarlo. Las sugerencias cuentan para el uso de Claude.",
+    },
   "Continue unfinished plans": {
     ko: "끝나지 않은 계획 이어가기",
     ja: "未完了のプランを続行",

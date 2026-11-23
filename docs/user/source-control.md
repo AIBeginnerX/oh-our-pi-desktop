@@ -173,6 +173,16 @@ closed reviews refresh periodically so reopening one on the host is detected. Me
 when requested. With **Auto-settle merged threads** enabled, a thread can settle after every linked
 review is terminal. An open or unsynced link keeps it active.
 
+For a linked GitHub pull request, turn on **Auto-fix failed checks** at the bottom of the thread's
+pull request list or use `/autofix on` in the terminal. When the thread is idle, failed CI checks on
+the open pull request for the thread's own branch can start a turn in the thread's own mode and
+model to fix the cause, verify it, and push a commit to that branch. A pull request linked from
+another branch is never fixed. Those turns count toward your usage. Auto-fix reacts only to failed
+checks and tries each commit once, up to three attempts in a row. Passing checks reset the count. To
+restart the count, turn Auto-fix off and back on. Stopping a turn pauses Auto-fix until the thread
+finishes another turn, and so does a turn cut off by a server restart. Enable it in one thread in
+one environment per pull request.
+
 Cross-repository links use a project on the same host. Azure DevOps reviews require a project checked
 out from the matching organization and repository.
 

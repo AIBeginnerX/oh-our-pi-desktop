@@ -71,7 +71,11 @@ import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSn
 import * as PullRequestFilesViewed from "../persistence/PullRequestFilesViewed.ts";
 import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
 import * as SourceControlRateLimit from "../sourceControl/SourceControlRateLimit.ts";
-import { type ProviderChangeRequest, PullRequestProviderError } from "./PullRequestProvider.ts";
+import {
+  type ProviderChangeRequest,
+  type PullRequestProviderApi,
+  PullRequestProviderError,
+} from "./PullRequestProvider.ts";
 import * as PullRequestReadCache from "./PullRequestReadCache.ts";
 import { PullRequestProviderRegistry } from "./PullRequestProviderRegistry.ts";
 import * as ViewedFiles from "./pullRequestViewedFiles.ts";
@@ -167,6 +171,14 @@ export class PullRequestService extends Context.Service<
     >;
     readonly subscribeRefreshes: Stream.Stream<number>;
     readonly refreshAfterTurn: (projectId: ProjectId) => Effect.Effect<void>;
+    readonly readChecks?: (
+      input: PullRequestRef,
+    ) => Effect.Effect<
+      Effect.Success<
+        ReturnType<NonNullable<PullRequestProviderApi["getChangeRequestChecks"]>>
+      > | null,
+      PullRequestError
+    >;
     readonly detail: (input: PullRequestRef) => Effect.Effect<PullRequestDetail, PullRequestError>;
     readonly preview: (
       input: PullRequestRef,
@@ -2832,6 +2844,19 @@ export const make = Effect.gen(function* () {
       Stream.filter((revision) => revision > 0),
     ),
     refreshAfterTurn,
+    readChecks: (input) =>
+      requireProject(input).pipe(
+        Effect.flatMap((project) => {
+          const read = project.api.getChangeRequestChecks;
+          if (read === undefined) return Effect.succeed(null);
+          return read({
+            cwd: project.project.workspaceRoot,
+            repository: project.repository,
+            host: project.host,
+            number: input.number,
+          }).pipe(Effect.mapError(toPullRequestError("readChecks")));
+        }),
+      ),
     detail: credentialCached(detail),
     activity: credentialCached(activity),
     preview: credentialCached(preview),

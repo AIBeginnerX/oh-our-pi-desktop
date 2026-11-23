@@ -12,7 +12,15 @@ becomes an attachment when inserting it would exceed the message limit. On a
 hardware keyboard, use `Cmd+Shift+V` on Apple devices or `Ctrl+Shift+V` elsewhere
 to keep a large paste editable in the composer instead.
 
+After Claude finishes a turn, the empty composer may show a suggested next prompt.
+Press Tab or tap the suggestion on your phone to add it to your draft. Suggestions
+count toward Claude usage and are hidden in threads that have used project memory.
+Turn them off under **Settings → General → Prompt suggestions**.
+
 ## Attach files
+
+Right-click a workspace file path in the chat and choose **Attach as context** to add
+it to the end of your next message as a file mention.
 
 Attach up to 100 files per message. Each image can be up to 10 MiB, with at most
 80 MiB of images in one message. Other files, including videos, can be up to
@@ -187,16 +195,12 @@ into a normal draft.
 
 On web and desktop, choose **Edit from here** beneath a sent message to rewind
 the conversation to before that message. Choose **Revert and keep changes** to
-leave workspace files as they are, or **Revert files too** to restore them as well.
-File restore is only offered for threads running in a worktree, and it is
-refused when another thread or agent session also uses that directory, since
-restoring would erase their changes. A thread that works in the project directory
-rewinds the conversation only. The selected prompt and its attachments return to the composer for editing and
+rewind the conversation. Files stay as they are, including in worktrees. The selected prompt and its attachments return to the composer for editing and
 resending. Any unsent draft stays above the restored prompt.
 
 This removes the selected message and later conversation from the active thread
 and provider history. It does not undo external actions or separate provider
-memory. The action is available only when the provider supports rewind.
+memory. The action is available only when the provider supports rewind, and never in a crew member's thread.
 
 ## Prompt stash
 
@@ -225,6 +229,13 @@ Transcription runs on your device. OOP deletes the temporary audio after
 transcription or cancellation; only the message text is sent when you submit.
 
 ## Commands and skills
+
+Type `/btw <question>` in an existing Claude, Codex, OpenCode, or Antigravity thread to ask about
+the recent conversation, even while the agent is working. A separate one-off request answers it,
+so it counts toward the provider's usage and never becomes part of the conversation. On web and
+desktop the answer appears above the composer; close it with Escape or the close button. The
+terminal app shows it under the conversation. A side answer is unavailable on other providers,
+when the thread has recalled memory, or when the provider takes longer than three minutes.
 
 Type `/` for commands or `$` to add a skill from the selected environment and
 provider. On mobile, both are also available before starting a thread on

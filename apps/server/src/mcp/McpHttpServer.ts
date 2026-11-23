@@ -31,10 +31,13 @@ import {
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
 import * as CrewService from "../crew/CrewService.ts";
+import { ProjectionTurnRepositoryLive } from "../persistence/Layers/ProjectionTurns.ts";
 import { CrewToolkitHandlersLive } from "./toolkits/crew/handlers.ts";
 import { CrewToolkit } from "./toolkits/crew/tools.ts";
 import { MemoryToolkitHandlersLive } from "./toolkits/memory/handlers.ts";
 import { MemoryToolkit } from "./toolkits/memory/tools.ts";
+import { ThreadsToolkitHandlersLive } from "./toolkits/threads/handlers.ts";
+import { ThreadsToolkit } from "./toolkits/threads/tools.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
 import {
@@ -676,6 +679,11 @@ export const MemoryToolkitRegistrationLive = McpServer.toolkit(MemoryToolkit).pi
   Layer.provide(MemoryToolkitHandlersLive),
 );
 
+const ThreadsToolkitRegistrationLive = McpServer.toolkit(ThreadsToolkit).pipe(
+  Layer.provide(ThreadsToolkitHandlersLive),
+  Layer.provide(ProjectionTurnRepositoryLive),
+);
+
 const DeviceStandardToolkitRegistrationLive = McpServer.toolkit(DeviceStandardToolkit).pipe(
   Layer.provide(DeviceStandardToolkitHandlersLive),
 );
@@ -702,7 +710,10 @@ export const layer = thenRegisterToolkit(
     PullRequestsToolkitRegistrationLive,
     thenRegisterToolkit(
       CrewToolkitRegistrationLive,
-      thenRegisterToolkit(MemoryToolkitRegistrationLive, DeviceToolkitRegistrationLive),
+      thenRegisterToolkit(
+        MemoryToolkitRegistrationLive,
+        thenRegisterToolkit(ThreadsToolkitRegistrationLive, DeviceToolkitRegistrationLive),
+      ),
     ),
   ),
 ).pipe(Layer.provideMerge(McpTransportLive));

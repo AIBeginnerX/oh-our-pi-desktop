@@ -45,7 +45,7 @@ Coding agents are good, but each one lives in its own terminal or app, with its 
 
 - **One place for many agents.** Switch between Codex, Claude Code, Cursor, Grok Build, OpenCode, Antigravity, ZCode and MiniMax Code per thread, with the same diff, terminal and approval flow.
 - **Let several models share a task.** OOP Crew lets one "brain" model hand routine work to cheaper workers, hard work to an expert, and have an auditor review the result.
-- **Stay in control.** Four permission modes, a diff panel with checkpoints you can restore, and a usage page so costs do not surprise you.
+- **Stay in control.** Four permission modes, a diff panel with checkpoints for reviewing changes, and a usage page so costs do not surprise you.
 - **One OOP for several computers.** Connect the desktops you already run OOP on and see their projects and threads in the same sidebar; new threads can be balanced across them by CPU and memory. See [Run every machine from one OOP](#run-every-machine-from-one-oop).
 - **Work away from the keyboard.** Pair your phone to the computer that runs the agents and keep an eye on (or steer) long tasks.
 - **Use it from a terminal too.** `oop` opens the same threads in a full-screen terminal app. It works with the desktop app closed and shares one data folder with it. It is a native Rust client, and on macOS the desktop app also installs **OOP Terminal**, a window with split panes for `oop` and shells.
@@ -64,7 +64,7 @@ _Main chat view: pick a provider and model, set the permission mode, and follow 
 1. Open OOP and sign in to one provider (Settings → Providers).
 2. Add a project folder and start a thread.
 3. Pick a model and a permission mode in the composer, then send a message.
-4. Review the result in the diff panel; restore from a checkpoint if you do not like it.
+4. Review the result in the diff panel; use checkpoints to compare each turn’s changes.
 
 ## What's new
 
@@ -147,12 +147,12 @@ _Add provider: Z.AI and MiniMax presets that run through OpenCode._
 
 ### Diff and review
 
-See exactly what the agent changed in a thread, review it, and restore from the checkpoint taken at the end of each turn. Checkpoints are hidden git refs, so they do not clutter your branches.
+See exactly what the agent changed in a thread and review diffs from the checkpoint taken at the end of each turn. Rewinding a conversation leaves files as they are.
 
 **Open it:** the **Diff** tab in the right panel (server threads in a git repository). In the diff panel, `]` and `[` move between files and `v` marks a file as viewed.
 
 ![Diff panel showing changes made by an agent in a thread](docs/screenshots/diff.png)
-_Diff panel: review what the agent changed, and restore from checkpoints._
+_Diff panel: review what the agent changed with turn checkpoints._
 
 ### Commit and source control
 
@@ -236,7 +236,7 @@ This is a different thing from the **Built-in terminal** section below. That one
 _The terminal app (`oop`): a screen recording of a chat in the terminal._
 
 - **Works with the app closed.** If the desktop app is not running, `oop` starts the server bundled with it as a background process. When you open the app, it takes that server over and `oop` reconnects. Both use the same data folder (`~/.oop-desktop`), so threads are shared. A turn running at the moment the app takes over is interrupted. Closing `oop` leaves its server running; `oop stop` ends it.
-- **Slash commands.** Type `/` for a menu: `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-workflow` and more. `/diff` shows what a turn changed, `/undo` rewinds the last turn, and `/tasks` shows the task list next to the conversation. The task list and the `/dag-workflow` panel open by themselves when the terminal is wide enough, with the logo, status and a small pet pinned above the conversation; `oop config set workflow false` and `oop config set pet false` turn the panel and the pet off.
+- **Slash commands.** Type `/` for a menu: `/model`, `/mode`, `/plan`, `/implement`, `/goal`, `/diff`, `/undo`, `/history`, `/tasks`, `/dag-workflow` and more. `/diff` shows what a turn changed, `/undo` rewinds the last conversation turn while leaving files as they are, and `/tasks` shows the task list next to the conversation. The task list and the `/dag-workflow` panel open by themselves when the terminal is wide enough, with the logo, status and a small pet pinned above the conversation; `oop config set workflow false` and `oop config set pet false` turn the panel and the pet off.
 - **Message queue.** Messages you send while a turn runs wait in a queue per thread. The queue lives only while `oop` is open.
 - **Terminal bell.** The bell rings when a turn finishes or waits for an approval or an answer. `oop config set notify false` turns it off.
 - **English and Korean.** The terminal app follows the `language` setting, or your system locale when the setting is empty (`oop config set language en` or `ko`).
@@ -298,7 +298,7 @@ _Settings → Connections: remote access and pairing (codes masked)._
 | Local-folder updater                  | Packaged OOP builds can pick up newer packages from a folder you point them at             | Packaged macOS / Windows builds                   | Added in OOP, early, untested by others             |
 | Multi-provider sessions               | Threads, turns, checkpoints across providers                                               | Everywhere                                        | Upstream                                        |
 | Permission modes                      | Supervised, Auto-accept edits, Auto, Full access                                           | Composer; Settings → General                      | Upstream                                        |
-| Diff panel and checkpoints            | Review and restore agent changes                                                           | Right panel → Diff                                | Upstream                                        |
+| Diff panel and checkpoints            | Review agent changes by turn                                                               | Right panel → Diff                                | Upstream                                        |
 | Source control                        | Clone, commit, publish, pull requests via provider CLIs                                    | Settings → Source Control                         | Upstream                                        |
 | Built-in terminal                     | Terminal per thread on the server machine                                                  | Inside a thread                                   | Upstream                                        |
 | Reports in chat                       | Charts, stat cards, progress bars, mermaid flows                                           | In replies                                        | Upstream                                        |

@@ -1,4 +1,9 @@
-import type { AdvertisedEndpoint, DesktopBridge, DesktopWslState } from "@t3tools/contracts";
+import type {
+  AdvertisedEndpoint,
+  DesktopBridge,
+  DesktopDiscoveredSshHost,
+  DesktopWslState,
+} from "@t3tools/contracts";
 
 type WslEnableBridge = Pick<DesktopBridge, "setWslBackendEnabled" | "setWslDistro" | "setWslOnly">;
 
@@ -69,4 +74,23 @@ export async function applyWslEnableSelection(input: {
     await bridge.setWslDistro(nextDistro);
   }
   return await bridge.setWslBackendEnabled(true);
+}
+
+export function sshHostSuggestionKey(host: DesktopDiscoveredSshHost): string {
+  return JSON.stringify([host.alias, host.hostname, host.username, host.port, host.source]);
+}
+
+export function findSshHostSuggestion(hosts: ReadonlyArray<DesktopDiscoveredSshHost>, key: string) {
+  return hosts.find((host) => sshHostSuggestionKey(host) === key);
+}
+
+export function isSavedSshHostSuggestion(
+  suggestion: DesktopDiscoveredSshHost,
+  saved: ReadonlyArray<{ readonly alias: string; readonly port: number | null }>,
+): boolean {
+  return saved.some(
+    (target) =>
+      target.alias === suggestion.alias &&
+      (suggestion.source === "ssh-config" || (target.port ?? 22) === (suggestion.port ?? 22)),
+  );
 }

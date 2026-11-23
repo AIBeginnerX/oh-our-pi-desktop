@@ -17,7 +17,7 @@ import { Atom, AsyncResult } from "effect/unstable/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
 
-import type { Thread, ThreadShell, TurnDiffSummary } from "../types";
+import type { ChatMessage, Thread, ThreadShell, TurnDiffSummary } from "../types";
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -35,12 +35,14 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   agentControlledBrowserCloseConfirmation,
   branchMismatchKey,
+  canRollbackConversation,
   buildExpiredTerminalContextToastCopy,
   buildLoadingThreadFromShell,
   buildRunningThreadTurnInterruptInput,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  hasComposerDraftChangedWhilePreparing,
   deriveLockedProvider,
   dismissBranchMismatchForSession,
   ENVIRONMENT_RECONNECT_WARNING_GRACE_MS,
@@ -56,6 +58,8 @@ import {
   resolveBackgroundDraftWorkspaceOptions,
   resolveComposerInteractionMode,
   restorePlanFollowUpComposer,
+  recoverFailedComposerSend,
+  revokeUserMessagePreviewUrls,
   resolveComposerProviderSelection,
   resolveDraftPromotionNavigationTarget,
   findRecordedWorktreeSetup,
@@ -89,6 +93,32 @@ import {
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
 } from "./ChatView.logic";
+
+describe("canRollbackConversation", () => {
+  const ordinary = { title: "Ordinary notes", parentThreadId: null };
+  const legacy = { title: "Crew Worker · notes", createdAsCrewMember: true };
+  const supported = { supportsConversationRollback: true };
+
+  it("allows ordinary threads regardless of their title", () => {
+    const renamed = { ...ordinary, title: "Crew Worker · notes" };
+    expect(canRollbackConversation(ordinary, supported)).toBe(true);
+    expect(canRollbackConversation(renamed, supported)).toBe(true);
+  });
+
+  it("refuses legacy and linked members regardless of their title", () => {
+    const renamed = { ...legacy, title: "Ordinary notes" };
+    const linked = { ...ordinary, parentThreadId: ThreadId.make("lead") };
+    expect(canRollbackConversation(legacy, supported)).toBe(false);
+    expect(canRollbackConversation(renamed, supported)).toBe(false);
+    expect(canRollbackConversation(linked, supported)).toBe(false);
+  });
+
+  it("requires a provider status that does not explicitly disable rollback", () => {
+    expect(canRollbackConversation(ordinary, null)).toBe(false);
+    expect(canRollbackConversation(ordinary, { supportsConversationRollback: false })).toBe(false);
+    expect(canRollbackConversation(ordinary, {})).toBe(true);
+  });
+});
 
 describe("agent browser close confirmation", () => {
   const surfaces = [
@@ -2256,6 +2286,129 @@ describe("rewind draft recovery", () => {
     expect(files[0]?.name).toBe("notes.txt");
     expect(await files[0]?.text()).toBe("original bytes");
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://server.test/asset/signed");
+  });
+});
+
+describe("composer attachment preparation", () => {
+  const draft = {
+    prompt: "Review the PDF",
+    files: [{ id: "pdf" }],
+    images: [],
+    terminalContexts: [],
+    previewAnnotations: [],
+    reviewComments: [],
+    projectMemoryReferences: [],
+  };
+
+  it("allows sending after an upload replaces the file with its uploaded copy", () => {
+    const uploadedFile = { id: "pdf", uploadedAttachmentId: "server-pdf" };
+    expect(
+      hasComposerDraftChangedWhilePreparing(draft, {
+        ...draft,
+        files: [uploadedFile],
+        reviewComments: [...draft.reviewComments],
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    { prompt: "Summarize the PDF" },
+    { files: [] },
+    { files: [...draft.files, { id: "notes" }] },
+    { terminalContexts: [{ id: "terminal" }] },
+  ])("stops sending when the user edits the draft (%j)", (change) => {
+    expect(hasComposerDraftChangedWhilePreparing(draft, { ...draft, ...change })).toBe(true);
+  });
+});
+
+describe("failed composer sends", () => {
+  const original = { prompt: "original prompt", files: [new File(["notes"], "notes.txt")] };
+
+  function failSend(newerPrompt: string, { handedOff = false } = {}) {
+    const optimistic: ChatMessage = {
+      id: MessageId.make("failed"),
+      role: "user",
+      text: original.prompt,
+      attachments: [
+        {
+          type: "image",
+          id: "preview",
+          name: "preview.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+          previewUrl: "blob:failed-send-preview",
+        },
+      ],
+      turnId: null,
+      createdAt: "2026-09-11T00:00:00.000Z",
+      updatedAt: "2026-09-11T00:00:00.000Z",
+      streaming: false,
+    };
+    const other = { ...optimistic, id: MessageId.make("other"), text: "another send" };
+    let rows = handedOff ? [other] : [other, optimistic];
+    let composer: typeof original = { prompt: newerPrompt, files: [] };
+    const recoveryActions: Array<() => void> = [];
+    recoverFailedComposerSend({
+      messageId: optimistic.id,
+      draft: original,
+      updateMessages: (update) => {
+        rows = update(rows);
+      },
+      canRestore: () => composer.prompt.length === 0,
+      restore: (draft) => {
+        composer = draft;
+      },
+      offerRecovery: (restore) => {
+        recoveryActions.push(restore);
+      },
+    });
+    return {
+      get rows() {
+        return rows.map(({ text }) => text);
+      },
+      get composer() {
+        return composer;
+      },
+      recoveryActions,
+      clearComposer: () => {
+        composer = { prompt: "", files: [] };
+      },
+      cleanUpTimeline: () => revokeUserMessagePreviewUrls(optimistic),
+    };
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("returns failed input to an empty composer and removes only the failed row", () => {
+    const result = failSend("");
+    expect(result.composer).toEqual(original);
+    expect(result.rows).toEqual(["another send"]);
+    expect(result.recoveryActions).toHaveLength(0);
+  });
+
+  it("preserves newer input and offers recovery while removing the failed row", () => {
+    const result = failSend("newer prompt");
+    expect(result.composer.prompt).toBe("newer prompt");
+    expect(result.rows).toEqual(["another send"]);
+    expect(result.recoveryActions).toHaveLength(1);
+    result.clearComposer();
+    result.recoveryActions[0]?.();
+    expect(result.composer).toEqual(original);
+  });
+
+  it("preserves a preview URL already handed off to the server row", () => {
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const result = failSend("", { handedOff: true });
+    expect(result.rows).toEqual(["another send"]);
+    expect(revoke).not.toHaveBeenCalled();
+  });
+
+  it("releases the failed row's preview URL once when timeline cleanup also runs", () => {
+    const revoke = vi.spyOn(URL, "revokeObjectURL");
+    const result = failSend("newer prompt");
+    expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:failed-send-preview");
+    result.cleanUpTimeline();
+    expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:failed-send-preview");
   });
 });
 

@@ -595,6 +595,33 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     }
   });
 
+  const attachStream = Effect.fn("DeviceService.attachStream")(function* (
+    ready: DeviceReadiness,
+    deviceId: DeviceId,
+  ) {
+    const result = yield* HttpClientRequest.post(
+      `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
+    ).pipe(
+      HttpClientRequest.bodyJson({ udid: deviceId }),
+      Effect.mapError(
+        (cause) =>
+          new DeviceOperationError({
+            operation: "attach stream",
+            reason: "invalid_payload",
+            cause,
+          }),
+      ),
+      Effect.flatMap((request) => hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT)),
+    );
+    if (!result.ok) {
+      return yield* new DeviceOperationError({
+        operation: "attach stream",
+        reason: "hub_rejected",
+        cause: result,
+      });
+    }
+  });
+
   /**
    * Boot through the hub so its device list and the streaming helper both see
    * the device come up. Android AVDs change id when they boot (AVD name to
@@ -629,18 +656,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
     if (device.platform === "ios") {
       // Booting alone does not attach a serve-sim helper; the grid start
       // does both and is idempotent for a booted simulator.
-      yield* HttpClientRequest.post(
-        `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
-      ).pipe(
-        HttpClientRequest.bodyJson({ udid: device.id }),
-        Effect.mapError(
-          (cause) =>
-            new DeviceOperationError({ operation: "boot", reason: "invalid_payload", cause }),
-        ),
-        Effect.flatMap((request) =>
-          hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT),
-        ),
-      );
+      yield* attachStream(ready, device.id);
     }
     return result.serial ?? result.id ?? device.id;
   });
@@ -682,18 +698,7 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       }
     } else if (device.platform === "ios" && device.booted) {
       // A simulator booted outside T3 has no helper attached yet.
-      yield* HttpClientRequest.post(
-        `${ready.hub.origin}${vendorPrefix("ios")}/grid/api/start`,
-      ).pipe(
-        HttpClientRequest.bodyJson({ udid: device.id }),
-        Effect.mapError(
-          (cause) =>
-            new DeviceOperationError({ operation: "open", reason: "invalid_payload", cause }),
-        ),
-        Effect.flatMap((request) =>
-          hubJson(request, HubActionResult, "attach stream", BOOT_TIMEOUT),
-        ),
-      );
+      yield* attachStream(ready, device.id);
     }
     if (hosts.get(host.id) !== host)
       return yield* new DeviceHostUnavailableError({
@@ -808,17 +813,17 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
           (input.deviceId === undefined || session.deviceId === input.deviceId),
       );
       if (closing.length === 0) return;
-      yield* publish((current) => ({
-        ...current,
-        sessions: current.sessions.filter((session) => !closing.includes(session)),
-      }));
       if (input.shutdown) {
-        yield* Effect.forEach(
+        return yield* Effect.forEach(
           closing,
           (session) => shutdownDevice(session.hostId, session.deviceId, session.platform),
           { discard: true },
         );
       }
+      yield* publish((current) => ({
+        ...current,
+        sessions: current.sessions.filter((session) => !closing.includes(session)),
+      }));
     },
   );
 

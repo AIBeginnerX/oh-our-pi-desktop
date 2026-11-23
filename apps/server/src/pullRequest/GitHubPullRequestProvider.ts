@@ -188,6 +188,7 @@ const rendersEmpty = (body: string): boolean =>
 
 export const make = Effect.gen(function* () {
   const cli = yield* GitHubPullRequestCli.GitHubPullRequestCli;
+  const readChecks = cli.getPullRequestChecks;
 
   const fail = (operation: string) => (error: GitHubPullRequestCli.GitHubPullRequestCliError) =>
     new PullRequestProviderError({
@@ -306,6 +307,13 @@ export const make = Effect.gen(function* () {
 
     getChangeRequestStack: (input) =>
       cli.getPullRequestStack(input).pipe(Effect.mapError(fail("getChangeRequestStack"))),
+
+    ...(readChecks === undefined
+      ? {}
+      : {
+          getChangeRequestChecks: (input) =>
+            readChecks(input).pipe(Effect.mapError(fail("getChangeRequestChecks"))),
+        }),
 
     getChangeRequestPreview: (input) =>
       cli.getPullRequestPreview(input).pipe(Effect.mapError(fail("getChangeRequestPreview"))),

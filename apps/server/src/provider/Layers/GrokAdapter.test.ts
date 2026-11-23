@@ -16,6 +16,9 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as AcpErrors from "effect-acp/errors";
+import { vi } from "vite-plus/test";
 
 import {
   ApprovalRequestId,
@@ -37,6 +40,8 @@ import {
   nextGrokPlanModeActive,
   selectGrokPermissionOptionId,
 } from "./GrokAdapter.ts";
+
+import * as GrokAcpSupport from "../acp/GrokAcpSupport.ts";
 
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
@@ -1897,6 +1902,90 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       yield* Fiber.interrupt(runtimeEventsFiber);
       yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects startup when an ACP exit is already queued for the event consumer", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-exit-during-startup");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const makeRuntime = GrokAcpSupport.makeGrokAcpRuntime;
+      const error = new AcpErrors.AcpProcessExitedError({ code: 19 });
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi.spyOn(GrokAcpSupport, "makeGrokAcpRuntime").mockImplementation((options) =>
+            makeRuntime(options).pipe(
+              Effect.map((runtime) => ({
+                ...runtime,
+                getEvents: () =>
+                  Stream.concat(
+                    Stream.succeed({ _tag: "ConnectionTerminated" as const, error }),
+                    runtime.getEvents(),
+                  ),
+              })),
+            ),
+          ),
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore()),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const events: ProviderRuntimeEvent[] = [];
+      yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ),
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      const result = yield* adapter
+        .startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" })
+        .pipe(Effect.result);
+      yield* TestClock.adjust(0);
+      assert.deepEqual(yield* adapter.listSessions(), []);
+      assert.deepEqual(
+        events.filter((event) => event.threadId === threadId),
+        [],
+      );
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.equal(result.failure._tag, "ProviderAdapterProcessError");
+        assert.equal(result.failure.cause, error);
+      }
+    }),
+  );
+
+  it.effect("ends an idle session when its ACP process exits", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-idle-process-exit");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const spawned = yield* Deferred.make<ChildProcessSpawner.ChildProcessHandle>();
+      const adapter = yield* makeTestAdapter(wrapperPath).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) =>
+            spawner.spawn(command).pipe(Effect.tap((child) => Deferred.succeed(spawned, child))),
+          ),
+        ),
+      );
+      const exited = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "session.exited"),
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+      assert.isTrue(yield* adapter.hasSession(threadId));
+
+      const child = yield* Deferred.await(spawned);
+      yield* child.kill();
+
+      const event = yield* Fiber.join(exited);
+      if (event._tag === "None") assert.fail("Expected a session exit event.");
+      assert.equal(event.value.payload.exitKind, "error");
+      assert.isFalse(yield* adapter.hasSession(threadId));
     }),
   );
 

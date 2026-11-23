@@ -9,6 +9,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationCommand,
+  type OrchestrationThreadActivity,
   type ProjectId,
   type ProviderRuntimeEvent,
   type ResponseStreamingMode,
@@ -23,6 +24,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
@@ -43,7 +45,7 @@ import {
   ProviderRuntimeIngestionService,
   type ProviderRuntimeIngestionShape,
 } from "../Services/ProviderRuntimeIngestion.ts";
-import { makeMemoryEchoGuard } from "../memoryEcho.ts";
+import { lookupMemoryEchoThreadState, makeMemoryEchoGuard } from "../memoryEcho.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
@@ -112,6 +114,7 @@ const make = Effect.gen(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const memoryEchoGuard = yield* makeMemoryEchoGuard;
+  const sql = yield* SqlClient.SqlClient;
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1035,6 +1038,24 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const appendRuntimeActivities = (
+    event: ProviderRuntimeEvent,
+    activities: ReadonlyArray<OrchestrationThreadActivity>,
+  ) =>
+    Effect.forEach(activities, (activity) =>
+      providerCommandId(event, "thread-activity-append").pipe(
+        Effect.flatMap((commandId) =>
+          orchestrationEngine.dispatch({
+            type: "thread.activity.append",
+            commandId,
+            threadId: event.threadId,
+            activity,
+            createdAt: activity.createdAt,
+          }),
+        ),
+      ),
+    ).pipe(Effect.asVoid);
+
   const processRuntimeEvent = (input: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
       if (
@@ -1043,6 +1064,14 @@ const make = Effect.gen(function* () {
         input.payload.streamKind !== "reasoning_text" &&
         input.payload.streamKind !== "reasoning_summary_text"
       ) {
+        return;
+      }
+
+      if (input.type === "prompt.suggestion") {
+        if (input.provider !== "claudeAgent") return;
+        if ((yield* lookupMemoryEchoThreadState(sql, input.threadId)) !== "clean") return;
+        if (!(yield* resolveThreadRuntimeContext(input.threadId))) return;
+        yield* appendRuntimeActivities(input, runtimeEventToActivities(input));
         return;
       }
 
@@ -2001,19 +2030,7 @@ const make = Effect.gen(function* () {
       }
 
       const activities = runtimeEventToActivities(activityEvent, taskTitle);
-      yield* Effect.forEach(activities, (activity) =>
-        providerCommandId(event, "thread-activity-append").pipe(
-          Effect.flatMap((commandId) =>
-            orchestrationEngine.dispatch({
-              type: "thread.activity.append",
-              commandId,
-              threadId: thread.id,
-              activity,
-              createdAt: activity.createdAt,
-            }),
-          ),
-        ),
-      ).pipe(Effect.asVoid);
+      yield* appendRuntimeActivities(event, activities);
     });
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;

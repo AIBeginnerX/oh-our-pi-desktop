@@ -32,6 +32,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildSideAnswerPrompt,
   buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -115,6 +116,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
+      | "generateSideAnswer"
       | "generateWorkLessons"
       | "generateMemoryTidy",
     value: unknown,
@@ -136,6 +138,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
+      | "generateSideAnswer"
       | "generateWorkLessons"
       | "generateMemoryTidy",
     attachments: TextGeneration.BranchNameGenerationInput["attachments"],
@@ -180,6 +183,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
+      | "generateSideAnswer"
       | "generateWorkLessons"
       | "generateMemoryTidy";
     cwd: string;
@@ -449,6 +453,27 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
       } satisfies TextGeneration.ThreadTitleGenerationResult;
     });
 
+  const generateSideAnswer: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateSideAnswer"]
+  > = (input) => {
+    const { prompt, outputSchema } = buildSideAnswerPrompt(input);
+    return runCodexJson({
+      operation: "generateSideAnswer",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    }).pipe(
+      Effect.mapError(
+        () =>
+          new TextGenerationError({
+            operation: "generateSideAnswer",
+            detail: "Could not generate an isolated side answer.",
+          }),
+      ),
+    );
+  };
+
   const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
     Effect.fn("CodexTextGeneration.generateWorkLessons")(function* (input) {
       const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
@@ -480,6 +505,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateSideAnswer,
     generateWorkLessons,
     generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];

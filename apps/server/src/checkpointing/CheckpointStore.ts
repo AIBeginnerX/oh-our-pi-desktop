@@ -1,7 +1,7 @@
 /**
  * CheckpointStore - Repository interface for filesystem-backed workspace checkpoints.
  *
- * Owns hidden Git-ref checkpoint capture/restore and diff computation for a
+ * Owns hidden Git-ref checkpoint capture and diff computation for a
  * workspace thread timeline. It does not store user-facing checkpoint metadata
  * and does not coordinate provider conversation rollback.
  *
@@ -32,10 +32,9 @@ export interface CaptureCheckpointInput {
   readonly checkpointRef: CheckpointRef;
 }
 
-export interface RestoreCheckpointInput {
+export interface HasCheckpointRefInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
-  readonly fallbackToHead?: boolean;
 }
 
 export interface DiffCheckpointsInput {
@@ -57,7 +56,7 @@ export interface DeleteThreadCheckpointRefsInput {
   readonly threadId: ThreadId;
 }
 
-/** Service tag for checkpoint persistence and restore operations. */
+/** Service tag for checkpoint persistence and diff operations. */
 export class CheckpointStore extends Context.Service<
   CheckpointStore,
   {
@@ -75,16 +74,7 @@ export class CheckpointStore extends Context.Service<
 
     /** Check whether a checkpoint ref exists. */
     readonly hasCheckpointRef: (
-      input: Omit<RestoreCheckpointInput, "fallbackToHead">,
-    ) => Effect.Effect<boolean, CheckpointStoreError>;
-
-    /**
-     * Restore workspace and staging state to a checkpoint.
-     *
-     * Optionally falls back to current `HEAD` when the checkpoint ref is missing.
-     */
-    readonly restoreCheckpoint: (
-      input: RestoreCheckpointInput,
+      input: HasCheckpointRefInput,
     ) => Effect.Effect<boolean, CheckpointStoreError>;
 
     /**
@@ -154,13 +144,6 @@ export const make = Effect.gen(function* () {
     return yield* checkpoints.hasCheckpointRef(input);
   });
 
-  const restoreCheckpoint: CheckpointStore["Service"]["restoreCheckpoint"] = Effect.fn(
-    "restoreCheckpoint",
-  )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.restoreCheckpoint", input.cwd);
-    return yield* checkpoints.restoreCheckpoint(input);
-  });
-
   const diffCheckpoints: CheckpointStore["Service"]["diffCheckpoints"] = Effect.fn(
     "diffCheckpoints",
   )(function* (input) {
@@ -194,7 +177,6 @@ export const make = Effect.gen(function* () {
     isGitRepository,
     captureCheckpoint,
     hasCheckpointRef,
-    restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,
     deleteThreadCheckpointRefs,

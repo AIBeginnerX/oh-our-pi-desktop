@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import type * as Exit from "effect/Exit";
 import * as ExitRuntime from "effect/Exit";
@@ -36,6 +37,8 @@ export const DEFAULT_SIGNAL_EXPORT: SignalExport = {
 };
 
 const FLUSH_BUFFER_THRESHOLD = 256;
+const TRACE_BUFFER_MAX_BYTES = 4 * 1024 * 1024;
+const TRACE_DROP_WARNING_INTERVAL_MS = 60_000;
 const textEncoder = new TextEncoder();
 
 export type TraceAttributes = Readonly<Record<string, unknown>>;
@@ -370,7 +373,11 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     throwOnError: true,
   });
 
-  let buffer: Array<string> = [];
+  let buffer: Array<{ line: string; bytes: number }> = [];
+  let bufferedBytes = 0;
+  let writeFailed = false;
+  let droppedCount = 0;
+  let nextDropWarningAt = -Infinity;
   let pendingFlushStats: TraceSinkFlushStats = {
     logicalWriteBytes: 0,
     count: 0,
@@ -382,44 +389,42 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
       return;
     }
 
-    const records = buffer;
-    buffer = [];
     let persistedCount = 0;
+    writeFailed = false;
 
-    while (persistedCount < records.length) {
-      const firstRecordBytes = textEncoder.encode(records[persistedCount]).byteLength;
-      if (firstRecordBytes > options.maxBytes) {
-        persistedCount += 1;
-        continue;
-      }
-
+    while (persistedCount < buffer.length) {
       let nextIndex = persistedCount + 1;
-      let chunkBytes = firstRecordBytes;
-      while (nextIndex < records.length) {
-        const nextRecordBytes = textEncoder.encode(records[nextIndex]).byteLength;
+      let chunkBytes = buffer[persistedCount]!.bytes;
+      while (nextIndex < buffer.length) {
+        const nextRecordBytes = buffer[nextIndex]!.bytes;
         if (chunkBytes + nextRecordBytes > options.maxBytes) break;
         chunkBytes += nextRecordBytes;
         nextIndex += 1;
       }
 
-      const chunk = records.slice(persistedCount, nextIndex).join("");
+      const chunk = buffer
+        .slice(persistedCount, nextIndex)
+        .map((record) => record.line)
+        .join("");
       const startedAt = performance.now();
       try {
         sink.write(chunk);
       } catch {
-        buffer.unshift(...records.slice(persistedCount));
-        return;
+        writeFailed = true;
+        break;
       }
       pendingFlushStats = {
         logicalWriteBytes: pendingFlushStats.logicalWriteBytes + chunkBytes,
         count: pendingFlushStats.count + nextIndex - persistedCount,
         durationMs: pendingFlushStats.durationMs + Math.max(0, performance.now() - startedAt),
       };
+      bufferedBytes -= chunkBytes;
       persistedCount = nextIndex;
     }
+    if (persistedCount > 0) buffer = buffer.slice(persistedCount);
   };
 
-  const flush = Effect.sync(() => {
+  const flush = Effect.gen(function* () {
     flushUnsafe();
     const stats = pendingFlushStats;
     pendingFlushStats = {
@@ -427,13 +432,17 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
       count: 0,
       durationMs: 0,
     };
-    return stats;
-  }).pipe(
-    Effect.flatMap((stats) =>
-      stats.count > 0 && options.onFlush ? options.onFlush(stats).pipe(Effect.ignore) : Effect.void,
-    ),
-    Effect.withTracerEnabled(false),
-  );
+    const now = yield* Clock.currentTimeMillis;
+    if (droppedCount > 0 && now >= nextDropWarningAt) {
+      const count = droppedCount;
+      droppedCount = 0;
+      nextDropWarningAt = now + TRACE_DROP_WARNING_INTERVAL_MS;
+      yield* Effect.logWarning("Dropping local trace records", { count });
+    }
+    if (stats.count > 0 && options.onFlush) {
+      yield* options.onFlush(stats).pipe(Effect.ignore);
+    }
+  }).pipe(Effect.withTracerEnabled(false));
 
   yield* Effect.addFinalizer(() => flush.pipe(Effect.ignore));
   yield* Effect.forkScoped(
@@ -443,13 +452,33 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
   return {
     filePath: options.filePath,
     push(record) {
+      let line: string;
       try {
-        buffer.push(`${JSON.stringify(record)}\n`);
-        if (buffer.length >= FLUSH_BUFFER_THRESHOLD) {
-          flushUnsafe();
-        }
+        line = `${JSON.stringify(record)}\n`;
       } catch {
+        droppedCount += 1;
         return;
+      }
+
+      const bytes = textEncoder.encode(line).byteLength;
+      if (bytes > options.maxBytes || bytes > TRACE_BUFFER_MAX_BYTES) {
+        droppedCount += 1;
+        return;
+      }
+      if (!writeFailed && bufferedBytes + bytes > TRACE_BUFFER_MAX_BYTES) {
+        flushUnsafe();
+      }
+      if (
+        buffer.length >= FLUSH_BUFFER_THRESHOLD ||
+        bufferedBytes + bytes > TRACE_BUFFER_MAX_BYTES
+      ) {
+        droppedCount += 1;
+        return;
+      }
+      buffer.push({ line, bytes });
+      bufferedBytes += bytes;
+      if (!writeFailed && buffer.length >= FLUSH_BUFFER_THRESHOLD) {
+        flushUnsafe();
       }
     },
     flush,

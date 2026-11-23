@@ -89,11 +89,10 @@ pub fn turn_start_from_plan(ctx: &Ctx, turn: &Turn, plan_thread_id: &str, plan_i
     command
 }
 
-/// Rewinds the thread to the state after `turn_count` turns. With `restore_files` the folder goes
-/// back to that checkpoint too; without it only the conversation does.
-pub fn revert(ctx: &Ctx, thread_id: &str, turn_count: u64, restore_files: bool) -> Value {
+/// Rewinds the conversation to the state after `turn_count` turns, leaving files unchanged.
+pub fn revert(ctx: &Ctx, thread_id: &str, turn_count: u64) -> Value {
     json!({
-        "type": if restore_files { "thread.checkpoint.revert" } else { "thread.conversation.revert" },
+        "type": "thread.conversation.revert",
         "commandId": ctx.command_id, "threadId": thread_id, "turnCount": turn_count,
         "createdAt": ctx.created_at,
     })
@@ -266,14 +265,12 @@ mod tests {
             str_of(&a["planId"]),
         );
         assert_eq!(built, f["command"]);
-        for (name, restore) in [
-            ("checkpoint.revert.json", true),
-            ("conversation.revert.json", false),
-        ] {
+        {
+            let name = "conversation.revert.json";
             let f = fixture(name);
             let a = &f["args"];
             assert_eq!(
-                revert(&ctx(), THREAD, a["turnCount"].as_u64().unwrap(), restore),
+                revert(&ctx(), THREAD, a["turnCount"].as_u64().unwrap()),
                 f["command"],
                 "{name}"
             );
@@ -381,7 +378,6 @@ mod tests {
             names,
             [
                 "approval.respond.json",
-                "checkpoint.revert.json",
                 "conversation.revert.json",
                 "interaction-mode.set.json",
                 "project.create.json",

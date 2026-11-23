@@ -31,16 +31,26 @@ describe("thread usage footer text", () => {
   });
   it("names the turn only when the server answered for one", () => {
     changeLanguage("en");
-    expect(formatThreadUsageFooter({ ...summary, scope: "turn" }, null)).toBe(
+    expect(
+      formatThreadUsageFooter({ ...summary, scope: "turn", requestAggregated: true }, null),
+    ).toBe(
       "This request · opus $4.12 cache 30% · astra ≈$0.31 cache 30% · glm Cost unknown cache 30%",
     );
     changeLanguage("ko");
-    expect(formatThreadUsageFooter({ ...summary, scope: "turn" }, null)).toBe(
+    expect(
+      formatThreadUsageFooter({ ...summary, scope: "turn", requestAggregated: true }, null),
+    ).toBe(
       "이번 요청 · opus $4.12 캐시 30% · astra ≈$0.31 캐시 30% · glm 비용 알 수 없음 캐시 30%",
     );
     // A whole-thread answer (or an old server without a scope) stays unlabelled.
     expect(formatThreadUsageFooter({ ...summary, scope: "thread" }, null)).not.toContain("턴");
     expect(formatThreadUsageFooter(summary, null)).not.toContain("턴");
+  });
+  it("does not label a legacy per-turn summary as a whole request", () => {
+    changeLanguage("en");
+    expect(formatThreadUsageFooter({ ...summary, scope: "turn" }, null)).not.toContain(
+      "This request",
+    );
   });
   it("says a row that measured no turn had no usage reported", () => {
     changeLanguage("en");
@@ -67,6 +77,7 @@ describe("thread usage footer text", () => {
     const request: ThreadUsageSummary = {
       ...summary,
       scope: "turn",
+      requestAggregated: true,
       models: [
         {
           ...totals,
@@ -115,9 +126,12 @@ describe("thread usage footer text", () => {
       ),
     ).toBe("This request · gpt-6.2-astra Usage not reported ctx 2k/10k");
     // The thread's latest context may come from an earlier request.
-    expect(formatThreadUsageFooter({ ...summary, scope: "turn", models: [] }, context)).toBe(
-      "This request",
-    );
+    expect(
+      formatThreadUsageFooter(
+        { ...summary, scope: "turn", requestAggregated: true, models: [] },
+        context,
+      ),
+    ).toBe("This request");
     expect(formatThreadUsageFooter({ ...summary, models: [] }, context)).toBe("ctx 2k/10k");
     expect(
       formatThreadUsageFooter(

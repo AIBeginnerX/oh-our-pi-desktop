@@ -19,10 +19,9 @@ export interface VcsCaptureCheckpointInput {
   readonly checkpointRef: CheckpointRef;
 }
 
-export interface VcsRestoreCheckpointInput {
+export interface VcsHasCheckpointRefInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
-  readonly fallbackToHead?: boolean;
 }
 
 export interface VcsDiffCheckpointsInput {
@@ -65,12 +64,7 @@ export type VcsTreeObservation =
 
 export interface VcsCheckpointOps {
   readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>;
-  readonly hasCheckpointRef: (
-    input: Omit<VcsRestoreCheckpointInput, "fallbackToHead">,
-  ) => Effect.Effect<boolean, VcsError>;
-  readonly restoreCheckpoint: (
-    input: VcsRestoreCheckpointInput,
-  ) => Effect.Effect<boolean, VcsError>;
+  readonly hasCheckpointRef: (input: VcsHasCheckpointRefInput) => Effect.Effect<boolean, VcsError>;
   readonly diffCheckpoints: (input: VcsDiffCheckpointsInput) => Effect.Effect<string, VcsError>;
   readonly deleteCheckpointRefs: (
     input: VcsDeleteCheckpointRefsInput,

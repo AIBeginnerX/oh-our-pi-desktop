@@ -467,10 +467,10 @@ function cleanupProcessHandles(session: TerminalSessionState): void {
 
 function enqueueProcessEvent(
   session: TerminalSessionState,
-  expectedPid: number,
+  expectedProcess: PtyAdapter.PtyProcess,
   event: PendingProcessEvent,
 ): boolean {
-  if (!session.process || session.status !== "running" || session.pid !== expectedPid) {
+  if (session.process !== expectedProcess || session.status !== "running") {
     return false;
   }
 
@@ -1445,14 +1445,12 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
 
   const drainProcessEvents = Effect.fn("terminal.drainProcessEvents")(function* (
     session: TerminalSessionState,
-    expectedPid: number,
+    expectedProcess: PtyAdapter.PtyProcess,
   ) {
     while (true) {
       const action: DrainProcessEventAction = yield* Effect.sync(() => {
-        if (session.pid !== expectedPid || !session.process || session.status !== "running") {
-          session.pendingProcessEvents = [];
-          session.pendingProcessEventIndex = 0;
-          session.processEventDrainRunning = false;
+        // A stale drain must leave the replacement process's queue alone.
+        if (session.process !== expectedProcess || session.status !== "running") {
           return { type: "idle" } as const;
         }
 
@@ -1686,7 +1684,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             ptyProcess = spawnResult.process;
             startedShell = spawnResult.shellLabel;
 
-            const processPid = ptyProcess.pid;
+            const process = spawnResult.process;
             let eventsActivated = false;
 
             let eventStamp: ReturnType<typeof advanceEventSequence> = {
@@ -1694,21 +1692,21 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
               sequence: session.eventSequence,
             };
             yield* modifyManagerState((state) => {
-              session.process = ptyProcess;
-              session.pid = processPid;
+              session.process = process;
+              session.pid = process.pid;
               session.status = "running";
               // onExit may replay an exit immediately; accept it before subscribing.
-              session.unsubscribeData = spawnResult.process.onData((data) => {
-                if (!enqueueProcessEvent(session, processPid, { type: "output", data })) {
+              session.unsubscribeData = process.onData((data) => {
+                if (!enqueueProcessEvent(session, process, { type: "output", data })) {
                   return;
                 }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated) runFork(drainProcessEvents(session, process));
               });
-              session.unsubscribeExit = spawnResult.process.onExit((event) => {
-                if (!enqueueProcessEvent(session, processPid, { type: "exit", event })) {
+              session.unsubscribeExit = process.onExit((event) => {
+                if (!enqueueProcessEvent(session, process, { type: "exit", event })) {
                   return;
                 }
-                if (eventsActivated) runFork(drainProcessEvents(session, processPid));
+                if (eventsActivated) runFork(drainProcessEvents(session, process));
               });
               eventStamp = advanceEventSequence(session);
               return [undefined, state] as const;
@@ -1723,7 +1721,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
             });
             // Publish startup before draining any events replayed during subscription.
             eventsActivated = true;
-            if (session.processEventDrainRunning) runFork(drainProcessEvents(session, processPid));
+            if (session.processEventDrainRunning) runFork(drainProcessEvents(session, process));
           }),
         ),
       ),

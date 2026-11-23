@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
 const { readPreparedConnection } = vi.hoisted(() => ({
@@ -416,6 +417,54 @@ describe("pendingTitlesByThreadKey", () => {
     setTitleForThreadUrl(threadRef, "http://192.168.64.2:5173/app", "Local App", "192.168.64.2");
     useBrowserHistoryStore.getState().registerThreadProject(threadRef, "proj-a");
     expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]?.[0]?.title).toBe("Local App");
+  });
+});
+
+describe("persisted thread project index", () => {
+  type PersistedState = {
+    projectKeyByThreadKey: Record<string, string>;
+  };
+
+  beforeEach(() => resetBrowserHistoryForTests());
+
+  it("persists only the newest 100 mappings for projects with history", () => {
+    const writes = spyOnPersistWrites();
+    const store = useBrowserHistoryStore.getState();
+    const refs = Array.from({ length: 102 }, (_, i) => ({
+      environmentId: threadRef.environmentId,
+      threadId: ThreadId.make(`visited-${i}`),
+    }));
+    store.recordVisit("proj-a", "http://visited.test/", 1);
+    for (const ref of refs) store.registerThreadProject(ref, "proj-a");
+    store.registerThreadProject(threadRef, "project-without-history");
+
+    const persisted = writes.mock.lastCall?.[1].state as PersistedState | undefined;
+    expect(persisted?.projectKeyByThreadKey).toEqual(
+      Object.fromEntries(refs.slice(-100).map((ref) => [scopedThreadKey(ref), "proj-a"])),
+    );
+    recordVisitForThread(refs[0]!, "http://older-thread.test/", 2);
+    expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]?.[0]?.url).toBe(
+      "http://older-thread.test/",
+    );
+  });
+
+  it("drops a deleted thread's mapping and buffered events without deleting project history", () => {
+    const store = useBrowserHistoryStore.getState();
+    const registered = { ...threadRef, threadId: ThreadId.make("registered") };
+    store.registerThreadProject(registered, "proj-a");
+    recordVisitForThread(registered, "http://keep.test/", 1);
+    recordVisitForThread(threadRef, "http://removed.test/", 2);
+    setTitleForThreadUrl(threadRef, "http://removed.test/", "Removed");
+    const writes = spyOnPersistWrites();
+
+    store.removeThread(registered);
+    store.removeThread(threadRef);
+    const persisted = writes.mock.lastCall?.[1].state as PersistedState | undefined;
+    expect(persisted?.projectKeyByThreadKey).toEqual({});
+    store.registerThreadProject(threadRef, "proj-a");
+    expect(useBrowserHistoryStore.getState().byProjectKey["proj-a"]).toEqual([
+      { url: "http://keep.test/", lastVisitedAt: 1 },
+    ]);
   });
 });
 

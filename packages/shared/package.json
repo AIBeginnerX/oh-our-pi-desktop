@@ -123,9 +123,17 @@
       "types": "./src/crew.ts",
       "import": "./src/crew.ts"
     },
+    "./pullRequestAutoFix": {
+      "types": "./src/pullRequestAutoFix.ts",
+      "import": "./src/pullRequestAutoFix.ts"
+    },
     "./threadGoal": {
       "types": "./src/threadGoal.ts",
       "import": "./src/threadGoal.ts"
+    },
+    "./scheduledPrompts": {
+      "types": "./src/scheduledPrompts.ts",
+      "import": "./src/scheduledPrompts.ts"
     },
     "./serverSettings": {
       "types": "./src/serverSettings.ts",
@@ -146,6 +154,10 @@
     "./projectSettings": {
       "types": "./src/projectSettings.ts",
       "import": "./src/projectSettings.ts"
+    },
+    "./promptSuggestion": {
+      "types": "./src/promptSuggestion.ts",
+      "import": "./src/promptSuggestion.ts"
     },
     "./t3ProjectFile": {
       "types": "./src/t3ProjectFile.ts",

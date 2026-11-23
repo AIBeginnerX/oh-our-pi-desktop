@@ -8,7 +8,7 @@
 //! drag-to-copy uses, and a paste is a request the main loop answers with `Msg::Clip` (see
 //! `main.rs`). A test hands the app the answer.
 
-use crate::app::{App, Focus};
+use crate::app::{App, Focus, LinkStatus};
 use crate::clipboard::{self, Why};
 use crate::input::Move;
 use crate::panels_common::s;
@@ -24,6 +24,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 /// Most rows the command list takes.
@@ -65,6 +66,7 @@ pub struct State {
     /// The tools that read the clipboard; none over SSH.
     read_tools: Vec<clipboard::Tool>,
     paste_wanted: bool,
+    dismissed_suggestions: HashSet<String>,
 }
 
 impl State {
@@ -122,8 +124,43 @@ pub fn list_open(app: &App) -> bool {
     !items(app).is_empty()
 }
 
+fn visible_suggestion(app: &App) -> Option<(&str, &str)> {
+    if !active(app)
+        || !app.input.is_empty()
+        || !app.queue.is_empty()
+        || app.thread_id().is_none()
+        || app.memory_edit.is_some()
+        || app.conv.busy()
+        || app.link != LinkStatus::Online
+        || crate::cmd_attach::line(app).is_some()
+        || app.config["settings"]["claudePromptSuggestionsEnabled"].as_bool() == Some(false)
+    {
+        return None;
+    }
+    app.conv
+        .thread
+        .prompt_suggestion()
+        .filter(|(id, _)| !app.composer.dismissed_suggestions.contains(*id))
+}
+
+pub fn accept_suggestion(app: &mut App) -> bool {
+    let Some((id, text)) = visible_suggestion(app) else {
+        return false;
+    };
+    let (id, text) = (id.to_owned(), text.to_owned());
+    app.composer.dismissed_suggestions.insert(id);
+    app.input.set(&text);
+    true
+}
+
 /// Keeps the list's highlight honest after every event: a new word starts it from the top.
 pub fn sync(app: &mut App) {
+    if !app.input.is_empty()
+        && let Some((id, _)) = app.conv.thread.prompt_suggestion()
+        && !app.composer.dismissed_suggestions.contains(id)
+    {
+        app.composer.dismissed_suggestions.insert(id.to_owned());
+    }
     let word = if active(app) {
         app.input.slash_query()
     } else {
@@ -403,6 +440,8 @@ pub fn draw_input(frame: &mut Frame, inner: Rect, app: &App) {
     // Show the rows that end at the cursor's, so the cursor is always on screen.
     let first = (row + 1).saturating_sub(visible);
     app.composer.geo.set(Geo { inner, room, first });
+    let suggestion = visible_suggestion(app)
+        .map(|(_, text)| truncate(&sanitize(&text.replace('\n', " ")), room));
     let selection = app.input.selection();
     let base = Style::new().fg(t.user_fg);
     let chip = if t.fills_user() {
@@ -422,6 +461,11 @@ pub fn draw_input(frame: &mut Frame, inner: Rect, app: &App) {
                 "  ".into()
             };
             let mut spans = vec![Span::styled(lead, Style::new().fg(t.brand))];
+            if i == 0
+                && let Some(text) = &suggestion
+            {
+                spans.push(Span::styled(text.as_str(), t.muted_style()));
+            }
             for (k, cell) in r.cells.iter().enumerate() {
                 let picked =
                     selection.is_some_and(|(from, to)| (from..to).contains(&(r.start + k)));
@@ -663,7 +707,7 @@ mod tests {
         let title = row_of(&rows, "Commands");
         assert!(rows[title].contains(&format!("10/{}", slash::COMMANDS.len())));
         let last = row_of(&rows, " Message ") - 2;
-        assert!(rows[last].contains("/dag-workflow"), "{}", rows[last]);
+        assert!(rows[last].contains("/provider"), "{}", rows[last]);
         assert!(
             !rows[title..=last].iter().any(|r| r.contains("/model")),
             "the first rows scrolled away"
@@ -1021,9 +1065,11 @@ mod tests {
         assert!(!app.quit);
     }
 
-    #[test]
-    fn shift_enter_still_breaks_the_line_and_plain_enter_sends() {
+    #[tokio::test]
+    async fn shift_enter_still_breaks_the_line_and_plain_enter_sends() {
         let mut app = app();
+        let (rpc, _peer) = crate::wire::fake_socket().await;
+        app.rpc = Some(rpc);
         type_text(&mut app, "a");
         press(&mut app, KeyCode::Enter, SHIFT);
         type_text(&mut app, "b");

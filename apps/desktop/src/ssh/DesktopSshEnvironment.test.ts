@@ -87,7 +87,7 @@ describe("sshEnvironment", () => {
           alias: "bastion.example.com",
           hostname: "bastion.example.com",
           username: null,
-          port: null,
+          port: 2222,
           source: "known-hosts",
         },
         {

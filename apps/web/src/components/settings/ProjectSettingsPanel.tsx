@@ -13,6 +13,7 @@ import * as Cause from "effect/Cause";
 import { InfoIcon, Trash2Icon } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { deleteProjectAndClearThreadViewState } from "../../hooks/useThreadActions";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { releaseProjectDraftUploads } from "../../lib/composerDraftUploads";
 import { readLocalApi } from "../../localApi";
@@ -40,6 +41,7 @@ import {
   ProjectFaviconPickerDialog,
 } from "./ProjectFaviconPickerDialog";
 import { ProjectActionsSettings } from "./ProjectActionsSettings";
+import { ProjectScheduledPromptsSettings } from "./ProjectScheduledPromptsSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectSkillsSection } from "./ProjectSkillsSection";
@@ -345,21 +347,20 @@ function ProjectDetail({
           (thread) =>
             thread.environmentId === member.environmentId && thread.projectId === member.id,
         );
+        const projectRef = scopeProjectRef(member.environmentId, member.id);
         const result = mapAtomCommandResult(
-          await deleteProject({
-            environmentId: member.environmentId,
-            input: {
-              projectId: member.id,
-              force: true,
-            },
-          }),
+          await deleteProjectAndClearThreadViewState(projectRef, () =>
+            deleteProject({
+              environmentId: member.environmentId,
+              input: { projectId: member.id, force: true },
+            }),
+          ),
           () => undefined,
         );
         if (result._tag === "Failure") {
           reportFailure(`Failed to remove "${member.title}"`, result);
           return;
         }
-        const projectRef = scopeProjectRef(member.environmentId, member.id);
         releaseProjectDraftUploads(
           projectRef,
           memberThreads.map((thread) => scopeThreadRef(thread.environmentId, thread.id)),
@@ -501,6 +502,7 @@ function ProjectDetail({
           projectId={group.memberProjects[0]!.id}
         />
         <ProjectActionsSettings />
+        <ProjectScheduledPromptsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}
         <SettingsSection title="Danger">
           <SettingsRow

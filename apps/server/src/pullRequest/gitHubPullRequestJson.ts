@@ -1625,6 +1625,22 @@ export function decodePullRequestCoreJson(
   });
 }
 
+const decodeChecksDetail = decodeJsonResult(
+  Schema.Struct({
+    state: Schema.String,
+    headRefOid: Schema.NullOr(Schema.String),
+    statusCheckRollup: Schema.NullOr(Schema.Array(RawCheckSchema)),
+  }),
+);
+
+export function decodePullRequestChecksJson(raw: string) {
+  return Result.map(decodeChecksDetail(raw), (value) => ({
+    open: value.state === "OPEN",
+    headSha: trimmed(value.headRefOid),
+    checks: toChecks(value.statusCheckRollup),
+  }));
+}
+
 export function decodePullRequestDetailJson(
   raw: string,
 ): Result.Result<GitHubPullRequestDetail, DecodeFailure> {

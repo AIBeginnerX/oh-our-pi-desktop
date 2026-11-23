@@ -1,3 +1,5 @@
+import { SuggestedTaskCard } from "./SuggestedTaskCard";
+import { useThreadActivities, useThreadDetailValue } from "../../state/entities";
 import {
   TimelineRowSharedState,
   TimelineRowActivityState,
@@ -32,7 +34,10 @@ import {
 } from "./MessagesTimeline.workGroup";
 import { ArrowUpIcon, ClockIcon } from "lucide-react";
 
-import { deriveTimelineMinimapItems } from "./timelineMinimapItems";
+import {
+  createTimelineMinimapPreviewStore,
+  type TimelineMinimapPosition,
+} from "./timelineMinimapItems";
 import {
   type AssistantCitation,
   type EnvironmentId,
@@ -41,7 +46,8 @@ import {
   type TurnId,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
+import { parseScopedThreadKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
+import type { EnvironmentThread } from "@t3tools/client-runtime/state/shell";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import {
@@ -66,6 +72,7 @@ const EMPTY_QUEUED_MESSAGES: ReadonlyArray<QueuedComposerMessage> = [];
 const NOOP_QUEUED_MESSAGE_ACTION = (_id: string) => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const selectThreadProjectId = (thread: EnvironmentThread | null) => thread?.projectId ?? null;
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 
 import { observeVisibleAnimation } from "../../lib/visibleAnimation";
@@ -152,6 +159,7 @@ import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection
 import { AssistantCitationSource, type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
 import {
+  collectSuggestedTaskEntries,
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRowsWithState,
   deriveUnsettledTurnId,
@@ -161,6 +169,7 @@ import {
   workEntryIsActiveTurnActivity,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
+  resolveTranscriptExpanded,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapCurrentIndex,
   resolveTimelineMinimapHitStripWidth,
@@ -192,6 +201,7 @@ import { chatMarkdownClipboardPayload } from "../../markdown-clipboard";
 
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { useClientSettings } from "~/hooks/useSettings";
+import type { ClientSettings } from "@t3tools/contracts/settings";
 import { THREAD_USAGE_NOTE } from "./threadUsageText";
 import type { ChatMarkdownContextReference } from "../ChatMarkdown";
 import { useMediaQuery } from "~/hooks/useMediaQuery";
@@ -329,6 +339,7 @@ interface MessagesTimelineProps {
   supportsConversationRollback: boolean;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate?: (template: CodexArtifactTemplate) => void;
+  onAttachContext?: (mention: string) => void;
   onRunShellCommand?: (command: string) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -374,6 +385,12 @@ interface MessagesTimelineProps {
 // MessagesTimeline — list owner
 // ---------------------------------------------------------------------------
 
+const selectTimelineSettings = (settings: ClientSettings) =>
+  [settings.chatWidth, settings.transcriptViewMode] as const;
+
+// Tie manual choices to the existing bounded thread-position cache.
+const rememberedDisclosureChoices = new WeakMap<WorkGroupViewState, ReadonlyMap<string, boolean>>();
+
 export const MessagesTimeline = memo(function MessagesTimeline({
   citationRequest = null,
   citationHistoryLoading = false,
@@ -401,6 +418,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   supportsConversationRollback,
   onRevertToTurnCount,
   onUseArtifactTemplate = NOOP_USE_ARTIFACT_TEMPLATE,
+  onAttachContext,
   onRunShellCommand,
   isRevertingCheckpoint,
   onImageExpand,
@@ -430,11 +448,30 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
 }: MessagesTimelineProps) {
   const threadUsageFooterText = !isWorking && threadUsageFooter ? threadUsageFooter : null;
+  const [chatWidth, transcriptViewMode] = useClientSettings(selectTimelineSettings);
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
     () => readTimelinePosition(listIdentityKey),
     [listIdentityKey],
   );
+  // Nested tool state shares the bounded thread-position cache.
+  const workGroupViewState = useMemo<WorkGroupViewState>(
+    () =>
+      rememberedPosition?.disclosures?.workGroupState ?? {
+        scrollPositions: new Map(),
+        expandedEntries: new Set(),
+      },
+    [listIdentityKey, rememberedPosition],
+  );
+  const [disclosureChoices, setDisclosureChoices] = useState(
+    () => rememberedDisclosureChoices.get(workGroupViewState) ?? new Map<string, boolean>(),
+  );
+  const setDisclosureChoice = useCallback((key: string, expanded: boolean) => {
+    setDisclosureChoices((current) => new Map(current).set(key, expanded));
+  }, []);
+  useLayoutEffect(() => {
+    rememberedDisclosureChoices.set(workGroupViewState, disclosureChoices);
+  }, [workGroupViewState, disclosureChoices]);
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(
     () => rememberedPosition?.disclosures?.turns ?? new Set(),
   );
@@ -457,6 +494,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   // The list stays mounted across thread switches. Its first end pins on the
   // new thread must snap, not glide, even if that thread is mid-turn.
   const [settlingListIdentity, setSettlingListIdentity] = useState<string | null>(null);
+  let paintedDisclosureChoices = disclosureChoices;
   let paintedExpandedTurnIds = expandedTurnIds;
   let paintedExpandedWorkGroupIds = expandedWorkGroupIds;
   let paintedExpandedSpawnEntryIds = expandedSpawnEntryIds;
@@ -471,35 +509,27 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     paintedExpandedSpawnEntryIds = rememberedPosition?.disclosures?.spawnEntries ?? new Set();
     paintedExpandedReasoningMessageIds =
       rememberedPosition?.disclosures?.reasoningMessages ?? new Set();
+    paintedDisclosureChoices = rememberedDisclosureChoices.get(workGroupViewState) ?? new Map();
+    setDisclosureChoices(paintedDisclosureChoices);
     setExpandedTurnIds(paintedExpandedTurnIds);
     setExpandedWorkGroupIds(paintedExpandedWorkGroupIds);
     setExpandedSpawnEntryIds(paintedExpandedSpawnEntryIds);
     setExpandedReasoningMessageIds(paintedExpandedReasoningMessageIds);
   }
-  const onToggleSpawnRow = useCallback((entryId: string, expanded: boolean) => {
-    setExpandedSpawnEntryIds((current) => {
-      if (current.has(entryId) === expanded) return current;
-      const next = new Set(current);
-      if (expanded) next.add(entryId);
-      else next.delete(entryId);
-      return next;
-    });
-  }, []);
+  const onToggleSpawnRow = useCallback(
+    (entryId: string, expanded: boolean) => setDisclosureChoice(`spawn:${entryId}`, expanded),
+    [setDisclosureChoice],
+  );
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
   const openPullRequest = useOpenPrLink(citationThreadRef ?? undefined);
-  const expandCitedTurn = useCallback((turnId: TurnId) => {
-    setExpandedTurnIds((current) =>
-      current.has(turnId) ? current : new Set([...current, turnId]),
-    );
-  }, []);
-  // Nested tool state shares the bounded thread-position cache.
-  const workGroupViewState = useMemo<WorkGroupViewState>(
-    () =>
-      rememberedPosition?.disclosures?.workGroupState ?? {
-        scrollPositions: new Map(),
-        expandedEntries: new Set(),
-      },
-    [listIdentityKey, rememberedPosition],
+  const expandCitedTurn = useCallback(
+    (turnId: TurnId) => {
+      setExpandedTurnIds((current) =>
+        current.has(turnId) ? current : new Set([...current, turnId]),
+      );
+      setDisclosureChoice(`turn:${turnId}`, true);
+    },
+    [setDisclosureChoice],
   );
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
@@ -574,47 +604,37 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
 
   const onToggleTurnFold = useCallback(
-    (turnId: TurnId) => {
+    (turnId: TurnId, expanded: boolean) => {
       suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`);
-      setExpandedTurnIds((existing) => {
-        const next = new Set(existing);
-        if (next.has(turnId)) {
-          next.delete(turnId);
-        } else {
-          next.add(turnId);
-        }
-        return next;
-      });
+      setDisclosureChoice(`turn:${turnId}`, !expanded);
     },
-    [suspendEndScrollMaintenanceForDisclosure],
+    [setDisclosureChoice, suspendEndScrollMaintenanceForDisclosure],
   );
   const onToggleWorkGroup = useCallback(
-    (groupId: string, anchorKey: string) => {
-      suspendEndScrollMaintenanceForDisclosure(anchorKey, expandedWorkGroupIds.has(groupId));
-      setExpandedWorkGroupIds((existing) => {
-        const next = new Set(existing);
-        if (next.has(groupId)) {
-          next.delete(groupId);
-        } else {
-          next.add(groupId);
-        }
-        return next;
-      });
+    (groupId: string, anchorKey: string, includesReasoning = false) => {
+      const key = `group:${groupId}`;
+      const expanded = resolveTranscriptExpanded(
+        transcriptViewMode,
+        includesReasoning ? "reasoning" : "work",
+        disclosureChoices.get(key) ?? (expandedWorkGroupIds.has(groupId) ? true : undefined),
+      );
+      suspendEndScrollMaintenanceForDisclosure(anchorKey, expanded);
+      setDisclosureChoice(key, !expanded);
     },
-    [expandedWorkGroupIds, suspendEndScrollMaintenanceForDisclosure],
+    [
+      disclosureChoices,
+      expandedWorkGroupIds,
+      setDisclosureChoice,
+      suspendEndScrollMaintenanceForDisclosure,
+      transcriptViewMode,
+    ],
   );
   const onToggleReasoning = useCallback(
     (messageId: string, expanded: boolean, anchorKey: string) => {
       suspendEndScrollMaintenanceForDisclosure(anchorKey, !expanded);
-      setExpandedReasoningMessageIds((current) => {
-        if (current.has(messageId) === expanded) return current;
-        const next = new Set(current);
-        if (expanded) next.add(messageId);
-        else next.delete(messageId);
-        return next;
-      });
+      setDisclosureChoice(`reasoning:${messageId}`, expanded);
     },
-    [suspendEndScrollMaintenanceForDisclosure],
+    [setDisclosureChoice, suspendEndScrollMaintenanceForDisclosure],
   );
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
@@ -673,13 +693,32 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         : new Set(liveAgentTaskKey.length > 0 ? liveAgentTaskKey.split("\n") : []),
     [liveAgentTaskKey],
   );
-  const rawRows = useMemo(() => {
+  const displayedThreadRef = useMemo(
+    () => parseScopedThreadKey(listIdentityKey),
+    [listIdentityKey],
+  );
+  const activities = useThreadActivities(displayedThreadRef);
+  const projectId = useThreadDetailValue(displayedThreadRef, selectThreadProjectId);
+  const suggestedTasks = useMemo(
+    () =>
+      displayedThreadRef && projectId
+        ? collectSuggestedTaskEntries(
+            activities,
+            scopeProjectRef(displayedThreadRef.environmentId, projectId),
+          )
+        : undefined,
+    [activities, displayedThreadRef, projectId],
+  );
+  const rowsProjection = useMemo(() => {
     const previous = rowsProjectionRef.current;
     const projection = deriveMessagesTimelineRowsWithState(
       {
         timelineEntries,
+        suggestedTasks,
         latestTurn,
         runningTurnId,
+        transcriptViewMode,
+        disclosureChoices: paintedDisclosureChoices,
         expandedTurnIds: paintedExpandedTurnIds,
         expandedWorkGroupIds: paintedExpandedWorkGroupIds,
         isWorking,
@@ -695,14 +734,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         : null,
     );
     rowsProjectionRef.current = { threadKey: listIdentityKey, workspaceRoot, projection };
-    return projection.rows;
+    return projection;
   }, [
     rowsProjectionRef,
     listIdentityKey,
     workspaceRoot,
     timelineEntries,
+    suggestedTasks,
     latestTurn,
     runningTurnId,
+    transcriptViewMode,
+    paintedDisclosureChoices,
     paintedExpandedTurnIds,
     paintedExpandedWorkGroupIds,
     isWorking,
@@ -713,8 +755,23 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     worktreeSetup,
     queuedMessages,
   ]);
-  const rows = useStableRows(rawRows, listIdentityKey);
-  const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
+  const { minimapPositions: minimapItems, rows: projectedRows } = rowsProjection;
+  const rows = useStableRows(projectedRows, listIdentityKey);
+  const [minimapPreviewStore] = useState(createTimelineMinimapPreviewStore);
+  useLayoutEffect(() => {
+    minimapPreviewStore.setRows(projectedRows);
+  }, [minimapPreviewStore, projectedRows]);
+  const selectMinimapItem = useCallback(
+    (item: TimelineMinimapPosition) => {
+      onManualNavigation();
+      void listRef.current?.scrollToIndex({
+        index: item.rowIndex,
+        animated: true,
+        viewOffset: 24,
+      });
+    },
+    [listRef, onManualNavigation],
+  );
   const restoreRowIndex =
     restoringThreadPosition && rememberedPosition?.atEnd === false
       ? rows.findIndex((row) => row.id === rememberedPosition.rowId)
@@ -843,7 +900,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     null,
   );
   // Re-measure the minimap gutter when the chat column changes width without a viewport resize.
-  const chatWidth = useClientSettings((settings) => settings.chatWidth);
   const {
     target: readyCitationRequest,
     positioning: citationPositioning,
@@ -1064,6 +1120,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertToTurnCount,
       onUseArtifactTemplate,
+      onAttachContext,
       onRunShellCommand,
       onImageExpand,
       onFileOpen,
@@ -1075,6 +1132,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onToggleWorkEntry: suspendEndScrollMaintenanceForDisclosure,
       onToggleSpawnRow,
       onToggleReasoning,
+      transcriptViewMode,
+      disclosureChoices: paintedDisclosureChoices,
       expandedReasoningMessageIds: paintedExpandedReasoningMessageIds,
       workGroupViewState,
       agentPanelModel: agentPanelModel ?? EMPTY_AGENT_PANEL_MODEL,
@@ -1100,6 +1159,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertToTurnCount,
       onUseArtifactTemplate,
+      onAttachContext,
       onRunShellCommand,
       onImageExpand,
       onFileOpen,
@@ -1111,6 +1171,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       suspendEndScrollMaintenanceForDisclosure,
       onToggleSpawnRow,
       onToggleReasoning,
+      transcriptViewMode,
+      paintedDisclosureChoices,
       paintedExpandedReasoningMessageIds,
       workGroupViewState,
       agentPanelModel,
@@ -1256,18 +1318,12 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           />
           <TimelineMinimap
             items={minimapItems}
+            previewStore={minimapPreviewStore}
             hasPersistentGutter={minimapHasPersistentGutter}
             hitStripWidth={minimapHitStripWidth}
             currentIndex={minimapCurrentIndex}
             stripMap={minimapStripMap}
-            onSelect={(item) => {
-              onManualNavigation();
-              void listRef.current?.scrollToIndex({
-                index: item.rowIndex,
-                animated: true,
-                viewOffset: 24,
-              });
-            }}
+            onSelect={selectMinimapItem}
           />
         </div>
       </TimelineRowActivityCtx>
@@ -1344,6 +1400,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <ReasoningTimelineRow row={row} />
       ) : null}
       {row.kind === "assistant-meta" ? <AssistantMetaTimelineRow row={row} /> : null}
+      {row.kind === "suggested-task" ? (
+        <SuggestedTaskCard title={row.title} prompt={row.prompt} projectRef={row.projectRef} />
+      ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
       {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
       {row.kind === "thinking" ? <ThinkingTimelineRow /> : null}
@@ -1927,7 +1986,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         type="button"
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
-        onClick={() => ctx.onToggleTurnFold(row.turnId)}
+        onClick={() => ctx.onToggleTurnFold(row.turnId, row.expanded)}
         className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-sm leading-relaxed text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
         <span>{row.label}</span>
@@ -1959,12 +2018,14 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         >
           <ChatMarkdown
             text={messageText}
+            messageRole="assistant"
             cwd={ctx.markdownCwd}
             threadRef={ctx.threadRef ?? undefined}
             isStreaming={Boolean(row.message.streaming)}
             lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
             skills={ctx.skills}
             headingLevelOffset={MESSAGE_HEADING_LEVEL}
+            onAttachContext={ctx.onAttachContext}
             onUseArtifactTemplate={ctx.onUseArtifactTemplate}
             onRunShellCommand={ctx.onRunShellCommand}
             onImageExpand={ctx.onImageExpand}
@@ -2105,7 +2166,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
   ) : isCompacting ? (
     <CompactingLabel />
   ) : isRevertingCheckpoint ? (
-    t("Restoring checkpoint…")
+    t("Rewinding conversation…")
   ) : row.createdAt ? (
     <>
       Working for <WorkingTimer createdAt={row.createdAt} />
@@ -2256,7 +2317,7 @@ function ActivityGroupTimelineRow({
         className="group/live-work flex min-h-6 w-full max-w-full cursor-pointer items-center rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
         aria-label={failed ? `${label}, tool call failed` : undefined}
         aria-expanded={row.expanded}
-        onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
+        onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id, true)}
       >
         <LiveActivityRow
           label={label}
@@ -2325,7 +2386,14 @@ function ReasoningTraceBlock({
   const ctx = use(TimelineRowCtx);
   const { isWorking, unsettledTurnId } = use(TimelineRowActivityCtx);
   const first = messages[0]!;
-  const expanded = !showHeader || ctx.expandedReasoningMessageIds.has(first.id);
+  const expanded =
+    !showHeader ||
+    resolveTranscriptExpanded(
+      ctx.transcriptViewMode,
+      "reasoning",
+      ctx.disclosureChoices.get(`reasoning:${first.id}`) ??
+        (ctx.expandedReasoningMessageIds.has(first.id) ? true : undefined),
+    );
   const streaming =
     live &&
     messages.some((reasoningMessage) => reasoningMessage.streaming) &&
@@ -2383,12 +2451,14 @@ function ReasoningTraceBlock({
               key={reasoningMessage.id}
               className="text-foreground"
               text={reasoningMessage.text}
+              messageRole="assistant"
               cwd={ctx.markdownCwd}
               threadRef={ctx.threadRef ?? undefined}
               isStreaming={streaming && reasoningMessage.streaming}
               lineBreaks
               skills={ctx.skills}
               headingLevelOffset={MESSAGE_HEADING_LEVEL}
+              onAttachContext={ctx.onAttachContext}
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}
               onImageExpand={ctx.onImageExpand}
             />
@@ -2411,7 +2481,12 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
 }) {
   const ctx = use(TimelineRowCtx);
   const { message } = row;
-  const expanded = ctx.expandedReasoningMessageIds.has(message.id);
+  const expanded = resolveTranscriptExpanded(
+    ctx.transcriptViewMode,
+    "reasoning",
+    ctx.disclosureChoices.get(`reasoning:${message.id}`) ??
+      (ctx.expandedReasoningMessageIds.has(message.id) ? true : undefined),
+  );
   const { onToggleReasoning } = ctx;
   const toggle = useCallback(() => {
     onToggleReasoning(message.id, !expanded, row.id);
@@ -2451,11 +2526,13 @@ const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
           <ChatMarkdown
             className="text-foreground"
             text={message.text}
+            messageRole="assistant"
             cwd={ctx.markdownCwd}
             threadRef={ctx.threadRef ?? undefined}
             lineBreaks
             skills={ctx.skills}
             headingLevelOffset={MESSAGE_HEADING_LEVEL}
+            onAttachContext={ctx.onAttachContext}
             onUseArtifactTemplate={ctx.onUseArtifactTemplate}
             onImageExpand={ctx.onImageExpand}
           />

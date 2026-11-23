@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { enabledEnvironmentIds } from "@t3tools/client-runtime/state/connections";
 import { arrayElementsEqual } from "@t3tools/client-runtime/state/entities";
 import {
@@ -10,13 +11,20 @@ import {
   createThreadEnvironmentAtoms,
   isThreadSessionRunning,
 } from "@t3tools/client-runtime/state/threads";
-import type { EnvironmentId, OrchestrationThreadShell, ThreadId } from "@t3tools/contracts";
+import {
+  isProviderDriverKind,
+  type EnvironmentId,
+  type OrchestrationThreadShell,
+  type ScopedThreadRef,
+  type ThreadId,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
 import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSnapshotAtom } from "./shell";
+import { serverEnvironment } from "./server";
 
 export const threadEnvironment = createThreadEnvironmentAtoms(
   connectionAtomRuntime,
@@ -30,6 +38,27 @@ export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   snapshotAtom: threadEnvironment.snapshotAtom,
 });
+
+const NO_CLAUDE_THREAD = Atom.make(false);
+const claudeThreadAtom = Atom.family((key: string) =>
+  Atom.make((get) => {
+    const ref = parseScopedThreadKey(key);
+    const thread = ref && get(environmentThreadShells.threadShellAtom(ref));
+    if (!ref || !thread) return false;
+    const providerName = thread.session?.providerName;
+    if (providerName && isProviderDriverKind(providerName)) return providerName === "claudeAgent";
+    const instanceId = thread.modelSelection.instanceId;
+    const providers = get(serverEnvironment.providersValueAtom(ref.environmentId));
+    return (
+      (providers?.find((provider) => provider.instanceId === instanceId)?.driver ?? instanceId) ===
+      "claudeAgent"
+    );
+  }),
+);
+
+export function useIsClaudeThread(ref: ScopedThreadRef | null): boolean {
+  return useAtomValue(ref === null ? NO_CLAUDE_THREAD : claudeThreadAtom(scopedThreadKey(ref)));
+}
 
 const EMPTY_THREAD_STATE_ATOM = Atom.make(AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE)).pipe(
   Atom.withLabel("web-environment-thread:empty"),

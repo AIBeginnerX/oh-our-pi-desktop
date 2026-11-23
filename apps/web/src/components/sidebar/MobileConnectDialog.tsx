@@ -245,13 +245,14 @@ function MobileConnectPanel() {
     return (
       <div className="space-y-3">
         <p className="text-sm text-muted-foreground">
-          Mobile connections are off. Allowing them lets paired phones reach this computer over your
-          network. OOP will restart once.
+          {t(
+            "Mobile connections are off. Allowing them lets paired phones reach this computer over your network. OOP will restart once.",
+          )}
         </p>
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
         <Button disabled={isEnablingNetwork} onClick={() => void enableNetworkAccess()}>
           {isEnablingNetwork ? <Spinner size="sm" /> : null}
-          {isEnablingNetwork ? "Restarting…" : "Allow mobile connections"}
+          {isEnablingNetwork ? t("Restarting…") : t("Allow mobile connections")}
         </Button>
       </div>
     );

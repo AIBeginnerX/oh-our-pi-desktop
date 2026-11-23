@@ -8,12 +8,36 @@ export interface DesktopIpcInvokeEvent {
   readonly sender: { readonly id: number };
 }
 
-export interface DesktopIpcSyncEvent {
+interface DesktopIpcSenderEvent extends DesktopIpcInvokeEvent {
+  readonly sender: DesktopIpcInvokeEvent["sender"] & {
+    readonly mainFrame: { readonly origin: string };
+  };
+  readonly senderFrame: DesktopIpcSenderEvent["sender"]["mainFrame"] | null;
+}
+
+const appWindowOrigins = new WeakMap<DesktopIpcSenderEvent["sender"], string>();
+
+export function registerAppWindow(sender: DesktopIpcSenderEvent["sender"], origin: string): void {
+  appWindowOrigins.set(sender, origin);
+}
+
+function isAppWindowMainFrame(event: DesktopIpcSenderEvent): boolean {
+  const origin = appWindowOrigins.get(event.sender);
+  const frame = event.senderFrame;
+  return (
+    origin !== undefined &&
+    frame !== null &&
+    frame === event.sender.mainFrame &&
+    frame.origin === origin
+  );
+}
+
+export interface DesktopIpcSyncEvent extends DesktopIpcSenderEvent {
   returnValue: unknown;
 }
 
 export type DesktopIpcHandleListener = (
-  event: DesktopIpcInvokeEvent,
+  event: DesktopIpcSenderEvent,
   raw: unknown,
 ) => unknown | Promise<unknown>;
 
@@ -94,14 +118,17 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
         Effect.try({
           try: () => {
             ipcMain.removeHandler(channel);
-            ipcMain.handle(channel, (event, raw) =>
-              runPromise(
+            ipcMain.handle(channel, (event, raw) => {
+              if (!isAppWindowMainFrame(event)) {
+                return Promise.reject(new Error("Unauthorized desktop IPC sender."));
+              }
+              return runPromise(
                 Effect.gen(function* () {
                   yield* Effect.annotateCurrentSpan({ channel });
                   return yield* handler(raw, event);
                 }).pipe(Effect.annotateLogs({ channel }), Effect.withSpan("desktop.ipc.invoke")),
-              ),
-            );
+              );
+            });
           },
           catch: (cause) =>
             new DesktopIpcRegistrationError({ handlerKind: "invoke", channel, cause }),
@@ -128,6 +155,10 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc["Service"] =>
           try: () => {
             ipcMain.removeAllListeners(channel);
             ipcMain.on(channel, (event) => {
+              if (!isAppWindowMainFrame(event)) {
+                event.returnValue = null;
+                return;
+              }
               event.returnValue = runSync(
                 Effect.gen(function* () {
                   yield* Effect.annotateCurrentSpan({ channel });

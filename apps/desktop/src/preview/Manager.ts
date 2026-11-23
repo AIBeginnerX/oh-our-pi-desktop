@@ -87,6 +87,7 @@ import {
   ZOOM_EPSILON,
   artifactSiteSlug,
   attempt,
+  attemptCapturePromise,
   attemptPromise,
   buildPreviewPictureInPictureDataUrl,
   captureAnnotationScreenshot,
@@ -151,6 +152,9 @@ export {
   PreviewWebContentsNotFoundError,
   PreviewWebviewNotInitializedError,
 } from "./ManagerErrors.ts";
+
+// The recording trigger waits for JavaScript to run in the app window's renderer.
+const RECORDING_HOST_REQUEST_TIMEOUT_MS = 10_000;
 
 const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function* (
   artifactDirectory: string,
@@ -2065,13 +2069,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         yield* attempt({ operation: "recording.cursor", tabId, webContentsId: wc.id }, () =>
           wc.send(RECORDING_CURSOR_CHANNEL, true, options, tab?.controller),
         );
-        yield* attemptPromise(
+        yield* attemptCapturePromise(
           {
             operation: "recording.warmSource",
             tabId,
             webContentsId: wc.id,
           },
-          () => wc.capturePage().then(() => undefined),
+          () => wc.capturePage(),
         ).pipe(Effect.retry({ times: 1 }), Effect.ignore);
         const currentWebContents = yield* requireWebContents(tabId);
         if (currentWebContents !== wc || wc.isDestroyed()) {
@@ -2085,7 +2089,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         }
         installDisplayMediaRequestHandler(requestWebContents.session);
         yield* armPendingRecording(tabId, wc, requestWebContents.mainFrame.frameTreeNodeId);
-        const captureRequested = yield* attemptPromise(
+        const captureRequested = yield* attemptCapturePromise(
           {
             operation: "recording.requestCapture",
             tabId,
@@ -2093,6 +2097,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           },
           () =>
             requestWebContents.executeJavaScript(requestRecordingCaptureExpression(tabId), true),
+          RECORDING_HOST_REQUEST_TIMEOUT_MS,
         );
         if (captureRequested !== true) {
           return yield* new PreviewRecordingCaptureUnavailableError({

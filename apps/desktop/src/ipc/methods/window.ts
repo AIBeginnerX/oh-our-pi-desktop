@@ -42,8 +42,8 @@ import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 import {
   extractDistroFromUncPath,
+  isWslUncPath,
   resolveWslPickFolderDefaultPath,
-  wslUncPathToLinuxPath,
 } from "../../wsl/wslPathParsing.ts";
 
 const ContextMenuPosition = Schema.Struct({
@@ -231,15 +231,32 @@ export const pickFolder = DesktopIpc.makeIpcMethod({
       return selectedPath.value;
     }
 
-    const linuxUncPath = wslUncPathToLinuxPath(selectedPath.value);
-    if (linuxUncPath !== null) {
-      return linuxUncPath;
+    const uncPath = selectedPath.value.trim().replaceAll("/", "\\");
+    if (isWslUncPath(uncPath)) {
+      const distro = extractDistroFromUncPath(uncPath);
+      const pool = yield* DesktopBackendPool.DesktopBackendPool;
+      // WSL-only mode uses a WSL picker target for the primary instance.
+      const instance = settings.wslOnly
+        ? Option.some(yield* pool.primary)
+        : yield* pool.get(DesktopBackendPool.BackendInstanceId(targetId));
+      const config = Option.isSome(instance) ? yield* instance.value.currentConfig : Option.none();
+      const runningDistro = Option.getOrUndefined(config)?.runningDistro;
+      if (distro !== null && distro.toLowerCase() === runningDistro?.toLowerCase()) {
+        const segments = uncPath.split("\\").slice(4).filter(Boolean);
+        return "/" + segments.join("/");
+      }
+      // The project picker routes UNC paths by distro and requires a name without spaces.
+      if (distro === null || distro.includes(" ")) {
+        yield* dialog.showErrorBox(
+          "Could not open WSL folder",
+          "Choose a folder in a WSL distribution with a valid name that contains no spaces.",
+        );
+        return null;
+      }
+      return selectedPath.value;
     }
 
-    const converted = yield* wslEnvironment.windowsToWslPath(
-      extractDistroFromUncPath(selectedPath.value) ?? wslDistro,
-      selectedPath.value,
-    );
+    const converted = yield* wslEnvironment.windowsToWslPath(wslDistro, selectedPath.value);
     return Option.getOrElse(converted, () => selectedPath.value);
   }),
 });

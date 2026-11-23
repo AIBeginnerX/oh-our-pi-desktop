@@ -1,4 +1,9 @@
 import {
+  CommandId,
+  EventId,
+  type OrchestrationThreadActivityTone,
+  type ThreadId,
+  type TurnId,
   type OrchestrationEvent,
   ProviderDriverKind,
   type OrchestrationSession,
@@ -6,8 +11,11 @@ import {
 } from "@t3tools/contracts";
 import { WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
+import type * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
+import type * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import {
   ProviderAdapterProcessError,
@@ -19,6 +27,12 @@ import type { ProviderServiceError } from "../../provider/Errors.ts";
 import type { ProviderAdmissionObservation } from "../../provider/Services/ProviderAdapter.ts";
 import { type ProviderSkillTrialRoute } from "../../provider/Services/ProviderService.ts";
 import { type ThreadTitleMessage } from "../../textGeneration/ThreadTitleContext.ts";
+import type { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
+import {
+  MEMORY_ECHO_WITHHELD_ERROR,
+  lookupMemoryEchoThreadState,
+  memoryEchoThreadShouldWithhold,
+} from "../memoryEcho.ts";
 
 export const isProviderAdapterProcessError = Schema.is(ProviderAdapterProcessError);
 export const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
@@ -223,3 +237,113 @@ export function buildGeneratedWorktreeBranchName(raw: string): string {
   const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
   return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
 }
+
+export const formatFailureDetail = (cause: Cause.Cause<unknown>): string => {
+  const failReason = cause.reasons.find(Cause.isFailReason);
+  if (isProviderAdapterRequestError(failReason?.error)) {
+    return failReason.error.detail;
+  }
+  if (isProviderAdapterProcessError(failReason?.error)) {
+    return failReason.error.detail;
+  }
+  if (isProviderAdapterValidationError(failReason?.error)) {
+    return failReason.error.issue;
+  }
+  if (isProviderWorkspaceMissingError(failReason?.error)) {
+    return failReason.error.message;
+  }
+  return Cause.pretty(cause);
+};
+
+export const makeProviderFailureReporting = ({
+  crypto,
+  sql,
+  orchestrationEngine,
+}: {
+  readonly crypto: Crypto.Crypto;
+  readonly sql: SqlClient.SqlClient;
+  readonly orchestrationEngine: OrchestrationEngineService["Service"];
+}) => {
+  /**
+   * One provider diagnostic for this thread, judged against the durable
+   * memory-send ledger at the moment of use: on a tainted or unavailable
+   * thread the fixed withheld phrase is returned and the raw formatter never
+   * runs; a clean thread keeps the raw text. No verdict is cached — every sink
+   * calls this immediately before its write, so a clean judgment never
+   * survives a projection fetch, a provider await, or another diagnostic
+   * write. A lookup interruption, pure or mixed, fails with its original
+   * cause so it reaches the enclosing worker or phase boundary untouched.
+   * Ordinary lookup failures fail closed to unavailable inside the lookup;
+   * they never reach this helper's failure channel.
+   */
+  const providerDiagnosticText = (threadId: ThreadId, raw: () => string) =>
+    Effect.gen(function* () {
+      const state = yield* lookupMemoryEchoThreadState(sql, threadId);
+      return memoryEchoThreadShouldWithhold(state) ? MEMORY_ECHO_WITHHELD_ERROR : raw();
+    });
+  const providerDiagnosticTextPair = (
+    threadId: ThreadId,
+    primary: () => string,
+    secondary: () => string,
+  ) =>
+    Effect.gen(function* () {
+      const state = yield* lookupMemoryEchoThreadState(sql, threadId);
+      const withhold = memoryEchoThreadShouldWithhold(state);
+      return withhold
+        ? { cause: MEMORY_ECHO_WITHHELD_ERROR, originalCause: MEMORY_ECHO_WITHHELD_ERROR }
+        : { cause: primary(), originalCause: secondary() };
+    });
+
+  const serverCommandId = (tag: string) =>
+    crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+  const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
+
+  const appendProviderFailureActivity = (input: {
+    readonly threadId: ThreadId;
+    readonly kind:
+      | "provider.turn.start.failed"
+      | "provider.turn.interrupt.failed"
+      | "provider.approval.respond.failed"
+      | "provider.user-input.respond.failed"
+      | "provider.session.stop.failed";
+    readonly tone?: OrchestrationThreadActivityTone;
+    readonly summary: string;
+    readonly detail: string;
+    readonly turnId: TurnId | null;
+    readonly createdAt: string;
+    readonly requestId?: string;
+  }) =>
+    Effect.all({
+      commandId: serverCommandId("provider-failure-activity"),
+      eventId: serverEventId(),
+    }).pipe(
+      Effect.flatMap(({ commandId, eventId }) =>
+        orchestrationEngine.dispatch({
+          type: "thread.activity.append",
+          commandId,
+          threadId: input.threadId,
+          activity: {
+            id: eventId,
+            tone: input.tone ?? "error",
+            kind: input.kind,
+            summary: input.summary,
+            payload: {
+              detail: input.detail,
+              ...(input.requestId ? { requestId: input.requestId } : {}),
+            },
+            turnId: input.turnId,
+            createdAt: input.createdAt,
+          },
+          createdAt: input.createdAt,
+        }),
+      ),
+    );
+
+  return {
+    providerDiagnosticText,
+    providerDiagnosticTextPair,
+    serverCommandId,
+    serverEventId,
+    appendProviderFailureActivity,
+  };
+};

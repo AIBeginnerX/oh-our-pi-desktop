@@ -1312,7 +1312,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'full-access',
             'default',
             NULL,
-            NULL,
+            '/tmp/worktree-first',
             NULL,
             '2026-03-01T00:00:05.000Z',
             '2026-03-01T00:00:06.000Z',
@@ -1327,7 +1327,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'full-access',
             'default',
             NULL,
-            NULL,
+            '/tmp/worktree-second',
             NULL,
             '2026-03-01T00:00:07.000Z',
             '2026-03-01T00:00:08.000Z',
@@ -1342,7 +1342,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'full-access',
             'default',
             NULL,
-            NULL,
+            '/tmp/worktree-deleted',
             NULL,
             '2026-03-01T00:00:09.000Z',
             '2026-03-01T00:00:10.000Z',
@@ -1373,6 +1373,25 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         if (firstThreadId._tag === "Some") {
           assert.equal(firstThreadId.value, ThreadId.make("thread-first"));
         }
+        const thread = yield* snapshotQuery.getActiveThreadIdByWorktreePath("/tmp/worktree-first");
+        assert.deepEqual(thread, Option.some(ThreadId.make("thread-first")));
+        assert.deepEqual(
+          yield* snapshotQuery.getActiveThreadIdByWorktreePath("/tmp/worktree-deleted"),
+          Option.none(),
+        );
+
+        assert.deepEqual([...(yield* snapshotQuery.listActiveWorkspaceRoots())].sort(), [
+          "/tmp/workspace",
+          "/tmp/worktree-first",
+          "/tmp/worktree-second",
+        ]);
+
+        yield* sql`UPDATE projection_projects SET deleted_at = updated_at WHERE project_id = 'project-active'`;
+        assert.deepEqual(
+          yield* snapshotQuery.getActiveThreadIdByWorktreePath("/tmp/worktree-first"),
+          Option.none(),
+        );
+        assert.deepEqual(yield* snapshotQuery.listActiveWorkspaceRoots(), []);
       }),
   );
 
@@ -3651,9 +3670,10 @@ it.effect(
         ('t-deleted', 'github.com', 'acme/web', 6, 'https://github.com/acme/web/pull/6', 'manual', '2026-09-02T00:00:00Z', NULL)`;
       const expected = (yield* query.getShellSnapshot()).threads
         .filter((thread) => thread.pullRequests.length > 0)
-        .map(({ id, projectId, settledOverride, settledAt, pullRequests }) => ({
+        .map(({ id, projectId, branch, settledOverride, settledAt, pullRequests }) => ({
           id,
           projectId,
+          branch,
           settledOverride,
           settledAt,
           pullRequests,

@@ -213,7 +213,13 @@ pub async fn connect_once_expecting(
         .await
         .map_err(failed)?;
     let rpc = Rpc::connect(&plan.url).await.map_err(failed)?;
-    let config = rpc.call(CONFIG_RPC, json!({})).await.map_err(failed)?;
+    let config = match rpc.call(CONFIG_RPC, json!({})).await {
+        Ok(config) => config,
+        Err(reason) => {
+            rpc.close();
+            return Err(failed(reason));
+        }
+    };
     Ok(Session {
         rpc,
         config,
@@ -232,6 +238,16 @@ fn jitter() -> f64 {
             .map_or(0, |d| d.subsec_nanos())
             % 1000,
     ) / 1000.0
+}
+
+async fn wait_for_session_end(rpc: &Rpc, switch: &tokio::sync::Notify) -> Option<String> {
+    tokio::select! {
+        reason = rpc.closed() => Some(reason),
+        _ = switch.notified() => {
+            rpc.close();
+            None
+        },
+    }
 }
 
 /// Runs the reconnect loop for the whole session. The computer it talks to is `target`, changed
@@ -310,26 +326,18 @@ pub async fn supervise(
                         app.notice = Some(why);
                     })));
                 }
-                {
-                    // The wait borrows the session, so it ends before the loop dials again: the
-                    // socket closes when the session drops at the end of the round.
-                    let closed = session.rpc.closed();
-                    tokio::pin!(closed);
-                    tokio::select! {
-                        reason = closed.as_mut() => {
-                            attempt = if started.elapsed() >= STABLE_SESSION {
-                                1
-                            } else {
-                                attempt + 1
-                            };
-                            reason
-                        }
-                        // The picker chose another computer: the session goes, and the loop
-                        // dials the new one from the start.
-                        _ = switch.notified() => {
-                            attempt = 0;
-                            String::new()
-                        }
+                match wait_for_session_end(&session.rpc, &switch).await {
+                    Some(reason) => {
+                        attempt = if started.elapsed() >= STABLE_SESSION {
+                            1
+                        } else {
+                            attempt + 1
+                        };
+                        reason
+                    }
+                    None => {
+                        attempt = 0;
+                        String::new()
                     }
                 }
             }
@@ -367,6 +375,28 @@ pub async fn supervise(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn switching_computers_closes_the_previous_socket_even_with_an_outstanding_request() {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message;
+
+        let (rpc, mut peer) = crate::wire::fake_socket().await;
+        let reply = rpc.start_call("waiting", json!({})).unwrap();
+        assert!(matches!(peer.next().await, Some(Ok(Message::Text(_)))));
+        let switch = tokio::sync::Notify::new();
+        switch.notify_one();
+        assert!(wait_for_session_end(&rpc, &switch).await.is_none());
+        let frame = tokio::time::timeout(Duration::from_secs(2), peer.next())
+            .await
+            .expect("the previous WebSocket stayed open");
+        assert!(matches!(frame, Some(Ok(Message::Close(_)))));
+        assert!(matches!(
+            reply.await,
+            Err(crate::wire::CallError::Closed(_))
+        ));
+        assert!(rpc.is_closed());
+    }
 
     #[test]
     fn backoff_doubles_to_a_cap_and_is_spread() {

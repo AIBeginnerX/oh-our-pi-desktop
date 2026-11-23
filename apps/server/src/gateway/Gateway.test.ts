@@ -117,6 +117,42 @@ const startUpstream = Effect.gen(function* () {
     ),
     HttpRouter.add(
       "GET",
+      "/echo-html/*",
+      Effect.succeed(
+        HttpServerResponse.text("<p>Relayed document</p>", {
+          contentType: "text/html",
+          headers: { "content-security-policy": "frame-ancestors 'none'" },
+        }),
+      ),
+    ),
+    HttpRouter.add(
+      "GET",
+      "/api/assets/test/example.html",
+      Effect.succeed(HttpServerResponse.text("<p>File preview</p>", { contentType: "text/html" })),
+    ),
+    ...(
+      [
+        ["/api/assets/test/preview.pdf", undefined],
+        ["/api/assets/test/ambiguous.pdf", undefined],
+        ["/api/assets/test/download.pdf", "Attachment; filename=example.pdf"],
+        ["/echo-pdf/preview.pdf", undefined],
+      ] as const
+    ).map(([path, disposition]) =>
+      HttpRouter.add(
+        "GET",
+        path,
+        Effect.succeed(
+          HttpServerResponse.text("%PDF-1.7", {
+            contentType: path.endsWith("ambiguous.pdf")
+              ? "application/pdf;x=1, text/html"
+              : "application/pdf",
+            headers: disposition ? { "content-disposition": disposition } : {},
+          }),
+        ),
+      ),
+    ),
+    HttpRouter.add(
+      "GET",
       "/gzipped",
       Effect.sync(() => {
         const compressed = NodeZlib.gzipSync(GZIPPED_JSON);
@@ -457,6 +493,51 @@ it.live("forwards a compressed upstream body without its stale content-length", 
         String(NodeZlib.gzipSync(GZIPPED_JSON).byteLength),
       );
       expect(yield* response.text).toBe(GZIPPED_JSON);
+    }),
+  ),
+);
+
+it.live("sandboxes relayed HTML and preserves the permissions needed by signed HTML previews", () =>
+  scoped(
+    Effect.gen(function* () {
+      const upstream = yield* startUpstream;
+      const gateway = yield* startGateway;
+      yield* gateway.register(upstream.baseUrl);
+      const base = gatewayEnvironmentPath("env-a");
+      const response = yield* gateway.call(`${base}/echo-html/page.pdf`, {}, "read");
+      expect(response.headers["content-security-policy"]).toBe("frame-ancestors 'none', sandbox");
+      expect(yield* response.text).toBe("<p>Relayed document</p>");
+
+      const ambiguous = yield* gateway.call(`${base}/api/assets/test/ambiguous.pdf`, {}, "read");
+      expect(ambiguous.headers["content-type"]).toBe("application/pdf");
+      const preview = yield* gateway.call(`${base}/api/assets/test/example.html`, {}, "read");
+      expect(preview.headers["content-security-policy"]).toBe(
+        "sandbox allow-scripts allow-forms allow-popups allow-modals",
+      );
+      expect(yield* preview.text).toBe("<p>File preview</p>");
+    }),
+  ),
+);
+
+it.live("leaves inline asset PDFs viewable and sandboxes other PDF responses", () =>
+  scoped(
+    Effect.gen(function* () {
+      const upstream = yield* startUpstream;
+      const gateway = yield* startGateway;
+      yield* gateway.register(upstream.baseUrl);
+      const base = gatewayEnvironmentPath("env-a");
+      const ambiguous = yield* gateway.call(`${base}/api/assets/test/ambiguous.pdf`, {}, "read");
+      expect(ambiguous.headers["content-type"]).toBe("application/pdf");
+      const preview = yield* gateway.call(`${base}/api/assets/test/preview.pdf`, {}, "read");
+      expect(preview.headers["content-type"]).toBe("application/pdf");
+      expect(preview.headers["content-security-policy"]).toBeUndefined();
+      expect(preview.headers["x-content-type-options"]).toBe("nosniff");
+      expect(yield* preview.text).toBe("%PDF-1.7");
+
+      for (const path of ["/api/assets/test/download.pdf", "/echo-pdf/preview.pdf"]) {
+        const response = yield* gateway.call(`${base}${path}`, {}, "read");
+        expect(response.headers["content-security-policy"]).toBe("sandbox");
+      }
     }),
   ),
 );

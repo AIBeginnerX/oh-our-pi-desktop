@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
+// @vitest-environment-options {"url":"https://localhost/"}
 import { EnvironmentId } from "@t3tools/contracts";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { createRoot } from "react-dom/client";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -171,6 +174,185 @@ describe("ChatMarkdown favicon privacy", () => {
       });
       expect(renderer!.root.findAllByType("img")).toHaveLength(0);
       expect(renderer!.root.findAllByType(GitHubIcon)).toHaveLength(1);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("ChatMarkdown external images", () => {
+  it("copies unloaded images and linked badges without mounting remote media", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const host = `${"long".repeat(14)}.example.com`;
+    const image = `![Screenshot](https://${host}/image.png "Full size")`;
+    const badge = `[![](https://${host}/status.svg)](https://example.com/build)`;
+    const text = `Before ${image} and ${badge} after`;
+    const container = document.createElement("div");
+    container.style.width = "160px";
+    document.body.append(container);
+    const root = createRoot(container);
+    const selection = window.getSelection()!;
+    try {
+      await act(async () => {
+        root.render(<ChatMarkdown cwd={undefined} text={text} messageRole="assistant" />);
+      });
+      expect(container.querySelector("img, video, source")).toBeNull();
+      expect(container.querySelector("button")?.textContent).toBe(`Load image from ${host}`);
+      selection.selectAllChildren(container.querySelector("p")!);
+      const clipboardData = new Map<string, string>();
+      const event = Object.assign(new Event("copy", { bubbles: true, cancelable: true }), {
+        clipboardData: {
+          setData: (type: string, value: string) => clipboardData.set(type, value),
+          getData: (type: string) => clipboardData.get(type) ?? "",
+        },
+      });
+      container.querySelector("p")!.dispatchEvent(event);
+      expect(clipboardData.get("text/plain")).toBe(text);
+      expect(clipboardData.get("text/html")).not.toMatch(/<(?:img|video|source|button)\b/);
+    } finally {
+      selection.removeAllRanges();
+      await act(async () => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("loads only the selected remote image and retains automatic loading in user messages", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const urls = ["https://images.example.com/first.png", "https://images.example.com/second.png"];
+    const text = urls.map((url) => `![Example](${url})`).join("\n\n");
+    let renderer: ReactTestRenderer | undefined;
+    const sources = () => renderer!.root.findAllByType("img").map((image) => image.props.src);
+    try {
+      await act(async () => {
+        renderer = create(<ChatMarkdown cwd={undefined} text={text} messageRole="assistant" />);
+      });
+      expect(sources()).toEqual([]);
+      const buttons = renderer!.root.findAllByType("button");
+      expect(buttons).toHaveLength(2);
+      expect(buttons[0]?.findByType("span").props.children).toBe(
+        "Load image from images.example.com",
+      );
+      await act(async () => {
+        buttons[0]?.props.onClick({ preventDefault: vi.fn(), stopPropagation: vi.fn() });
+      });
+      expect(sources()).toEqual([urls[0]]);
+      await act(async () => {
+        renderer!.update(
+          <ChatMarkdown cwd={undefined} text={text} parseRawHtml={false} messageRole="assistant" />,
+        );
+      });
+      expect(sources()).toEqual([urls[0]]);
+      await act(async () => {
+        renderer!.update(<ChatMarkdown cwd={undefined} text={text} parseRawHtml={false} />);
+      });
+      expect(sources()).toEqual(urls);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("opens a consented protocol-relative image with a resolved preview URL", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const imageNode = { closest: () => null };
+    const onImageExpand =
+      vi.fn<NonNullable<ComponentProps<typeof ChatMarkdown>["onImageExpand"]>>();
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          <ChatMarkdown
+            cwd={undefined}
+            text="![Example](//images.example.com/example.png)"
+            messageRole="assistant"
+            onImageExpand={onImageExpand}
+          />,
+          { createNodeMock: (node) => (node.type === "img" ? imageNode : null) },
+        );
+      });
+      expect(renderer!.root.findAllByType("img")).toHaveLength(0);
+      await act(async () => {
+        renderer!.root.findByType("button").props.onClick({
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        });
+      });
+      await act(async () => {
+        renderer!.root.findByType("img").props.onLoad();
+      });
+      renderer!.root.findByType("img").props.onClick({
+        currentTarget: imageNode,
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+      });
+      expect(onImageExpand).toHaveBeenCalledOnce();
+      const preview = onImageExpand.mock.calls[0]?.[0];
+      expect(preview?.images[0]?.src).toBe("https://images.example.com/example.png");
+      expect(preview?.images[0]).not.toHaveProperty("originalUrl");
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("blocks picture sources and only loads a link-wrapped image on consent", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const fallback = "https://images.example.com/fallback.png";
+    const text = `<a href="#elsewhere"><picture><source srcset="https://other.example.com/alternate.png"><img src="${fallback}" alt="Example"></picture></a>`;
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(<ChatMarkdown cwd={undefined} text={text} messageRole="assistant" />);
+      });
+      expect(renderer!.root.findAllByType("source")).toHaveLength(0);
+      expect(renderer!.root.findAllByType("img")).toHaveLength(0);
+      const preventDefault = vi.fn();
+      const stopPropagation = vi.fn();
+      await act(async () => {
+        renderer!.root.findByType("button").props.onClick({ preventDefault, stopPropagation });
+      });
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(stopPropagation).toHaveBeenCalledOnce();
+      expect(renderer!.root.findByType("img").props.src).toBe(fallback);
+    } finally {
+      await act(async () => {
+        renderer?.unmount();
+      });
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not mount an external video player for image markup before consent", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    let renderer: ReactTestRenderer | undefined;
+    try {
+      await act(async () => {
+        renderer = create(
+          <ChatMarkdown
+            cwd={undefined}
+            text="![Example](https://images.example.com/clip.mp4)"
+            messageRole="assistant"
+          />,
+        );
+      });
+      expect(renderer!.root.findAllByType("video")).toHaveLength(0);
+      await act(async () => {
+        renderer!.root.findByType("button").props.onClick({
+          preventDefault: vi.fn(),
+          stopPropagation: vi.fn(),
+        });
+      });
+      expect(renderer!.root.findByType("video").props.src).toBe(
+        "https://images.example.com/clip.mp4",
+      );
     } finally {
       await act(async () => {
         renderer?.unmount();

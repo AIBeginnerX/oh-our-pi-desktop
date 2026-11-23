@@ -253,6 +253,37 @@ describe("observability", () => {
       ),
     );
 
+    it.effect("bounds the trace backlog during a write outage and flushes it after recovery", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const tempDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-trace-sink-" });
+          const tracePath = path.join(tempDir, "shared.trace.ndjson");
+          const sink = yield* makeTraceSink({
+            filePath: tracePath,
+            maxBytes: 1024 * 1024,
+            maxFiles: 2,
+            batchWindowMs: 10_000,
+          });
+
+          yield* fileSystem.makeDirectory(tracePath);
+          for (let index = 0; index < 300; index += 1) {
+            sink.push(makeRecord(`span-${index}`));
+          }
+          yield* sink.flush;
+          yield* fileSystem.remove(tracePath, { recursive: true });
+          yield* sink.flush;
+
+          const records = yield* readTraceRecords(tracePath);
+          assert.deepStrictEqual(
+            records.map((record) => record.name),
+            Array.from({ length: 256 }, (_, index) => `span-${index}`),
+          );
+        }),
+      ),
+    );
+
     it.effect("reports successful logical trace writes", () =>
       Effect.scoped(
         Effect.gen(function* () {

@@ -458,6 +458,22 @@ export function useComposerPromptHandlers(args: {
         return;
       }
       if (item.type === "slash-command") {
+        if (item.command === "btw") {
+          const replacement = "/btw ";
+          const rangeEnd = extendReplacementRangeForTrailingSpace(
+            snapshot.value,
+            trigger.rangeEnd,
+            replacement,
+          );
+          if (
+            applyPromptReplacement(trigger.rangeStart, rangeEnd, replacement, {
+              expectedText: snapshot.value.slice(trigger.rangeStart, rangeEnd),
+            })
+          ) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         if (item.command === "model") {
           const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
             expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),

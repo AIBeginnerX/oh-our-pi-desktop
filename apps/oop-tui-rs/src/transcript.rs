@@ -287,6 +287,7 @@ pub fn build_cached(
         thread
             .activities
             .iter()
+            .filter(|a| a.kind != "prompt.suggestion")
             .map(|a| (a.created_at.as_str(), Item::Activity(a))),
     );
     items.extend(
@@ -308,6 +309,7 @@ pub fn build_cached(
                 let mark = marks.get(message.id.as_str()).copied();
                 let print = fingerprint((
                     &message.text,
+                    &message.attachments,
                     message.streaming,
                     message.role as u8,
                     mark.map(|m| (m.first, m.total)),
@@ -383,7 +385,10 @@ fn message_lines(
         ];
         (lines, meta)
     };
-    match m.role {
+    let attachments = m.attachments.as_deref().unwrap_or_default();
+    let (mut lines, mut rows) = match m.role {
+        Role::User if m.text.is_empty() && !attachments.is_empty() => (Vec::new(), Vec::new()),
+        Role::Assistant if m.text.trim().is_empty() => (Vec::new(), Vec::new()),
         // A long message (a big paste) shows its first line and a count; the text is whole.
         Role::User => user_lines(
             crate::paste::fold(&m.text).as_deref().unwrap_or(&m.text),
@@ -392,9 +397,6 @@ fn message_lines(
             sym,
         ),
         Role::Assistant => {
-            if m.text.trim().is_empty() {
-                return (Vec::new(), Vec::new());
-            }
             let lines =
                 markdown::render_marked(&m.text, w.saturating_sub(2), th, sym, m.streaming, mark)
                     .into_iter()
@@ -430,7 +432,23 @@ fn message_lines(
                 .collect(),
             2,
         ),
+    };
+    for attachment in attachments {
+        let name = sanitize(&attachment.name).replace('\n', " ");
+        let label = if attachment.kind == "image" {
+            crate::panels_common::s("Image", "이미지")
+        } else {
+            crate::panels_common::s("Attachment", "첨부")
+        };
+        for row in wrap(&format!("[{label}] {name}"), w.saturating_sub(2)) {
+            lines.push(Line::from(Span::styled(format!("  {row}"), th.dim_style())));
+            rows.push(RowMeta {
+                from: 2,
+                ..RowMeta::default()
+            });
+        }
     }
+    (lines, rows)
 }
 
 /// Least cells of text a user's box gets, whatever the room.
@@ -831,6 +849,39 @@ mod tests {
     /// A whole transcript as text, without styling.
     fn text_of(t: &Transcript) -> Vec<String> {
         plain(&t.rows().0)
+    }
+
+    #[test]
+    fn transcript_renders_snapshot_and_live_attachments() {
+        let mut thread = thread(
+            json!([{"id": "u1", "role": "user", "attachments": [
+                {"type": "image", "name": "snapshot.png", "futureField": 1}
+            ]}, {"id": "old", "role": "assistant", "text": "older message"}]),
+            json!([]),
+        );
+        let mut cache = BlockCache::default();
+        let mut draw = |thread: &Thread| {
+            text_of(&build_cached(thread, 80, &LAVENDER, &ASCII, &mut cache)).join("\n")
+        };
+        let initial = draw(&thread);
+        assert!(initial.contains("snapshot.png"));
+        assert!(initial.contains("older message"));
+        thread.apply_event(&json!({
+            "type": "thread.message-sent",
+            "payload": {"messageId": "u1", "role": "user", "attachments": [
+                {"type": "file", "name": "live.txt"},
+                {"type": "future", "name": "future.dat"}
+            ]}
+        }));
+        let updated = draw(&thread);
+        assert!(updated.contains("live.txt"));
+        assert!(updated.contains("future.dat"));
+        assert!(!updated.contains("snapshot.png"));
+        thread.apply_event(&json!({
+            "type": "thread.message-sent",
+            "payload": {"messageId": "u1", "role": "user", "text": "an update"}
+        }));
+        assert!(draw(&thread).contains("live.txt"));
     }
 
     fn tool(id: &str, at: &str, kind: &str, payload: Value) -> Value {

@@ -23,6 +23,7 @@ import {
   FileDiff,
   Files,
   Globe2,
+  MessagesSquare,
   Plus,
   TerminalSquare,
   Volume2,
@@ -127,6 +128,7 @@ interface RightPanelTabsProps {
   onAddAgents: () => void;
   onAddWorkflows: () => void;
   onAddDevice: () => void;
+  onAddChat?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -262,7 +264,10 @@ export function surfaceShortcutActionForKey<
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   return (
     actions.find(
-      (action) => action.available && action.shortcut.toLowerCase() === event.key.toLowerCase(),
+      (action) =>
+        action.available &&
+        action.shortcut &&
+        action.shortcut.toLowerCase() === event.key.toLowerCase(),
     ) ?? null
   );
 }
@@ -305,14 +310,31 @@ function SurfaceMenuItem(props: {
       className={!props.available ? "data-disabled:pointer-events-auto" : undefined}
       onClick={props.onClick}
       disabled={!props.available}
-      aria-keyshortcuts={props.shortcut}
+      aria-keyshortcuts={props.shortcut || undefined}
     >
       {props.children}
-      <MenuShortcut>{props.shortcut}</MenuShortcut>
+      {props.shortcut ? <MenuShortcut>{props.shortcut}</MenuShortcut> : null}
     </MenuItem>
   );
   if (props.available || !props.disabledReason) return item;
   return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />;
+}
+
+function chatLauncherActions(t: ReturnType<typeof useT>, onClick: (() => void) | undefined) {
+  return onClick
+    ? ([
+        {
+          label: t("Chat beside"),
+          description: "Read another chat beside this one.",
+          icon: MessagesSquare,
+          shortcut: "",
+          available: true,
+          disabledReason: "",
+          onClick,
+          badgeCount: 0,
+        },
+      ] as const)
+    : [];
 }
 
 /**
@@ -334,6 +356,7 @@ function RightPanelEmptyState(props: {
   onAddAgents: () => void;
   onAddWorkflows: () => void;
   onAddDevice: () => void;
+  onAddChat?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -440,6 +463,7 @@ function RightPanelEmptyState(props: {
       onClick: props.onAddDevice,
       badgeCount: 0,
     },
+    ...chatLauncherActions(t, props.onAddChat),
   ] as const;
 
   type SurfaceAction = (typeof actions)[number];
@@ -567,7 +591,7 @@ function RightPanelEmptyState(props: {
                 >
                   <span className="flex items-start justify-between gap-2">
                     {actionIcon(action, "size-5")}
-                    <Kbd>{action.shortcut}</Kbd>
+                    {action.shortcut ? <Kbd>{action.shortcut}</Kbd> : null}
                   </span>
                   <span
                     className={cn(
@@ -622,7 +646,7 @@ function RightPanelEmptyState(props: {
               >
                 <span className="flex items-start justify-between gap-2">
                   {actionIcon(action, "size-5")}
-                  <Kbd>{action.shortcut}</Kbd>
+                  {action.shortcut ? <Kbd>{action.shortcut}</Kbd> : null}
                 </span>
                 <span className="flex min-w-0 flex-col">
                   <span className="truncate font-medium">{action.label}</span>
@@ -643,6 +667,7 @@ function surfaceTitle(
   surface: RightPanelSurface,
   sessions: Readonly<Record<string, PreviewSessionSnapshot>>,
   terminalLabelsById: ReadonlyMap<string, string>,
+  t: ReturnType<typeof useT>,
 ): string {
   switch (surface.kind) {
     case "diff":
@@ -666,6 +691,8 @@ function surfaceTitle(
       return "Agents";
     case "workflows":
       return "Workflows";
+    case "chat":
+      return t("Chat beside");
     case "device":
       return surface.title ?? surface.target?.name ?? "Device";
     case "preview": {
@@ -754,6 +781,8 @@ function SurfaceIcon({
       return <Bot className="size-3 shrink-0" />;
     case "workflows":
       return <Workflow className="size-3 shrink-0" />;
+    case "chat":
+      return <MessagesSquare className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1009,6 +1038,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       disabledReason: SURFACE_DISABLED_REASONS.device,
       onClick: props.onAddDevice,
     },
+    ...chatLauncherActions(t, props.onAddChat),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1207,7 +1237,12 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             {props.surfaces.map((surface) => {
               const active = surface.id === props.activeSurfaceId;
               const pending = props.pendingSurfaceIds.has(surface.id);
-              const title = surfaceTitle(surface, props.previewSessions, props.terminalLabelsById);
+              const title = surfaceTitle(
+                surface,
+                props.previewSessions,
+                props.terminalLabelsById,
+                t,
+              );
               const workingCount =
                 surface.kind === "agents" || surface.kind === "workflows"
                   ? props.liveAgentCount
@@ -1513,6 +1548,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddAgents={props.onAddAgents}
             onAddWorkflows={props.onAddWorkflows}
             onAddDevice={props.onAddDevice}
+            onAddChat={props.onAddChat}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}

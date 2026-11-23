@@ -137,7 +137,7 @@ pub fn steps(thread: &Thread) -> Option<Vec<Step>> {
             thread
                 .activities
                 .iter()
-                .filter(|a| tagged(&a.turn_id))
+                .filter(|a| tagged(&a.turn_id) && a.kind != "prompt.suggestion")
                 .map(|a| a.created_at.as_str()),
         )
         .min();

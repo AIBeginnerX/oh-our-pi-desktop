@@ -30,6 +30,7 @@ const RIGHT_PANEL_KINDS = [
   "pull-requests",
   "agents",
   "workflows",
+  "chat",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -87,14 +88,16 @@ export type RightPanelSurface =
   /** The thread's linked pull requests, one singleton tab beside any number of `pull-request` tabs. */
   | { id: "pull-requests"; kind: "pull-requests" }
   | { id: "agents"; kind: "agents" }
-  | { id: "workflows"; kind: "workflows" };
+  | { id: "workflows"; kind: "workflows" }
+  | { id: "chat"; kind: "chat"; target: ScopedThreadRef | null };
 
 const RIGHT_PANEL_STORAGE_KEY = "t3code:right-panel-state:v2";
 // v9 removed the "plan" surface kind (plans render inline in the transcript).
 // v10 keys pull-request surfaces by reference instead of a singleton tab.
 // v11 stops persisting the pull-request list's shared panel, so a restart opens the page fresh.
 // v12 adds the device surface.
-const RIGHT_PANEL_STORAGE_VERSION = 13;
+// v14 adds the chat surface and remembers its target after the tab closes.
+const RIGHT_PANEL_STORAGE_VERSION = 14;
 
 /** A fixed workspace-level ref: each PR surface carries its own real environment. */
 export const PULL_REQUESTS_PANEL_REF = scopeThreadRef(
@@ -113,6 +116,7 @@ export interface ThreadRightPanelState {
   activeSurfaceId: string | null;
   surfaces: RightPanelSurface[];
   dismissedDeviceSurfaceIds?: string[];
+  lastChatTarget?: ScopedThreadRef;
 }
 
 interface RightPanelStoreState {
@@ -133,6 +137,7 @@ interface RightPanelStoreState {
     ref: ScopedThreadRef,
     kind: Exclude<RightPanelKind, "file" | "terminal" | "pull-request">,
   ) => void;
+  openChat: (ref: ScopedThreadRef, target: ScopedThreadRef | null) => void;
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
@@ -183,6 +188,7 @@ const EMPTY_THREAD_STATE: ThreadRightPanelState = {
 
 const singletonSurface = (
   kind: Exclude<RightPanelKind, "file" | "preview" | "terminal" | "pull-request">,
+  current: ThreadRightPanelState,
 ): RightPanelSurface => {
   switch (kind) {
     case "diff":
@@ -197,6 +203,8 @@ const singletonSurface = (
       return { id: "workflows", kind };
     case "device":
       return { id: "device", kind };
+    case "chat":
+      return { id: "chat", kind, target: current.lastChatTarget ?? null };
   }
 };
 
@@ -281,6 +289,8 @@ const upsertSurface = (
     ? current.surfaces
     : [...current.surfaces, surface],
   activeSurfaceId: activate ? surface.id : current.activeSurfaceId,
+  // The chat tab's target outlives the tab, so opening another surface keeps it.
+  ...(current.lastChatTarget ? { lastChatTarget: current.lastChatTarget } : {}),
 });
 
 const updateThread = (
@@ -294,7 +304,8 @@ const updateThread = (
     !next.isOpen &&
     next.activeSurfaceId === null &&
     next.surfaces.length === 0 &&
-    !next.dismissedDeviceSurfaceIds?.length
+    !next.dismissedDeviceSurfaceIds?.length &&
+    !next.lastChatTarget
   ) {
     if (!(threadKey in byThreadKey)) return byThreadKey;
     const { [threadKey]: _removed, ...rest } = byThreadKey;
@@ -350,6 +361,25 @@ function normalizeRevealLine(line: number | undefined): number | null {
   return Math.max(1, Math.trunc(line));
 }
 
+function readChatTarget(value: unknown, hostKey: string): ScopedThreadRef | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("environmentId" in value) ||
+    typeof value.environmentId !== "string" ||
+    !value.environmentId ||
+    !("threadId" in value) ||
+    typeof value.threadId !== "string" ||
+    !value.threadId
+  )
+    return null;
+  const target = scopeThreadRef(
+    EnvironmentId.make(value.environmentId),
+    ThreadId.make(value.threadId),
+  );
+  return scopedThreadKey(target) === hostKey ? null : target;
+}
+
 export function migratePersistedRightPanelState(persistedState: unknown): {
   byThreadKey: Record<string, ThreadRightPanelState>;
 } {
@@ -368,9 +398,16 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                 threadState && typeof threadState === "object" ? threadState : null;
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
-                    // Dropped surface kind: plans now render inline in the
-                    // transcript (v9).
-                    if ((surface as { kind?: string }).kind === "plan") return [];
+                    if (!surface || !RIGHT_PANEL_KINDS.includes(surface.kind)) return [];
+                    if (surface.kind === "chat") {
+                      return [
+                        {
+                          id: "chat",
+                          kind: "chat",
+                          target: readChatTarget(surface.target, threadKey),
+                        },
+                      ];
+                    }
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&
@@ -458,12 +495,17 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
               // first survivor instead of rendering an open empty panel.
               const activeSurfaceId =
                 persistedActiveSurfaceId ?? (isOpen ? (surfaces[0]?.id ?? null) : null);
+              const chat = surfaces.find((surface) => surface.kind === "chat");
+              const lastChatTarget = chat
+                ? chat.target
+                : readChatTarget(validThreadState?.lastChatTarget, threadKey);
               return [
                 threadKey,
                 {
                   isOpen,
                   surfaces,
                   activeSurfaceId,
+                  ...(lastChatTarget ? { lastChatTarget } : {}),
                   ...(Array.isArray(validThreadState?.dismissedDeviceSurfaceIds)
                     ? {
                         dismissedDeviceSurfaceIds:
@@ -517,9 +559,25 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
             }
-            return upsertSurface(current, singletonSurface(kind));
+            return upsertSurface(current, singletonSurface(kind, current));
           }),
         ),
+      openChat: (ref, target) => {
+        const threadKey = scopedThreadKey(ref);
+        if (target && scopedThreadKey(target) === threadKey) return;
+        set((state) =>
+          userAction(state, threadKey, (current) => {
+            const { lastChatTarget: _previous, ...panel } = current;
+            const surface = { id: "chat", kind: "chat", target } as const;
+            const next = upsertSurface(panel, surface);
+            return {
+              ...next,
+              ...(target ? { lastChatTarget: target } : {}),
+              surfaces: next.surfaces.map((entry) => (entry.id === surface.id ? surface : entry)),
+            };
+          }),
+        );
+      },
       openDevice: (ref, target, automatic = false) =>
         set((state) =>
           (automatic ? automaticUpdate : userAction)(state, scopedThreadKey(ref), (current) => {
@@ -600,6 +658,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               (existing?.revealRequestId ?? 0) + 1,
             );
             return {
+              ...current,
               isOpen: true,
               activeSurfaceId: surface.id,
               surfaces: existing
@@ -848,7 +907,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
             }
-            return upsertSurface(current, singletonSurface(kind));
+            return upsertSurface(current, singletonSurface(kind, current));
           }),
         ),
       removeThread: (ref) =>

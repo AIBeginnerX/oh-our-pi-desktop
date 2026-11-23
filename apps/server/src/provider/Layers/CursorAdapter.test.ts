@@ -16,6 +16,9 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import * as AcpErrors from "effect-acp/errors";
+import { vi } from "vite-plus/test";
 import { createModelSelection } from "@t3tools/shared/model";
 
 import {
@@ -35,6 +38,8 @@ import type { CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { makeCursorAdapter } from "./CursorAdapter.ts";
 import { execScriptSource, writeFakeCli } from "../../testUtils/fakeCli.ts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as CursorAcpSupport from "../acp/CursorAcpSupport.ts";
+
 const decodeCursorSettings = Schema.decodeSync(CursorSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CursorAdapter`.
@@ -228,6 +233,92 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       yield* adapter.stopSession(threadId);
       const runtimeEvents = yield* Fiber.join(runtimeEventsFiber);
       assert.isFalse(runtimeEvents.some((event) => event.type === "turn.completed"));
+    }),
+  );
+
+  it.effect("rejects startup when an ACP exit is already queued for the event consumer", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("cursor-exit-during-startup");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      const makeRuntime = CursorAcpSupport.makeCursorAcpRuntime;
+      const error = new AcpErrors.AcpProcessExitedError({ code: 19 });
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          vi.spyOn(CursorAcpSupport, "makeCursorAcpRuntime").mockImplementation((options) =>
+            makeRuntime(options).pipe(
+              Effect.map((runtime) => ({
+                ...runtime,
+                getEvents: () =>
+                  Stream.concat(
+                    Stream.succeed({ _tag: "ConnectionTerminated" as const, error }),
+                    runtime.getEvents(),
+                  ),
+              })),
+            ),
+          ),
+        ),
+        (spy) => Effect.sync(() => spy.mockRestore()),
+      );
+      const adapter = yield* makeCursorAdapter(decodeCursorSettings({ binaryPath: wrapperPath }));
+      const events: ProviderRuntimeEvent[] = [];
+      yield* adapter.streamEvents.pipe(
+        Stream.runForEach((event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ),
+        Effect.forkChild({ startImmediately: true }),
+      );
+
+      const result = yield* adapter
+        .startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" })
+        .pipe(Effect.result);
+      yield* TestClock.adjust(0);
+      assert.deepEqual(yield* adapter.listSessions(), []);
+      assert.deepEqual(
+        events.filter((event) => event.threadId === threadId),
+        [],
+      );
+      assert.equal(result._tag, "Failure");
+      if (result._tag === "Failure") {
+        assert.equal(result.failure._tag, "ProviderAdapterProcessError");
+        assert.equal(result.failure.cause, error);
+      }
+    }),
+  );
+
+  it.effect("ends an idle session when its ACP process exits", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("cursor-idle-process-exit");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const spawned = yield* Deferred.make<ChildProcessSpawner.ChildProcessHandle>();
+      const adapter = yield* makeCursorAdapter(
+        decodeCursorSettings({ binaryPath: wrapperPath }),
+      ).pipe(
+        Effect.provideService(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make((command) =>
+            spawner.spawn(command).pipe(Effect.tap((child) => Deferred.succeed(spawned, child))),
+          ),
+        ),
+      );
+      const exited = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "session.exited"),
+        Stream.filter((event) => event.threadId === threadId),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* adapter.startSession({ threadId, cwd: process.cwd(), runtimeMode: "full-access" });
+      assert.isTrue(yield* adapter.hasSession(threadId));
+
+      const child = yield* Deferred.await(spawned);
+      yield* child.kill();
+
+      const event = yield* Fiber.join(exited);
+      if (event._tag === "None") assert.fail("Expected a session exit event.");
+      assert.equal(event.value.payload.exitKind, "error");
+      assert.isFalse(yield* adapter.hasSession(threadId));
     }),
   );
 

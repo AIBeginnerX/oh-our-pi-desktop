@@ -70,6 +70,8 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { MEMORY_ECHO_WITHHELD_ERROR, MEMORY_ECHO_WITHHELD_NOTICE } from "../memoryEcho.ts";
+import type { OrchestrationDispatchError } from "../Errors.ts";
+import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
 
 const provider = ProviderDriverKind.make("codex");
 const instanceId = ProviderInstanceId.make("codex");
@@ -168,15 +170,15 @@ vi.mock("@t3tools/shared/DrainableWorker", async (importOriginal) => {
 });
 
 type IngestionHarness = {
-  readonly dispatch: (command: OrchestrationCommand) => Effect.Effect<void, unknown>;
-  readonly emit: (events: ReadonlyArray<ProviderRuntimeEvent>) => Effect.Effect<void, unknown>;
-  readonly emitAndDrain: (
-    events: ReadonlyArray<ProviderRuntimeEvent>,
-  ) => Effect.Effect<void, unknown>;
+  readonly dispatch: (
+    command: OrchestrationCommand,
+  ) => Effect.Effect<void, OrchestrationDispatchError>;
+  readonly emit: (events: ReadonlyArray<ProviderRuntimeEvent>) => Effect.Effect<void>;
+  readonly emitAndDrain: (events: ReadonlyArray<ProviderRuntimeEvent>) => Effect.Effect<void>;
   readonly readThread: (
     threadId: ThreadId,
-  ) => Effect.Effect<OrchestrationThread | undefined, unknown>;
-  readonly readAllStoredText: () => Effect.Effect<string, unknown>;
+  ) => Effect.Effect<OrchestrationThread | undefined, ProjectionRepositoryError>;
+  readonly readAllStoredText: () => Effect.Effect<string, SqlError>;
   readonly armGuardLookupFailure: (threadId: ThreadId, cause: Cause.Cause<unknown>) => void;
   readonly disarmGuardLookup: () => void;
   readonly setProviderSession: (session: ProviderSession) => void;
@@ -844,6 +846,78 @@ describe("ProviderRuntimeIngestion memory echo guard", () => {
         yield* Scope.close(pubsubScope, Exit.void);
       }
     });
+
+  it.layer(Layer.empty)("prompt suggestions", (it) => {
+    it.effect.each(["clean", "tainted", "unavailable", "defect"] as const)(
+      "only persists suggestions with a clean verdict (%s)",
+      (verdict) =>
+        Effect.gen(function* () {
+          const dir = makeTempDir("t3-echo-suggestion-");
+          yield* withHarness(
+            NodePath.join(dir, "live.sqlite"),
+            Effect.fnUntraced(function* (harness) {
+              const messageId = MessageId.make("msg-suggestion");
+              yield* harness.dispatch({
+                type: "project.create",
+                commandId: CommandId.make("cmd-suggestion-project"),
+                projectId,
+                title: "Suggestion project",
+                workspaceRoot: dir,
+                defaultModelSelection: { instanceId, model: "gpt-5-codex" },
+                createdAt: at,
+              });
+              yield* seedThread(harness, threadClean, messageId, "suggestion");
+              if (verdict === "tainted") {
+                yield* admitTaintedMemory(harness, {
+                  threadId: threadClean,
+                  messageId,
+                  body: MARK_BODY,
+                });
+              }
+              if (verdict === "unavailable") {
+                yield* harness.sql.unsafe(
+                  "ALTER TABLE project_memory_send_attempts RENAME TO memory_send_attempts_broken",
+                );
+              }
+              if (verdict === "defect") {
+                harness.armGuardLookupFailure(threadClean, Cause.die("ledger read defect"));
+              }
+              const text = "suggestion canary only present in this event";
+              const turnId = turnFor("suggestion");
+              const before = yield* harness.readThread(threadClean);
+              yield* harness.emitAndDrain([
+                {
+                  ...base(threadClean),
+                  provider: ProviderDriverKind.make("claudeAgent"),
+                  eventId: EventId.make("event-prompt-suggestion"),
+                  type: "prompt.suggestion",
+                  payload: { turnId, text },
+                },
+              ]);
+              const thread = yield* harness.readThread(threadClean);
+              expect(thread?.session).toEqual(before?.session);
+              expect(thread?.latestTurn).toEqual(before?.latestTurn);
+              const suggestions = thread?.activities.filter(
+                (activity) => activity.kind === "prompt.suggestion",
+              );
+              const stored = yield* harness.readAllStoredText();
+              if (verdict === "clean") {
+                expect(suggestions).toHaveLength(1);
+                expect(suggestions?.[0]).toMatchObject({
+                  turnId,
+                  tone: "info",
+                  payload: { turnId, text },
+                });
+                expect(stored).toContain(text);
+              } else {
+                expect(suggestions).toEqual([]);
+                expect(stored).not.toContain(text);
+              }
+            }),
+          );
+        }),
+    );
+  });
 
   it.live(
     "withholds covered diagnostics on an admitted thread while the clean thread persists them",

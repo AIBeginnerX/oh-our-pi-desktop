@@ -15,6 +15,9 @@ import * as TestClock from "effect/testing/TestClock";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
+import { ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import * as ExternalLauncher from "../process/externalLauncher.ts";
+
 import * as CliTokenManager from "./CliTokenManager.ts";
 
 // pk_test_<base64 of "clerk.example.test$">
@@ -59,6 +62,7 @@ const provideTestEnv = Effect.provide(
 );
 
 const isAuthorizationError = Schema.is(CliTokenManager.CloudCliAuthorizationError);
+const isCredentialRefreshError = Schema.is(CliTokenManager.CloudCliCredentialRefreshError);
 
 const makeTestTerminal = (queue: Queue.Queue<Terminal.UserInput>) =>
   Terminal.make({
@@ -323,5 +327,48 @@ it.layer(NodeServices.layer)("CliTokenManager.deviceAuthorizationLogin", (it) =>
 
       assert.isTrue(isAuthorizationError(result));
     }),
+  );
+});
+
+it.layer(NodeServices.layer)("CliTokenManager refresh", (it) => {
+  it.effect("times out a stalled refresh and releases the credential lock", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      let stored = Option.none<Uint8Array>();
+      const manager = yield* CliTokenManager.make.pipe(
+        Effect.provide(ExternalLauncher.layer),
+        Effect.provideService(
+          ServerSecretStore,
+          ServerSecretStore.of({
+            get: () => Effect.sync(() => stored),
+            set: (_name, value) =>
+              Effect.sync(() => {
+                stored = Option.some(value);
+              }),
+            remove: () => Effect.void,
+            create: () => Effect.die("Unexpected create"),
+            getOrCreateRandom: () => Effect.die("Unexpected random request"),
+          }),
+        ),
+        Effect.provideService(
+          HttpClient.HttpClient,
+          HttpClient.make(() =>
+            Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+          ),
+        ),
+      );
+      yield* manager.store({ accessToken: "", refreshToken: "", expiresAtEpochMs: 0 });
+      const refresh = yield* manager.getExisting.pipe(Effect.flip, Effect.forkChild);
+      yield* Deferred.await(started);
+      const hasCredential = yield* manager.hasCredential.pipe(Effect.forkChild);
+      yield* TestClock.adjust(Duration.seconds(15));
+      assert.isUndefined(refresh.pollUnsafe(), "refresh must still wait after fifteen seconds");
+      yield* TestClock.adjust(Duration.seconds(15));
+      assert.isDefined(refresh.pollUnsafe(), "refresh must finish by the deadline");
+      const error = yield* Fiber.join(refresh);
+      assert.isTrue(isCredentialRefreshError(error));
+      assert.isDefined(hasCredential.pollUnsafe(), "credential lookup must acquire the lock");
+      assert.isTrue(yield* Fiber.join(hasCredential));
+    }).pipe(provideTestEnv),
   );
 });

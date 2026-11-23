@@ -29,8 +29,11 @@ import {
   isSettingsSearchScopeAvailable,
 } from "../components/settings/settingsSearch";
 
-function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void }) {
+function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
   const t = useT();
+  const { scope, connectedEnvironments } = useSettingsScope();
+  const restoresEnvironments =
+    connectedEnvironments.length > 0 && (scope.kind === "all" || scope.kind === "environment");
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
   return (
     <Button
@@ -40,7 +43,7 @@ function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void })
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      {t("Restore device defaults")}
+      {restoresEnvironments ? t("Reset all") : t("Restore device defaults")}
     </Button>
   );
 }
@@ -127,9 +130,7 @@ function SettingsContentLayout() {
             <SettingsBreadcrumb pathname={location.pathname} />
             {location.pathname === "/settings/general" ? (
               <div className="ms-auto flex shrink-0 items-center">
-                <RestoreDeviceDefaultsButton
-                  onRestored={() => setRestoreSignal((value) => value + 1)}
-                />
+                <RestoreDefaultsButton onRestored={() => setRestoreSignal((value) => value + 1)} />
               </div>
             ) : null}
           </div>

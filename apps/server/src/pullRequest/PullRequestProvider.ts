@@ -401,6 +401,17 @@ export interface PullRequestProviderApi {
     input: ProviderRepositoryRef & { readonly number: number },
   ) => Effect.Effect<ProviderChangeRequestDetail, PullRequestProviderError>;
 
+  readonly getChangeRequestChecks?: (
+    input: ProviderRepositoryRef & { readonly number: number },
+  ) => Effect.Effect<
+    {
+      readonly open: boolean;
+      readonly headSha: string | null;
+      readonly checks: ReadonlyArray<PullRequestCheck>;
+    },
+    PullRequestProviderError
+  >;
+
   /** Hosts without a narrow read use their existing detail response for hover cards. */
   readonly getChangeRequestPreview?: (
     input: ProviderRepositoryRef & { readonly number: number },

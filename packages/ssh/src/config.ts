@@ -158,7 +158,7 @@ const collectSshConfigAliasesFromFile = Effect.fnUntraced(function* (
 function normalizeKnownHostsHostname(rawHost: string): string {
   const bracketMatch = /^\[([^\]]+)\]:(\d+)$/u.exec(rawHost);
   if (bracketMatch?.[1]) {
-    return bracketMatch[1];
+    return rawHost;
   }
 
   if (!rawHost.includes(":")) {
@@ -167,7 +167,9 @@ function normalizeKnownHostsHostname(rawHost: string): string {
 
   const firstColonIndex = rawHost.indexOf(":");
   const lastColonIndex = rawHost.lastIndexOf(":");
-  return firstColonIndex === lastColonIndex ? rawHost.slice(0, lastColonIndex) : rawHost;
+  return firstColonIndex === lastColonIndex
+    ? `[${rawHost.slice(0, lastColonIndex)}]:${rawHost.slice(lastColonIndex + 1)}`
+    : rawHost;
 }
 
 export function parseKnownHostsHostnames(raw: string): ReadonlyArray<string> {
@@ -242,15 +244,19 @@ export const discoverSshHosts = Effect.fnUntraced(
       });
     }
 
-    for (const hostname of knownHosts) {
-      if (discovered.has(hostname)) {
+    for (const alias of knownHosts) {
+      const match = /^\[([^\]]+)\]:(\d+)$/u.exec(alias);
+      const hostname = match?.[1] ?? alias;
+      const port = match ? Number(match[2]) : null;
+      if (port !== null && (!Number.isInteger(port) || port < 1 || port > 65535)) continue;
+      if (discovered.has(alias)) {
         continue;
       }
-      discovered.set(hostname, {
+      discovered.set(alias, {
         alias: hostname,
         hostname,
         username: null,
-        port: null,
+        port,
         source: "known-hosts",
       });
     }

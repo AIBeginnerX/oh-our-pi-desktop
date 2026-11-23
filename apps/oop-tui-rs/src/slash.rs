@@ -108,6 +108,13 @@ pub const COMMANDS: &[Command] = &[
         "스레드 목표 설정·확인",
     ),
     cmd(
+        "autofix",
+        &[],
+        Some("[on|off]"),
+        "Toggle or view PR auto-fix",
+        "PR 자동 수정 설정·확인",
+    ),
+    cmd(
         "crew",
         &[],
         Some("[on|off|back]"),
@@ -163,6 +170,13 @@ pub const COMMANDS: &[Command] = &[
         None,
         "New thread from a short summary of this one",
         "이 스레드 요약으로 새 스레드 시작",
+    ),
+    cmd(
+        "btw",
+        &[],
+        Some("<question>"),
+        "Ask a question about this thread without starting a turn",
+        "턴을 시작하지 않고 이 스레드에 대해 질문",
     ),
     cmd("threads", &["t"], None, "Pick a thread", "스레드 고르기"),
     cmd(

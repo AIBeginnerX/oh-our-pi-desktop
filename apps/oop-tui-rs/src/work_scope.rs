@@ -177,6 +177,9 @@ impl<'a> Scope<'a> {
     }
 
     fn keeps(&self, activity: &Activity) -> bool {
+        if activity.kind == "prompt.suggestion" {
+            return false;
+        }
         if self.start.is_none() || activity.kind == "context-window.updated" {
             return true;
         }

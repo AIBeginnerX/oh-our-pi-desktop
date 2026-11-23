@@ -43,7 +43,7 @@ const LOWEST_PRINTABLE = 0x20;
 const BACKSLASH = 0x5c;
 
 const utf8 = new TextEncoder();
-const fromUtf8 = new TextDecoder();
+const fromUtf8 = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /**
  * A name as a patch header can carry it: itself where that is unambiguous, and git's quoted form

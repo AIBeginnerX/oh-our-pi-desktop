@@ -257,12 +257,12 @@ Each turn ends with a checkpoint when the project is a git repository. In a conv
   shows one file in full. A long diff stops after a few hundred lines and says so. Like
   `/history`, it is refused while a reply is being written.
 - `/undo` removes the last turn from the conversation and puts your question back in the
-  input. It asks for confirmation first and cannot run while the agent is working. Messages
+  input. It asks for confirmation first and cannot run while the agent is working or in a crew member's thread. Messages
   waiting in the queue go back to the input too, after the question, since they may have
   assumed the turn that is gone.
 
-Files are restored only for a thread that has its own worktree. In a folder shared with other
-threads, `/undo` rewinds the conversation and leaves your files alone, as the desktop app does.
+Files stay as they are, including in worktrees. Review the turn’s changes with `/diff` before
+undoing, since its checkpoint is removed when the conversation rewinds.
 There is no way to undo an undo, in the terminal or in the desktop app.
 
 ## With and without the desktop app

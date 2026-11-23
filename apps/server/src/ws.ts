@@ -22,6 +22,8 @@ import {
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
   type AuthEnvironmentScope,
+  AuthOrchestrationOperateScope,
+  AuthReviewWriteScope,
   CommandId,
   CrewRetryTaskError,
   CrewScorecardReadError,
@@ -82,6 +84,7 @@ import {
   projectActivityEvent,
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
+import { readLegacyCrewMember } from "./orchestration/crewMembership.ts";
 import { makeThreadLiveEventCoalescer } from "./orchestration/ThreadLiveEventCoalescer.ts";
 import { makeLiveStreamBudget, type RetainedLiveItem } from "./orchestration/LiveStreamBudget.ts";
 import {
@@ -111,6 +114,9 @@ import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
+import { lookupMemoryEchoThreadState } from "./orchestration/memoryEcho.ts";
+import { answerSideQuestion } from "./sideQuestion/SideQuestion.ts";
+import { TextGeneration } from "./textGeneration/TextGeneration.ts";
 import { buildThreadHandoffSeed } from "./orchestration/threadHandoffSeed.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import { withTerminalOutputWindow } from "./terminal/OutputProtocol.ts";
@@ -150,7 +156,11 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import { requiredScopeForRpcMethod, requiredScopeForDeviceList } from "./auth/RpcAuthorization.ts";
+import {
+  authorizeWsRpcHandlers,
+  requiredScopeForRpcMethod,
+  requiredScopeForDeviceList,
+} from "./auth/RpcAuthorization.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
@@ -331,6 +341,10 @@ const toSelectedChecksGetRpcCause = <E>(
         }),
       );
 
+const hasWorkflowScriptPath = Schema.is(
+  Schema.Struct({ runHandles: Schema.Struct({ scriptPath: Schema.String }) }),
+);
+
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   clientOrigin: OrchestrationClientOrigin,
@@ -404,6 +418,7 @@ const makeWsRpcLayer = (
       const modelManifest = yield* ModelManifest.ModelManifest;
       const providerVersionCache = yield* ProviderMaintenance.ProviderVersionCache;
       const providerService = yield* ProviderService.ProviderService;
+      const textGeneration = yield* TextGeneration;
       const providerSessionDirectory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const providerAuth = yield* ProviderAuthService;
@@ -485,6 +500,78 @@ const makeWsRpcLayer = (
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
           requiredScope,
         });
+      const workspaceOnly = !currentSession.scopes.includes(AuthOrchestrationOperateScope);
+      const workspaceVerificationError = (message: string) =>
+        new EnvironmentAuthorizationError({
+          message,
+          requiredScope: AuthOrchestrationOperateScope,
+        });
+      const requireRegisteredWorkspace = (cwd: string) =>
+        workspaceOnly
+          ? Effect.gen(function* () {
+              const project = yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(cwd);
+              if (Option.isSome(project)) return true;
+              const threadId = yield* projectionSnapshotQuery.getActiveThreadIdByWorktreePath(cwd);
+              return Option.isSome(threadId);
+            }).pipe(
+              Effect.mapError(() =>
+                workspaceVerificationError("Failed to verify the registered workspace."),
+              ),
+              Effect.flatMap((registered) =>
+                registered
+                  ? Effect.void
+                  : Effect.fail(authorizationError(AuthOrchestrationOperateScope)),
+              ),
+            )
+          : Effect.void;
+      const requireVcsWorkspace = (cwd: string) => {
+        if (!workspaceOnly) return Effect.void;
+        if (!currentSession.scopes.includes(AuthReviewWriteScope)) {
+          return requireRegisteredWorkspace(cwd);
+        }
+        return review
+          .assertReviewableCwd(cwd)
+          .pipe(Effect.catch(() => requireRegisteredWorkspace(cwd)));
+      };
+      const fileSystem = yield* FileSystem.FileSystem;
+      const assetPath = yield* Path.Path;
+      const requireCanonicalWorkspaceFile = Effect.fn("ws.requireCanonicalWorkspaceFile")(
+        function* (canonicalFile: string | null, workspaceRoot?: string) {
+          const roots =
+            workspaceRoot === undefined
+              ? yield* projectionSnapshotQuery
+                  .listActiveWorkspaceRoots()
+                  .pipe(
+                    Effect.mapError(() =>
+                      workspaceVerificationError("Failed to list registered workspaces."),
+                    ),
+                  )
+              : [workspaceRoot];
+
+          for (const root of roots) {
+            const canonicalRoot = yield* fileSystem.realPath(root).pipe(
+              Effect.asSome,
+              Effect.catchTag("PlatformError", (cause) =>
+                cause.reason._tag === "NotFound"
+                  ? Effect.succeedNone
+                  : Effect.fail(
+                      workspaceVerificationError("Failed to resolve a registered workspace."),
+                    ),
+              ),
+            );
+            if (Option.isNone(canonicalRoot) || canonicalFile === null) continue;
+            const relative = assetPath.relative(canonicalRoot.value, canonicalFile);
+            if (
+              relative !== "" &&
+              relative !== ".." &&
+              !relative.startsWith(`..${assetPath.sep}`) &&
+              !assetPath.isAbsolute(relative)
+            )
+              return;
+          }
+          return yield* authorizationError(AuthOrchestrationOperateScope);
+        },
+      );
       const authorizeEffect = <A, E, R>(
         requiredScope: AuthEnvironmentScope,
         effect: Effect.Effect<A, E, R>,
@@ -674,7 +761,7 @@ const makeWsRpcLayer = (
           };
         });
 
-      return WsRpcGroup.of({
+      const handlers = WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
@@ -765,7 +852,35 @@ const makeWsRpcLayer = (
         [ORCHESTRATION_WS_METHODS.getWorkflowScript]: (input) =>
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.getWorkflowScript,
-            readWorkflowScript({ scriptPath: input.scriptPath }),
+            Effect.gen(function* () {
+              if (workspaceOnly) {
+                const thread = yield* projectionSnapshotQuery
+                  .getThreadDetailById(input.threadId, {
+                    activityKinds: [
+                      "task.started",
+                      "task.progress",
+                      "task.updated",
+                      "task.completed",
+                    ],
+                  })
+                  .pipe(
+                    Effect.mapError(() =>
+                      workspaceVerificationError("Failed to verify the workflow script's thread."),
+                    ),
+                  );
+                if (
+                  Option.isNone(thread) ||
+                  !thread.value.activities.some(
+                    ({ payload }) =>
+                      hasWorkflowScriptPath(payload) &&
+                      payload.runHandles.scriptPath === input.scriptPath,
+                  )
+                ) {
+                  return yield* authorizationError(AuthOrchestrationOperateScope);
+                }
+              }
+              return yield* readWorkflowScript({ scriptPath: input.scriptPath });
+            }),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getTurnDiff]: (input) =>
@@ -1024,7 +1139,8 @@ const makeWsRpcLayer = (
               const isThisThreadDetailEvent = (event: OrchestrationEvent) =>
                 event.aggregateKind === "thread" &&
                 event.aggregateId === input.threadId &&
-                isThreadDetailEvent(event);
+                isThreadDetailEvent(event) &&
+                (event.type !== "thread.deleted" || input.threadDeletion === true);
 
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(isThisThreadDetailEvent),
@@ -1113,9 +1229,22 @@ const makeWsRpcLayer = (
                   const afterCatchUp =
                     input.requestCompletionMarker === true
                       ? Stream.unwrap(
-                          liveBuffer
-                            .offer({ kind: "synchronized" as const })
-                            .pipe(Effect.as(bufferedLiveStream)),
+                          readLegacyCrewMember(sql, input.threadId).pipe(
+                            Effect.mapError(
+                              (cause) =>
+                                new OrchestrationGetSnapshotError({
+                                  message: `Failed to read thread ${input.threadId} crew membership`,
+                                  cause,
+                                }),
+                            ),
+                            Effect.flatMap((legacyCrewMember) =>
+                              liveBuffer.offer({
+                                kind: "synchronized",
+                                ...(legacyCrewMember ? { createdAsCrewMember: true } : {}),
+                              }),
+                            ),
+                            Effect.as(bufferedLiveStream),
+                          ),
                         )
                       : bufferedLiveStream;
                   const replay = Stream.concat(catchUpStream, afterCatchUp);
@@ -1265,6 +1394,22 @@ const makeWsRpcLayer = (
             }),
             { "rpc.aggregate": "server" },
           ),
+        [WS_METHODS.threadSideQuestion]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadSideQuestion,
+            answerSideQuestion(input, {
+              getThreadDetailSnapshot: projectionSnapshotQuery.getThreadDetailSnapshot,
+              getMemoryEchoState: (threadId) => lookupMemoryEchoThreadState(sql, threadId),
+              generateSideAnswer: textGeneration.generateSideAnswer,
+            }),
+          ),
+        [WS_METHODS.providerContextBreakdown]: ({ threadId }) =>
+          observeRpcEffect(
+            WS_METHODS.providerContextBreakdown,
+            providerService.getContextBreakdown?.(threadId) ??
+              Effect.succeed({ status: "unavailable" } as const),
+            { "rpc.aggregate": "provider" },
+          ),
         [WS_METHODS.providerUploadFeedback]: (input) =>
           observeRpcEffect(
             WS_METHODS.providerUploadFeedback,
@@ -1344,10 +1489,22 @@ const makeWsRpcLayer = (
             providerAuth.complete(input, currentSessionId),
             { "rpc.aggregate": "provider" },
           ),
-        [WS_METHODS.chatGptReconnectProfile]: (input) => providerAuth.reconnectProfile(input),
-        [WS_METHODS.chatGptImportProfile]: (input) => providerAuth.importProfile(input),
+        [WS_METHODS.chatGptReconnectProfile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.chatGptReconnectProfile,
+            providerAuth.reconnectProfile(input),
+            { "rpc.aggregate": "provider" },
+          ),
+        [WS_METHODS.chatGptImportProfile]: (input) =>
+          observeRpcEffect(WS_METHODS.chatGptImportProfile, providerAuth.importProfile(input), {
+            "rpc.aggregate": "provider",
+          }),
         [WS_METHODS.chatGptHandoffSubscribe]: (input) =>
-          subscribeChatGptHandoff(input, currentSessionId),
+          observeRpcStream(
+            WS_METHODS.chatGptHandoffSubscribe,
+            subscribeChatGptHandoff(input, currentSessionId),
+            { "rpc.aggregate": "provider" },
+          ),
         [WS_METHODS.codexAuthCallbackSubscribe]: (input) =>
           observeRpcStream(
             WS_METHODS.codexAuthCallbackSubscribe,
@@ -1881,7 +2038,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.sourceControlLookupRepository]: (input) =>
           observeRpcEffect(
             WS_METHODS.sourceControlLookupRepository,
-            sourceControlRepositories.lookupRepository(input),
+            Effect.andThen(
+              input.cwd === undefined ? Effect.void : requireRegisteredWorkspace(input.cwd),
+              sourceControlRepositories.lookupRepository(input),
+            ),
             {
               "rpc.aggregate": "source-control",
             },
@@ -1970,16 +2130,19 @@ const makeWsRpcLayer = (
         [WS_METHODS.projectsSearchEntries]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsSearchEntries,
-            workspaceEntries.search(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProjectSearchEntriesError({
-                    cwd: input.cwd,
-                    queryLength: input.query.length,
-                    limit: input.limit,
-                    ...projectEntriesFailureContext(cause),
-                    cause,
-                  }),
+            Effect.andThen(
+              requireRegisteredWorkspace(input.cwd),
+              workspaceEntries.search(input).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProjectSearchEntriesError({
+                      cwd: input.cwd,
+                      queryLength: input.query.length,
+                      limit: input.limit,
+                      ...projectEntriesFailureContext(cause),
+                      cause,
+                    }),
+                ),
               ),
             ),
             { "rpc.aggregate": "workspace" },
@@ -1987,16 +2150,19 @@ const makeWsRpcLayer = (
         [WS_METHODS.projectsSearchContents]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsSearchContents,
-            workspaceEntries.searchContents(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProjectSearchContentsError({
-                    cwd: input.cwd,
-                    queryLength: input.query.length,
-                    limit: input.limit,
-                    ...projectEntriesFailureContext(cause),
-                    cause,
-                  }),
+            Effect.andThen(
+              requireRegisteredWorkspace(input.cwd),
+              workspaceEntries.searchContents(input).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProjectSearchContentsError({
+                      cwd: input.cwd,
+                      queryLength: input.query.length,
+                      limit: input.limit,
+                      ...projectEntriesFailureContext(cause),
+                      cause,
+                    }),
+                ),
               ),
             ),
             { "rpc.aggregate": "workspace" },
@@ -2004,14 +2170,17 @@ const makeWsRpcLayer = (
         [WS_METHODS.projectsListEntries]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsListEntries,
-            workspaceEntries.list(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProjectListEntriesError({
-                    ...input,
-                    ...projectEntriesFailureContext(cause),
-                    cause,
-                  }),
+            Effect.andThen(
+              requireRegisteredWorkspace(input.cwd),
+              workspaceEntries.list(input).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProjectListEntriesError({
+                      ...input,
+                      ...projectEntriesFailureContext(cause),
+                      cause,
+                    }),
+                ),
               ),
             ),
             { "rpc.aggregate": "workspace" },
@@ -2019,14 +2188,21 @@ const makeWsRpcLayer = (
         [WS_METHODS.projectsReadFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsReadFile,
-            workspaceFileSystem.readFile(input).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ProjectReadFileError({
-                    ...input,
-                    ...projectFileFailureContext(cause),
-                    cause,
-                  }),
+            requireRegisteredWorkspace(input.cwd).pipe(
+              Effect.andThen(
+                workspaceFileSystem.readFile(input, { workspaceOnly }).pipe(
+                  Effect.mapError((cause) =>
+                    workspaceOnly &&
+                    (cause._tag === "WorkspaceFilePathEscapeError" ||
+                      cause._tag === "WorkspacePathOutsideRootError")
+                      ? authorizationError(AuthOrchestrationOperateScope)
+                      : new ProjectReadFileError({
+                          ...input,
+                          ...projectFileFailureContext(cause),
+                          cause,
+                        }),
+                  ),
+                ),
               ),
             ),
             { "rpc.aggregate": "workspace" },
@@ -2291,6 +2467,13 @@ const makeWsRpcLayer = (
             WS_METHODS.assetsCreateUrl,
             Effect.gen(function* () {
               const path = yield* Path.Path;
+              const resource = input.resource;
+              const containment = workspaceOnly
+                ? { authorizeCanonicalFile: requireCanonicalWorkspaceFile }
+                : {};
+              if (resource._tag === "github-media" || resource._tag === "draft-workspace-file") {
+                yield* requireRegisteredWorkspace(resource.cwd);
+              }
               // An absolute media path can be linked from a thread on another environment.
               if (
                 input.resource._tag === "attachment" ||
@@ -2299,7 +2482,7 @@ const makeWsRpcLayer = (
                 input.resource._tag === "github-media" ||
                 (input.resource._tag === "media-file" && path.isAbsolute(input.resource.path))
               ) {
-                return yield* issueAssetUrl({ resource: input.resource });
+                return yield* issueAssetUrl({ resource, ...containment });
               }
               if (input.resource._tag === "draft-workspace-file") {
                 // A project draft names its workspace directly; there is no
@@ -2307,6 +2490,7 @@ const makeWsRpcLayer = (
                 return yield* issueAssetUrl({
                   resource: input.resource,
                   workspaceRoot: input.resource.cwd,
+                  ...containment,
                 });
               }
               if (input.resource._tag === "project-favicon") {
@@ -2328,6 +2512,7 @@ const makeWsRpcLayer = (
                 }
                 return yield* issueAssetUrl({
                   resource: input.resource,
+                  ...containment,
                   ...(project.value.faviconPath
                     ? { projectFaviconPath: project.value.faviconPath }
                     : {}),
@@ -2365,19 +2550,24 @@ const makeWsRpcLayer = (
                   resource: input.resource,
                 });
               }
-              return yield* issueAssetUrl({
-                resource: input.resource,
-                workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
-              });
+              const workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
+              yield* requireRegisteredWorkspace(workspaceRoot);
+              return yield* issueAssetUrl({ resource, workspaceRoot, ...containment });
             }),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.subscribeVcsStatus]: (input) =>
           observeRpcStream(
             WS_METHODS.subscribeVcsStatus,
-            vcsStatusBroadcaster.streamStatus(input, {
-              automaticRemoteRefreshInterval: automaticGitFetchInterval,
-            }),
+            Stream.unwrap(
+              requireVcsWorkspace(input.cwd).pipe(
+                Effect.map(() =>
+                  vcsStatusBroadcaster.streamStatus(input, {
+                    automaticRemoteRefreshInterval: automaticGitFetchInterval,
+                  }),
+                ),
+              ),
+            ),
             {
               "rpc.aggregate": "vcs",
             },
@@ -2421,7 +2611,10 @@ const makeWsRpcLayer = (
         [WS_METHODS.vcsRefreshStatus]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsRefreshStatus,
-            vcsStatusBroadcaster.refreshStatus(input.cwd),
+            Effect.andThen(
+              requireVcsWorkspace(input.cwd),
+              vcsStatusBroadcaster.refreshStatus(input.cwd),
+            ),
             {
               "rpc.aggregate": "vcs",
             },
@@ -2495,9 +2688,11 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "git" },
           ),
         [WS_METHODS.vcsListRefs]: (input) =>
-          observeRpcEffect(WS_METHODS.vcsListRefs, gitWorkflow.listRefs(input), {
-            "rpc.aggregate": "vcs",
-          }),
+          observeRpcEffect(
+            WS_METHODS.vcsListRefs,
+            Effect.andThen(requireVcsWorkspace(input.cwd), gitWorkflow.listRefs(input)),
+            { "rpc.aggregate": "vcs" },
+          ),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           observeRpcEffect(
             WS_METHODS.vcsCreateWorktree,
@@ -2908,6 +3103,7 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "server" },
           ),
       });
+      return authorizeWsRpcHandlers(currentSession.scopes, handlers);
     }),
   );
 

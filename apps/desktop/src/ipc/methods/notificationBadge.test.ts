@@ -94,7 +94,10 @@ it.effect("validates IPC and clears on native focus, quit, and disposal", () =>
       Effect.gen(function* () {
         yield* installNotificationBadge();
         const handler = handlers.get("desktop:set-notification-badge")!;
-        const event = { sender: { id: 1 } };
+        const mainFrame = { origin: "t3code://app" };
+        const sender = { id: 1, mainFrame };
+        DesktopIpc.registerAppWindow(sender, mainFrame.origin);
+        const event = { sender, senderFrame: mainFrame };
         for (const invalid of [
           { ...badge, count: -1 },
           { ...badge, count: 0.5 },

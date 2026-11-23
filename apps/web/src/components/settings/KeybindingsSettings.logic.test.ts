@@ -259,6 +259,7 @@ describe("KeybindingsSettings.logic", () => {
     expect(options).toEqual(
       expect.arrayContaining([
         "chat.new",
+        "chat.cycleTranscriptView",
         "rightPanel.toggleMaximized",
         "thread.stop",
         "usage.open",
@@ -268,6 +269,11 @@ describe("KeybindingsSettings.logic", () => {
     expect(DEFAULT_RESOLVED_KEYBINDINGS.some((binding) => binding.command === "thread.stop")).toBe(
       false,
     );
+    expect(
+      DEFAULT_RESOLVED_KEYBINDINGS.some(
+        (binding) => binding.command === "chat.cycleTranscriptView",
+      ),
+    ).toBe(false);
   });
 
   it("reports unknown when variables without rejecting parseable expressions", () => {

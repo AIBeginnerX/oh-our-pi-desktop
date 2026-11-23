@@ -1,3 +1,8 @@
+import { SideQuestionInput, SideQuestionResult } from "./sideQuestion.ts";
+import {
+  ProviderContextBreakdownInput,
+  ProviderContextBreakdownResult,
+} from "./providerContextBreakdown.ts";
 import {
   ChatGptReconnectProfileInput,
   ChatGptReconnectProfile,
@@ -415,6 +420,8 @@ export const WS_METHODS = {
   attachmentsDelete: "attachments.delete",
 
   // Provider methods
+  threadSideQuestion: "thread.sideQuestion",
+  providerContextBreakdown: "provider.contextBreakdown",
   providerUploadFeedback: "provider.uploadFeedback",
   providerAuthStart: "provider.auth.start",
   providerConsumeResetCredit: "provider.consumeResetCredit",
@@ -885,12 +892,10 @@ const ThreadUsageContext = Schema.Struct({
 });
 
 /**
- * How far the summary reached. `turn` means the numbers describe the request
- * the named turn belongs to: the turn started by the user's message plus the
- * crew follow-up and wake turns after it, with the crew threads they started.
- * `thread` means the whole thread family. Optional so a client facing a
- * server from before turn scoping can tell the two apart and never label a
- * whole-chat total as one request's usage.
+ * How far the summary reached. `turn` scopes to the named turn's request on
+ * current servers, but older servers counted only that turn. Clients may label
+ * it as a whole request only when `requestAggregated` is true. `thread` counts
+ * the whole thread family; servers predating scoping omit `scope`.
  *
  * A model row's `context` is the fullest latest context window among the
  * counted threads that ran on that model; absent when none reported one.
@@ -899,6 +904,8 @@ export const ThreadUsageSummary = Schema.Struct({
   threadId: ThreadId,
   status: Schema.Literals(["ok", "too-large"]),
   scope: Schema.optional(Schema.Literals(["turn", "thread"])),
+  // Only explicit confirmation distinguishes request totals from legacy per-turn totals.
+  requestAggregated: Schema.optional(Schema.Boolean),
   totals: ThreadUsageTotals,
   models: Schema.Array(
     Schema.Struct({
@@ -1542,6 +1549,18 @@ const WsAttachmentsDeleteRpc = Rpc.make(WS_METHODS.attachmentsDelete, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsThreadSideQuestionRpc = Rpc.make(WS_METHODS.threadSideQuestion, {
+  payload: SideQuestionInput,
+  success: SideQuestionResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsProviderContextBreakdownRpc = Rpc.make(WS_METHODS.providerContextBreakdown, {
+  payload: ProviderContextBreakdownInput,
+  success: ProviderContextBreakdownResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFeedback, {
   payload: ProviderUploadFeedbackInput,
   success: ProviderUploadFeedbackResult,
@@ -2152,6 +2171,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsAssetsCreateUrlRpc,
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,
+  WsThreadSideQuestionRpc,
+  WsProviderContextBreakdownRpc,
   WsProviderUploadFeedbackRpc,
   WsSubscribeVcsStatusRpc,
   WsSubscribeWorktreeSetupRpc,

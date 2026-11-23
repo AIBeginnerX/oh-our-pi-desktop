@@ -48,6 +48,7 @@ export interface makeClaudeSystemHandlersDeps {
     { eventId: EventId; createdAt: string },
     ProviderAdapterRequestError
   >;
+  readonly promptSuggestionsEnabled: Effect.Effect<boolean>;
   readonly offerRuntimeEvent: (event: ProviderRuntimeEvent) => Effect.Effect<void>;
   readonly logNativeSdkMessage: (
     context: ClaudeSessionContext,
@@ -71,6 +72,7 @@ export const makeClaudeSystemHandlers = (deps: makeClaudeSystemHandlersDeps) => 
     offerRuntimeEvent,
     logNativeSdkMessage,
     scopedLimitNames,
+    promptSuggestionsEnabled,
     emitRuntimeError,
     emitRuntimeWarning,
     emitThreadTokenUsage,
@@ -679,8 +681,10 @@ export const makeClaudeSystemHandlers = (deps: makeClaudeSystemHandlersDeps) => 
     context: ClaudeSessionContext,
     message: SDKMessage,
   ) {
-    yield* logNativeSdkMessage(context, message);
-    yield* ensureThreadId(context, message);
+    if (message.type !== "prompt_suggestion") {
+      yield* logNativeSdkMessage(context, message);
+      yield* ensureThreadId(context, message);
+    }
 
     // Wire-only command bookkeeping has no user-facing T3 lifecycle.
     if (sdkMessageType(message) === "command_lifecycle") {
@@ -709,11 +713,34 @@ export const makeClaudeSystemHandlers = (deps: makeClaudeSystemHandlersDeps) => 
       case "rate_limit_event":
         yield* handleSdkTelemetryMessage(context, message);
         return;
-      // Composer prompt suggestions have no T3 surface; consumed deliberately.
+      case "prompt_suggestion": {
+        const candidate = context.promptSuggestionCandidate;
+        if (!candidate || context.stopped || typeof message.suggestion !== "string") return;
+        const text = message.suggestion.trim();
+        if (
+          !text ||
+          text.length > 1_000 ||
+          /\p{Cc}/u.test(message.suggestion.replace(/[\n\t]/g, "")) ||
+          text.includes('<context kind="memory"') ||
+          !(yield* promptSuggestionsEnabled)
+        )
+          return;
+        const stamp = yield* makeEventStamp().pipe(Effect.option);
+        if (stamp._tag === "None" || context.promptSuggestionCandidate !== candidate) return;
+        context.promptSuggestionCandidate = undefined;
+        yield* offerRuntimeEvent({
+          type: "prompt.suggestion",
+          ...stamp.value,
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          payload: { turnId: candidate.turnId, text },
+        });
+        return;
+      }
       // `conversation_reset` announces a CLI-side conversation id swap
       // (e.g. /clear); T3 keeps its own thread identity and resume cursor.
-      case "prompt_suggestion":
       case "conversation_reset":
+        context.promptSuggestionCandidate = undefined;
         return;
       default: {
         // Exhaustiveness guard (see handleSystemMessage): new SDK top-level

@@ -13,6 +13,7 @@ import {
   type CrewThreadOverride,
   type ModelSelection,
   type ServerProvider,
+  type ThreadId,
 } from "@t3tools/contracts";
 
 export const CREW_ROLE_LABEL: Record<CrewRole, string> = {
@@ -28,6 +29,13 @@ export const CREW_ROLE_LABEL: Record<CrewRole, string> = {
  */
 export function isCrewThreadTitle(title: string): boolean {
   return Object.values(CREW_ROLE_LABEL).some((label) => title.startsWith(`Crew ${label} · `));
+}
+
+export function isCrewMemberThread(thread: {
+  readonly parentThreadId?: ThreadId | null | undefined;
+  readonly createdAsCrewMember?: boolean | undefined;
+}): boolean {
+  return thread.parentThreadId != null || thread.createdAsCrewMember === true;
 }
 
 /** 1 = fast and cheap, 2 = balanced, 3 = strongest. */

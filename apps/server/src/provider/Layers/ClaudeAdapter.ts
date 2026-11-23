@@ -23,6 +23,9 @@ import { type ClaudeScopedLimitNames } from "./claudeUsageLimits.ts";
 import {
   ApprovalRequestId,
   type ClaudeSettings,
+  CONTEXT_BREAKDOWN_MAX_CATEGORIES,
+  CONTEXT_BREAKDOWN_MAX_NAME_LENGTH,
+  type ProviderContextBreakdownResult,
   EventId,
   type ProviderApprovalDecision,
   ProviderInstanceId,
@@ -170,6 +173,7 @@ export interface ClaudeAdapterLiveOptions {
    * means no instructions block.
    */
   readonly agentInstructions?: Effect.Effect<string>;
+  readonly promptSuggestionsEnabled?: Effect.Effect<boolean>;
   /** Defaults to the process-wide marker; tests inject their own. See `serverShutdown`. */
   readonly isShuttingDown?: () => boolean;
 }
@@ -337,7 +341,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     ensureAssistantTextBlock,
     updateResumeCursor,
   });
+  const promptSuggestionsEnabled = options?.promptSuggestionsEnabled ?? Effect.succeed(true);
   const { runSdkStream } = makeClaudeSystemHandlers({
+    promptSuggestionsEnabled,
     makeEventStamp,
     offerRuntimeEvent,
     logNativeSdkMessage,
@@ -359,6 +365,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     if (context.stopped) {
       return;
     }
+
+    context.promptSuggestionCandidate = undefined;
 
     // The shutdown signal kills the provider CLI with the server, so its
     // stream dying then is not an error. Leave the session listed as running
@@ -398,6 +406,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     options?: { readonly emitExitEvent?: boolean },
   ) {
     if (context.stopped) return;
+
+    context.promptSuggestionCandidate = undefined;
 
     // Schedule process termination before any cleanup that can wait on the
     // provider. The SDK closes stdin, then escalates from SIGTERM to SIGKILL.
@@ -1052,7 +1062,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(input.cwd ? [input.cwd] : []),
         serverConfig.attachmentsDir,
       ];
+      const enablePromptSuggestions = yield* promptSuggestionsEnabled;
       const queryOptions: ClaudeQueryOptions = {
+        ...(enablePromptSuggestions ? { promptSuggestions: true } : {}),
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
@@ -1583,6 +1595,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
             return { _tag: "Closed" };
           }
 
+          context.promptSuggestionCandidate = undefined;
           if (current === undefined) {
             context.turnState = {
               turnId,
@@ -1685,6 +1698,44 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       Effect.timeoutOption(CLAUDE_INTERRUPT_GRACE),
     );
     context.interruptedTurnSettled = undefined;
+  });
+
+  const getContextBreakdown = Effect.fn("getContextBreakdown")(function* (threadId: ThreadId) {
+    const unavailable = { status: "unavailable" } as const;
+    const context = sessions.get(threadId);
+    if (!context || context.stopped || context.session.status === "closed") return unavailable;
+    const getContextUsage = context.query.getContextUsage?.bind(context.query);
+    if (!getContextUsage) return unavailable;
+
+    const usage = yield* Effect.tryPromise(() => getContextUsage({ detail: "summary" })).pipe(
+      Effect.timeout("3 seconds"),
+      Effect.orElseSucceed(() => null),
+    );
+    const validTokens = (tokens: number) => Number.isFinite(tokens) && tokens >= 0;
+    if (
+      !usage ||
+      context.stopped ||
+      sessions.get(threadId) !== context ||
+      !validTokens(usage.totalTokens) ||
+      !validTokens(usage.rawMaxTokens)
+    )
+      return unavailable;
+
+    return {
+      status: "available",
+      model: usage.model,
+      totalTokens: usage.totalTokens,
+      maxTokens: usage.rawMaxTokens,
+      categories: usage.categories
+        .filter(({ tokens }) => validTokens(tokens))
+        .slice(0, CONTEXT_BREAKDOWN_MAX_CATEGORIES)
+        .map(({ name, tokens, kind }) => ({
+          name: name.slice(0, CONTEXT_BREAKDOWN_MAX_NAME_LENGTH),
+          tokens,
+          kind,
+        })),
+      measuredAt: yield* nowIso,
+    } satisfies ProviderContextBreakdownResult;
   });
 
   const readThread: ClaudeAdapterShape["readThread"] = Effect.fn("readThread")(
@@ -1963,6 +2014,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       sessionModelSwitch: "in-session",
     },
     compaction: { type: "slash-command", command: "/compact" },
+    getContextBreakdown,
     startSession,
     sendTurn,
     memoryAdmission: {

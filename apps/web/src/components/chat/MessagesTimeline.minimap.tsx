@@ -1,5 +1,5 @@
-import { resolveTimelineMinimapPreview, type TimelineMinimapItem } from "./timelineMinimapItems";
-import { useCallback, useMemo, useState, type MouseEvent } from "react";
+import type { TimelineMinimapPosition, TimelineMinimapPreviewStore } from "./timelineMinimapItems";
+import { memo, useCallback, useMemo, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -35,31 +35,39 @@ function timelineMinimapEventTargetsPreview(target: EventTarget): boolean {
   return target instanceof Element && target.closest("[data-minimap-preview]") !== null;
 }
 
-export function TimelineMinimap({
+const emptyPreview = () => null;
+const subscribeClosedPreview = () => () => {};
+
+export const TimelineMinimap = memo(function TimelineMinimap({
   hasPersistentGutter,
   hitStripWidth,
   currentIndex,
   items,
+  previewStore,
   stripMap,
   onSelect,
 }: {
   hasPersistentGutter: boolean;
   hitStripWidth: number;
   currentIndex: number | null;
-  items: ReadonlyArray<TimelineMinimapItem>;
+  items: ReadonlyArray<TimelineMinimapPosition>;
+  previewStore: TimelineMinimapPreviewStore;
   stripMap: Map<string, HTMLSpanElement>;
-  onSelect: (item: TimelineMinimapItem) => void;
+  onSelect: (item: TimelineMinimapPosition) => void;
 }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
   const resolvedActiveIndex =
     activeIndex !== null && activeIndex < items.length ? activeIndex : null;
-  const activeItem = useMemo(
-    () =>
-      resolveTimelineMinimapPreview(
-        resolvedActiveIndex === null ? null : (items[resolvedActiveIndex] ?? null),
-      ),
-    [items, resolvedActiveIndex],
+  const activeItem = resolvedActiveIndex === null ? null : (items[resolvedActiveIndex] ?? null);
+  const getPreview = useMemo(
+    () => (activeItem === null ? emptyPreview : previewStore.snapshotFor(activeItem)),
+    [activeItem, previewStore],
+  );
+  const preview = useSyncExternalStore(
+    activeItem === null ? subscribeClosedPreview : previewStore.subscribe,
+    getPreview,
+    emptyPreview,
   );
   const navigationInteractive = resolveTimelineMinimapNavigationInteractive(hitStripWidth);
   const activeTopPercent =
@@ -111,6 +119,42 @@ export function TimelineMinimap({
     [items.length],
   );
 
+  const markers = useMemo(
+    () =>
+      items.map((item, index) => {
+        const top = `${resolveTimelineMinimapTopPercent(index, items.length)}%`;
+        const activeDistance =
+          resolvedActiveIndex === null ? null : Math.abs(index - resolvedActiveIndex);
+        return (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "pointer-events-none absolute left-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/35 transition-[width,background-color] duration-150 data-[in-view=true]:bg-foreground/90",
+              activeDistance === 0
+                ? "w-6 bg-muted-foreground/75"
+                : activeDistance === 1
+                  ? "w-4"
+                  : activeDistance === 2
+                    ? "w-2.5"
+                    : "w-2",
+            )}
+            data-in-view="false"
+            data-minimap-strip
+            key={item.id}
+            ref={(node) => {
+              if (node) {
+                stripMap.set(item.id, node);
+              } else {
+                stripMap.delete(item.id);
+              }
+            }}
+            style={{ top }}
+          />
+        );
+      }),
+    [items, resolvedActiveIndex, stripMap],
+  );
+
   if (items.length < TIMELINE_MINIMAP_MIN_ITEMS) {
     return null;
   }
@@ -148,7 +192,7 @@ export function TimelineMinimap({
             }}
           />
           <button
-            aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+            aria-label={`Jump to message: ${preview?.userText ?? "User message"}`}
             className="absolute inset-y-0 left-0 w-full cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
             onBlur={() => setActiveIndex(null)}
             onClick={(event) => {
@@ -194,38 +238,8 @@ export function TimelineMinimap({
             type="button"
           >
             <div className="absolute top-0 left-3 h-full w-px bg-border/15" />
-            {items.map((item, index) => {
-              const top = `${resolveTimelineMinimapTopPercent(index, items.length)}%`;
-              const activeDistance =
-                resolvedActiveIndex === null ? null : Math.abs(index - resolvedActiveIndex);
-              return (
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "pointer-events-none absolute left-0 h-0.5 -translate-y-1/2 rounded-full bg-muted-foreground/35 transition-[width,background-color] duration-150 data-[in-view=true]:bg-foreground/90",
-                    activeDistance === 0
-                      ? "w-6 bg-muted-foreground/75"
-                      : activeDistance === 1
-                        ? "w-4"
-                        : activeDistance === 2
-                          ? "w-2.5"
-                          : "w-2",
-                  )}
-                  data-in-view="false"
-                  data-minimap-strip
-                  key={item.id}
-                  ref={(node) => {
-                    if (node) {
-                      stripMap.set(item.id, node);
-                    } else {
-                      stripMap.delete(item.id);
-                    }
-                  }}
-                  style={{ top }}
-                />
-              );
-            })}
-            {activeItem ? (
+            {markers}
+            {preview ? (
               <span
                 className="pointer-events-auto absolute left-8 w-80 cursor-text select-text"
                 data-minimap-preview
@@ -237,9 +251,9 @@ export function TimelineMinimap({
               >
                 <span className="dropdown-glass block rounded-xl p-3 text-left text-popover-foreground shadow-xl shadow-black/25">
                   <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium leading-5">
-                    {activeItem.userText ?? "User message"}
+                    {preview.userText ?? "User message"}
                   </span>
-                  {activeItem.assistantText ? (
+                  {preview.assistantText ? (
                     <span
                       className="mt-1 max-h-[3.75rem] overflow-hidden text-muted-foreground text-sm leading-5"
                       style={{
@@ -248,7 +262,7 @@ export function TimelineMinimap({
                         WebkitLineClamp: 3,
                       }}
                     >
-                      {activeItem.assistantText}
+                      {preview.assistantText}
                     </span>
                   ) : null}
                 </span>
@@ -267,7 +281,7 @@ export function TimelineMinimap({
       </div>
     </div>
   );
-}
+});
 
 function TimelineMinimapNavigationButton({
   direction,

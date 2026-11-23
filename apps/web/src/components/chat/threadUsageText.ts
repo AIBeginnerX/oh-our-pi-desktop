@@ -21,7 +21,7 @@ export function formatThreadUsageFooter(
   const parts: string[] = [];
   const models = summary?.status === "ok" ? summary.models : [];
   const request = summary?.status === "ok" && summary.scope === "turn";
-  if (request) parts.push(t("This request"));
+  if (request && summary.requestAggregated === true) parts.push(t("This request"));
   const formatContext = (value: { usedTokens: number; maxTokens: number | null }) =>
     `ctx ${formatContextWindowTokens(value.usedTokens)}${value.maxTokens === null ? "" : `/${formatContextWindowTokens(value.maxTokens)}`}`;
   // The thread's latest context may predate the request, so it never stands in for one.

@@ -47,6 +47,7 @@ import {
   buildSetFilesViewedGraphQlMutation,
   decodeActorAvatarsJson,
   decodePullRequestActivityJson,
+  decodePullRequestChecksJson,
   decodePullRequestDetailJson,
   decodePullRequestCoreJson,
   type GitHubPullRequestCore,
@@ -550,6 +551,16 @@ export class GitHubPullRequestCli extends Context.Service<
       readonly host: string;
       readonly number: number;
     }) => Effect.Effect<GitHubPullRequestCore, GitHubPullRequestCliError>;
+
+    readonly getPullRequestChecks?: (input: {
+      readonly cwd: string;
+      readonly repository: string;
+      readonly host: string;
+      readonly number: number;
+    }) => Effect.Effect<
+      Result.Result.Success<ReturnType<typeof decodePullRequestChecksJson>>,
+      GitHubPullRequestCliError
+    >;
 
     readonly getPullRequestPreview: (input: {
       readonly cwd: string;
@@ -2107,6 +2118,34 @@ export const make = Effect.gen(function* () {
     getPullRequestSummary,
 
     getPullRequestDetail,
+    getPullRequestChecks: (input) =>
+      github
+        .execute({
+          cwd: input.cwd,
+          args: [
+            "pr",
+            "view",
+            String(input.number),
+            ...repositoryArgs(input),
+            "--json",
+            "state,headRefOid,statusCheckRollup",
+          ],
+        })
+        .pipe(
+          Effect.flatMap(({ stdout }) => {
+            const decoded = decodePullRequestChecksJson(stdout.trim());
+            return Result.isSuccess(decoded)
+              ? Effect.succeed(decoded.success)
+              : Effect.fail(
+                  new GitHubPullRequestReadError({
+                    command: "gh",
+                    cwd: input.cwd,
+                    operation: "getPullRequestChecks",
+                    cause: decoded.failure,
+                  }),
+                );
+          }),
+        ),
     getPullRequestPreview: (input) => {
       const { owner, name } = parseRepositorySelector(input.repository);
       return graphqlRead({

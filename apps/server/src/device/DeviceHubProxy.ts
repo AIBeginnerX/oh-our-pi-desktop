@@ -182,6 +182,8 @@ const proxyHttp = Effect.fn("DeviceHubProxy.proxyHttp")(function* (
     }
     if (value !== undefined) headers[name] = value;
   }
+  const upstreamPolicy = headers["content-security-policy"];
+  headers["content-security-policy"] = upstreamPolicy ? `${upstreamPolicy}, sandbox` : "sandbox";
   // Long-lived MJPEG and AVCC responses must not be buffered by compression.
   headers["cache-control"] = "no-store, no-transform";
   return HttpServerResponse.stream(response.stream, {

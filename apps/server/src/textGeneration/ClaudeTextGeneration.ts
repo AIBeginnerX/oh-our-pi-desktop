@@ -26,6 +26,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
   buildWorkLessonsPrompt,
+  buildSideAnswerPrompt,
   buildMemoryTidyPrompt,
 } from "./TextGenerationPrompts.ts";
 import {
@@ -105,6 +106,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
+      | "generateSideAnswer"
       | "generateWorkLessons"
       | "generateMemoryTidy",
     value: unknown,
@@ -137,6 +139,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generatePrContent"
       | "generateBranchName"
       | "generateThreadTitle"
+      | "generateSideAnswer"
       | "generateWorkLessons"
       | "generateMemoryTidy";
     cwd: string;
@@ -222,6 +225,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           "--tools",
           "",
           "--disable-slash-commands",
+          ...(operation === "generateSideAnswer" ? ["--no-session-persistence"] : []),
           "--strict-mcp-config",
           "--permission-mode",
           "dontAsk",
@@ -419,6 +423,27 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const generateSideAnswer: NonNullable<
+    TextGeneration.TextGeneration["Service"]["generateSideAnswer"]
+  > = (input) => {
+    const { prompt, outputSchema } = buildSideAnswerPrompt(input);
+    return runClaudeJson({
+      operation: "generateSideAnswer",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    }).pipe(
+      Effect.mapError(
+        () =>
+          new TextGenerationError({
+            operation: "generateSideAnswer",
+            detail: "Could not generate an isolated side answer.",
+          }),
+      ),
+    );
+  };
+
   const generateWorkLessons: TextGeneration.TextGeneration["Service"]["generateWorkLessons"] =
     Effect.fn("ClaudeTextGeneration.generateWorkLessons")(function* (input) {
       const { prompt, outputSchema } = buildWorkLessonsPrompt({ digest: input.digest });
@@ -448,6 +473,7 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generateSideAnswer,
     generateWorkLessons,
     generateMemoryTidy,
   } satisfies TextGeneration.TextGeneration["Service"];

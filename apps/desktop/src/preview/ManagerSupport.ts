@@ -562,6 +562,22 @@ export const attemptPromise = <A>(
     catch: (cause) => new PreviewOperationError({ ...errorContext, cause }),
   });
 
+export const attemptCapturePromise = <A>(
+  errorContext: PreviewOperationContext,
+  evaluate: () => PromiseLike<A>,
+  timeoutMs = CAPTURE_PAGE_ATTEMPT_TIMEOUT_MS,
+) =>
+  Effect.tryPromise({
+    // Electron cannot cancel the request, but the fiber can stop waiting.
+    try: (_signal) => evaluate(),
+    catch: (cause) => new PreviewOperationError({ ...errorContext, cause }),
+  }).pipe(
+    Effect.timeout(timeoutMs),
+    Effect.catchTags({
+      TimeoutError: (cause) => Effect.fail(new PreviewOperationError({ ...errorContext, cause })),
+    }),
+  );
+
 export const currentIso = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
 export const currentMillis = Clock.currentTimeMillis;

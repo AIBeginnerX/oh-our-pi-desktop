@@ -25,7 +25,8 @@ click a project to jump to it, or **Reset all** to make those projects follow th
 again.
 
 Providers and diagnostics are per machine: they show one environment at a time, the primary
-one until you pick another. Every other setting fans out to the selection.
+one until you pick another. Scheduled prompts are saved to the one environment you choose for
+the project. Every other setting fans out to the selection.
 
 On mobile, open **Settings** and use the filter in its header to choose connected environments
 and a project. The filter stays available in server-setting pages. With **All projects** selected,
@@ -50,6 +51,11 @@ checkouts and removal. Actions belong to a project: editing them creates the pro
 on each selected environment, and reset returns to the environment's shared list. A project's
 `t3.json` actions can be imported there.
 
+You can also import preview configurations from the project's `.claude/launch.json` as ordinary
+actions without running them. Each configuration's name, launch command and working folder become
+the action's name and command; its URL, or localhost address using its port, becomes the preview
+address. Environment variables and automatic port selection are not imported.
+
 Settings a repository can also declare in `t3.json`, such as the workspace for new threads,
 resolve in one order: a project override, then the environment setting, then `t3.json`, then the
 built-in default. Leave a setting on **Inherit** to let the next tier decide.
@@ -61,6 +67,19 @@ selected to override it there) to **Top level only** to stop at the ones the rep
 itself, or **Skip** to leave them for a setup script. It resolves in the same order as the
 workspace default: a `"worktreeSubmodules"` value in the `t3.json` of the branch being checked out
 applies when the project and environment are both on **Inherit**.
+
+## Scheduled prompts
+
+In **Settings → Project → Scheduled prompts** (**Projects & threads → Overview** on mobile),
+choose a project and one environment. Add a prompt with a title and a time of day. The schedule
+uses the server's local time and runs daily while that OOP server is running. If the machine
+was asleep at that time, the prompt runs when it wakes, unless that is more than an hour late.
+Restarting the server does not replay missed runs. Changing an entry to a later time the same
+day runs it again that day.
+
+Each run opens a new thread in the project's own checkout and sends the saved prompt. It uses
+the project's default model and permission mode, so the agent can act within those permissions
+while you're away.
 
 ## Selected checks
 

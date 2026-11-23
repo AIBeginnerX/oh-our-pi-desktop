@@ -1,0 +1,205 @@
+[
+  {
+    "thread": {
+      "latestTurn": {
+        "turnId": "current",
+        "state": "completed",
+        "requestedAt": "2026-11-01T00:00:00.000Z",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "completedAt": "2026-11-01T00:00:01.000Z"
+      },
+      "session": {
+        "status": "ready"
+      },
+      "activities": [
+        {
+          "id": "first",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "First"
+          }
+        },
+        {
+          "id": "second",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "Second"
+          }
+        },
+        {
+          "id": "old",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "older",
+            "text": "Older"
+          }
+        }
+      ],
+      "messages": []
+    },
+    "expected": {
+      "id": "second",
+      "text": "Second"
+    }
+  },
+  {
+    "thread": {
+      "latestTurn": {
+        "turnId": "current",
+        "state": "completed",
+        "requestedAt": "2026-11-01T00:00:00.000Z",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "completedAt": "2026-11-01T00:00:01.000Z"
+      },
+      "session": {
+        "status": "ready"
+      },
+      "activities": [
+        {
+          "id": "old",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "older",
+            "text": "Older"
+          }
+        }
+      ],
+      "messages": []
+    },
+    "expected": null
+  },
+  {
+    "thread": {
+      "latestTurn": {
+        "turnId": "current",
+        "state": "running",
+        "requestedAt": "2026-11-01T00:00:00.000Z",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "completedAt": "2026-11-01T00:00:01.000Z"
+      },
+      "session": {
+        "status": "ready"
+      },
+      "activities": [
+        {
+          "id": "first",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "First"
+          }
+        },
+        {
+          "id": "second",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "Second"
+          }
+        },
+        {
+          "id": "old",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "older",
+            "text": "Older"
+          }
+        }
+      ],
+      "messages": []
+    },
+    "expected": null
+  },
+  {
+    "thread": {
+      "latestTurn": {
+        "turnId": "current",
+        "state": "completed",
+        "requestedAt": "2026-11-01T00:00:00.000Z",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "completedAt": "2026-11-01T00:00:01.000Z"
+      },
+      "session": {
+        "status": "starting"
+      },
+      "activities": [
+        {
+          "id": "first",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "First"
+          }
+        },
+        {
+          "id": "second",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "Second"
+          }
+        },
+        {
+          "id": "old",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "older",
+            "text": "Older"
+          }
+        }
+      ],
+      "messages": []
+    },
+    "expected": null
+  },
+  {
+    "thread": {
+      "latestTurn": {
+        "turnId": "current",
+        "state": "completed",
+        "requestedAt": "2026-11-01T00:00:00.000Z",
+        "startedAt": "2026-11-01T00:00:00.000Z",
+        "completedAt": "2026-11-01T00:00:01.000Z"
+      },
+      "session": {
+        "status": "ready"
+      },
+      "activities": [
+        {
+          "id": "first",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "First"
+          }
+        },
+        {
+          "id": "second",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "current",
+            "text": "Second"
+          }
+        },
+        {
+          "id": "old",
+          "kind": "prompt.suggestion",
+          "payload": {
+            "turnId": "older",
+            "text": "Older"
+          }
+        }
+      ],
+      "messages": [
+        {
+          "id": "next-user",
+          "role": "user",
+          "createdAt": "2026-11-01T00:00:02.000Z"
+        }
+      ]
+    },
+    "expected": null
+  }
+]

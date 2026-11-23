@@ -13,6 +13,8 @@ mod cli_update;
 mod clipboard;
 mod cmd;
 mod cmd_attach;
+mod cmd_autofix;
+mod cmd_btw;
 mod cmd_continue;
 mod cmd_copy;
 mod cmd_crew;
@@ -844,8 +846,11 @@ async fn run(
                     read_clipboard(tools, tx.clone());
                 }
                 if let Some((request, server, home)) = cmd_provider::take_request(&mut app) {
-                    let (back, failure) =
-                        cmd_provider::run_in_foreground(&mut guard, request, server, home).await;
+                    let Some((back, failure)) =
+                        cmd_provider::run_in_foreground(&mut guard, request, server, home, ended.as_mut()).await
+                    else {
+                        break Ok(());
+                    };
                     terminal = back;
                     let _ = terminal.clear();
                     match failure {

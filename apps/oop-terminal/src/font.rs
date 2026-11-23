@@ -63,6 +63,7 @@ struct Shelf {
 
 pub struct Atlas {
     shelf: Shelf,
+    preserve: bool,
     pub uploads: Vec<Upload>,
     pub generation: u32,
 }
@@ -75,6 +76,7 @@ impl Atlas {
                 y: 1,
                 row_h: 0,
             },
+            preserve: false,
             uploads: Vec::new(),
             generation: 0,
         }
@@ -105,7 +107,7 @@ impl Atlas {
         if let Some(pos) = self.alloc(w, h) {
             return Some((pos, false));
         }
-        if w + 2 > ATLAS_SIZE || h + 2 > ATLAS_SIZE {
+        if self.preserve || w + 2 > ATLAS_SIZE || h + 2 > ATLAS_SIZE {
             return None;
         }
         self.reset();
@@ -371,6 +373,20 @@ impl Fonts {
         Some(e)
     }
 
+    /// Start a fresh retry pass and keep its glyph coordinates valid when the atlas fills.
+    pub fn begin_atlas_retry(&mut self) {
+        self.atlas.reset();
+        self.cache.clear();
+        self.masks.clear();
+        self.atlas.preserve = true;
+    }
+
+    pub fn end_atlas_retry(&mut self) {
+        self.atlas.preserve = false;
+        // A miss in the preserved pass can fit after a reset in a later frame.
+        self.cache.retain(|_, entry| entry.is_some());
+    }
+
     pub fn atlas_generation(&self) -> u32 {
         self.atlas.generation
     }
@@ -382,6 +398,38 @@ mod tests {
 
     fn fonts() -> Fonts {
         Fonts::new(28.0)
+    }
+
+    #[test]
+    fn an_overflowed_glyph_is_retried_only_in_the_next_frame() {
+        let mut f = fonts();
+        let key = GlyphKey {
+            ch: 'M',
+            bold: false,
+            italic: false,
+        };
+        f.begin_atlas_retry();
+        let empty = std::mem::replace(
+            &mut f.atlas.shelf,
+            Shelf {
+                x: 1,
+                y: ATLAS_SIZE,
+                row_h: 0,
+            },
+        );
+        assert!(f.glyph(key).is_none(), "the glyph cannot fit");
+        // Give a repeat lookup room to detect whether it tries to allocate again.
+        let full = std::mem::replace(&mut f.atlas.shelf, empty);
+        assert!(
+            f.glyph(key).is_none(),
+            "the repeat lookup tried to allocate"
+        );
+        assert!(f.atlas.uploads.is_empty());
+
+        f.atlas.shelf = full;
+        f.end_atlas_retry();
+        assert!(f.glyph(key).is_some(), "the next frame can reset the atlas");
+        assert_eq!(f.atlas.uploads.len(), 1);
     }
 
     #[test]

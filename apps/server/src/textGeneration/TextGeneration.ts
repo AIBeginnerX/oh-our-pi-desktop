@@ -87,6 +87,13 @@ export interface ThreadTitleGenerationResult {
   needsRefinement?: boolean | undefined;
 }
 
+export interface SideAnswerGenerationInput {
+  cwd: string;
+  question: string;
+  transcript: ReadonlyArray<{ role: "user" | "assistant"; text: string }>;
+  modelSelection: ModelSelection;
+}
+
 export interface WorkLessonsGenerationInput {
   /** Scratch directory the model runs in; the prompt carries all the context. */
   cwd: string;
@@ -140,6 +147,11 @@ export class TextGeneration extends Context.Service<
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
 
+    /** Optional on provider instances that cannot run a private one-shot request. */
+    readonly generateSideAnswer?: (
+      input: SideAnswerGenerationInput,
+    ) => Effect.Effect<{ answer: string }, TextGenerationError>;
+
     /** Suggest merges, fixes, and deletions for a project's saved memories. */
     readonly generateMemoryTidy: (
       input: MemoryTidyGenerationInput,
@@ -155,6 +167,7 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
+  | "generateSideAnswer"
   | "generateThreadTitle"
   | "generateWorkLessons"
   | "generateMemoryTidy";
@@ -330,6 +343,19 @@ export const make = Effect.gen(function* () {
               ));
             return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
           }),
+        ),
+      ),
+    generateSideAnswer: (input) =>
+      resolveInstance(registry, "generateSideAnswer", input.modelSelection.instanceId).pipe(
+        Effect.flatMap(
+          (textGeneration) =>
+            textGeneration.generateSideAnswer?.(input) ??
+            Effect.fail(
+              new TextGenerationError({
+                operation: "generateSideAnswer",
+                detail: "Side questions are unavailable for this provider instance.",
+              }),
+            ),
         ),
       ),
     generateMemoryTidy: (input) =>

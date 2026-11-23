@@ -254,7 +254,11 @@ export const deriveThreadUsageSummary = (
           entry.threadId !== threadId
             ? request.children.has(entry.threadId)
             : entry.turnId !== null && request.turnIds.has(entry.turnId);
-  return { ...aggregateThreadUsage(threadId, entries, rates, overrides, counted), scope };
+  return {
+    ...aggregateThreadUsage(threadId, entries, rates, overrides, counted),
+    scope,
+    ...(request === undefined ? {} : { requestAggregated: true }),
+  };
 };
 
 /**

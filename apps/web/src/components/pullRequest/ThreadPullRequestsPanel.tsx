@@ -1,5 +1,10 @@
 import type { ScopedThreadRef, ThreadPullRequestLink } from "@t3tools/contracts";
 import {
+  PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+  pullRequestAutoFixProgress,
+  pullRequestAutoFixTarget,
+} from "@t3tools/shared/pullRequestAutoFix";
+import {
   resolveThreadPullRequestChains,
   visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
@@ -7,9 +12,11 @@ import { ArrowUpRightIcon, LinkIcon, MoreHorizontalIcon, PlusIcon } from "lucide
 import { useCallback, useMemo } from "react";
 
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
+import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "~/hooks/useSettings";
+import { useT } from "~/i18n";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { cn } from "~/lib/utils";
-import { useServerConfigs, useThreadShell } from "~/state/entities";
+import { useServerConfigs, useThreadDetail, useThreadShell } from "~/state/entities";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -18,6 +25,7 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ScrollArea } from "../ui/scroll-area";
+import { Switch } from "../ui/switch";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { openLinkPullRequestDialog } from "./LinkPullRequestDialog";
 import { pullRequestListLines, type PullRequestListLine } from "./pullRequestListLines";
@@ -64,6 +72,26 @@ function ChecksGlyph({
   );
 }
 
+/** The thread's auto-fix switch with its current state beside it. */
+function AutoFixControl({
+  enabled,
+  setEnabled,
+  status,
+}: {
+  enabled: boolean;
+  setEnabled: (enabled: boolean) => void;
+  status: string;
+}) {
+  const t = useT();
+  const label = t("Auto-fix failed checks");
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <Switch size="sm" aria-label={label} checked={enabled} onCheckedChange={setEnabled} />
+      <span className="truncate">{enabled ? status : label}</span>
+    </span>
+  );
+}
+
 function LinkRow({
   line,
   threadRef,
@@ -101,7 +129,7 @@ function LinkRow({
       <a
         href={link.url}
         onClick={(event) => openPrLink(event, link.url, threadRef)}
-        className="flex min-w-0 flex-1"
+        className="flex min-w-0 flex-1 pointer-coarse:pr-12"
       >
         <PullRequestRowLines
           number={
@@ -183,30 +211,25 @@ function LinkRow({
           updatedAt={snapshot?.updatedAt}
         />
       </a>
-      {/* Out of the row's flow, so no row reserves a column for a button only the hovered one
-          shows. It sits over the right end of the second line on the row's own hover color,
-          fading in from the left, so it covers the time and leaves the diff counts alone. */}
+      {/* The actions sit at the end of the second line.
+          Touch rows reserve space for the always-visible button. */}
       <span
         className={cn(
           "absolute right-0 bottom-0.5 flex items-center rounded-r-md bg-background pr-1 pl-5",
           "[mask-image:linear-gradient(to_right,transparent,black_1rem)]",
-          // Hidden means untouchable too: on a touch screen there is no hover, and an invisible
-          // layer over the right of the row would otherwise swallow the tap meant for the link.
+          // Hidden means untouchable too: invisible desktop actions must not swallow link taps.
+          // On touch only the button takes taps, leaving the surrounding strip to the link.
           "pointer-events-none opacity-0 group-hover/pr-row:pointer-events-auto group-hover/pr-row:opacity-100",
+          "pointer-coarse:pointer-events-none! pointer-coarse:opacity-100 pointer-coarse:bg-transparent pointer-coarse:pl-0 pointer-coarse:mask-none pointer-coarse:[&>button]:pointer-events-auto",
           "has-[[data-popup-open]]:pointer-events-auto has-[[data-popup-open]]:opacity-100",
           "has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:opacity-100",
         )}
       >
-        <span aria-hidden className="absolute inset-0 bg-accent/60" />
+        <span aria-hidden className="absolute inset-0 bg-accent/60 pointer-coarse:hidden" />
         <Menu>
           <MenuTrigger
             render={
-              <Button
-                variant="ghost"
-                size="icon-micro"
-                aria-label={`Actions for #${link.number}`}
-                className="relative"
-              >
+              <Button variant="ghost" size="icon-micro" aria-label={`Actions for #${link.number}`}>
                 <MoreHorizontalIcon className="size-3.5" />
               </Button>
             }
@@ -245,10 +268,47 @@ export function ThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
 }
 
 function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThreadRef }) {
+  const t = useT();
   const thread = useThreadShell(threadRef);
+  const setting = useEnvironmentSettings(
+    threadRef.environmentId,
+    (settings) => settings.threadPullRequestAutoFix[threadRef.threadId],
+  );
+  const updateSettings = useUpdateEnvironmentSettings(threadRef.environmentId);
+  const activities = useThreadDetail(threadRef)?.activities;
+  const enabled = setting?.enabled === true;
+  const setEnabled = (next: boolean) =>
+    updateSettings({
+      threadPullRequestAutoFix: {
+        [threadRef.threadId]: { enabled: next, setAt: new Date().toISOString() },
+      },
+    });
   const openLinkDialog = useCallback(() => openLinkPullRequestDialog(threadRef), [threadRef]);
   const unlink = useAtomCommand(threadEnvironment.unlinkPullRequest, { reportFailure: true });
   const links = useMemo(() => visibleThreadPullRequests(thread?.pullRequests ?? []), [thread]);
+  const target = useMemo(
+    () => pullRequestAutoFixTarget(thread?.pullRequests ?? [], thread?.branch ?? null),
+    [thread],
+  );
+  const progress = useMemo(
+    () =>
+      setting?.enabled && target
+        ? pullRequestAutoFixProgress(target.url, setting.setAt, activities ?? [])
+        : null,
+    [activities, setting, target],
+  );
+  const status = progress?.exhausted
+    ? t("Auto-fix stopped after {limit} attempts", { limit: PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS })
+    : target === null
+      ? t("Auto-fix on · no open pull request on this branch")
+      : thread?.latestTurn?.state === "interrupted"
+        ? t("Auto-fix paused until the next turn")
+        : progress && progress.attempts > 0
+          ? t("Auto-fix: attempt {attempt}/{limit}", {
+              attempt: progress.attempts,
+              limit: PULL_REQUEST_AUTO_FIX_MAX_ATTEMPTS,
+            })
+          : t("Auto-fix on");
   const lines = useMemo(() => pullRequestListLines(resolveThreadPullRequestChains(links)), [links]);
   const handleUnlink = useCallback(
     (link: ThreadPullRequestLink) => {
@@ -290,6 +350,11 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
           <PlusIcon className="size-3.5" />
           Link pull request
         </Button>
+        {enabled ? (
+          <div className="text-xs text-muted-foreground">
+            <AutoFixControl enabled={enabled} setEnabled={setEnabled} status={status} />
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -308,11 +373,14 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
           ))}
         </div>
       </ScrollArea>
-      <footer className="flex items-center justify-between border-t border-border/60 px-2 py-1.5 text-2xs text-muted-foreground">
-        <span>
-          {openCount} open · {links.length} linked
-          {lastSynced ? ` · synced ${formatRelativeTimeLabel(lastSynced)}` : ""}
-        </span>
+      <footer className="flex items-center justify-between gap-2 border-t border-border/60 px-2 py-1.5 text-2xs text-muted-foreground">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span>
+            {openCount} open · {links.length} linked
+            {lastSynced ? ` · synced ${formatRelativeTimeLabel(lastSynced)}` : ""}
+          </span>
+          <AutoFixControl enabled={enabled} setEnabled={setEnabled} status={status} />
+        </div>
         <Button size="xs" variant="ghost" onClick={openLinkDialog}>
           <PlusIcon className="size-3.5" />
           Link

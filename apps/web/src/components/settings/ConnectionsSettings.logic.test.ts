@@ -1,11 +1,16 @@
 import type { AdvertisedEndpoint, DesktopWslState } from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { parseManualDesktopSshTarget } from "./ConnectionsSettings.helpers";
 import {
   applyWslEnableSelection,
+  isSavedSshHostSuggestion,
+  findSshHostSuggestion,
   isQrShareableEndpoint,
   isWslSettingsRowVisible,
   selectQrEndpointOption,
+  sshHostSuggestionKey,
 } from "./ConnectionsSettings.logic";
+import { formatDesktopSshTarget } from "./EnvironmentRow";
 
 const baseWslState: DesktopWslState = {
   enabled: false,
@@ -182,4 +187,77 @@ describe("selectQrEndpointOption", () => {
     expect(selectQrEndpointOption(loopbackOnly, null, null)?.id).toBe("desktop-loopback:4780");
     expect(selectQrEndpointOption([], "anything", "anything")).toBeNull();
   });
+});
+
+it("resolves same-host suggestions by port and preserves config aliases", () => {
+  const hosts = [
+    { alias: "host", hostname: "host", port: null, username: null, source: "known-hosts" as const },
+    { alias: "host", hostname: "host", port: 2222, username: null, source: "known-hosts" as const },
+    {
+      alias: "dev",
+      hostname: "internal",
+      port: 2200,
+      username: "me",
+      source: "ssh-config" as const,
+    },
+  ] as const;
+  expect(findSshHostSuggestion(hosts, sshHostSuggestionKey(hosts[1]))).toBe(hosts[1]);
+  expect(findSshHostSuggestion(hosts, sshHostSuggestionKey(hosts[0]))).toBe(hosts[0]);
+  expect(findSshHostSuggestion(hosts, sshHostSuggestionKey(hosts[2]))).toBe(hosts[2]);
+});
+
+const ipv6WithPort = {
+  alias: "2001:db8::1",
+  hostname: "2001:db8::1",
+  username: null,
+  port: 2222,
+  source: "known-hosts",
+} as const;
+const ipv6WithoutPort = {
+  ...ipv6WithPort,
+  alias: "2001:db8::1:2222",
+  hostname: "2001:db8::1:2222",
+  port: null,
+} as const;
+
+it.each([
+  { order: "port first", hosts: [ipv6WithPort, ipv6WithoutPort] },
+  { order: "port last", hosts: [ipv6WithoutPort, ipv6WithPort] },
+])("resolves distinct IPv6 suggestions with $order", ({ hosts }) => {
+  for (const host of hosts) {
+    expect(findSshHostSuggestion(hosts, sshHostSuggestionKey(host))).toBe(host);
+  }
+});
+
+it("formats IPv6 suggestions as distinct addresses that round-trip through the manual parser", () => {
+  const withPort = formatDesktopSshTarget(ipv6WithPort);
+  const withoutPort = formatDesktopSshTarget(ipv6WithoutPort);
+  expect(withPort).toBe("[2001:db8::1]:2222");
+  expect(withoutPort).toBe("2001:db8::1:2222");
+  for (const target of [ipv6WithPort, ipv6WithoutPort, { ...ipv6WithPort, username: "me" }]) {
+    expect(
+      parseManualDesktopSshTarget({ host: formatDesktopSshTarget(target), username: "", port: "" }),
+    ).toMatchObject({
+      hostname: target.hostname,
+      port: target.port,
+      username: target.username,
+    });
+  }
+});
+
+it("hides known hosts only at the same port and config hosts by alias", () => {
+  const saved = [{ alias: "host", port: 2200 }];
+  const host = {
+    alias: "host",
+    hostname: "host",
+    username: null,
+    port: 2222,
+    source: "known-hosts" as const,
+  };
+  expect(isSavedSshHostSuggestion(host, saved)).toBe(false);
+  expect(isSavedSshHostSuggestion({ ...host, port: 2200 }, saved)).toBe(true);
+  expect(isSavedSshHostSuggestion({ ...host, port: null }, [{ alias: "host", port: 22 }])).toBe(
+    true,
+  );
+  expect(isSavedSshHostSuggestion({ ...host, source: "ssh-config" }, saved)).toBe(true);
 });

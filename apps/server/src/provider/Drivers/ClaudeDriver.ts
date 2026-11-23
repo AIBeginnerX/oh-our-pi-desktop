@@ -189,6 +189,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         modelCatalog,
         scopedLimitNames,
         agentInstructions: makeAgentInstructionsReader(serverSettings),
+        promptSuggestionsEnabled: serverSettings.getSettings.pipe(
+          Effect.map((settings) => settings.claudePromptSuggestionsEnabled),
+          Effect.orElseSucceed(() => false),
+        ),
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);

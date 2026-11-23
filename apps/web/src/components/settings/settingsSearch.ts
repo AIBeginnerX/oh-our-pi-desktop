@@ -237,6 +237,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
     searchTerms: ["wide full width column layout messages composer monitor"],
   },
+
+  {
+    id: "transcript-view-mode",
+    title: "Transcript view",
+    to: "/settings/appearance",
+    searchTerms: ["chat display reasoning thinking verbose normal expand tool entries"],
+  },
   {
     id: "panel-animations",
     title: "Panel animations",
@@ -433,6 +440,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Collapse composer on scroll",
     to: "/settings/general",
     searchTerms: ["composer rest resting scroll wheel conversation timeline shrink minimize"],
+  },
+  {
+    id: "prompt-suggestions",
+    title: "Prompt suggestions",
+    to: "/settings/general",
+    searchTerms: ["claude next prompt tab composer"],
+    scope: "environment-defaults",
   },
   {
     id: "send-shortcut",
@@ -851,6 +865,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Actions",
     to: "/settings/projects",
     searchTerms: ["commands scripts setup run dev server checkout worktree t3.json import"],
+  },
+  {
+    id: "project-scheduled-prompts",
+    title: "Scheduled prompts",
+    to: "/settings/projects",
+    searchTerms: ["schedule daily recurring prompt automation time"],
   },
   {
     id: "environment-icon",

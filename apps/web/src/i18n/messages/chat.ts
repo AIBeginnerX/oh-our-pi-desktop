@@ -2,17 +2,113 @@ import type { MessageCatalog } from "./types";
 
 /** The conversation timeline and composer. */
 export const CHAT_MESSAGES: MessageCatalog = {
+  "Load image from {host}": {
+    ko: "{host}의 이미지 불러오기",
+    ja: "{host} から画像を読み込む",
+    "zh-CN": "加载来自 {host} 的图片",
+    es: "Cargar imagen de {host}",
+  },
+  "Ask about this thread without sending a message": {
+    ko: "메시지를 보내지 않고 이 스레드에 대해 질문",
+    ja: "メッセージを送信せずにこのスレッドについて質問",
+    "zh-CN": "询问此对话，无需发送消息",
+    es: "Pregunta sobre este hilo sin enviar un mensaje",
+  },
+  "Side question": {
+    ko: "별도 질문",
+    ja: "サイド質問",
+    "zh-CN": "临时提问",
+    es: "Pregunta aparte",
+  },
+  "Close side question": {
+    ko: "별도 질문 닫기",
+    ja: "サイド質問を閉じる",
+    "zh-CN": "关闭临时提问",
+    es: "Cerrar la pregunta aparte",
+  },
+  "Getting a side answer…": {
+    ko: "답변을 가져오는 중…",
+    ja: "回答を取得中…",
+    "zh-CN": "正在获取回答…",
+    es: "Obteniendo una respuesta…",
+  },
+  "Side answer unavailable.": {
+    ko: "답변을 가져올 수 없습니다.",
+    ja: "回答を取得できませんでした。",
+    "zh-CN": "暂时无法获取回答。",
+    es: "No se pudo obtener una respuesta.",
+  },
+  "Show breakdown": {
+    ko: "세부 내역 보기",
+    ja: "内訳を表示",
+    "zh-CN": "显示明细",
+    es: "Mostrar desglose",
+  },
+  "Loading breakdown…": {
+    ko: "세부 내역 불러오는 중…",
+    ja: "内訳を読み込み中…",
+    "zh-CN": "正在加载明细…",
+    es: "Cargando desglose…",
+  },
+  "Breakdown is available while a Claude session is open.": {
+    ko: "Claude 세션이 열려 있을 때 세부 내역을 볼 수 있습니다.",
+    ja: "Claude セッションが開いている間は内訳を表示できます。",
+    "zh-CN": "Claude 会话打开时可以查看明细。",
+    es: "El desglose está disponible mientras haya una sesión de Claude abierta.",
+  },
+  "Used subtotal": {
+    ko: "사용량 소계",
+    ja: "使用量の小計",
+    "zh-CN": "已用小计",
+    es: "Subtotal de uso",
+  },
+  Category: {
+    ko: "카테고리",
+    ja: "カテゴリ",
+    "zh-CN": "类别",
+    es: "Categoría",
+  },
+  Tokens: {
+    ko: "토큰",
+    ja: "トークン",
+    "zh-CN": "令牌",
+    es: "Tokens",
+  },
+  "Share of window": {
+    ko: "창 내 비율",
+    ja: "ウィンドウに占める割合",
+    "zh-CN": "窗口占比",
+    es: "Porcentaje de la ventana",
+  },
+  "Open in new thread": {
+    ko: "새 스레드에서 열기",
+    ja: "新しいスレッドで開く",
+    "zh-CN": "在新线程中打开",
+    es: "Abrir en un hilo nuevo",
+  },
+  "Expand prompt": {
+    ko: "프롬프트 펼치기",
+    ja: "プロンプトを展開",
+    "zh-CN": "展开提示词",
+    es: "Expandir la instrucción",
+  },
+  "Could not open the draft": {
+    ko: "초안을 열 수 없습니다",
+    ja: "下書きを開けませんでした",
+    "zh-CN": "无法打开草稿",
+    es: "No se pudo abrir el borrador",
+  },
   "{count} failed": {
     ko: "{count}개 실패",
     ja: "{count}件失敗",
     "zh-CN": "{count} 个失败",
     es: "{count} con error",
   },
-  "Restoring checkpoint…": {
-    ko: "체크포인트 복원 중…",
-    ja: "チェックポイントを復元中…",
-    "zh-CN": "正在恢复检查点…",
-    es: "Restaurando punto de control…",
+  "Rewinding conversation…": {
+    ko: "대화 되감는 중…",
+    ja: "会話を巻き戻し中…",
+    "zh-CN": "正在回退对话…",
+    es: "Rebobinando conversación…",
   },
   "Expand ({count} lines)": {
     ko: "펼치기 ({count}줄)",

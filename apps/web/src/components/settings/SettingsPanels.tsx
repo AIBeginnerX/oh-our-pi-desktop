@@ -465,6 +465,35 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
+        <SettingsRow
+          {...searchableSetting("transcript-view-mode")}
+          title={t("Transcript view")}
+          description={t("Choose which reasoning and tool details start expanded.")}
+          control={
+            <Select
+              items={[
+                { value: "normal", label: t("Normal") },
+                { value: "thinking", label: t("Thinking") },
+                { value: "verbose", label: t("Verbose") },
+              ]}
+              value={settings.transcriptViewMode}
+              onValueChange={(value) => {
+                if (value === "normal" || value === "thinking" || value === "verbose") {
+                  updateSettings({ transcriptViewMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" aria-label={t("Transcript view")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="normal">{t("Normal")}</SelectItem>
+                <SelectItem value="thinking">{t("Thinking")}</SelectItem>
+                <SelectItem value="verbose">{t("Verbose")}</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
       </SettingsSection>
 
       <SettingsSection id="motion" title={t("Motion")}>
@@ -1461,6 +1490,25 @@ export function GeneralSettingsPanel() {
                 updateSettings({ composerCollapseOnScroll: Boolean(checked) })
               }
               aria-label={t("Collapse composer on scroll")}
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("prompt-suggestions")}
+          title={t("Prompt suggestions")}
+          description={t(
+            "After Claude finishes a turn, suggest the next prompt in the composer. Press Tab to use it. Suggestions count toward Claude usage.",
+          )}
+          control={
+            <ScopedSwitch
+              settingKeys={["claudePromptSuggestionsEnabled"]}
+              checked={settings.claudePromptSuggestionsEnabled}
+              disabled={!hasServerTargets}
+              onCheckedChange={(checked) =>
+                updateSettings({ claudePromptSuggestionsEnabled: Boolean(checked) })
+              }
+              aria-label={t("Prompt suggestions")}
             />
           }
         />

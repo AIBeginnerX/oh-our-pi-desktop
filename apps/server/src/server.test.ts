@@ -1586,6 +1586,8 @@ const buildAppUnderTest = (options?: {
                 eventCount: Math.max(0, toSequenceInclusive - fromSequenceExclusive),
                 payloadBytes: 0,
               }),
+            getActiveThreadIdByWorktreePath: () => Effect.succeedNone,
+            listActiveWorkspaceRoots: () => Effect.succeed([]),
             getActiveProjectByWorkspaceRoot: () => Effect.succeedNone,
             getFirstActiveThreadIdByProjectId: () => Effect.succeedNone,
             getImportedAgentSessionSources: () => Effect.succeed([]),
@@ -6929,6 +6931,25 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.deepEqual(result, { importedCount: 0, skippedCount: 1 });
+
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      assert.equal(token.response.status, 200);
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const readOnlyUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      const denied = yield* Effect.scoped(
+        withWsRpcClient(readOnlyUrl, (client) =>
+          client[WS_METHODS.agentSessionsScan]({}).pipe(Effect.flip),
+        ),
+      );
+      assert.equal(denied._tag, "EnvironmentAuthorizationError");
+      if (denied._tag === "EnvironmentAuthorizationError") {
+        assert.equal(denied.requiredScope, "orchestration:operate");
+      }
     }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
   );
 
@@ -7280,6 +7301,412 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(
         failureMessage.includes("Unauthorized") ||
           failureMessage.includes("An error occurred during Open"),
+      );
+    }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
+  );
+
+  it.effect("confines read-only file, asset, and VCS reads to registered workspace roots", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped();
+      const worktreePath = yield* fileSystem.makeTempDirectoryScoped();
+      const outsideDir = yield* fileSystem.makeTempDirectoryScoped();
+      const unavailableRoot = path.join(outsideDir, "lookup-failed");
+      const outsideFile = path.join(outsideDir, "outside.txt");
+      yield* fileSystem.writeFileString(path.join(cwd, "inside.txt"), "inside");
+      yield* fileSystem.writeFileString(outsideFile, "outside");
+      yield* fileSystem.writeFileString(path.join(worktreePath, "inside.txt"), "worktree");
+      for (const root of [cwd, worktreePath, outsideDir]) {
+        yield* fileSystem.writeFileString(path.join(root, "preview.html"), "<p>preview</p>");
+      }
+      yield* fileSystem.symlink(
+        path.join(outsideDir, "preview.html"),
+        path.join(cwd, "escape.html"),
+      );
+      yield* fileSystem.writeFileString(path.join(cwd, "needle-local.txt"), "needle local");
+      yield* fileSystem.writeFileString(
+        path.join(outsideDir, "needle-private.txt"),
+        "needle private",
+      );
+      yield* fileSystem.symlink(outsideDir, path.join(cwd, "needle-link"));
+      yield* fileSystem.symlink(
+        path.join(outsideDir, "needle-private.txt"),
+        path.join(cwd, "needle-link.txt"),
+      );
+      const readModel = makeDefaultOrchestrationReadModel();
+      const project = { ...readModel.projects[0]!, workspaceRoot: cwd };
+      const localStatus = {
+        isRepo: true,
+        hasPrimaryRemote: false,
+        isDefaultRef: true,
+        refName: "main",
+        hasWorkingTreeChanges: false,
+        workingTree: { files: [], insertions: 0, deletions: 0 },
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          sourceControlRepositoryService: {
+            lookupRepository: () =>
+              Effect.succeed({
+                provider: "github",
+                nameWithOwner: "fixture/example",
+                url: "https://github.com/fixture/example",
+                sshUrl: "git@github.com:fixture/example.git",
+              }),
+          },
+          vcsDriver: { isInsideWorkTree: () => Effect.succeed(true) },
+          gitVcsDriver: {
+            listRefs: () =>
+              Effect.succeed({
+                refs: [],
+                isRepo: true,
+                hasPrimaryRemote: false,
+                nextCursor: null,
+                totalCount: 0,
+              }),
+          },
+          vcsStatusBroadcaster: {
+            streamStatus: () =>
+              Stream.succeed({ _tag: "snapshot", local: localStatus, remote: null }),
+            refreshStatus: () =>
+              Effect.succeed({
+                ...localStatus,
+                hasUpstream: false,
+                aheadCount: 0,
+                behindCount: 0,
+                pr: null,
+              }),
+          },
+          projectionSnapshotQuery: {
+            getActiveThreadIdByWorktreePath: (root) =>
+              Effect.succeed(
+                root === worktreePath ? Option.some(readModel.threads[0]!.id) : Option.none(),
+              ),
+            getThreadDetailById: () =>
+              Effect.succeed(
+                Option.some({
+                  ...readModel.threads[0]!,
+                  activities: [
+                    {
+                      id: EventId.make("workflow-script"),
+                      tone: "info",
+                      kind: "task.updated",
+                      summary: "Workflow script",
+                      payload: { runHandles: { scriptPath: "recorded.js" } },
+                      turnId: null,
+                      createdAt: project.createdAt,
+                    },
+                  ],
+                }),
+              ),
+            listActiveWorkspaceRoots: () => Effect.succeed([cwd, worktreePath]),
+            getActiveProjectByWorkspaceRoot: (root) =>
+              root === unavailableRoot
+                ? Effect.fail(new PersistenceSqlError({ operation: "workspace lookup fixture" }))
+                : Effect.succeed(root === cwd ? Option.some(project) : Option.none()),
+          },
+        },
+      });
+      for (const operate of [false, true]) {
+        const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+          scope: operate ? "orchestration:read orchestration:operate" : "orchestration:read",
+        });
+        assert.equal(token.response.status, 200);
+        const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+          headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+        });
+        const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.gen(function* () {
+              const inside = yield* client[WS_METHODS.projectsReadFile]({
+                cwd,
+                relativePath: "inside.txt",
+              });
+              assert.equal(inside.contents, "inside");
+              const worktree = yield* client[WS_METHODS.projectsReadFile]({
+                cwd: worktreePath,
+                relativePath: "inside.txt",
+              });
+              assert.equal(worktree.contents, "worktree");
+              const threadId = readModel.threads[0]!.id;
+              for (const root of [cwd, worktreePath, outsideDir]) {
+                for (const resource of [
+                  { _tag: "media-file", threadId, path: path.join(root, "preview.html") },
+                  { _tag: "draft-workspace-file", cwd: root, path: "preview.html" },
+                  { _tag: "draft-workspace-file", cwd, path: path.join(root, "preview.html") },
+                ] as const) {
+                  // Absolute drafts are scoped to their declared workspace.
+                  if (
+                    root === worktreePath &&
+                    resource._tag === "draft-workspace-file" &&
+                    path.isAbsolute(resource.path)
+                  )
+                    continue;
+                  const issue = client[WS_METHODS.assetsCreateUrl]({ resource });
+                  if (operate || root !== outsideDir) {
+                    assert.equal((yield* HttpClient.get((yield* issue).relativeUrl)).status, 200);
+                  } else {
+                    assert.equal(
+                      (yield* issue.pipe(Effect.flip))._tag,
+                      "EnvironmentAuthorizationError",
+                    );
+                  }
+                }
+              }
+              const escapedMedia = client[WS_METHODS.assetsCreateUrl]({
+                resource: { _tag: "media-file", threadId, path: path.join(cwd, "escape.html") },
+              });
+              if (operate) {
+                assert.equal(
+                  (yield* HttpClient.get((yield* escapedMedia).relativeUrl)).status,
+                  200,
+                );
+              } else {
+                assert.equal(
+                  (yield* escapedMedia.pipe(Effect.flip))._tag,
+                  "EnvironmentAuthorizationError",
+                );
+              }
+              for (const root of [cwd, worktreePath, outsideDir]) {
+                const status = client[WS_METHODS.subscribeVcsStatus]({ cwd: root }).pipe(
+                  Stream.runHead,
+                );
+                const refresh = client[WS_METHODS.vcsRefreshStatus]({ cwd: root });
+                const refs = client[WS_METHODS.vcsListRefs]({ cwd: root });
+                if (operate || root !== outsideDir) {
+                  assert.equal(Option.getOrThrow(yield* status)._tag, "snapshot");
+                  assert.equal((yield* refresh).refName, "main");
+                  assert.equal((yield* refs).isRepo, true);
+                } else {
+                  assert.equal(
+                    (yield* status.pipe(Effect.flip))._tag,
+                    "EnvironmentAuthorizationError",
+                  );
+                  assert.equal(
+                    (yield* refresh.pipe(Effect.flip))._tag,
+                    "EnvironmentAuthorizationError",
+                  );
+                  assert.equal(
+                    (yield* refs.pipe(Effect.flip))._tag,
+                    "EnvironmentAuthorizationError",
+                  );
+                }
+              }
+              for (const root of [undefined, cwd, outsideDir]) {
+                const lookup = client[WS_METHODS.sourceControlLookupRepository]({
+                  provider: "github",
+                  repository: "fixture/example",
+                  ...(root === undefined ? {} : { cwd: root }),
+                });
+                if (operate || root !== outsideDir) {
+                  assert.equal((yield* lookup).nameWithOwner, "fixture/example");
+                } else {
+                  assert.equal(
+                    (yield* lookup.pipe(Effect.flip))._tag,
+                    "EnvironmentAuthorizationError",
+                  );
+                }
+              }
+              for (const scriptPath of ["recorded.js", "unrecorded.js"]) {
+                const error = yield* client[ORCHESTRATION_WS_METHODS.getWorkflowScript]({
+                  threadId,
+                  scriptPath,
+                }).pipe(Effect.flip);
+                assert.equal(
+                  error._tag,
+                  operate || scriptPath === "recorded.js"
+                    ? "OrchestrationGetWorkflowScriptError"
+                    : "EnvironmentAuthorizationError",
+                );
+              }
+              const browse = client[WS_METHODS.filesystemBrowse]({
+                partialPath: `${outsideDir}${path.sep}`,
+              });
+              if (operate) {
+                yield* browse;
+              } else {
+                const searchInput = { cwd, query: "needle", limit: 20 };
+                const contents = yield* client[WS_METHODS.projectsSearchContents]({
+                  ...searchInput,
+                  caseSensitive: true,
+                  wholeWord: false,
+                  useRegex: false,
+                });
+                assert.deepEqual(
+                  contents.matches.map(({ path, lineContent }) => ({ path, lineContent })),
+                  [{ path: "needle-local.txt", lineContent: "needle local" }],
+                );
+                const entries = yield* client[WS_METHODS.projectsSearchEntries](searchInput);
+                assert.deepEqual(
+                  entries.entries.map((entry) => entry.path),
+                  ["needle-local.txt"],
+                );
+                for (const directoryPath of [undefined, ""]) {
+                  const list = yield* client[WS_METHODS.projectsListEntries]({
+                    cwd,
+                    ...(directoryPath === undefined ? {} : { directoryPath }),
+                  });
+                  assert.deepEqual(
+                    list.entries
+                      .map((entry) => entry.path)
+                      .filter((entry) => entry.includes("needle")),
+                    ["needle-local.txt"],
+                  );
+                }
+                const linkedDirectory = yield* client[WS_METHODS.projectsListEntries]({
+                  cwd,
+                  directoryPath: "needle-link",
+                }).pipe(Effect.flip);
+                assert.equal(linkedDirectory._tag, "ProjectListEntriesError");
+                const lookupFailure = yield* client[WS_METHODS.projectsListEntries]({
+                  cwd: unavailableRoot,
+                }).pipe(Effect.flip);
+                assert.match(lookupFailure.message, /Failed to verify the registered workspace/u);
+                const search = { cwd: outsideDir, query: "outside", limit: 10 };
+                const hostQueries = yield* Effect.all([
+                  client[WS_METHODS.projectsSearchEntries](search).pipe(Effect.flip),
+                  client[WS_METHODS.projectsSearchContents]({
+                    ...search,
+                    caseSensitive: false,
+                    wholeWord: false,
+                    useRegex: false,
+                  }).pipe(Effect.flip),
+                  client[WS_METHODS.projectsListEntries]({ cwd: outsideDir }).pipe(Effect.flip),
+                  browse.pipe(Effect.flip),
+                ]);
+                for (const error of hostQueries) {
+                  assert.equal(error._tag, "EnvironmentAuthorizationError");
+                  if (error._tag === "EnvironmentAuthorizationError") {
+                    assert.equal(error.requiredScope, "orchestration:operate");
+                  }
+                }
+              }
+              for (const input of [
+                { cwd, relativePath: outsideFile },
+                { cwd: outsideDir, relativePath: "outside.txt" },
+              ]) {
+                const read = client[WS_METHODS.projectsReadFile](input);
+                if (operate) {
+                  assert.equal((yield* read).contents, "outside");
+                } else {
+                  const error = yield* read.pipe(Effect.flip);
+                  assert.equal(error._tag, "EnvironmentAuthorizationError");
+                  if (error._tag === "EnvironmentAuthorizationError") {
+                    assert.equal(error.requiredScope, "orchestration:operate");
+                  }
+                }
+              }
+            }),
+          ),
+        );
+      }
+    }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
+  );
+
+  it.effect("lists refs for an unregistered review cwd only with review access", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped();
+      const cwd = path.join(workspaceRoot, "review");
+      yield* fileSystem.makeDirectory(cwd);
+      yield* fileSystem.writeFileString(path.join(cwd, "inside.txt"), "inside");
+      yield* buildAppUnderTest({ config: { cwd: workspaceRoot }, l2HarnessRealGitVcs: true });
+      for (const review of [false, true]) {
+        const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+          scope: review ? "orchestration:read review:write" : "orchestration:read",
+        });
+        assert.equal(token.response.status, 200);
+        const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+          headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+        });
+        const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+        const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+        yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            Effect.gen(function* () {
+              const refs = client[WS_METHODS.vcsListRefs]({ cwd });
+              if (review) {
+                const preview = yield* client[WS_METHODS.reviewGetDiffPreview]({ cwd });
+                assert.equal(preview.cwd, cwd);
+                const file = yield* client[WS_METHODS.projectsReadFile]({
+                  cwd,
+                  relativePath: "inside.txt",
+                }).pipe(Effect.flip);
+                assert.equal(file._tag, "EnvironmentAuthorizationError");
+                assert.deepEqual((yield* refs).refs, []);
+              } else {
+                assert.equal((yield* refs.pipe(Effect.flip))._tag, "EnvironmentAuthorizationError");
+              }
+            }),
+          ),
+        );
+      }
+    }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
+  );
+
+  it.effect("refuses ChatGPT profile RPCs for read-only sessions", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        layers: {
+          providerAuth: {
+            reconnectProfile: () => Effect.succeed(null),
+            importProfile: () => Effect.succeed(providerSetupAuthState),
+          },
+        },
+      });
+      const token = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: "orchestration:read",
+      });
+      assert.equal(token.response.status, 200);
+      const ticketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+        headers: { authorization: `Bearer ${token.body.access_token ?? ""}` },
+      });
+      const { ticket } = yield* responseJsonEffect<{ readonly ticket: string }>(ticketResponse);
+      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(ticket)}`;
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* () {
+            const instanceId = providerSetupInstanceId;
+            const errors = yield* Effect.all([
+              client[WS_METHODS.chatGptReconnectProfile]({ instanceId, methodId: "test" }).pipe(
+                Effect.result,
+              ),
+              client[WS_METHODS.chatGptImportProfile]({
+                instanceId,
+                profile: {
+                  registration: { clientId: "oaiapp_test" },
+                  credentials: {
+                    clientId: "oaiapp_test",
+                    accessToken: "fixture",
+                    refreshToken: null,
+                    idToken: "fixture",
+                    issuer: "fixture",
+                    expiresAt: 0,
+                    earliestRefreshAt: null,
+                    scopes: [],
+                    subject: "fixture",
+                    email: null,
+                  },
+                },
+              }).pipe(Effect.result),
+              client[WS_METHODS.chatGptHandoffSubscribe]({
+                instanceId,
+                environmentId: EnvironmentId.make("environment-test"),
+                attemptId: "fixture",
+                returnUrl: "",
+                profile: null,
+              }).pipe(Stream.runHead, Effect.result),
+            ]);
+            assert.deepEqual(
+              errors.map((result) => result._tag === "Failure" && result.failure._tag),
+              Array(3).fill("EnvironmentAuthorizationError"),
+            );
+          }),
+        ),
       );
     }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
   );
@@ -13451,6 +13878,104 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
   );
 
+  for (const scenario of ["legacy", "renamed legacy", "ordinary", "linked", "archived legacy"]) {
+    it.effect(`subscribeThread resumes a ${scenario} thread from a cached cursor`, () =>
+      Effect.gen(function* () {
+        const { config, appContext } = yield* buildAppUnderTest({ realOrchestrationStack: true });
+        const engine = Option.getOrThrow(
+          Context.getOption(appContext, OrchestrationEngine.OrchestrationEngineService),
+        );
+        const projectId = ProjectId.make("resume-crew-project");
+        const threadId = ThreadId.make("resume-crew-thread");
+        const parentThreadId = ThreadId.make("resume-crew-lead");
+        const createdAt = "2026-01-01T00:00:00.000Z";
+        yield* engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("resume-crew-project"),
+          projectId,
+          title: "Resume crew",
+          workspaceRoot: config.baseDir,
+          createdAt,
+        });
+        const threadDefaults = {
+          type: "thread.create",
+          projectId,
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+        } as const;
+        if (scenario === "linked") {
+          yield* engine.dispatch({
+            ...threadDefaults,
+            commandId: CommandId.make("resume-crew-lead"),
+            threadId: parentThreadId,
+            title: "Lead",
+          });
+        }
+        const title = "Crew Worker · notes";
+        const { sequence: afterSequence } = yield* engine.dispatch({
+          ...threadDefaults,
+          commandId: CommandId.make(
+            scenario === "ordinary" ? "resume-ordinary-thread" : `server:crew-create:${threadId}`,
+          ),
+          threadId,
+          title,
+          ...(scenario === "linked" ? { parentThreadId } : {}),
+        });
+        const expectedTitle = scenario === "renamed legacy" ? "Ordinary notes" : title;
+        if (scenario === "renamed legacy") {
+          yield* engine.dispatch({
+            type: "thread.meta.update",
+            commandId: CommandId.make("resume-crew-rename"),
+            threadId,
+            title: expectedTitle,
+          });
+        }
+        const replayed = yield* engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("resume-crew-activity"),
+          threadId,
+          activity: makeLiveToolActivityEvent(0, "tool.completed").payload.activity,
+          createdAt,
+        });
+        if (scenario === "archived legacy") {
+          yield* engine.dispatch({
+            type: "thread.archive",
+            commandId: CommandId.make("resume-crew-archive"),
+            threadId,
+          });
+        }
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId,
+              afterSequence,
+              requestCompletionMarker: true,
+            }).pipe(
+              Stream.takeUntil((item) => item.kind === "synchronized"),
+              Stream.runCollect,
+            ),
+          ),
+        );
+        const first = items[0];
+        assert.equal(first?.kind, "event");
+        assertTrue(first?.kind === "event");
+        assert.equal(first.event.sequence, replayed.sequence);
+        assert.equal(first.event.type, "thread.activity-appended");
+        assert.deepEqual(items.slice(1), [
+          scenario === "ordinary" || scenario === "linked"
+            ? { kind: "synchronized" }
+            : { kind: "synchronized", createdAsCrewMember: true },
+        ]);
+      }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
+    );
+  }
+
   it.effect("subscribeThread resets cached history when its ID is created again", () =>
     Effect.gen(function* () {
       const thread = {
@@ -13576,6 +14101,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               Effect.gen(function* () {
                 const threadResult = yield* client[ORCHESTRATION_WS_METHODS.subscribeThread]({
                   threadId: defaultThreadId,
+                  threadDeletion: true,
                   afterSequence: 0,
                   requestCompletionMarker: true,
                 }).pipe(
@@ -13593,7 +14119,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   return;
                 }
                 assertTrue(threadResult._tag === "Success");
-                assert.deepEqual(threadResult.success, [{ kind: "synchronized" }]);
+                assert.deepEqual(threadResult.success, [
+                  { kind: "event", event: deleted },
+                  { kind: "synchronized" },
+                ]);
                 const shellItems = yield* client[ORCHESTRATION_WS_METHODS.subscribeShell]({
                   afterSequence: 0,
                   requestCompletionMarker: true,
@@ -13619,84 +14148,122 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     );
   }
 
-  it.effect("subscribeThread bounds catch-up replay to the captured head", () =>
-    Effect.gen(function* () {
-      let replayHead: number | undefined;
-      let headSequence = 50;
-      const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
-      const now = "2026-01-01T00:00:00.000Z";
-      const messageEvent = {
-        sequence: 3,
-        eventId: EventId.make("event-replay-message"),
-        aggregateKind: "thread",
-        aggregateId: defaultThreadId,
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.message-sent",
-        payload: {
-          threadId: defaultThreadId,
-          messageId: MessageId.make("message-replay"),
-          role: "user",
-          text: "Replayed message",
-          turnId: null,
-          streaming: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
+  for (const threadDeletion of [undefined, true] as const) {
+    it.effect(`subscribeThread deletion opt-in ${threadDeletion} for live and replay`, () =>
+      Effect.gen(function* () {
+        let replayHead: number | undefined;
+        let headSequence = 50;
+        const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+        const now = "2026-01-01T00:00:00.000Z";
+        const messageEvent = {
+          sequence: 3,
+          eventId: EventId.make("event-replay-message"),
+          aggregateKind: "thread",
+          aggregateId: defaultThreadId,
+          occurredAt: now,
+          commandId: null,
+          causationEventId: null,
+          correlationId: null,
+          metadata: {},
+          type: "thread.message-sent",
+          payload: {
+            threadId: defaultThreadId,
+            messageId: MessageId.make("message-replay"),
+            role: "user",
+            text: "Replayed message",
+            turnId: null,
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        } satisfies Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
 
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.sync(() => headSequence),
-            streamDomainEvents: Stream.fromPubSub(liveEvents),
-            getThreadReplayStats: () =>
-              Effect.sync(() => {
-                headSequence = 100;
-                return { eventCount: 1, payloadBytes: 100, hasCreateEvent: false };
-              }),
-            readThreadEvents: ({ toSequenceInclusive }) => {
-              replayHead = toSequenceInclusive;
-              return Stream.fromEffect(
-                PubSub.publish(liveEvents, {
-                  ...messageEvent,
-                  sequence: 51,
-                  eventId: EventId.make("event-live-after-head"),
-                  payload: {
-                    ...messageEvent.payload,
-                    messageId: MessageId.make("message-live-after-head"),
-                  },
+        yield* buildAppUnderTest({
+          layers: {
+            orchestrationEngine: {
+              latestSequence: Effect.sync(() => headSequence),
+              streamDomainEvents: Stream.fromPubSub(liveEvents),
+              getThreadReplayStats: () =>
+                Effect.sync(() => {
+                  headSequence = 100;
+                  return { eventCount: 1, payloadBytes: 100, hasCreateEvent: false };
                 }),
-              ).pipe(Stream.flatMap(() => Stream.make(messageEvent)));
+              readThreadEvents: ({ toSequenceInclusive }) => {
+                replayHead = toSequenceInclusive;
+                return Stream.fromEffect(
+                  PubSub.publishAll(liveEvents, [
+                    {
+                      ...messageEvent,
+                      sequence: 51,
+                      eventId: EventId.make("event-live-after-head"),
+                      payload: {
+                        ...messageEvent.payload,
+                        messageId: MessageId.make("message-live-after-head"),
+                      },
+                    },
+                    {
+                      ...messageEvent,
+                      sequence: 52,
+                      eventId: EventId.make("event-live-delete-after-head"),
+                      type: "thread.deleted",
+                      payload: { threadId: defaultThreadId, deletedAt: now },
+                    },
+                    {
+                      ...messageEvent,
+                      sequence: 53,
+                      commandId: CommandId.make("server:bootstrap-thread-delete:live"),
+                      type: "thread.deleted",
+                      payload: { threadId: defaultThreadId, deletedAt: now },
+                    },
+                  ]),
+                ).pipe(
+                  Stream.flatMap(() =>
+                    Stream.make(
+                      messageEvent,
+                      {
+                        ...messageEvent,
+                        sequence: 5,
+                        type: "thread.deleted",
+                        payload: { threadId: defaultThreadId, deletedAt: now },
+                      },
+                      {
+                        ...messageEvent,
+                        sequence: 4,
+                        commandId: CommandId.make("server:bootstrap-thread-delete:replay"),
+                        type: "thread.deleted",
+                        payload: { threadId: defaultThreadId, deletedAt: now },
+                      },
+                    ),
+                  ),
+                );
+              },
             },
           },
-        },
-      });
+        });
 
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const items = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
-            threadId: defaultThreadId,
-            afterSequence: 0,
-            requestCompletionMarker: true,
-          }).pipe(
-            Stream.takeUntil((item) => item.kind === "synchronized"),
-            Stream.runCollect,
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const items = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+              threadId: defaultThreadId,
+              afterSequence: 0,
+              requestCompletionMarker: true,
+              ...(threadDeletion ? { threadDeletion } : {}),
+            }).pipe(
+              Stream.takeUntil((item) => item.kind === "synchronized"),
+              Stream.runCollect,
+            ),
           ),
-        ),
-      );
+        );
 
-      assert.deepEqual(
-        items.map((item) => (item.kind === "event" ? item.event.sequence : item.kind)),
-        [3, 51, "synchronized"],
-      );
-      assert.equal(replayHead, 50);
-    }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
-  );
+        assert.deepEqual(
+          items.map((item) => (item.kind === "event" ? item.event.sequence : item.kind)),
+          threadDeletion ? [3, 5, 51, 52, "synchronized"] : [3, 51, "synchronized"],
+        );
+        assert.equal(replayHead, 50);
+      }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
+    );
+  }
 
   it.effect("subscribeShell sends a fresh snapshot instead of replaying a large gap", () =>
     Effect.gen(function* () {

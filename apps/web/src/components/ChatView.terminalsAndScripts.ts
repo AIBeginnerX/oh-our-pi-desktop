@@ -1,3 +1,4 @@
+import { projectScriptsOverridePatch } from "./settings/scopedSettings";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { decideStop } from "./chat/stopBackgroundAgents.logic";
@@ -932,14 +933,7 @@ export function useChatViewTerminalsAndScripts({
             // The canonical key on servers that understand it; the legacy
             // per-project map is still translated on older ones.
             patch: supportsProjectSettingsOverrides
-              ? {
-                  projectSettingsOverrides: {
-                    [input.projectId]: {
-                      ...settings.projectSettingsOverrides[input.projectId],
-                      defaultProjectScripts: input.nextScripts,
-                    },
-                  },
-                }
+              ? projectScriptsOverridePatch(settings, input.projectId, input.nextScripts)
               : {
                   projectScriptOverrides: {
                     [input.projectId]: input.nextScripts,
@@ -971,7 +965,7 @@ export function useChatViewTerminalsAndScripts({
     },
     [
       environmentId,
-      settings.projectSettingsOverrides,
+      settings,
       supportsProjectSettingsOverrides,
       updateProjectScriptSettings,
       upsertKeybinding,

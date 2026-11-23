@@ -3,7 +3,9 @@ import {
   EnvironmentId,
   ProjectId,
   type ServerSettings,
+  ServerSettingsPatch,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
@@ -15,12 +17,21 @@ import {
   planProjectOverridesClear,
   planScopedSettingsClear,
   planScopedSettingsPatch,
+  projectScriptsOverridePatch,
   resolveScopedSettingsTargets,
+  scheduledPromptWrite,
   scopedSettingsAreMixed,
   scopedSettingsSource,
   selectScopedSettingsEnvironments,
 } from "./scopedSettings";
 import { resolveSettingsScope } from "./settingsScope";
+
+const decodeLegacySettingsPatch = Schema.decodeUnknownSync(
+  Schema.Struct({
+    projectSettingsOverrides: ServerSettingsPatch.fields.projectSettingsOverrides,
+    scheduledPrompts: ServerSettingsPatch.fields.scheduledPrompts,
+  }),
+);
 
 function environment(
   id: string,
@@ -252,22 +263,18 @@ describe("scoped settings writes", () => {
       defaultAutoPull: true,
     });
     expect(plan.unavailableReason).toBeNull();
-    expect(plan.serverWrites).toEqual([
-      {
-        environmentId: server.environmentId,
-        label: server.label,
-        patch: {
-          projectSettingsOverrides: {
-            [projectId]: { enableAgentBrowserAccess: false, defaultAutoPull: true },
-          },
-        },
-      },
-      {
-        environmentId: laptop.environmentId,
-        label: laptop.label,
-        patch: { projectSettingsOverrides: { [laptopProjectId]: { defaultAutoPull: true } } },
-      },
+    expect(plan.serverWrites.map(({ environmentId }) => environmentId)).toEqual([
+      server.environmentId,
+      laptop.environmentId,
     ]);
+    const settings = withExisting.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS;
+    expect(
+      applyServerSettingsPatch(settings, plan.serverWrites[0]!.patch).projectSettingsOverrides,
+    ).toEqual({ [projectId]: { enableAgentBrowserAccess: false, defaultAutoPull: true } });
+    expect(
+      applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, plan.serverWrites[1]!.patch)
+        .projectSettingsOverrides,
+    ).toEqual({ [laptopProjectId]: { defaultAutoPull: true } });
     expect(
       planScopedSettingsPatch(checkout, [laptop, server], { defaultAutoPull: true }),
     ).toMatchObject({
@@ -302,7 +309,15 @@ describe("scoped settings writes", () => {
     const plan = planScopedSettingsPatch(project, [machine, customized], {
       worktreeCleanup: { mode: "custom", rules: { worktreeOnDelete: true } },
     });
-    expect(plan.serverWrites.map((write) => write.patch.projectSettingsOverrides)).toEqual([
+    expect(
+      plan.serverWrites.map(({ environmentId, patch }) => {
+        const target = environmentId === machine.environmentId ? machine : customized;
+        return applyServerSettingsPatch(
+          target.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+          patch,
+        ).projectSettingsOverrides;
+      }),
+    ).toEqual([
       {
         [projectId]: {
           defaultAutoPull: true,
@@ -332,10 +347,11 @@ describe("scoped settings writes", () => {
       },
     ]);
     expect(
-      planScopedSettingsClear(checkout, [customized], ["worktreeCleanup"]).serverWrites[0]?.patch,
-    ).toEqual({
-      projectSettingsOverrides: { [projectId]: { defaultAutoPull: true } },
-    });
+      applyServerSettingsPatch(
+        customized.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS,
+        planScopedSettingsClear(checkout, [customized], ["worktreeCleanup"]).serverWrites[0]!.patch,
+      ).projectSettingsOverrides,
+    ).toEqual({ [projectId]: { defaultAutoPull: true } });
     expect(
       planScopedSettingsPatch(project, [machine, customized], {
         storageCleanup: { browserArtifactsAfterDays: 8 },
@@ -347,9 +363,14 @@ describe("scoped settings writes", () => {
     const plan = planScopedSettingsPatch(project, [laptop, server], {
       enableAgentDeviceAccess: true,
     });
-    expect(plan.serverWrites.map((write) => write.patch)).toEqual([
-      { projectSettingsOverrides: { [projectId]: { enableAgentDeviceAccess: true } } },
-      { projectSettingsOverrides: { [laptopProjectId]: { enableAgentDeviceAccess: true } } },
+    expect(
+      plan.serverWrites.map(
+        ({ patch }) =>
+          applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, patch).projectSettingsOverrides,
+      ),
+    ).toEqual([
+      { [projectId]: { enableAgentDeviceAccess: true } },
+      { [laptopProjectId]: { enableAgentDeviceAccess: true } },
     ]);
     for (const patch of [{ enableDeviceSupport: true }, { deviceHosts: [] }]) {
       expect(planScopedSettingsPatch(project, environments, patch).serverWrites).toEqual([]);
@@ -378,20 +399,21 @@ describe("scoped settings writes", () => {
       },
     });
     const plan = planScopedSettingsClear(checkout, [laptop, withOverrides], ["defaultAutoPull"]);
-    expect(plan.serverWrites).toEqual([
-      {
-        environmentId: server.environmentId,
-        label: server.label,
-        patch: { projectSettingsOverrides: { [projectId]: { enableAgentBrowserAccess: false } } },
-      },
+    const settings = withOverrides.serverConfig?.settings ?? DEFAULT_SERVER_SETTINGS;
+    expect(plan.serverWrites.map(({ environmentId }) => environmentId)).toEqual([
+      server.environmentId,
     ]);
     expect(
-      planScopedSettingsClear(
-        checkout,
-        [laptop, withOverrides],
-        ["defaultAutoPull", "enableAgentBrowserAccess"],
-      ).serverWrites[0]?.patch,
-    ).toEqual({ projectSettingsOverrides: { [projectId]: null } });
+      applyServerSettingsPatch(settings, plan.serverWrites[0]!.patch).projectSettingsOverrides,
+    ).toEqual({ [projectId]: { enableAgentBrowserAccess: false } });
+    const clearBoth = planScopedSettingsClear(
+      checkout,
+      [laptop, withOverrides],
+      ["defaultAutoPull", "enableAgentBrowserAccess"],
+    );
+    expect(
+      applyServerSettingsPatch(settings, clearBoth.serverWrites[0]!.patch).projectSettingsOverrides,
+    ).toEqual({});
   });
 
   it("never substitutes an environment-default write for an invalid scope", () => {
@@ -485,28 +507,23 @@ describe("project overrides at environment scope", () => {
   });
 
   it("clears only those keys and drops entries that become empty", () => {
+    const target = environment(laptop, {
+      [fleet]: { defaultAutoPull: true, defaultThreadEnvMode: "local" },
+      [t3]: { defaultAutoPull: true },
+    });
     const plan = planProjectOverridesClear(
-      [
-        environment(laptop, {
-          [fleet]: { defaultAutoPull: true, defaultThreadEnvMode: "local" },
-          [t3]: { defaultAutoPull: true },
-        }),
-      ],
+      [target],
       [
         { environmentId: laptop, projectId: fleet },
         { environmentId: laptop, projectId: t3 },
       ],
       ["defaultAutoPull"],
     );
-    expect(plan.serverWrites).toEqual([
-      {
-        environmentId: laptop,
-        label: laptop,
-        patch: {
-          projectSettingsOverrides: { [fleet]: { defaultThreadEnvMode: "local" }, [t3]: null },
-        },
-      },
-    ]);
+    expect(plan.serverWrites.map(({ environmentId }) => environmentId)).toEqual([laptop]);
+    expect(
+      applyServerSettingsPatch(target.serverConfig.settings, plan.serverWrites[0]!.patch)
+        .projectSettingsOverrides,
+    ).toEqual({ [fleet]: { defaultThreadEnvMode: "local" } });
   });
 });
 
@@ -538,27 +555,29 @@ describe("null patches at project scope", () => {
         },
       },
     ];
+    const inherit = planScopedSettingsPatch(scope, environments, { defaultThreadEnvMode: null });
+    const unsetModel = planScopedSettingsPatch(scope, environments, {
+      defaultModelSelection: null,
+    });
+    const settings = environments[0]!.serverConfig.settings;
     expect(
-      planScopedSettingsPatch(scope, environments, { defaultThreadEnvMode: null }).serverWrites[0]
-        ?.patch,
-    ).toEqual({ projectSettingsOverrides: { [projectId]: { defaultAutoPull: true } } });
+      applyServerSettingsPatch(settings, inherit.serverWrites[0]!.patch).projectSettingsOverrides,
+    ).toEqual({ [projectId]: { defaultAutoPull: true } });
     expect(
-      planScopedSettingsPatch(scope, environments, { defaultModelSelection: null }).serverWrites[0]
-        ?.patch,
+      applyServerSettingsPatch(settings, unsetModel.serverWrites[0]!.patch)
+        .projectSettingsOverrides,
     ).toEqual({
-      projectSettingsOverrides: {
-        [projectId]: {
-          defaultThreadEnvMode: "worktree",
-          defaultAutoPull: true,
-          defaultModelSelection: null,
-        },
+      [projectId]: {
+        defaultThreadEnvMode: "worktree",
+        defaultAutoPull: true,
+        defaultModelSelection: null,
       },
     });
   });
 });
 
 describe("partial object patches at project scope", () => {
-  it("completes a writing style field patch from the target's effective value", () => {
+  it("keeps writing instructions and template changes made from the same snapshot", () => {
     const environmentId = EnvironmentId.make("laptop");
     const projectId = ProjectId.make("fleet");
     const member = {
@@ -585,38 +604,91 @@ describe("partial object patches at project scope", () => {
         },
       },
     };
-    const plan = planScopedSettingsPatch(
-      {
-        kind: "project",
-        group: {} as never,
-        environmentId: null,
-        label: "fleet",
-        members: [member as never],
-        environmentIds: [environmentId],
-      },
-      [
-        {
-          environmentId,
-          label: "Laptop",
-          connection: { phase: "connected" },
-          serverConfig: {
-            settings,
-            environment: { capabilities: { projectSettingsOverrides: true } },
-          },
-        },
-      ],
-      { sourceControlWritingStyle: { customInstructions: "Be terse." } },
+    const scope = {
+      kind: "project" as const,
+      group: {} as never,
+      environmentId: null,
+      label: "fleet",
+      members: [member as never],
+      environmentIds: [environmentId],
+    };
+    const environments = [environment("laptop", { settings })];
+    const instructions = planScopedSettingsPatch(scope, environments, {
+      sourceControlWritingStyle: { customInstructions: "Be terse." },
+    });
+    const templates = planScopedSettingsPatch(scope, environments, {
+      sourceControlWritingStyle: { followChangeRequestTemplates: true },
+    });
+    const saved = [...instructions.serverWrites, ...templates.serverWrites].reduce(
+      (current, { patch }) => applyServerSettingsPatch(current, patch),
+      settings as ServerSettings,
     );
-    expect(plan.serverWrites[0]?.patch).toEqual({
-      projectSettingsOverrides: {
-        [projectId]: {
-          sourceControlWritingStyle: {
-            mode: "custom",
-            customInstructions: "Be terse.",
-            followChangeRequestTemplates: false,
-          },
-        },
-      },
+    expect(saved.projectSettingsOverrides[projectId]?.sourceControlWritingStyle).toEqual({
+      mode: "custom",
+      customInstructions: "Be terse.",
+      followChangeRequestTemplates: true,
     });
   });
+});
+
+it.each([[[]], [null]] as const)(
+  "keeps another project setting when saving scripts %j",
+  (scripts) => {
+    const snapshot = {
+      ...DEFAULT_SERVER_SETTINGS,
+      projectSettingsOverrides: { [projectId]: { defaultProjectScripts: [] } },
+    };
+    const scriptPatch = projectScriptsOverridePatch(snapshot, projectId, scripts);
+    const latest = applyServerSettingsPatch(snapshot, {
+      projectSettingsOverridePatches: { [projectId]: { set: { defaultAutoPull: true } } },
+    });
+    const saved = applyServerSettingsPatch(latest, scriptPatch);
+    expect(saved.projectSettingsOverrides[projectId]).toEqual(
+      scripts === null
+        ? { defaultAutoPull: true }
+        : { defaultAutoPull: true, defaultProjectScripts: [] },
+    );
+  },
+);
+
+it("keeps project setting saves and resets on servers that ignore operation fields", () => {
+  const settings = {
+    ...DEFAULT_SERVER_SETTINGS,
+    projectSettingsOverrides: {
+      [projectId]: { defaultAutoPull: true, enableAgentDeviceAccess: true },
+    },
+  };
+  const target = environment("Server", { settings });
+  const save = planScopedSettingsPatch(checkout, [target], { defaultAutoPull: false });
+  const reset = planScopedSettingsClear(checkout, [target], ["enableAgentDeviceAccess"]);
+  for (const [plan, expected] of [
+    [save, { defaultAutoPull: false, enableAgentDeviceAccess: true }],
+    [reset, { defaultAutoPull: true }],
+  ] as const) {
+    const patch = decodeLegacySettingsPatch(plan.serverWrites[0]!.patch);
+    expect(applyServerSettingsPatch(settings, patch).projectSettingsOverrides[projectId]).toEqual(
+      expected,
+    );
+  }
+});
+
+it("keeps scheduled prompt changes on servers that ignore operation fields", () => {
+  const entry = {
+    id: "daily",
+    projectId,
+    title: "Daily check",
+    prompt: "Review open issues.",
+    enabled: true,
+    hour: 9,
+    minute: 30,
+  };
+  const snapshot = { ...DEFAULT_SERVER_SETTINGS, scheduledPrompts: [entry] };
+  const patch = scheduledPromptWrite(snapshot.scheduledPrompts, {
+    type: "update",
+    id: entry.id,
+    changes: { enabled: false },
+  });
+  expect(
+    applyServerSettingsPatch(snapshot, decodeLegacySettingsPatch(patch)).scheduledPrompts,
+  ).toEqual([{ ...entry, enabled: false }]);
 });

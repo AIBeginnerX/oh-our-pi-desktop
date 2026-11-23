@@ -147,6 +147,7 @@ import {
   type CrewTaskStatus,
   crewFailureKind,
   crewFallbackNote,
+  crewThreadCreationCommandId,
   CANDIDATE_CHECKOUT_PROMPT,
   ISOLATED_CHECKOUT_PROMPT,
 } from "./crewLogic.ts";
@@ -967,7 +968,7 @@ export const make = Effect.gen(function* () {
     const message = withCrewMemoryReferences(input.prompt, input.memory ?? []);
     yield* engine.dispatch({
       type: "thread.create",
-      commandId: CommandId.make(`server:crew-create:${threadId}`),
+      commandId: crewThreadCreationCommandId(threadId),
       threadId,
       projectId: input.lead.projectId,
       title: crewThreadTitle(input.role, input.subject),
@@ -2698,7 +2699,7 @@ export const make = Effect.gen(function* () {
       lock: yield* Semaphore.make(1),
       checkLock: yield* Semaphore.make(1),
     };
-    yield* persistTask(record);
+    yield* persistTask(record).pipe(Effect.tapError(() => dropIsolated(record)));
     tasks.set(taskId, record);
     leadIds.add(record.leadThreadId);
     // A stop that landed after the record was built but before it was listed found nothing to

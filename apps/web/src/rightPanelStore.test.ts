@@ -21,6 +21,74 @@ beforeEach(() => {
 });
 
 describe("rightPanelStore", () => {
+  it("opens a chat picker and replaces its scoped target without adding tabs", () => {
+    const store = useRightPanelStore.getState();
+    const remote = scopeThreadRef("env-2" as EnvironmentId, refA.threadId);
+    const active = () =>
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA);
+
+    store.open(refA, "chat");
+    expect(active()).toEqual({ id: "chat", kind: "chat", target: null });
+    store.openChat(refA, refB);
+    expect(active()).toMatchObject({ target: refB });
+    store.openChat(refA, remote);
+    store.openChat(refA, refA);
+    expect(
+      selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA).surfaces,
+    ).toEqual([{ id: "chat", kind: "chat", target: remote }]);
+  });
+
+  it("remembers a closed chat per host across reload and forgets a cleared target", () => {
+    const store = useRightPanelStore.getState();
+    const active = (ref = refA) =>
+      selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, ref);
+
+    store.openChat(refA, refB);
+    store.closeSurface(refA, "chat");
+    expect(active()).toBeNull();
+    // Opening another surface in between keeps the remembered chat.
+    store.open(refA, "diff");
+    store.closeSurface(refA, "diff");
+    const persisted = JSON.parse(
+      JSON.stringify({ byThreadKey: useRightPanelStore.getState().byThreadKey }),
+    );
+    useRightPanelStore.setState(migratePersistedRightPanelState(persisted));
+    store.open(refA, "chat");
+    expect(active()).toMatchObject({ target: refB });
+    store.open(refB, "chat");
+    expect(active(refB)).toMatchObject({ target: null });
+    store.openChat(refA, null);
+    store.closeAllSurfaces(refA);
+    store.open(refA, "chat");
+    expect(active()).toMatchObject({ target: null });
+  });
+
+  it("restores a persisted chat alongside legacy tabs and discards invalid targets", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "diff");
+    store.openChat(refA, refB);
+    const persisted = { byThreadKey: useRightPanelStore.getState().byThreadKey };
+    expect(
+      selectActiveRightPanelSurface(migratePersistedRightPanelState(persisted).byThreadKey, refA),
+    ).toEqual({ id: "chat", kind: "chat", target: refB });
+    const invalid = migratePersistedRightPanelState({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "chat",
+          surfaces: [
+            { id: "diff", kind: "diff" },
+            { id: "chat", kind: "chat", target: refA },
+          ],
+        },
+      },
+    });
+    expect(selectThreadRightPanelState(invalid.byThreadKey, refA).surfaces).toEqual([
+      { id: "diff", kind: "diff" },
+      { id: "chat", kind: "chat", target: null },
+    ]);
+  });
+
   it("gives each host/device its own tab and preserves renamed tabs", () => {
     const store = useRightPanelStore.getState();
     const android = {

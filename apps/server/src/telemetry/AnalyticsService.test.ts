@@ -1,6 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
+import * as TestClock from "effect/testing/TestClock";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as HttpServer from "effect/unstable/http/HttpServer";
@@ -47,6 +52,53 @@ interface RecordedBatchBody {
 }
 
 it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
+  it.effect("bounds the final flush when the analytics endpoint stalls", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const cancelled = yield* Deferred.make<void>();
+      const client = HttpClient.make((request) =>
+        Deferred.succeed(started, undefined).pipe(
+          Effect.andThen(Deferred.await(release)),
+          Effect.as(HttpClientResponse.fromWeb(request, Response.json({}))),
+          Effect.onInterrupt(() => Deferred.succeed(cancelled, undefined)),
+        ),
+      );
+      const runtimeLayer = AnalyticsService.layer.pipe(
+        Layer.provide(
+          ServerConfig.ServerConfig.layerTest(process.cwd(), {
+            prefix: "t3-telemetry-shutdown-",
+          }),
+        ),
+        Layer.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(
+              ConfigProvider.fromUnknown({
+                T3CODE_TELEMETRY_ENABLED: true,
+                T3CODE_POSTHOG_KEY: "analytics-test-placeholder",
+              }),
+            ),
+            Layer.succeed(HttpClient.HttpClient, client),
+            Layer.succeed(HostProcessPlatform, "linux"),
+            Layer.succeed(HostProcessArchitecture, "arm64"),
+          ),
+        ),
+      );
+
+      const closing = yield* Effect.gen(function* () {
+        const analytics = yield* AnalyticsService.AnalyticsService;
+        yield* analytics.record("test.shutdown");
+      }).pipe(Effect.provide(runtimeLayer), Effect.forkChild);
+
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("2 seconds");
+      const cancelledOnTime = yield* Deferred.isDone(cancelled);
+      if (!cancelledOnTime) yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(closing);
+      assert.isTrue(cancelledOnTime, "shutdown must cancel the stalled request by the deadline");
+    }),
+  );
+
   it.effect("does not send batch requests when enabled without a PostHog key", () =>
     Effect.gen(function* () {
       const capturedPaths: Array<string> = [];

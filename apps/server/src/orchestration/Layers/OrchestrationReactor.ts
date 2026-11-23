@@ -1,6 +1,7 @@
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
 import {
   OrchestrationReactor,
@@ -11,6 +12,7 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import * as ThreadGoalReactor from "../ThreadGoalReactor.ts";
+import * as PullRequestAutoFixReactor from "../PullRequestAutoFixReactor.ts";
 import * as ThreadPlanContinuationReactor from "../ThreadPlanContinuationReactor.ts";
 import * as ThreadSettlementReactor from "../ThreadSettlementReactor.ts";
 import * as PullRequestSyncReactor from "../PullRequestSyncReactor.ts";
@@ -29,6 +31,9 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const threadDeletionReactor = yield* ThreadDeletionReactor;
   const threadSettlementReactor = yield* ThreadSettlementReactor.ThreadSettlementReactor;
   const threadGoalReactor = yield* ThreadGoalReactor.ThreadGoalReactor;
+  const pullRequestAutoFixReactor = yield* Effect.serviceOption(
+    PullRequestAutoFixReactor.PullRequestAutoFixReactor,
+  );
   const threadPlanContinuationReactor =
     yield* ThreadPlanContinuationReactor.ThreadPlanContinuationReactor;
   const pullRequestSyncReactor = yield* PullRequestSyncReactor.PullRequestSyncReactor;
@@ -57,6 +62,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     yield* threadPullRequestReactor.start();
     yield* threadSettlementReactor.start();
     yield* threadGoalReactor.start();
+    if (Option.isSome(pullRequestAutoFixReactor)) yield* pullRequestAutoFixReactor.value.start();
     yield* threadPlanContinuationReactor.start();
     yield* pullRequestSyncReactor.start();
     yield* agentAwarenessRelay.start();

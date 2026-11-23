@@ -1691,9 +1691,10 @@ fn retry_task(app: &mut App, task: &TaskRef) {
     let (tx, task) = (app.sender(), task.clone());
     tokio::spawn(async move {
         let outcome = rpc
-            .call(
+            .call_with_timeout(
                 RETRY_RPC,
                 json!({"leadThreadId": lead, "taskId": task.task_id}),
+                None,
             )
             .await;
         RETRYING.store(false, Ordering::SeqCst);

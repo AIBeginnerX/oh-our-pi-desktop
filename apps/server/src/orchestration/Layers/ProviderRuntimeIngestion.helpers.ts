@@ -1011,6 +1011,20 @@ export function runtimeEventToActivities(
       ];
     }
 
+    case "prompt.suggestion":
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "prompt.suggestion",
+          summary: "Prompt suggestion",
+          payload: event.payload,
+          turnId: event.payload.turnId,
+          ...maybeSequence,
+        },
+      ];
+
     case "thread.token-usage.updated": {
       const payload = buildContextWindowActivityPayload(event);
       if (!payload) {

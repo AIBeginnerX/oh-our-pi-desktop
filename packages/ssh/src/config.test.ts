@@ -52,17 +52,26 @@ describe("ssh config", () => {
           "known.example.com ssh-ed25519 AAAA",
           "|1|hashed|entry ssh-ed25519 AAAA",
           "[bastion.example.com]:2222 ssh-ed25519 AAAA",
+          "[2001:db8::1]:2222 ssh-ed25519 AAAA",
           "",
         ].join("\n"),
       );
 
       const hosts = yield* discoverSshHosts({ homeDir });
+      assert.isFalse(hosts.some((host) => host.alias.startsWith("[")));
       assert.deepEqual(hosts, [
+        {
+          alias: "2001:db8::1",
+          hostname: "2001:db8::1",
+          username: null,
+          port: 2222,
+          source: "known-hosts",
+        },
         {
           alias: "bastion.example.com",
           hostname: "bastion.example.com",
           username: null,
-          port: null,
+          port: 2222,
           source: "known-hosts",
         },
         {
@@ -115,12 +124,12 @@ describe("ssh config", () => {
         ),
         [
           "::1",
+          "[port.example.com]:22",
+          "[ssh.example.com]:2200",
           "2001:db8::1",
           "github.com",
           "gitlab-alias",
           "gitlab.com",
-          "port.example.com",
-          "ssh.example.com",
         ],
       );
     }),

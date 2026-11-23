@@ -71,6 +71,8 @@ import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstra
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
+import { useT } from "../i18n";
+import { cycleTranscriptView } from "./ChatView.shortcutsAndRevert";
 import { useClientSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { useCustomThemes } from "../hooks/useCustomThemes";
@@ -465,6 +467,7 @@ function OpenCommandPaletteDialog(props: {
   const isActionsOnly = deferredQuery.startsWith(">");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
   const clientSettings = useClientSettings();
+  const t = useT();
   const createProject = useAtomCommand(projectEnvironment.create, {
     reportFailure: false,
   });
@@ -1810,6 +1813,24 @@ function OpenCommandPaletteDialog(props: {
   };
   actionItems.push(changeThemeItem);
 
+  const transcriptModeLabels = {
+    normal: t("Normal"),
+    thinking: t("Thinking"),
+    verbose: t("Verbose"),
+  };
+  actionItems.push({
+    kind: "action",
+    value: "action:cycle-transcript-view",
+    searchTerms: ["transcript", "chat display", "reasoning", "thinking", "verbose", "normal"],
+    title: t("Cycle transcript view"),
+    description: transcriptModeLabels[clientSettings.transcriptViewMode],
+    icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "chat.cycleTranscriptView",
+    run: async () => {
+      await cycleTranscriptView();
+    },
+  });
+
   const changeAppearanceItem: CommandPaletteSubmenuItem = {
     kind: "submenu",
     value: "action:change-appearance",
@@ -2649,8 +2670,8 @@ function OpenCommandPaletteDialog(props: {
       // pass the bootstrap-mapped instance id (not the catalog environmentId).
       // A WSL-only primary has no secondary bootstrap, so resolve its instance
       // id from desktop settings. Windows and combo-mode primaries still omit
-      // the target to preserve the native primary picker. The desktop converts
-      // a WSL UNC selection back to a Linux path before returning.
+      // the target to preserve the native primary picker. Picks in the running distribution return Linux paths;
+      // picks in another distribution stay UNC so they can be routed below.
       const pickerTargetEnvironmentId = resolveProjectPickerTarget({
         browseEnvironmentId,
         primaryEnvironmentId,

@@ -69,13 +69,23 @@ back to the reusable credential. OAuth exchanges create ordinary local bearer
 or DPoP children with normal expiry and revocation. The reusable cookie expires
 after 30 days.
 
-## The environment is the filesystem boundary
+## Filesystem access follows session scope
 
-Projects are organizational boundaries, not filesystem sandboxes.
-`orchestration:read` permits reading files the server account can read, including
-absolute paths outside a project. This lets clients display artifacts that an
-agent writes in a temporary directory. Relative paths and writes still follow
-the [workspace path rules](../../apps/server/src/workspace/WorkspaceFileSystem.ts).
+Without `orchestration:operate`, filesystem reads are confined to registered
+roots of active projects and live thread worktrees. An explicit working
+directory must name one of those roots, and file targets must remain inside
+the authorized workspace after symlink resolution. Absolute media paths can
+resolve inside any registered root or live worktree.
+
+A session with `review:write` can read VCS status and refs in directories
+accepted by the review service. Repository lookup without a working directory
+uses the server default. Server-managed attachments, native app icons, and
+recorded workflow scripts are addressed by their server-managed references.
+
+`orchestration:operate` permits host filesystem browsing, provider session
+discovery, and opening supported files by absolute path, including artifacts
+an agent writes to a temporary directory. Relative paths and writes follow the
+[workspace path rules](../../apps/server/src/workspace/WorkspaceFileSystem.ts).
 
 Signed asset URLs are bearer credentials. A URL for media on the host grants
 access to one canonical file and its device/inode identity, not its containing directory.

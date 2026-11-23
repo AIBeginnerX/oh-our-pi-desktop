@@ -33,6 +33,21 @@ A role's own model is still tried once at the start of every new task, even whil
 
 While the auditor is still reviewing, the end of the chat says so; the usage line appears after the review and covers the whole request, including crew follow-ups, listing each model's cost, cache rate, and context. When the auditor asks for changes, or a crew task finishes after the brain has already answered, OOP sends the brain a follow-up turn with that report so it can fix the work or update its answer. Tasks handed out together come back in one follow-up, once the last of them finishes. The auditor checks whether a failing test or build already failed before the turn, and does not ask for fixes to failures that predate it. It also reads the brain's reply and which crew tasks are still running, so a step only you can do, or work still in progress, is noted as deferred instead of reported as a problem. A fix turn starts only when the auditor backs a blocking problem with evidence. Audit fixes stop after two rounds per message you send. When you turn the crew off for a chat, tasks already running keep going and their results still reach the brain, as plain information it may use; the brain starts no new crew tasks, and an auditor's request for changes is dropped. A crew member that finished only part of its task, or was blocked, says so instead of reporting it done, and the board shows that task as unfinished.
 
+## Sharing context across threads
+
+Ask your agent to find or read another thread in the same project. It can also send a labeled
+message that starts a turn in an idle thread. Threads in other projects are private, and busy,
+archived, and crew task threads cannot receive these messages. The receiving thread must use the
+same access and interaction mode as the sender, so an agent cannot start work with permissions it
+does not have. A thread that received a message cannot send one for an hour, which keeps two
+threads from starting turns in each other unattended; its agent can still be read from the other
+thread. If you send your own message to a thread at the same moment, the provider can receive the
+agent's message during your turn.
+
+When an agent suggests a task, choose **Open in new thread** on the card to put the prompt in a
+draft in the same project. You can review or edit it before you send. The suggestion itself starts
+no work.
+
 ## Task checklists
 
 The brain gives each crew task a short checklist of steps. A step that can be proved also carries
@@ -58,7 +73,7 @@ The brain and its crew show up live in the right panel under **Workflows** and *
 
 On the **Workflows** board a finished task is labeled **reported**, **tests reported** (the member says its tests passed, which nothing confirmed), **tested** (OOP saw its tests pass, or ran a checklist command that passed), or **audited** (an approving audit came after it), and never called done. Cards show tokens and, when the provider reports one, a cost; the brain's card totals the turn and says "+ unpriced" when part of it had no reported cost. Select a card to **Stop** a running task, **Open** its chat, or **Retry** one that failed, stopped, was blocked, or finished only part of its work. **Stop all** on the board, or `/crew stop [id|all]` in the terminal, stops every running task. Stopping the chat's own turn, or deleting the chat, also stops the crew tasks it started; a stopped task is never retried on another model.
 
-When the brain splits code edits across crew tasks that run at the same time, it can start each in its own git worktree. The member starts from your tracked files, uncommitted changes included, and its changes are applied back to the chat's workspace when it finishes. Untracked and ignored files such as installed dependencies are not copied. If the changes conflict with yours, nothing is applied, the worktree is kept, and the task is reported as unfinished with the worktree's path. A worktree needs a git repository with at least one commit; without one, the task is not started rather than run in your workspace.
+When the brain splits code edits across crew tasks that run at the same time, it can start each in its own git worktree. The member starts from your tracked files, uncommitted changes included, and its changes are applied back to the chat's workspace when it finishes. Other untracked and ignored files, such as installed dependencies, are not copied, except the [gitignored files a `.worktreeinclude` file selects](./thread-sidebar.md#copy-local-files-into-a-new-worktree), and a member's edits to ignored files are not applied back. If the changes conflict with yours, nothing is applied, the worktree is kept, and the task is reported as unfinished with the worktree's path. A worktree needs a git repository with at least one commit; without one, the task is not started rather than run in your workspace.
 
 When the brain is a Claude chat, crew roles that use a Claude model from the same account run as
 the brain's own subagents instead of separate chats. They start faster and share the brain's

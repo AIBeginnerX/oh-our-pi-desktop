@@ -25,6 +25,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { isCrewMemberThread } from "@t3tools/shared/crew";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
@@ -64,6 +65,17 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+
+export function canRollbackConversation(
+  thread: Pick<Thread, "parentThreadId" | "createdAsCrewMember"> | undefined,
+  providerStatus: Pick<ServerProvider, "supportsConversationRollback"> | null,
+): boolean {
+  return (
+    !isCrewMemberThread(thread ?? {}) &&
+    providerStatus !== null &&
+    providerStatus.supportsConversationRollback !== false
+  );
+}
 
 export function agentControlledBrowserCloseConfirmation(
   surfaces: readonly RightPanelSurface[],
@@ -754,10 +766,18 @@ export async function prepareRevertedMessageAttachments(input: {
   );
 }
 
+const messagesWithReleasedPreviews = new WeakSet<ChatMessage>();
+
 export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
-  if (message.role !== "user" || !message.attachments) {
+  if (
+    message.role !== "user" ||
+    !message.attachments ||
+    messagesWithReleasedPreviews.has(message)
+  ) {
     return;
   }
+  // A failed send and timeline teardown can both clean up the same optimistic row.
+  messagesWithReleasedPreviews.add(message);
   for (const attachment of message.attachments) {
     if (!isImageAttachment(attachment)) {
       continue;
@@ -1348,6 +1368,73 @@ export function shouldRefocusComposerOnWindowFocus(
       '[role="dialog"], [role="alertdialog"], [data-slot$="-popup"], [data-terminal-owner]',
     ) === null
   );
+}
+
+interface PreparingComposerDraft {
+  readonly prompt: string;
+  readonly images: readonly { id: string }[];
+  readonly files: readonly { id: string }[];
+  readonly terminalContexts: readonly unknown[];
+  readonly previewAnnotations: readonly unknown[];
+  readonly reviewComments: readonly unknown[];
+  readonly projectMemoryReferences: readonly unknown[];
+}
+
+function sameAttachmentIds(
+  submitted: PreparingComposerDraft["files"] = [],
+  current: PreparingComposerDraft["files"] = [],
+): boolean {
+  if (submitted === current) return true;
+  if (submitted.length !== current.length) return false;
+  const submittedIds = new Set(submitted.map(({ id }) => id));
+  return current.every(({ id }) => submittedIds.has(id));
+}
+
+function sameContextChips(submitted: readonly unknown[] = [], current: readonly unknown[] = []) {
+  return (
+    submitted === current ||
+    (submitted.length === current.length &&
+      submitted.every((chip, index) => chip === current[index]))
+  );
+}
+
+export function hasComposerDraftChangedWhilePreparing(
+  submitted: PreparingComposerDraft | null | undefined,
+  current: PreparingComposerDraft | null | undefined,
+): boolean {
+  return (
+    current?.prompt !== submitted?.prompt ||
+    !sameAttachmentIds(submitted?.images, current?.images) ||
+    !sameAttachmentIds(submitted?.files, current?.files) ||
+    !sameContextChips(submitted?.terminalContexts, current?.terminalContexts) ||
+    !sameContextChips(submitted?.previewAnnotations, current?.previewAnnotations) ||
+    !sameContextChips(submitted?.reviewComments, current?.reviewComments) ||
+    !sameContextChips(submitted?.projectMemoryReferences, current?.projectMemoryReferences)
+  );
+}
+
+export function recoverFailedComposerSend<Draft>(input: {
+  messageId: MessageId;
+  draft: Draft;
+  updateMessages: (update: (messages: ChatMessage[]) => ChatMessage[]) => void;
+  canRestore: () => boolean;
+  restore: (draft: Draft) => void;
+  offerRecovery: (restore: () => void) => void;
+}): void {
+  input.updateMessages((existing) => {
+    const remaining = existing.filter((message) => {
+      if (message.id !== input.messageId) return true;
+      revokeUserMessagePreviewUrls(message);
+      return false;
+    });
+    return remaining.length === existing.length ? existing : remaining;
+  });
+  const restore = () => input.restore(input.draft);
+  if (input.canRestore()) {
+    restore();
+  } else {
+    input.offerRecovery(restore);
+  }
 }
 
 export interface PlanFollowUpComposerSnapshot {

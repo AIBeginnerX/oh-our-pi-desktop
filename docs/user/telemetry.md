@@ -52,8 +52,8 @@ Apart from your agents' own traffic, OOP makes these requests on its own:
 - **Link icons.** Icons for links and websites in the chat load from Google's favicon service and
   from the sites themselves. To use generic icons instead, turn off **Settings → Appearance → Load
   link icons from Google**. On mobile, the switch is in Settings → Appearance.
-- **Images in responses.** Images that an agent links in its response load from where they are
-  hosted.
+- **Images in responses.** On web and desktop, remote images and videos in agent responses load
+  only after you click the load button, which names the host they load from.
 - **Provider update checks.** OOP checks GitHub and the npm registry for newer agent CLI versions.
   Turn this off with **Settings → General → Provider update checks**.
 - **Usage pricing.** Opening usage views downloads a public model price list from GitHub.

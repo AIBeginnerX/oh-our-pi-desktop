@@ -825,6 +825,16 @@ mod tests {
     }
 
     #[test]
+    fn flowgraph_in_markdown_renders_non_ascii_headers() {
+        for header in ["flowchart 한글", "graph 🚀"] {
+            let text = format!("```mermaid\n{header}\nA[Start] --> B[End]\n```");
+            let rows = plain(&render(&text, 60, &LAVENDER, &crate::theme::UNICODE)).join("\n");
+            assert!(rows.contains("Start"), "{rows}");
+            assert!(!rows.contains(header));
+        }
+    }
+
+    #[test]
     fn headings_lists_quotes_and_rules() {
         let text =
             "# Title\n\n- one\n- two with `code`\n1. first\n> quoted\n---\nplain **bold** and *it*";

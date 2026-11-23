@@ -2,6 +2,74 @@ import type { MessageCatalog } from "./types";
 
 /** The right panel tab bar and in-app browser. */
 export const PANELS_MESSAGES: MessageCatalog = {
+  "Chat beside": {
+    ko: "옆 채팅",
+    ja: "チャットを並べて表示",
+    "zh-CN": "并排聊天",
+    es: "Chat en paralelo",
+  },
+  "Read another chat beside this one.": {
+    ko: "현재 채팅 옆에서 다른 채팅을 읽습니다.",
+    ja: "現在のチャットの横で別のチャットを読みます。",
+    "zh-CN": "在当前聊天旁阅读另一个聊天。",
+    es: "Lee otro chat junto al actual.",
+  },
+  "Open beside current chat": {
+    ko: "현재 채팅 옆에서 열기",
+    ja: "現在のチャットの横で開く",
+    "zh-CN": "在当前聊天旁打开",
+    es: "Abrir junto al chat actual",
+  },
+  "Filter recent chats": {
+    ko: "최근 채팅 필터링",
+    ja: "最近のチャットを絞り込む",
+    "zh-CN": "筛选最近的聊天",
+    es: "Filtrar chats recientes",
+  },
+  "No matching chats": {
+    ko: "일치하는 채팅이 없습니다",
+    ja: "一致するチャットがありません",
+    "zh-CN": "没有匹配的聊天",
+    es: "No hay chats que coincidan",
+  },
+  "This chat is unavailable": {
+    ko: "이 채팅을 불러올 수 없습니다",
+    ja: "このチャットは読み込めません",
+    "zh-CN": "无法加载此聊天",
+    es: "No se puede cargar este chat",
+  },
+  "This chat is open on the left": {
+    ko: "이 채팅은 왼쪽에 열려 있습니다",
+    ja: "このチャットは左側で開いています",
+    "zh-CN": "此聊天已在左侧打开",
+    es: "Este chat está abierto a la izquierda",
+  },
+  "No messages yet": {
+    ko: "아직 메시지가 없습니다",
+    ja: "まだメッセージがありません",
+    "zh-CN": "暂无消息",
+    es: "Aún no hay mensajes",
+  },
+  "Loading chat…": {
+    ko: "채팅 불러오는 중…",
+    ja: "チャットを読み込み中…",
+    "zh-CN": "正在加载聊天…",
+    es: "Cargando chat…",
+  },
+  User: { ko: "사용자", ja: "ユーザー", "zh-CN": "用户", es: "Usuario" },
+  Assistant: { ko: "어시스턴트", ja: "アシスタント", "zh-CN": "助手", es: "Asistente" },
+  "Switch chat": {
+    ko: "채팅 전환",
+    ja: "チャットを切り替える",
+    "zh-CN": "切换聊天",
+    es: "Cambiar de chat",
+  },
+  "Clear selection": {
+    ko: "선택 해제",
+    ja: "選択を解除",
+    "zh-CN": "取消选择",
+    es: "Quitar selección",
+  },
   "Stop loading": {
     ko: "로드 중지",
     ja: "読み込みを停止",
@@ -43,6 +111,42 @@ export const PANELS_MESSAGES: MessageCatalog = {
     ja: "このブランチのプルリクエストを開きます。",
     "zh-CN": "打开此分支的拉取请求。",
     es: "Abre el pull request de esta rama.",
+  },
+  "Auto-fix failed checks": {
+    ko: "실패한 검사 자동 수정",
+    ja: "失敗したチェックを自動修正",
+    "zh-CN": "自动修复失败的检查",
+    es: "Corregir automáticamente las comprobaciones fallidas",
+  },
+  "Auto-fix on": {
+    ko: "자동 수정 켜짐",
+    ja: "自動修正オン",
+    "zh-CN": "自动修复已开启",
+    es: "Corrección automática activada",
+  },
+  "Auto-fix on · no open pull request on this branch": {
+    ko: "자동 수정 켜짐 · 이 브랜치에 열린 풀 리퀘스트 없음",
+    ja: "自動修正オン · このブランチに未完了のプルリクエストなし",
+    "zh-CN": "自动修复已开启 · 此分支没有打开的拉取请求",
+    es: "Corrección automática activada · sin pull request abierto en esta rama",
+  },
+  "Auto-fix: attempt {attempt}/{limit}": {
+    ko: "자동 수정 시도 {attempt}/{limit}",
+    ja: "自動修正 {attempt}/{limit} 回目",
+    "zh-CN": "自动修复：第 {attempt}/{limit} 次尝试",
+    es: "Corrección automática: intento {attempt}/{limit}",
+  },
+  "Auto-fix stopped after {limit} attempts": {
+    ko: "{limit}회 시도 후 자동 수정 중지",
+    ja: "{limit} 回の試行後に自動修正を停止",
+    "zh-CN": "自动修复在尝试 {limit} 次后停止",
+    es: "Corrección automática detenida tras {limit} intentos",
+  },
+  "Auto-fix paused until the next turn": {
+    ko: "다음 턴까지 자동 수정 일시 중지",
+    ja: "次のターンまで自動修正を一時停止",
+    "zh-CN": "自动修复已暂停，直到下一轮",
+    es: "Corrección automática en pausa hasta el próximo turno",
   },
   "Pull requests linked to this thread.": {
     ko: "이 스레드에 연결된 풀 리퀘스트입니다.",

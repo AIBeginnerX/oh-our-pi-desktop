@@ -29,6 +29,7 @@ import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import type { TestTurnResponse } from "./TestProviderAdapter.integration.ts";
 import {
@@ -822,20 +823,21 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
         8000,
       );
 
-      yield* harness.engine.dispatch({
-        type: "thread.checkpoint.revert",
+      const { sequence } = yield* harness.engine.dispatch({
+        type: "thread.conversation.revert",
         commandId: CommandId.make("cmd-checkpoint-revert"),
         threadId: THREAD_ID,
         turnCount: 1,
         createdAt: nowIso(),
       });
 
-      yield* harness.waitForDomainEvent((event) => event.type === "thread.reverted");
-      const revertedThread = yield* harness.waitForThread(
-        THREAD_ID,
-        (entry) =>
-          entry.checkpoints.length === 1 && entry.checkpoints[0]?.checkpointTurnCount === 1,
-      );
+      yield* harness.drainCheckpointReactor;
+      const events = yield* Stream.runCollect(harness.engine.readEvents(sequence));
+      assert.isTrue(events.some((event) => event.type === "thread.reverted"));
+      const snapshot = yield* harness.snapshotQuery.getSnapshot();
+      const revertedThread = snapshot.threads.find((thread) => thread.id === THREAD_ID);
+      assert.isDefined(revertedThread);
+      assert.lengthOf(revertedThread.checkpoints, 1);
       assert.equal(revertedThread.checkpoints[0]?.checkpointTurnCount, 1);
       assert.deepEqual(
         revertedThread.messages.map((message) => ({ role: message.role, text: message.text })),
@@ -862,7 +864,7 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
       );
       assert.equal(
         NodeFS.readFileSync(NodePath.join(harness.workspaceDir, "README.md"), "utf8"),
-        "v2\n",
+        "v3\n",
       );
       assert.equal(
         gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
@@ -881,22 +883,17 @@ it.live(
         yield* seedProjectAndThread(harness);
 
         yield* harness.engine.dispatch({
-          type: "thread.checkpoint.revert",
+          type: "thread.conversation.revert",
           commandId: CommandId.make("cmd-checkpoint-revert-no-session"),
           threadId: THREAD_ID,
           turnCount: 0,
           createdAt: nowIso(),
         });
 
-        const thread = yield* harness.waitForThread(THREAD_ID, (entry) =>
-          entry.activities.some(
-            (activity) =>
-              activity.kind === "checkpoint.revert.failed" &&
-              typeof activity.payload === "object" &&
-              activity.payload !== null,
-          ),
-        );
-        const failureActivity = thread.activities.find(
+        yield* harness.drainCheckpointReactor;
+        const snapshot = yield* harness.snapshotQuery.getSnapshot();
+        const thread = snapshot.threads.find((entry) => entry.id === THREAD_ID);
+        const failureActivity = thread?.activities.find(
           (activity) => activity.kind === "checkpoint.revert.failed",
         );
         assert.equal(failureActivity !== undefined, true);
@@ -1399,18 +1396,18 @@ it.live("reverts claudeAgent turns and rolls back provider conversation state", 
         );
 
         yield* harness.engine.dispatch({
-          type: "thread.checkpoint.revert",
+          type: "thread.conversation.revert",
           commandId: CommandId.make("cmd-checkpoint-revert-claude"),
           threadId: THREAD_ID,
           turnCount: 1,
           createdAt: nowIso(),
         });
 
-        const revertedThread = yield* harness.waitForThread(
-          THREAD_ID,
-          (entry) =>
-            entry.checkpoints.length === 1 && entry.checkpoints[0]?.checkpointTurnCount === 1,
-        );
+        yield* harness.drainCheckpointReactor;
+        const snapshot = yield* harness.snapshotQuery.getSnapshot();
+        const revertedThread = snapshot.threads.find((thread) => thread.id === THREAD_ID);
+        assert.isDefined(revertedThread);
+        assert.lengthOf(revertedThread.checkpoints, 1);
         assert.equal(revertedThread.checkpoints[0]?.checkpointTurnCount, 1);
         assert.equal(
           gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 1)),

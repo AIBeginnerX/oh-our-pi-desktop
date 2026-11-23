@@ -273,7 +273,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     readonly snapshot: OrchestrationThreadDetailSnapshot;
     readonly epoch: number;
   } | null>(null);
-  const persistence = yield* Queue.sliding<OrchestrationThreadDetailSnapshot>(1);
+  // Serialize disk removal with any save already in flight, and invalidate
+  // snapshots waiting in the queue or debounce window.
+  const persistenceLock = yield* Semaphore.make(1);
+  let persistenceGeneration = 0;
+  const persistence = yield* Queue.sliding<{
+    snapshot: OrchestrationThreadDetailSnapshot;
+    generation: number;
+  }>(1);
 
   const persist = Effect.fn("EnvironmentThreadState.persist")(function* (
     snapshot: OrchestrationThreadDetailSnapshot,
@@ -314,7 +321,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
   yield* Stream.fromQueue(persistence).pipe(
     Stream.debounce("500 millis"),
-    Stream.runForEach(persist),
+    Stream.runForEach(({ snapshot, generation }) =>
+      persistenceLock.withPermits(1)(
+        Effect.suspend(() =>
+          generation === persistenceGeneration ? persist(snapshot) : Effect.void,
+        ),
+      ),
+    ),
     Effect.forkScoped,
   );
 
@@ -366,21 +379,24 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     function* (thread: OrchestrationThread, snapshotSequence: number) {
       const currentPage = yield* SubscriptionRef.get(state).pipe(Effect.map((value) => value.page));
       yield* Queue.offer(persistence, {
-        snapshotSequence,
-        thread,
-        // Persist the window boundary with the window's content so a cache
-        // restore can keep paging from where the loaded history ends.
-        ...Option.match(currentPage, {
-          onNone: () => ({}),
-          onSome: (value) =>
-            ({
-              page: {
-                beforeCursor: value.beforeCursor,
-                hasMore: value.hasMore,
-                snapshotSequence,
-              },
-            }) as const,
-        }),
+        generation: persistenceGeneration,
+        snapshot: {
+          snapshotSequence,
+          thread,
+          // Persist the window boundary with the window's content so a cache
+          // restore can keep paging from where the loaded history ends.
+          ...Option.match(currentPage, {
+            onNone: () => ({}),
+            onSome: (value) =>
+              ({
+                page: {
+                  beforeCursor: value.beforeCursor,
+                  hasMore: value.hasMore,
+                  snapshotSequence,
+                },
+              }) as const,
+          }),
+        },
       });
     },
   );
@@ -412,9 +428,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
   });
 
+  // The deleted state can close the route and its subscription immediately.
+  // Complete the cache removal even if that interrupts the stream.
   const setDeleted = Effect.fn("EnvironmentThreadState.setDeleted")(function* () {
+    persistenceGeneration += 1;
     yield* Ref.set(awaitingCompletion, false);
     yield* Ref.update(historyEpoch, (epoch) => epoch + 1);
+    yield* Ref.set(pendingOlderPage, null);
     yield* SubscriptionRef.set(state, {
       data: Option.none(),
       status: "deleted",
@@ -422,19 +442,26 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       page: Option.none(),
     });
     yield* remember;
-    if (resumeCache !== undefined && resumeCache.owner !== owner) return;
-    yield* cache.removeThread(environmentId, threadId).pipe(
-      Effect.catch((error) =>
-        Effect.logWarning("Could not remove the cached thread.").pipe(
-          Effect.annotateLogs({
-            environmentId,
-            threadId,
-            error: error.message,
-          }),
+    yield* persistenceLock
+      .withPermits(1)(
+        Effect.suspend(() =>
+          resumeCache !== undefined && resumeCache.owner !== owner
+            ? Effect.void
+            : cache.removeThread(environmentId, threadId),
         ),
-      ),
-    );
-  });
+      )
+      .pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not remove the cached thread.").pipe(
+            Effect.annotateLogs({
+              environmentId,
+              threadId,
+              error: error.message,
+            }),
+          ),
+        ),
+      );
+  }, Effect.uninterruptible);
 
   // Body of applyItem, running under applyLock.
   const applyItemLocked = Effect.fn("EnvironmentThreadState.applyItemLocked")(function* (
@@ -442,6 +469,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   ) {
     if (item.kind === "synchronized") {
       yield* Ref.set(awaitingCompletion, false);
+      if (item.createdAsCrewMember === true) {
+        const { data } = yield* SubscriptionRef.get(state);
+        if (Option.isSome(data) && data.value.createdAsCrewMember !== true) {
+          yield* setThread({ ...data.value, createdAsCrewMember: true }, "keep");
+          return;
+        }
+      }
       yield* SubscriptionRef.update(state, (current) =>
         Option.isSome(current.data) && current.status !== "deleted" && Option.isNone(current.error)
           ? { ...current, status: "live" as const, error: Option.none() }
@@ -556,13 +590,15 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
         let thread = current.data.value;
         let sequence = yield* SubscriptionRef.get(lastSequence);
-        let synchronized = false;
+        let synchronized:
+          | Extract<OrchestrationThreadStreamItem, { kind: "synchronized" }>
+          | undefined;
         // Retain the last settled state even if the next turn starts before
         // this batch publishes. Its cursor must describe that settled content.
         let persistable: { thread: OrchestrationThread; sequence: number } | undefined;
         for (const item of items) {
           if (item.kind === "synchronized") {
-            synchronized = true;
+            if (synchronized?.createdAsCrewMember !== true) synchronized = item;
           } else if (item.kind === "event" && item.event.sequence > sequence) {
             sequence = item.event.sequence;
             const result = applyThreadDetailEvent(thread, item.event);
@@ -577,7 +613,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         if (persistable !== undefined && !shouldPersistThread(thread)) {
           yield* offerThreadPersistence(persistable.thread, persistable.sequence);
         }
-        if (synchronized) yield* applyItemLocked({ kind: "synchronized" });
+        if (synchronized !== undefined) yield* applyItemLocked(synchronized);
         yield* remember;
       }),
     );
@@ -632,9 +668,12 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     if (merged !== null && shouldPersistThread(merged)) {
       const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
       yield* Queue.offer(persistence, {
-        snapshotSequence,
-        thread: merged,
-        ...(snapshot.page === undefined ? {} : { page: { ...snapshot.page, snapshotSequence } }),
+        generation: persistenceGeneration,
+        snapshot: {
+          snapshotSequence,
+          thread: merged,
+          ...(snapshot.page === undefined ? {} : { page: { ...snapshot.page, snapshotSequence } }),
+        },
       });
     }
     yield* remember;
@@ -838,6 +877,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
         return {
           threadId,
+          threadDeletion: true,
           ...(canResume ? { afterSequence: sequence } : {}),
           ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
           ...(supportsReasoningMessages ? { reasoningMessages: true as const } : {}),
@@ -849,7 +889,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       }),
       {
         onDefect: () => setStreamError("Could not synchronize the thread."),
-        onExpectedFailure: (cause) => setStreamError(formatThreadError(cause)),
+        onExpectedFailure: (cause) =>
+          SubscriptionRef.get(state).pipe(
+            Effect.flatMap((current) =>
+              current.status === "deleted"
+                ? Effect.never
+                : setStreamError(formatThreadError(cause)),
+            ),
+          ),
         retryExpectedFailureAfter: "250 millis",
         resubscribe: foregroundResubscriptions,
       },

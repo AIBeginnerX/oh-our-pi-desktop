@@ -85,15 +85,28 @@ pub fn build(
     rects: &[(PaneId, Rect)],
     dividers: &[Divider],
 ) -> SceneOut {
-    for _ in 0..2 {
-        let generation = view.fonts.atlas_generation();
-        frame.clear();
-        let out = build_once(frame, view, panes, rects, dividers);
-        if view.fonts.atlas_generation() == generation {
-            return out;
-        }
+    build_with_atlas(frame, view, |frame, view| {
+        build_once(frame, view, panes, rects, dividers)
+    })
+}
+
+fn build_with_atlas(
+    frame: &mut Frame,
+    view: &mut ViewState,
+    mut build_pass: impl FnMut(&mut Frame, &mut ViewState) -> SceneOut,
+) -> SceneOut {
+    let generation = view.fonts.atlas_generation();
+    frame.clear();
+    let out = build_pass(frame, view);
+    if view.fonts.atlas_generation() == generation {
+        return out;
     }
-    SceneOut::default()
+
+    frame.clear();
+    view.fonts.begin_atlas_retry();
+    let out = build_pass(frame, view);
+    view.fonts.end_atlas_retry();
+    out
 }
 
 fn build_once(
@@ -478,6 +491,40 @@ mod tests {
         baseline: 27,
         line: 2,
     };
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn atlas_overflow_keeps_only_current_generation_glyphs() {
+        let mut fonts = Fonts::new(16.0);
+        let ime = ImeState::default();
+        let mut view = ViewState {
+            fonts: &mut fonts,
+            scale: 1.0,
+            window_focused: true,
+            blink_on: true,
+            ime: &ime,
+            focus: 0,
+            active_divider: None,
+        };
+        let mut frame = Frame::default();
+        let mut passes = 0;
+        let alpha = vec![255; 1500 * 1500];
+        for _ in 0..2 {
+            build_with_atlas(&mut frame, &mut view, |frame, view| {
+                passes += 1;
+                for (i, glyph) in ['a', 'b', 'c'].into_iter().enumerate() {
+                    if let Some(entry) = view.fonts.mask(glyph, 1500, 1500, &alpha) {
+                        push_glyph(frame, &entry, i as f32, 0.0, 0.0, [1.0; 4], &M, true);
+                    }
+                }
+                SceneOut::default()
+            });
+            assert_eq!(frame.glyphs.len(), 1);
+            assert_eq!(frame.glyphs[0].pos[0], 0.0);
+            assert_eq!(view.fonts.atlas.uploads.len(), 1);
+        }
+        assert_eq!(passes, 4);
+    }
 
     #[test]
     fn geometry_fits_whole_cells_inside_padding() {

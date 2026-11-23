@@ -108,6 +108,26 @@ describe("ReviewService", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("allows diff preview in a sub-repository whose name starts with two dots", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const cwd = `${workspaceRoot}/..foo`;
+      yield* fs.makeDirectory(cwd);
+      const detectCalls: Array<{ readonly cwd: string }> = [];
+
+      const result = yield* Effect.gen(function* () {
+        const review = yield* ReviewService.ReviewService;
+        return yield* review.getDiffPreview({ cwd });
+      }).pipe(Effect.provide(makeLayer({ workspaceRoot, baseDir, detectCalls })));
+
+      assert.strictEqual(result.cwd, cwd);
+      assert.deepStrictEqual(result.sources, []);
+      assert.deepStrictEqual(detectCalls, [{ cwd }]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("preserves unexpected path-resolution failures", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

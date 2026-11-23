@@ -788,6 +788,7 @@ export const makeClaudeMessageHandlers = (deps: makeClaudeMessageHandlersDeps) =
       return;
     }
 
+    context.promptSuggestionCandidate = undefined;
     const turn = context.turnState;
     const failureHint =
       turn?.authenticationFailureMessage ??

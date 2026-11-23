@@ -21,7 +21,10 @@ import {
 import { resolveProjectExpanded, useUiStateStore } from "../uiStateStore";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { useThreadActions } from "../hooks/useThreadActions";
+import {
+  deleteProjectAndClearThreadViewState,
+  type useThreadActions,
+} from "../hooks/useThreadActions";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
@@ -481,13 +484,12 @@ export const SidebarProjectItem = memo(function SidebarProjectItem(props: Sideba
   const removeProject = useCallback(
     async (member: SidebarProjectGroupMember) => {
       const memberProjectRef = scopeProjectRef(member.environmentId, member.id);
-      const result = await deleteProject({
-        environmentId: member.environmentId,
-        input: {
-          projectId: member.id,
-          force: true,
-        },
-      });
+      const result = await deleteProjectAndClearThreadViewState(memberProjectRef, () =>
+        deleteProject({
+          environmentId: member.environmentId,
+          input: { projectId: member.id, force: true },
+        }),
+      );
       if (result._tag === "Failure") {
         return result;
       }

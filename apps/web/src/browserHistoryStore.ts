@@ -14,6 +14,7 @@ export type BrowserHistoryEntry = { url: string; lastVisitedAt: number; title?: 
 
 export const BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT = 50;
 export const BROWSER_HISTORY_MAX_PROJECTS = 20;
+const BROWSER_HISTORY_MAX_PERSISTED_THREAD_MAPPINGS = 100;
 const BROWSER_HISTORY_MAX_URL_LENGTH = 2048;
 export const BROWSER_HISTORY_MAX_TITLE_LENGTH = 512;
 const MAX_VALID_DATE_MS = 8_640_000_000_000_000;
@@ -165,6 +166,7 @@ interface BrowserHistoryStoreState {
   ) => void;
   removeUrl: (projectKey: string, url: string) => void;
   registerThreadProject: (ref: ScopedThreadRef, projectKey: string) => void;
+  removeThread: (ref: ScopedThreadRef) => void;
 }
 
 function addPendingByThread<T>(
@@ -275,6 +277,23 @@ export const useBrowserHistoryStore = create<BrowserHistoryStoreState>()(
             pendingTitle.environmentHostname,
           );
       },
+      removeThread: (ref) => {
+        const threadKey = scopedThreadKey(ref);
+        const state = get();
+        if (
+          !Object.hasOwn(state.projectKeyByThreadKey, threadKey) &&
+          !Object.hasOwn(state.pendingVisitsByThreadKey, threadKey) &&
+          !Object.hasOwn(state.pendingTitlesByThreadKey, threadKey)
+        ) {
+          return;
+        }
+        const { [threadKey]: _project, ...projectKeyByThreadKey } = state.projectKeyByThreadKey;
+        const { [threadKey]: _visits, ...pendingVisitsByThreadKey } =
+          state.pendingVisitsByThreadKey;
+        const { [threadKey]: _titles, ...pendingTitlesByThreadKey } =
+          state.pendingTitlesByThreadKey;
+        set({ projectKeyByThreadKey, pendingVisitsByThreadKey, pendingTitlesByThreadKey });
+      },
     }),
     {
       name: BROWSER_HISTORY_STORAGE_KEY,
@@ -284,7 +303,10 @@ export const useBrowserHistoryStore = create<BrowserHistoryStoreState>()(
       ),
       partialize: (state) => ({
         byProjectKey: state.byProjectKey,
-        projectKeyByThreadKey: state.projectKeyByThreadKey,
+        projectKeyByThreadKey: boundPersistedThreadProjectKeys(
+          state.projectKeyByThreadKey,
+          state.byProjectKey,
+        ),
       }),
       migrate: migratePersistedBrowserHistoryState,
       merge: mergeBrowserHistoryState,
@@ -313,13 +335,20 @@ function migratePersistedThreadProjectKeys(
   if (!persistedState || typeof persistedState !== "object") return {};
   const raw = (persistedState as { projectKeyByThreadKey?: unknown }).projectKeyByThreadKey;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return boundPersistedThreadProjectKeys(raw as Record<string, unknown>, byProjectKey);
+}
+
+function boundPersistedThreadProjectKeys(
+  projectKeyByThreadKey: Record<string, unknown>,
+  byProjectKey: Record<string, BrowserHistoryEntry[]>,
+): Record<string, string> {
   return Object.fromEntries(
-    Object.entries(raw as Record<string, unknown>)
+    Object.entries(projectKeyByThreadKey)
       .filter(
         (entry): entry is [string, string] =>
-          typeof entry[1] === "string" && entry[1] in byProjectKey,
+          typeof entry[1] === "string" && Object.hasOwn(byProjectKey, entry[1]),
       )
-      .slice(-100),
+      .slice(-BROWSER_HISTORY_MAX_PERSISTED_THREAD_MAPPINGS),
   );
 }
 

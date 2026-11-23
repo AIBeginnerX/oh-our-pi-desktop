@@ -744,17 +744,6 @@ command(
   },
 );
 command(
-  "checkpoint.revert",
-  { turnCount: 1 },
-  {
-    type: "thread.checkpoint.revert",
-    commandId: "cmd-1",
-    threadId: THREAD,
-    turnCount: 1,
-    createdAt: T0,
-  },
-);
-command(
   "conversation.revert",
   { turnCount: 1 },
   {
@@ -878,6 +867,19 @@ put("config/server-config.json", {
   threadResumeCompletionMarker: true,
   environment: { serverVersion: "0.0.43" },
 });
+
+put(
+  "config/thread-pr-auto-fix-patch.json",
+  roundTrip(
+    contracts.ServerSettingsPatch,
+    {
+      threadPullRequestAutoFix: {
+        "thread-1": { enabled: true, setAt: T0 },
+      },
+    },
+    "thread-pr-auto-fix-patch.json",
+  ),
+);
 
 // --- memory: the project-memory RPC answers the terminal's /memory command reads ---------------
 //
@@ -1977,6 +1979,43 @@ if (!NodeFS.existsSync(NodePath.join(out, "pet", "mocha.json"))) {
   console.error("fixtures/pet/mocha.json is missing; src/pet.rs embeds it");
   process.exit(1);
 }
+
+const { selectPromptSuggestion } = await import(
+  NodeURL.pathToFileURL(
+    NodePath.join(root, "..", "..", "packages", "shared", "src", "promptSuggestion.ts"),
+  ).href
+);
+const suggestionRequestedAt = "2026-11-01T00:00:00.000Z";
+const suggestionCompletedAt = "2026-11-01T00:00:01.000Z";
+const suggestionThread = {
+  latestTurn: {
+    turnId: "current",
+    state: "completed",
+    requestedAt: suggestionRequestedAt,
+    startedAt: suggestionRequestedAt,
+    completedAt: suggestionCompletedAt,
+  },
+  session: { status: "ready" },
+  activities: [
+    { id: "first", kind: "prompt.suggestion", payload: { turnId: "current", text: "First" } },
+    { id: "second", kind: "prompt.suggestion", payload: { turnId: "current", text: "Second" } },
+    { id: "old", kind: "prompt.suggestion", payload: { turnId: "older", text: "Older" } },
+  ],
+  messages: [],
+};
+put(
+  "vectors/prompt-suggestion.json",
+  [
+    suggestionThread,
+    { ...suggestionThread, activities: suggestionThread.activities.slice(-1) },
+    { ...suggestionThread, latestTurn: { ...suggestionThread.latestTurn, state: "running" } },
+    { ...suggestionThread, session: { status: "starting" } },
+    {
+      ...suggestionThread,
+      messages: [{ id: "next-user", role: "user", createdAt: "2026-11-01T00:00:02.000Z" }],
+    },
+  ].map((thread) => ({ thread, expected: selectPromptSuggestion(thread) })),
+);
 
 const wanted = new Set(files.keys());
 const present = [];

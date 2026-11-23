@@ -2,6 +2,7 @@ import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setu
 export { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import * as Equal from "effect/Equal";
 import { shallow } from "zustand/vanilla/shallow";
+import { deriveTimelineMinimapItems } from "./timelineMinimapItems";
 import { renderCodexDirectivesForCopy } from "@t3tools/client-runtime/codex-markdown-directives";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
 import {
@@ -27,7 +28,7 @@ import {
   workEntryIndicatesToolSuccess,
   workEntryIndicatesToolNeutralStatus,
   workLogEntryIsToolLike,
-  type TimelineEntry,
+  type TimelineEntry as SessionTimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
@@ -35,6 +36,9 @@ import type { QueuedComposerMessage } from "../../queuedMessageStore";
 import {
   type MessageId,
   type OrchestrationLatestTurn,
+  type OrchestrationThreadActivity,
+  type ScopedProjectRef,
+  type TranscriptViewMode,
   type TurnId,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
@@ -44,6 +48,27 @@ const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
 const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
 const TIMELINE_MINIMAP_PERSISTENT_GUTTER = 48;
+
+export function cycleTranscriptViewMode(mode: TranscriptViewMode): TranscriptViewMode {
+  switch (mode) {
+    case "normal":
+      return "thinking";
+    case "thinking":
+      return "verbose";
+    case "verbose":
+      return "normal";
+  }
+}
+
+export function resolveTranscriptExpanded(
+  mode: TranscriptViewMode,
+  disclosure: "reasoning" | "work",
+  manualChoice: boolean | undefined,
+): boolean {
+  return (
+    manualChoice ?? (mode === "verbose" || (mode === "thinking" && disclosure === "reasoning"))
+  );
+}
 
 function singleToolCallLabel(entry: WorkLogEntry): string {
   const toolPresentation = resolveWorkEntryToolPresentation(entry, "completed");
@@ -350,6 +375,38 @@ export type TimelineLatestTurn = Pick<
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
+type SuggestedTaskTimelineEntry = {
+  kind: "suggested-task";
+  id: string;
+  createdAt: string;
+  title: string;
+  prompt: string;
+  projectRef: ScopedProjectRef;
+};
+type TimelineEntry = SessionTimelineEntry | SuggestedTaskTimelineEntry;
+
+export function collectSuggestedTaskEntries(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  projectRef: ScopedProjectRef,
+): ReadonlyMap<string, Omit<SuggestedTaskTimelineEntry, "id" | "createdAt">> {
+  const suggestions = new Map<string, Omit<SuggestedTaskTimelineEntry, "id" | "createdAt">>();
+  for (const { id, kind, payload } of activities) {
+    if (kind !== "task.suggested" || typeof payload !== "object" || payload === null) continue;
+    const { suggestionId, title, prompt } = payload as Record<string, unknown>;
+    if (
+      typeof suggestionId !== "string" ||
+      !suggestionId ||
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof prompt !== "string" ||
+      !prompt.trim()
+    )
+      continue;
+    suggestions.set(id, { kind: "suggested-task", title, prompt, projectRef });
+  }
+  return suggestions;
+}
+
 type ActivityEntry = Extract<TimelineEntry, { kind: "message" | "work" }>;
 
 function isActivityEntry(entry: TimelineEntry): entry is ActivityEntry {
@@ -363,6 +420,7 @@ function isActivityEntry(entry: TimelineEntry): entry is ActivityEntry {
 }
 
 export type MessagesTimelineRow =
+  | SuggestedTaskTimelineEntry
   | {
       kind: "activity-group";
       id: string;
@@ -975,9 +1033,12 @@ function buildRevertTurnCountByUserMessageId(input: {
 }
 
 export function deriveMessagesTimelineRows(input: {
-  timelineEntries: ReadonlyArray<TimelineEntry>;
+  timelineEntries: ReadonlyArray<SessionTimelineEntry>;
+  suggestedTasks?: ReturnType<typeof collectSuggestedTaskEntries> | undefined;
   latestTurn?: TimelineLatestTurn | null;
   runningTurnId?: TurnId | null;
+  transcriptViewMode?: TranscriptViewMode;
+  disclosureChoices?: ReadonlyMap<string, boolean>;
   expandedTurnIds?: ReadonlySet<TurnId>;
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
@@ -991,6 +1052,16 @@ export function deriveMessagesTimelineRows(input: {
   /** Messages sent during the running turn, rendered after the live rows. */
   queuedMessages?: ReadonlyArray<QueuedComposerMessage>;
 }): MessagesTimelineRow[] {
+  // The work-log projection has already ordered these activities alongside messages.
+  // Replace the generic entry before folding so the suggested task stays visible.
+  const timelineEntries: ReadonlyArray<TimelineEntry> = input.suggestedTasks?.size
+    ? input.timelineEntries.map((entry) => {
+        const suggestion =
+          entry.kind === "work" ? input.suggestedTasks?.get(entry.entry.id) : undefined;
+        return suggestion ? { ...suggestion, id: entry.id, createdAt: entry.createdAt } : entry;
+      })
+    : input.timelineEntries;
+
   const turnDiffSummaryByAssistantMessageId = new Map<MessageId, TurnDiffSummary>();
   for (const summary of input.turnDiffSummaries) {
     if (summary.assistantMessageId) {
@@ -999,7 +1070,7 @@ export function deriveMessagesTimelineRows(input: {
   }
   const revertTurnCountByUserMessageId = buildRevertTurnCountByUserMessageId({
     supportsConversationRollback: input.supportsConversationRollback,
-    timelineEntries: input.timelineEntries,
+    timelineEntries,
     turnDiffSummaryByAssistantMessageId,
     inferredCheckpointTurnCountByTurnId: input.supportsConversationRollback
       ? inferCheckpointTurnCountByTurnId(input.turnDiffSummaries)
@@ -1007,36 +1078,59 @@ export function deriveMessagesTimelineRows(input: {
   });
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
-    input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+    timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
-  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const unsettledTurnId = deriveUnsettledTurnId(
     input.latestTurn ?? null,
     input.runningTurnId ?? null,
   );
   const activeVisualResponseTurnIds = deriveActiveVisualResponseTurnIds({
-    timelineEntries: input.timelineEntries,
+    timelineEntries,
     unsettledTurnId,
     isWorking: input.isWorking,
   });
   const foldsByAnchorEntryId = deriveTurnFolds({
-    timelineEntries: input.timelineEntries,
+    timelineEntries,
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
     unfoldedTurnIds: activeVisualResponseTurnIds,
   });
+  const mode = input.transcriptViewMode ?? "normal";
+  const reasoningTurns = new Set<TurnId>();
+  if (mode === "thinking") {
+    for (const entry of timelineEntries) {
+      if (entry.kind === "message" && entry.message.role === "reasoning" && entry.message.turnId) {
+        reasoningTurns.add(entry.message.turnId);
+      }
+    }
+  }
+  const turnExpanded = (turnId: TurnId) =>
+    resolveTranscriptExpanded(
+      mode,
+      reasoningTurns.has(turnId) ? "reasoning" : "work",
+      input.disclosureChoices?.get(`turn:${turnId}`) ??
+        (input.expandedTurnIds?.has(turnId) ? true : undefined),
+    );
+  const groupExpanded = (groupId: string, disclosure: "reasoning" | "work" = "work") =>
+    resolveTranscriptExpanded(
+      mode,
+      disclosure,
+      input.disclosureChoices?.get(`group:${groupId}`) ??
+        (input.expandedWorkGroupIds?.has(groupId) ? true : undefined),
+    );
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
-    if (!input.expandedTurnIds?.has(fold.turnId)) {
+    if (!turnExpanded(fold.turnId)) {
       for (const entryId of fold.hiddenEntryIds) {
         collapsedEntryIds.add(entryId);
       }
     }
   }
 
-  let activeTurnHeaderIndex = input.timelineEntries.length;
+  let activeTurnHeaderIndex = timelineEntries.length;
   if (input.isWorking) {
-    const latestUserMessageIndex = lastUserMessageIndex(input.timelineEntries);
+    const latestUserMessageIndex = lastUserMessageIndex(timelineEntries);
     activeTurnHeaderIndex = latestUserMessageIndex + 1;
   }
   const entryBelongsToActiveTurn = (entry: TimelineEntry, index: number) =>
@@ -1049,8 +1143,8 @@ export function deriveMessagesTimelineRows(input: {
     entry.toolLifecycleStatus === "inProgress" &&
     entry.turnId === unsettledTurnId;
   const activeToolEntries: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
-  for (let index = input.timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
-    const entry = input.timelineEntries[index]!;
+  for (let index = timelineEntries.length - 1; index >= activeTurnHeaderIndex; index -= 1) {
+    const entry = timelineEntries[index]!;
     if (
       !entryBelongsToActiveTurn(entry, index) ||
       entry.kind !== "work" ||
@@ -1103,7 +1197,7 @@ export function deriveMessagesTimelineRows(input: {
             entry: (latestRunningToolEntry ?? latestVisibleToolEntry).entry,
             groupedEntries: visibleActiveToolEntries.map((entry) => entry.entry),
             groupId,
-            expanded: input.expandedWorkGroupIds?.has(groupId) ?? false,
+            expanded: groupExpanded(groupId),
             active: latestToolKeepsActivityLive,
           };
         })()
@@ -1112,7 +1206,7 @@ export function deriveMessagesTimelineRows(input: {
     activeWorkRow !== null || latestToolFailed ? activeToolEntries.map((entry) => entry.id) : [],
   );
   const appendWorkingRow = () => {
-    const latestUserMessage = input.timelineEntries[lastUserMessageIndex(input.timelineEntries)];
+    const latestUserMessage = timelineEntries[lastUserMessageIndex(timelineEntries)];
     const visualResponseStartedAt =
       activeVisualResponseTurnIds.size > 1 &&
       latestUserMessage?.kind === "message" &&
@@ -1141,8 +1235,8 @@ export function deriveMessagesTimelineRows(input: {
   };
 
   let scannedActivityThrough = -1;
-  for (let index = 0; index < input.timelineEntries.length; index += 1) {
-    const timelineEntry = input.timelineEntries[index];
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
     }
@@ -1163,7 +1257,7 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: anchoredTurnFold.createdAt,
         turnId: anchoredTurnFold.turnId,
         label: anchoredTurnFold.label,
-        expanded: input.expandedTurnIds?.has(anchoredTurnFold.turnId) ?? false,
+        expanded: turnExpanded(anchoredTurnFold.turnId),
       });
     }
 
@@ -1171,12 +1265,17 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
+    if (timelineEntry.kind === "suggested-task") {
+      nextRows.push(timelineEntry);
+      continue;
+    }
+
     const activityTurnId = timelineEntryTurnId(timelineEntry);
     if (index > scannedActivityThrough && activityTurnId && isActivityEntry(timelineEntry)) {
       const entries = [timelineEntry];
       let cursor = index + 1;
-      while (cursor < input.timelineEntries.length) {
-        const next = input.timelineEntries[cursor]!;
+      while (cursor < timelineEntries.length) {
+        const next = timelineEntries[cursor]!;
         if (
           !isActivityEntry(next) ||
           timelineEntryTurnId(next) !== activityTurnId ||
@@ -1192,7 +1291,7 @@ export function deriveMessagesTimelineRows(input: {
         const active =
           input.isWorking &&
           activityTurnId === unsettledTurnId &&
-          cursor === input.timelineEntries.length &&
+          cursor === timelineEntries.length &&
           !latestToolFailed &&
           (latestVisibleToolEntry === undefined || latestToolKeepsActivityLive);
         const groupId =
@@ -1206,7 +1305,7 @@ export function deriveMessagesTimelineRows(input: {
           turnId: activityTurnId,
           groupId,
           entries,
-          expanded: input.expandedWorkGroupIds?.has(groupId) ?? false,
+          expanded: groupExpanded(groupId, "reasoning"),
           active,
         });
         hasActivityRow ||= active;
@@ -1255,8 +1354,8 @@ export function deriveMessagesTimelineRows(input: {
       }
       const groupedEntries = [timelineEntry.entry];
       let cursor = index + 1;
-      while (cursor < input.timelineEntries.length) {
-        const nextEntry = input.timelineEntries[cursor];
+      while (cursor < timelineEntries.length) {
+        const nextEntry = timelineEntries[cursor];
         if (
           !nextEntry ||
           nextEntry.kind !== "work" ||
@@ -1283,7 +1382,7 @@ export function deriveMessagesTimelineRows(input: {
         const activeInProgressToolEntries = visibleGroupedEntries.filter(workEntryIsInActiveRun);
         if (activeInProgressToolEntries.length > 0) {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          const expanded = groupExpanded(groupId);
           const latestActiveToolEntry = activeInProgressToolEntries.at(-1)!;
           nextRows.push({
             kind: "work-live",
@@ -1319,7 +1418,7 @@ export function deriveMessagesTimelineRows(input: {
           });
         } else {
           const groupId = workGroupId(timelineEntry.id, timelineEntry.entry);
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+          const expanded = groupExpanded(groupId);
           const summaryKind = toolGroupSummaryKind(visibleGroupedEntries);
           const primarySourceEntry = visibleGroupedEntries.find(
             (entry) => entry.toolSource !== undefined,
@@ -1475,7 +1574,7 @@ export function deriveMessagesTimelineRows(input: {
   // A running setup owns the working slot above its card and shows no
   // activity row of its own; every other state gets the usual tail.
   const hasWorkingRow = nextRows.some((row) => row.kind === "working");
-  if (input.isWorking && !hasWorkingRow && activeTurnHeaderIndex === input.timelineEntries.length) {
+  if (input.isWorking && !hasWorkingRow && activeTurnHeaderIndex === timelineEntries.length) {
     appendWorkingRow();
   }
   if (input.isWorking && !setupRunning && (!hasActivityRow || latestToolFailed)) {
@@ -1505,6 +1604,7 @@ type MessagesTimelineRowsInput = Parameters<typeof deriveMessagesTimelineRows>[0
 export interface MessagesTimelineRowsProjection {
   readonly input: MessagesTimelineRowsInput;
   readonly rows: MessagesTimelineRow[];
+  readonly minimapPositions: ReturnType<typeof deriveTimelineMinimapItems>;
 }
 
 function replaceStreamingMessageRows(
@@ -1578,11 +1678,30 @@ export function deriveMessagesTimelineRowsWithState(
   input: MessagesTimelineRowsInput,
   previous: MessagesTimelineRowsProjection | null = null,
 ): MessagesTimelineRowsProjection {
+  if (previous !== null) {
+    const streamingRows = replaceStreamingMessageRows(input, previous);
+    if (streamingRows !== null) {
+      return { input, rows: streamingRows, minimapPositions: previous.minimapPositions };
+    }
+  }
+
+  const rows = deriveMessagesTimelineRows(input);
+  const sameStructure =
+    previous !== null &&
+    previous.rows.length === rows.length &&
+    rows.every((row, index) => {
+      const prior = previous.rows[index]!;
+      return (
+        row.id === prior.id &&
+        row.kind === prior.kind &&
+        (row.kind !== "message" ||
+          (prior.kind === "message" && row.message.role === prior.message.role))
+      );
+    });
   return {
     input,
-    rows:
-      (previous === null ? null : replaceStreamingMessageRows(input, previous)) ??
-      deriveMessagesTimelineRows(input),
+    rows,
+    minimapPositions: sameStructure ? previous.minimapPositions : deriveTimelineMinimapItems(rows),
   };
 }
 
@@ -1611,6 +1730,16 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
   if (a.kind !== b.kind || a.id !== b.id) return false;
 
   switch (a.kind) {
+    case "suggested-task": {
+      const task = b as typeof a;
+      return (
+        a.title === task.title &&
+        a.prompt === task.prompt &&
+        a.createdAt === task.createdAt &&
+        a.projectRef.environmentId === task.projectRef.environmentId &&
+        a.projectRef.projectId === task.projectRef.projectId
+      );
+    }
     case "activity-group": {
       const group = b as typeof a;
       return (

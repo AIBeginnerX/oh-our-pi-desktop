@@ -13,6 +13,7 @@ import {
   AssetWorkspacePathValidationError,
   AssetWorkspaceResolutionError,
   AssetWorkspaceRootNormalizationError,
+  type EnvironmentAuthorizationError,
   ToolActivityNativeAppReference,
 } from "@t3tools/contracts";
 import {
@@ -197,11 +198,22 @@ const optionOnNotFound = <A, R>(
     }),
   );
 
-const resolveCanonicalFile = Effect.fn("AssetAccess.resolveCanonicalFile")(function* (
-  filePath: string,
-) {
+type AuthorizeCanonicalAsset<E extends EnvironmentAuthorizationError> = (
+  canonicalFile: string | null,
+  workspaceRoot?: string,
+) => Effect.Effect<void, E>;
+
+const resolveCanonicalFile = Effect.fn("AssetAccess.resolveCanonicalFile")(function* <
+  E extends EnvironmentAuthorizationError = never,
+>(filePath: string, authorizeCanonicalFile?: AuthorizeCanonicalAsset<E>, workspaceRoot?: string) {
   const fileSystem = yield* FileSystem.FileSystem;
-  const canonicalFile = yield* optionOnNotFound(fileSystem.realPath(filePath));
+  const resolve = optionOnNotFound(fileSystem.realPath(filePath));
+  const canonicalFile = yield* authorizeCanonicalFile
+    ? resolve.pipe(Effect.orElseSucceed(() => Option.none<string>()))
+    : resolve;
+  if (authorizeCanonicalFile) {
+    yield* authorizeCanonicalFile(Option.getOrNull(canonicalFile), workspaceRoot);
+  }
   if (Option.isNone(canonicalFile)) return null;
 
   const info = yield* optionOnNotFound(fileSystem.stat(canonicalFile.value));
@@ -279,15 +291,23 @@ const readImageDimensionsFromHeader = (filePath: string) =>
   );
 
 const finalizeAbsoluteMediaFileAsset = Effect.fn("AssetAccess.finalizeAbsoluteMediaFileAsset")(
-  function* (input: {
+  function* <E extends EnvironmentAuthorizationError>(input: {
     readonly requestedPath: string;
     readonly resource: AssetResource;
     readonly expiresAt: number;
+    readonly workspaceRoot?: string;
+    readonly authorizeCanonicalFile?: AuthorizeCanonicalAsset<E>;
   }) {
     const path = yield* Path.Path;
-    const canonicalFile = yield* resolveCanonicalFile(input.requestedPath).pipe(
-      Effect.mapError(
-        (cause) => new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
+    const canonicalFile = yield* resolveCanonicalFile(
+      input.requestedPath,
+      input.authorizeCanonicalFile,
+      input.workspaceRoot,
+    ).pipe(
+      Effect.mapError((cause) =>
+        cause._tag === "EnvironmentAuthorizationError"
+          ? cause
+          : new AssetWorkspaceAssetInspectionError({ resource: input.resource, cause }),
       ),
     );
     if (!canonicalFile) {
@@ -415,10 +435,13 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
   },
 );
 
-export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (input: {
+export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* <
+  E extends EnvironmentAuthorizationError = never,
+>(input: {
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
   readonly projectFaviconPath?: string;
+  readonly authorizeCanonicalFile?: AuthorizeCanonicalAsset<E>;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -448,6 +471,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       }
       const finalized = yield* finalizeAbsoluteMediaFileAsset({
         requestedPath,
+        ...(input.workspaceRoot === undefined ? {} : { workspaceRoot: input.workspaceRoot }),
+        ...(input.authorizeCanonicalFile
+          ? { authorizeCanonicalFile: input.authorizeCanonicalFile }
+          : {}),
         resource: input.resource,
         expiresAt,
       });
@@ -490,6 +517,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         // An absolute draft path serves exactly like an absolute media path.
         const finalized = yield* finalizeAbsoluteMediaFileAsset({
           requestedPath: input.resource.path,
+          workspaceRoot: draftWorkspaceRoot,
+          ...(input.authorizeCanonicalFile
+            ? { authorizeCanonicalFile: input.authorizeCanonicalFile }
+            : {}),
           resource: input.resource,
           expiresAt,
         });
@@ -572,6 +603,23 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
             }),
         ),
       );
+      if (
+        input.authorizeCanonicalFile &&
+        input.projectFaviconPath &&
+        path.isAbsolute(input.projectFaviconPath)
+      ) {
+        yield* resolveCanonicalFile(
+          input.projectFaviconPath,
+          input.authorizeCanonicalFile,
+          workspaceRoot,
+        ).pipe(
+          Effect.mapError((cause) =>
+            cause._tag === "EnvironmentAuthorizationError"
+              ? cause
+              : new AssetProjectFaviconInspectionError({ resource: input.resource, cause }),
+          ),
+        );
+      }
       const faviconResolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
       const faviconPath = yield* faviconResolver
         .resolvePath(workspaceRoot, input.projectFaviconPath ?? undefined)
@@ -615,6 +663,9 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
         return yield* new AssetProjectFaviconNotFoundError({
           resource: input.resource,
         });
+      }
+      if (isExternalOverride && canonicalFaviconPath && input.authorizeCanonicalFile) {
+        yield* input.authorizeCanonicalFile(canonicalFaviconPath, workspaceRoot);
       }
       claims =
         isExternalOverride && canonicalFaviconPath

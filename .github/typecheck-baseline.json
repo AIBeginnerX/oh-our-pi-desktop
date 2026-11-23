@@ -19,7 +19,7 @@
   "apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts TS377026": 3,
   "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts TS377030": 8,
   "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts TS377042": 1,
-  "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.memoryEcho.test.ts TS377030": 91,
+  "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.memoryEcho.test.ts TS377030": 1,
   "apps/server/src/orchestration/memoryEcho.test.ts TS2339": 5,
   "apps/server/src/orchestration/memoryEcho.test.ts TS377026": 1,
   "apps/server/src/persistence/Migrations/056_ProjectMemories.test.ts TS377030": 1,
