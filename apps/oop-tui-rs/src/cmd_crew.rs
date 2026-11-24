@@ -236,6 +236,7 @@ fn context(app: &App, now: i64) -> Context {
         pinned,
         listed,
         own,
+        ..
     } = crew::resolve(&app.config, app.own_crew(), brain);
     let loaded = thread.is_some_and(|id| app.conv.loaded && app.conv.thread_id == id);
     let board = loaded
@@ -363,11 +364,9 @@ pub fn as_default(settings: &Value, crew: &Resolved) -> Value {
     let mut pinned = Map::new();
     let mut listed = Map::new();
     for (slot, role) in ROLES.iter().enumerate() {
-        if let (true, Some(option)) = (crew.pinned[slot], &crew.roles[slot]) {
-            pinned.insert(
-                (*role).into(),
-                json!({"instanceId": option.instance_id, "model": option.model}),
-            );
+        // The pick as stored, so one whose model is not listed here is not dropped.
+        if let Some(pick) = &crew.picks[slot] {
+            pinned.insert((*role).into(), pick.clone());
         }
         // The list as stored, so a model whose provider is away for now is not dropped.
         let fallbacks = &crew.listed[slot];

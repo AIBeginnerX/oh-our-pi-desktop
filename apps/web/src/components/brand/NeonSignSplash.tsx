@@ -1,21 +1,11 @@
-import { releaseNotesFor } from "@t3tools/shared/releaseNotes";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
-import { OOP_VERSION } from "../../branding";
 import { cn } from "../../lib/utils";
-import {
-  hasUnseenReleaseNotes,
-  markWhatsNewNoticeSeen,
-  readWhatsNewNoticeSeenVersion,
-} from "../../lib/whatsNew";
 import { OoPMascot } from "./OoPMascot";
+import { useLaunchSplash } from "./useLaunchSplash";
 import { WhatsNewNotice } from "./WhatsNewNotice";
 
 const LETTER_STAGGER_MS = 14;
-
-// Once per app launch: a renderer reload in the same session keeps the session flag.
-const shownThisLaunch = new Set<string>();
 
 function NeonLetters(props: { text: string; offset: number }) {
   return Array.from(props.text, (letter, index) => {
@@ -35,39 +25,17 @@ function NeonLetters(props: { text: string; offset: number }) {
 }
 
 /**
- * A monochrome neon sign that flickers on letter by letter, once per launch for its key:
- * "OOP Development AI Agents" when the desktop app starts, "OOP Connected" when a browser connects.
+ * A monochrome neon sign that flickers on letter by letter, once per launch for its key.
  * When this version has release notes the user has not seen, the sign holds with a
  * "What's new" card under it until the card is closed, then fades.
  */
-export function NeonSignSplash(props: {
+function NeonSignSplash(props: {
   readonly headline: string;
   readonly tagline: string;
   readonly shownKey: string;
   readonly onSeeAllUpdates: () => void;
 }) {
-  const [visible, setVisible] = useState(
-    () =>
-      !shownThisLaunch.has(props.shownKey) &&
-      window.sessionStorage.getItem(props.shownKey) === null,
-  );
-  const [notes] = useState(() => {
-    const notes = releaseNotesFor(OOP_VERSION);
-    return visible &&
-      hasUnseenReleaseNotes({
-        version: OOP_VERSION,
-        notes,
-        seenVersion: readWhatsNewNoticeSeenVersion(),
-      })
-      ? notes
-      : undefined;
-  });
-  const [noticeOpen, setNoticeOpen] = useState(notes !== undefined);
-
-  useEffect(() => {
-    shownThisLaunch.add(props.shownKey);
-    window.sessionStorage.setItem(props.shownKey, "1");
-  }, [props.shownKey]);
+  const { visible, notes, noticeOpen, hide, closeNotice } = useLaunchSplash(props.shownKey);
 
   if (!visible) return null;
   return (
@@ -80,7 +48,7 @@ export function NeonSignSplash(props: {
         !noticeOpen && "pointer-events-none",
       )}
       onAnimationEnd={(event) => {
-        if (event.animationName === "oop-splash-out") setVisible(false);
+        if (event.animationName === "oop-splash-out") hide();
       }}
     >
       <div className="flex max-w-full flex-col items-center gap-8">
@@ -94,32 +62,10 @@ export function NeonSignSplash(props: {
           </p>
         </div>
         {notes && noticeOpen ? (
-          <WhatsNewNotice
-            notes={notes}
-            onSeeAll={props.onSeeAllUpdates}
-            onClose={() => {
-              markWhatsNewNoticeSeen(OOP_VERSION);
-              setNoticeOpen(false);
-            }}
-          />
+          <WhatsNewNotice notes={notes} onSeeAll={props.onSeeAllUpdates} onClose={closeNotice} />
         ) : null}
       </div>
     </div>
-  );
-}
-
-/**
- * The desktop startup splash mounts outside the router tree, so the caller supplies how to
- * reach the "What's new" settings page.
- */
-export function StartupNeonSplash(props: { readonly onSeeAllUpdates: () => void }) {
-  return (
-    <NeonSignSplash
-      headline="OOP"
-      tagline="Development AI Agents"
-      shownKey="oop:startup-neon-shown"
-      onSeeAllUpdates={props.onSeeAllUpdates}
-    />
   );
 }
 

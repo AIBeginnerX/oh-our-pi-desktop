@@ -468,4 +468,10 @@ export const WORKFLOWS_MESSAGES: MessageCatalog = {
     "zh-CN": "正在后台运行",
     es: "Ejecutando en segundo plano",
   },
+  Work: {
+    ko: "작업",
+    ja: "作業",
+    "zh-CN": "工作",
+    es: "Trabajo",
+  },
 };

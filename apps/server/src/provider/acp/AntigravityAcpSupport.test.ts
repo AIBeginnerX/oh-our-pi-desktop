@@ -35,12 +35,39 @@ function makeModelRuntime(
   failure?: EffectAcpErrors.AcpError,
 ) {
   const selections: string[] = [];
+  const selectValues = (configId: string) => {
+    const option = configOptions.find((entry) => entry.id === configId);
+    if (option?.type !== "select") return undefined;
+    return option.options.flatMap((entry) =>
+      "value" in entry ? [entry.value] : entry.options.map((nested) => nested.value),
+    );
+  };
+  // Mirrors `AcpSessionRuntime.setConfigOption`, which refuses values the
+  // advertised select does not offer.
+  const validate = (configId: string, value: string) =>
+    Effect.gen(function* () {
+      if (failure) return yield* failure;
+      const allowed = selectValues(configId);
+      if (allowed && !allowed.includes(value)) {
+        return yield* EffectAcpErrors.AcpRequestError.invalidParams(
+          `Invalid value "${value}" for session config option "${configId}": expected one of ${allowed.join(", ")}`,
+        );
+      }
+    });
   const setModel = Effect.fn("AntigravityAcpSupportTest.setModel")(function* (model: string) {
-    if (failure) return yield* failure;
+    yield* validate("model", model);
     selections.push(model);
   });
+  const setConfigOption = Effect.fn("AntigravityAcpSupportTest.setConfigOption")(function* (
+    configId: string,
+    value: string | boolean,
+  ) {
+    if (typeof value === "string") yield* validate(configId, value);
+    selections.push(`${configId}=${value}`);
+    return { configOptions };
+  });
   return {
-    runtime: { getConfigOptions: Effect.succeed(configOptions), setModel },
+    runtime: { getConfigOptions: Effect.succeed(configOptions), setModel, setConfigOption },
     selections,
   };
 }
@@ -81,7 +108,23 @@ describe("applyAntigravityAcpModelSelection", () => {
       });
 
       expect(model).toBe("gemini-3.8-flash-high");
-      expect(selections).toEqual(["gemini-3.8-flash-high"]);
+      expect(selections).toEqual(["gemini-3.8-flash", "thinking_level=high"]);
+    }),
+  );
+
+  it.effect("reapplies both settings for an explicit combined selection on the current model", () =>
+    Effect.gen(function* () {
+      const { runtime, selections } = makeModelRuntime(
+        thinkingLevelConfigs("gemini-3.8-flash", "high"),
+      );
+      const model = yield* applyAntigravityAcpModelSelection({
+        runtime,
+        model: "gemini-3.8-flash-high",
+        mapError: (cause) => cause,
+      });
+
+      expect(model).toBe("gemini-3.8-flash-high");
+      expect(selections).toEqual(["gemini-3.8-flash", "thinking_level=high"]);
     }),
   );
 

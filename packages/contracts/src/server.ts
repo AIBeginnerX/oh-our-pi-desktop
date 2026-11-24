@@ -707,6 +707,15 @@ export const ServerConfigProviderStatusesPayload = Schema.Struct({
 });
 export type ServerConfigProviderStatusesPayload = typeof ServerConfigProviderStatusesPayload.Type;
 
+/** instanceIds is the complete ordered list after the change. changed holds only providers
+ * whose snapshot differs from the previous emission on this subscription. */
+export const ServerConfigProviderStatusesPatchedPayload = Schema.Struct({
+  instanceIds: Schema.Array(ProviderInstanceId),
+  changed: Schema.Array(ServerProvider),
+});
+export type ServerConfigProviderStatusesPatchedPayload =
+  typeof ServerConfigProviderStatusesPatchedPayload.Type;
+
 export const ServerConfigSettingsUpdatedPayload = Schema.Struct({
   settings: ServerSettings,
 });
@@ -734,6 +743,14 @@ export const ServerConfigStreamProviderStatusesEvent = Schema.Struct({
 });
 export type ServerConfigStreamProviderStatusesEvent =
   typeof ServerConfigStreamProviderStatusesEvent.Type;
+
+export const ServerConfigStreamProviderStatusesPatchedEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("providerStatusesPatched"),
+  payload: ServerConfigProviderStatusesPatchedPayload,
+});
+export type ServerConfigStreamProviderStatusesPatchedEvent =
+  typeof ServerConfigStreamProviderStatusesPatchedEvent.Type;
 
 export const ServerConfigStreamSettingsUpdatedEvent = Schema.Struct({
   version: Schema.Literal(1),
@@ -777,6 +794,7 @@ export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
   ServerConfigStreamProviderStatusesEvent,
+  ServerConfigStreamProviderStatusesPatchedEvent,
   ServerConfigStreamSettingsUpdatedEvent,
   ServerConfigStreamEnvironmentThemesUpdatedEvent,
   ServerConfigStreamUsageLimitSourcesUpdatedEvent,

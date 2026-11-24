@@ -225,6 +225,12 @@ const CrewWaitResult = Schema.Struct({
       result: Schema.NullOr(Schema.String),
       report: Schema.optional(CrewMemberReport),
       proof: Schema.optional(Schema.Struct({ verdict: CrewProof, reason: Schema.String })),
+      model: Schema.optional(
+        Schema.String.annotate({
+          description:
+            'The model that did the work, as "Model (Provider)"; after a fallback it can differ from the model shown for the role.',
+        }),
+      ),
     }),
   ),
 });
@@ -259,7 +265,7 @@ const CrewRosterTool = Tool.make("crew_roster", {
   .annotate(Tool.OpenWorld, false);
 
 const CrewDelegateTool = Tool.make("crew_delegate", {
-  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace (or, with isolation "worktree", its own worktree) as its own thread. Give it a todos checklist and, on each item something can prove, a check the server runs for you (command or files) that fails until the item is done and can run in that task's environment, so prefer a command you know works there (name test files, not a folder) and one that proves the content, since files alone only proves a change; keep each item to one step, and finish or hand on anything left undone, since it comes back partial. Returns at once with a taskId (and a warning when the task's writeScope overlaps one still running, when no todo has a check so OOP cannot verify it, or when paths the task, verify, or checks cite do not exist from the task's directory); start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to the role's fallback models first, then another model of the same level. Fails when the crew is off; then do the work yourself.`,
+  description: `${CREW_GUIDE} Hands one task to the worker or expert model, which works in this same workspace (or, with isolation "worktree", its own worktree) as its own thread. Give it a todos checklist and, on each item something can prove, a check the server runs for you (command or files) that fails until the item is done and can run in that task's environment, so prefer a command you know works there (name test files, not a folder) and one that proves the content, since files alone only proves a change; keep each item to one step, and finish or hand on anything left undone, since it comes back partial. Returns at once with a taskId (and a warning when the task's writeScope overlaps one still running, when no todo has a check so OOP cannot verify it, or when paths the task, verify, or checks cite do not exist from the task's directory); start several in parallel when the work splits cleanly, then collect them with crew_wait. If the crew model fails, OOP hands the same task to the role's fallback models; only a role left on automatic moves on to another model of the same level. Fails when the crew is off; then do the work yourself.`,
   parameters: CrewDelegateInput,
   success: CrewDelegateResult,
   failure: CrewToolError,

@@ -809,6 +809,8 @@ describe("Crew service restart delivery", () => {
       const result = yield* service.crew.wait({ threadId: LEAD, taskIds: ["task-1"] });
       // The recovered thread detail has no readable reply, so nothing says the task finished.
       assert.equal(result[0]!.status, "partial");
+      // A recovered report still names the model its last attempt ran on.
+      assert.equal(result[0]!.model, "worker-model");
       assert.isFalse(
         (yield* Ref.get(harness.commands)).some(
           (command) =>
@@ -1902,7 +1904,11 @@ describe("Crew fallback switch", () => {
         });
         yield* Ref.set(harness.memberTurnError, LIMIT_ERROR);
         const service = yield* harness.start;
-        yield* service.crew.delegate({ threadId: LEAD, role: "worker", task: "change the thing" });
+        const task = yield* service.crew.delegate({
+          threadId: LEAD,
+          role: "worker",
+          task: "change the thing",
+        });
         let switched: OrchestrationThreadActivity | undefined;
         let completed: { summary: string; payload: Record<string, unknown> } | undefined;
         for (let i = 0; i < 120 && completed === undefined; i += 1) {
@@ -1952,6 +1958,10 @@ describe("Crew fallback switch", () => {
           assert.include(note, "failed");
           assert.include(note, "Exhausted");
         }
+        // The report names the model that finished the task: the fallback, not the role's own.
+        const [report] = yield* service.crew.wait({ threadId: LEAD, taskIds: [task.taskId] });
+        assert.equal(report!.status, "failed");
+        assert.equal(report!.model, "gpt-5.4-mini (codex)");
         yield* service.close;
       }).pipe(Effect.scoped, Effect.provide(testLayers)),
   );

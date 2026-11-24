@@ -68,6 +68,15 @@ export function applyServerConfigProjection(
         latestEvent: event,
         source: "live",
       }));
+    case "providerStatusesPatched":
+      return Option.map(current, (projection) => {
+        const previousById = new Map(projection.config.providers.map((p) => [p.instanceId, p]));
+        const changedById = new Map(event.payload.changed.map((p) => [p.instanceId, p]));
+        const providers = event.payload.instanceIds.flatMap(
+          (id) => changedById.get(id) ?? previousById.get(id) ?? [],
+        );
+        return { config: { ...projection.config, providers }, latestEvent: event, source: "live" };
+      });
     case "settingsUpdated":
       return Option.map(current, (projection) => ({
         config: {

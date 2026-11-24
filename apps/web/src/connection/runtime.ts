@@ -36,6 +36,7 @@ const providedClientConnectionLayer = snapshotLoaderLayer.pipe(
       environmentThemes: true,
       usageLimitSources: true,
       usageLimitsCommand: true,
+      providerStatusPatches: true,
     }),
   ),
   Layer.provideMerge(

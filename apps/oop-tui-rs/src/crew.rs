@@ -6,7 +6,7 @@
 //! server) wins over the default crew in the settings.
 
 use crate::flow::CrewRoleModel;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub const ROLES: [&str; 3] = ["worker", "expert", "auditor"];
 
@@ -331,8 +331,11 @@ pub struct Resolved {
     pub enabled: bool,
     pub preset: String,
     pub roles: [Option<ModelOption>; 3],
-    /// The roles a model was pinned for (and still can run) rather than left to the preset.
+    /// The roles the user picked a model for, listed here or not, rather than left to the preset.
     pub pinned: [bool; 3],
+    /// The picked models as stored, listed here or not, so "Use this crew for new chats" keeps
+    /// every pick (`pinSelections`).
+    pub picks: [Option<Value>; 3],
     /// The fallback lists as stored, including models that cannot run now (`fallback_list`); a
     /// model that is not ready here is skipped when tasks run, and comes back with its provider.
     pub listed: [Vec<Value>; 3],
@@ -363,22 +366,28 @@ pub fn resolve(config: &Value, own: Option<&Value>, brain: Brain) -> Resolved {
     let mut roles: [Option<ModelOption>; 3] = [None, None, None];
     let listed = fallback_lists(config, own);
     let mut pinned_roles = [false; 3];
+    let mut picks: [Option<Value>; 3] = [None, None, None];
     for (slot, role) in ROLES.iter().enumerate() {
-        let pinned = pin(settings, role, thread).and_then(|(instance, model)| {
-            options
+        // A picked model this environment does not list leaves the role without one: its tasks
+        // run only on the user's fallbacks, never on a model OOP would pick instead.
+        let picked = pin(settings, role, thread);
+        pinned_roles[slot] = picked.is_some();
+        picks[slot] =
+            picked.map(|(instance, model)| json!({"instanceId": instance, "model": model}));
+        roles[slot] = match picked {
+            Some((instance, model)) => options
                 .iter()
-                .find(|o| o.instance_id == instance && o.model == model)
-        });
-        pinned_roles[slot] = pinned.is_some();
-        roles[slot] = pinned
-            .or_else(|| recommended[slot].map(|i| &options[i]))
-            .cloned();
+                .find(|o| o.instance_id == instance && o.model == model),
+            None => recommended[slot].map(|i| &options[i]),
+        }
+        .cloned();
     }
     Resolved {
         enabled,
         preset: preset.to_string(),
         roles,
         pinned: pinned_roles,
+        picks,
         listed,
         own: thread.is_some(),
     }
@@ -547,6 +556,17 @@ mod tests {
         let auto = json!({"pinned": {"worker": null}});
         let roles = roles_of(&cfg, Some(&auto), brain, true).unwrap();
         assert_eq!(roles[0].model.as_deref(), Some("Haiku 5.5"));
+    }
+
+    #[test]
+    fn a_role_picked_for_a_model_that_is_not_listed_has_none_rather_than_the_preset_pick() {
+        let cfg = config(json!({
+            "enabled": true,
+            "pinned": {"expert": {"instanceId": "zai", "model": "glm-5.3"}},
+        }));
+        let crew = resolve(&cfg, None, Some(("claude", "claude-sonnet-5-5")));
+        assert!(crew.roles[1].is_none());
+        assert_eq!(crew.pinned, [false, true, false]);
     }
 
     #[test]

@@ -13,7 +13,7 @@ import {
   syncDocumentWindowControlsOverlayClass,
 } from "./lib/windowControlsOverlay";
 import { AppRoot } from "./AppRoot";
-import { StartupNeonSplash } from "./components/brand/StartupNeonSplash";
+import { StartupIntro } from "./components/brand/StartupIntro";
 import { clearChunkReloadGuard, reloadOnceForChunkLoadError } from "./lib/chunkReloadGuard";
 
 prepareProviderAuthDelivery();
@@ -46,9 +46,7 @@ const app = (
   <>
     <AppRoot router={router} />
     {isElectron ? (
-      <StartupNeonSplash
-        onSeeAllUpdates={() => void router.navigate({ to: "/settings/whats-new" })}
-      />
+      <StartupIntro onSeeAllUpdates={() => void router.navigate({ to: "/settings/whats-new" })} />
     ) : null}
   </>
 );

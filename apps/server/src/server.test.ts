@@ -10621,6 +10621,49 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
   );
 
+  it.effect("providerStatusPatches sends only the changed provider", () =>
+    Effect.gen(function* () {
+      const first = {
+        instanceId: ProviderInstanceId.make("codex"),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        version: "1.0.0",
+        status: "ready" as const,
+        auth: { status: "authenticated" as const },
+        checkedAt: "2026-04-11T00:00:00.000Z",
+        models: [],
+        slashCommands: [],
+        skills: [],
+      } as const;
+      const second = { ...first, instanceId: ProviderInstanceId.make("codex_work") };
+      const updated = { ...second, checkedAt: "2026-04-11T00:03:00.000Z" };
+      yield* buildAppUnderTest({
+        layers: {
+          providerRegistry: {
+            getProviders: Effect.succeed([first, second]),
+            streamChanges: Stream.succeed([first, updated]),
+          },
+        },
+      });
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [snapshot, update] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerConfig]({ providerStatusPatches: true }).pipe(
+            Stream.take(2),
+            Stream.runCollect,
+          ),
+        ),
+      );
+      assert.equal(snapshot?.type, "snapshot");
+      assert.deepEqual(update, {
+        version: 1,
+        type: "providerStatusesPatched",
+        payload: { instanceIds: [first.instanceId, second.instanceId], changed: [updated] },
+      });
+    }).pipe(Effect.provide(LoopbackHttpServer.layerTest)),
+  );
+
   for (const mode of ["all", "targeted", "background"] as const) {
     it.effect(`provider refresh invalidates T3 caches before probing (${mode})`, () => {
       const driver = ProviderDriverKind.make("codex");

@@ -8,7 +8,8 @@
  *   changing data must never change their height.
  * - Workflow expansion is presentation state. A live run stays expanded when
  *   it settles; older collapsed runs can still be opened at run granularity.
- * - Static status dots, DOM-write elapsed timers, plain token counters.
+ * - Static status dots, DOM-write elapsed timers, plain token counters. Flow steps animate once
+ *   (check draw, underline sweep), never in a loop.
  */
 import { useAtomValue } from "@effect/atom-react";
 import type {
@@ -595,13 +596,17 @@ function WorkflowSection({
   );
 }
 
-const FLOW_STATE: Record<AgentFlowState, { dotClass: string; label: string }> = {
-  working: { dotClass: "bg-info", label: "Working" },
-  thinking: { dotClass: "bg-info", label: "Thinking" },
-  waiting: { dotClass: "bg-warning", label: "Waiting" },
-  done: { dotClass: "bg-success", label: "Done" },
-  failed: { dotClass: "bg-destructive", label: "Failed" },
-  stopped: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+const FLOW_STATE: Record<AgentFlowState, { dotClass: string; boxClass: string; label: string }> = {
+  working: { dotClass: "bg-info", boxClass: "text-info", label: "Working" },
+  thinking: { dotClass: "bg-info", boxClass: "text-info", label: "Thinking" },
+  waiting: { dotClass: "bg-warning", boxClass: "text-warning", label: "Waiting" },
+  done: { dotClass: "bg-success", boxClass: "text-success", label: "Done" },
+  failed: { dotClass: "bg-destructive", boxClass: "text-destructive", label: "Failed" },
+  stopped: {
+    dotClass: "bg-muted-foreground/60",
+    boxClass: "text-muted-foreground/60",
+    label: "Stopped",
+  },
 };
 const FALLBACK_AGENT_COLOR = "var(--muted-foreground)";
 
@@ -679,24 +684,57 @@ function AgentRosterRow({
   );
 }
 
-/** The link into a box; the one feeding a live box is drawn in its agent's color. */
-function FlowConnector({ live, color }: { live: boolean; color: string }) {
+/**
+ * The step's checkbox: empty while open, a drawn check when done, a cross when failed, a dash
+ * when stopped.
+ */
+function FlowTaskBox({ state }: { state: AgentFlowState }) {
+  const mark =
+    state === "done"
+      ? "M 3.5 7.5 L 6 10 L 10.5 4.5"
+      : state === "failed"
+        ? "M 5 5 L 9 9 M 9 5 L 5 9"
+        : state === "stopped"
+          ? "M 4.5 7 L 9.5 7"
+          : null;
   return (
-    <svg aria-hidden width={12} height={14} className="ml-3 shrink-0">
-      <line
-        x1={6}
-        y1={1}
-        x2={6}
-        y2={13}
-        stroke={live ? color : "var(--border)"}
-        strokeWidth={live ? 2 : 1.5}
-        strokeLinecap="round"
+    <svg
+      aria-hidden
+      viewBox="0 0 14 14"
+      className={cn(
+        "mt-px size-3.5 shrink-0 transition-colors duration-200 motion-reduce:transition-none",
+        FLOW_STATE[state].boxClass,
+      )}
+    >
+      <rect
+        x={1}
+        y={1}
+        width={12}
+        height={12}
+        rx={3.5}
+        fill="currentColor"
+        fillOpacity={state === "done" ? 0.12 : 0}
+        stroke="currentColor"
+        strokeWidth={1.4}
       />
+      {mark === null ? null : (
+        <path
+          key={state}
+          d={mark}
+          pathLength={1}
+          strokeDasharray="1 1"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="motion-safe:wf-task-draw"
+        />
+      )}
     </svg>
   );
 }
 
-/** The latest turn's core work, box by box in the order it happened, each in its agent's color. */
 /** A box's words: what the lead is doing or did by category, or the agent's own task. */
 function boxText(box: AgentFlowBox, t: Translate): { title: string; detail: string | null } {
   const tools = toolSummaryText(box.tools ?? [], t);
@@ -705,6 +743,11 @@ function boxText(box: AgentFlowBox, t: Translate): { title: string; detail: stri
   return { title: box.agentId === LEAD_AGENT_ID ? t(box.title) : box.title, detail: box.detail };
 }
 
+/**
+ * The latest turn's core work as a checklist in the order it happened. The header count is
+ * derived from the rows; done steps go quiet so the live one stands out. Presentation adapted
+ * from SmoothUI's ai-task-list (MIT).
+ */
 function AgentFlowLane({
   boxes,
   colorOf,
@@ -718,42 +761,59 @@ function AgentFlowLane({
   if (boxes.length === 0) {
     return <p className="px-1 text-2xs text-muted-foreground">No work in this turn yet.</p>;
   }
+  const done = boxes.filter((box) => box.state === "done").length;
   return (
-    <ol className="flex flex-col" aria-label="Work flow">
-      {boxes.map((box, index) => {
-        const live = isLive(box.state);
-        const color = colorOf(box.agentId);
-        const dimmed = highlighted !== null && highlighted !== box.agentId;
-        const text = boxText(box, t);
-        return (
-          <li
-            key={box.id}
-            className={cn("flex flex-col transition-opacity", dimmed && "opacity-40")}
-          >
-            {index > 0 ? <FlowConnector live={live} color={color} /> : null}
-            <div
+    <div className="rounded-lg border border-border/70 bg-card p-2.5">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <p className="text-xs font-medium">{t("Work")}</p>
+        <p className="text-2xs tabular-nums text-muted-foreground">
+          {done}/{boxes.length}
+        </p>
+      </div>
+      <ol className="flex flex-col" aria-label="Work flow">
+        {boxes.map((box) => {
+          const live = isLive(box.state);
+          const color = colorOf(box.agentId);
+          const dimmed = highlighted !== null && highlighted !== box.agentId;
+          const text = boxText(box, t);
+          return (
+            <li
+              key={box.id}
               className={cn(
-                "flex flex-col gap-0.5 rounded-lg border border-l-4 bg-card px-2.5 py-1.5 motion-safe:wf-box-enter",
-                live ? "border-primary ring-1 ring-primary/60" : "border-border/70",
-                box.state === "failed" && "border-destructive/50",
+                "relative flex items-start gap-2 border-l-2 py-1 pl-2 transition-[opacity,translate] duration-200 motion-reduce:transition-none",
+                box.state === "done" && "opacity-65 motion-safe:translate-y-px",
+                dimmed && "opacity-40",
               )}
               style={{ borderLeftColor: color }}
             >
-              <span className="flex min-w-0 items-center gap-1.5">
+              <FlowTaskBox state={box.state} />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-xs font-medium">{text.title}</span>
+                {text.detail ? (
+                  <span className="truncate text-2xs text-muted-foreground">{text.detail}</span>
+                ) : null}
+              </span>
+              <span className="shrink-0 text-2xs text-muted-foreground">
+                {FLOW_STATE[box.state].label}
+              </span>
+              {live ? (
                 <span
                   aria-hidden
-                  className={cn("size-1.5 shrink-0 rounded-full", FLOW_STATE[box.state].dotClass)}
-                />
-                <span className="min-w-0 truncate text-xs font-medium">{text.title}</span>
-              </span>
-              <span className="truncate text-2xs text-muted-foreground">
-                {[text.detail, FLOW_STATE[box.state].label].filter(Boolean).join(" · ")}
-              </span>
-            </div>
-          </li>
-        );
-      })}
-    </ol>
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-px overflow-hidden"
+                >
+                  <span
+                    className="block h-full opacity-60 motion-safe:wf-task-underline"
+                    style={{
+                      backgroundImage: `linear-gradient(90deg, transparent, ${color}, transparent)`,
+                    }}
+                  />
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 

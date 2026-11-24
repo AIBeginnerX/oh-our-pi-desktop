@@ -2015,6 +2015,12 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
      * client would send it to the provider as an ordinary prompt.
      */
     usageLimitsCommand: Schema.optional(Schema.Boolean),
+    /**
+     * Whether this client understands providerStatusesPatched events. Older clients
+     * cannot decode unknown stream events, so only subscribers that opt in receive
+     * patches. Older servers drop the flag and continue sending full lists.
+     */
+    providerStatusPatches: Schema.optional(Schema.Boolean),
   }),
   success: ServerConfigStreamEvent,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),

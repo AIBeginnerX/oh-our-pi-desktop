@@ -927,6 +927,61 @@ it.layer(Layer.mergeAll(TestNodeServices, ServerSettingsModule.layerTest(), Test
         assert.deepStrictEqual(afterFailure.models, [authoritativeProvider.models[0]!]);
       });
 
+      describe("ZCode model inventory", () => {
+        const modelA = { slug: "a", name: "A", isCustom: false, capabilities: null };
+        const modelB = { slug: "b", name: "B", isCustom: false, capabilities: null };
+        const previous = {
+          instanceId: ProviderInstanceId.make("zcode"),
+          driver: ProviderDriverKind.make("zcode"),
+          status: "ready",
+          enabled: true,
+          installed: true,
+          auth: { status: "unknown" },
+          checkedAt: "2026-09-04T19:00:00.000Z",
+          version: null,
+          models: [modelA, modelB],
+          slashCommands: [],
+          skills: [],
+        } satisfies ServerProvider;
+
+        it("removes a model the agent stops advertising after successful discovery", () => {
+          const merged = mergeProviderSnapshot(previous, { ...previous, models: [modelA] });
+          assert.deepStrictEqual(merged.models, [modelA]);
+        });
+
+        it("keeps the last discovered models while discovery is incomplete", () => {
+          // An incomplete probe still carries the built-in fallback model.
+          const builtIn = {
+            slug: "zcode-default",
+            name: "GLM (ZCode)",
+            isCustom: false,
+            capabilities: null,
+          };
+          const merged = mergeProviderSnapshot(previous, {
+            ...previous,
+            status: "warning",
+            models: [builtIn],
+          });
+          assert.deepStrictEqual(merged.models, [builtIn, modelA, modelB]);
+        });
+
+        it("keeps the picker-ready list when the agent lists no models", () => {
+          const custom = {
+            slug: "my-model",
+            name: "Mine",
+            isCustom: true,
+            capabilities: null,
+          };
+          const merged = mergeProviderSnapshot(previous, {
+            ...previous,
+            status: "ready",
+            models: [custom],
+          });
+          assert.strictEqual(merged.status, "ready");
+          assert.deepStrictEqual(merged.models, [custom, modelA, modelB]);
+        });
+      });
+
       describe("Codex model inventories", () => {
         const cachedProvider = {
           instanceId: ProviderInstanceId.make("codex-personal"),

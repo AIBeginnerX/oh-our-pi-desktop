@@ -105,6 +105,7 @@ type Runtime = Pick<
   | "start"
   | "setMode"
   | "setModel"
+  | "setConfigOption"
   | "getConfigOptions"
   | "getEvents"
   | "drainEvents"

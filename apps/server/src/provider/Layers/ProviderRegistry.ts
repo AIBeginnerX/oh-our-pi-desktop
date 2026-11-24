@@ -103,6 +103,18 @@ export function upsertProviderWorkspaceSnapshot(
 }
 
 const shouldRetainMissingProviderModels = (provider: ServerProvider): boolean => {
+  // ZCode and MiniMax list their complete inventory on a successful probe. A probe that listed
+  // nothing carries only custom models, so the last discovered list stays.
+  if (
+    provider.driver === ProviderDriverKind.make("zcode") ||
+    provider.driver === ProviderDriverKind.make("minimax")
+  ) {
+    return (
+      provider.enabled &&
+      (provider.status !== "ready" || provider.models.every((model) => model.isCustom))
+    );
+  }
+
   const isAntigravity = provider.driver === ProviderDriverKind.make("antigravity");
   const isCodex = provider.driver === ProviderDriverKind.make("codex");
   if (!isAntigravity && !isCodex && provider.driver !== ProviderDriverKind.make("opencode")) {

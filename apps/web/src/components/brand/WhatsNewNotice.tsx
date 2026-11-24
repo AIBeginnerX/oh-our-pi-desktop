@@ -11,7 +11,7 @@ const FOCUSABLE = "button:not([disabled])";
 const MAX_NOTICE_HIGHLIGHTS = 5;
 
 /**
- * The launch card under the neon sign. It owns focus while open: Escape closes it and Tab
+ * The launch card under a launch splash. It owns focus while open: Escape closes it and Tab
  * cycles inside it, because the splash covers the whole app. Any way of closing it counts as seen.
  */
 export function WhatsNewNotice(props: {

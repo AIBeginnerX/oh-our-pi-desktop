@@ -51,7 +51,7 @@ import {
 } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
-import { ConnectedNeonSplash } from "../components/brand/StartupNeonSplash";
+import { ConnectedNeonSplash } from "../components/brand/NeonSignSplash";
 import { applyAppearanceFontVariables } from "~/appearanceFonts";
 import { applyAppearanceContrast } from "~/appearanceContrast";
 import { useClientSettings } from "../hooks/useSettings";

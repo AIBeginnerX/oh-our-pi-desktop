@@ -1823,6 +1823,7 @@ describe("crew: cooling after a failure", () => {
     Effect.gen(function* () {
       const world = yield* makeWorld("interrupted", new Set([1, 3]), false, {
         pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CODEX, model: "gpt-5.4-mini" }] },
       });
       const resetsAt = IsoDateTime.make("1970-01-01T02:00:00.000Z");
       yield* Ref.set(world.providers, [
@@ -1863,7 +1864,12 @@ describe("crew: cooling after a failure", () => {
     Effect.gen(function* () {
       const world = yield* makeWorld("interrupted", new Set([1]), false, {
         pinned: pinnedHaiku,
-        fallbacks: { worker: [{ instanceId: CLAUDE, model: "claude-sonnet-5" }] },
+        fallbacks: {
+          worker: [
+            { instanceId: CLAUDE, model: "claude-sonnet-5" },
+            { instanceId: CODEX, model: "gpt-5.4-mini" },
+          ],
+        },
       });
       yield* Ref.set(world.providers, withSonnet);
       const service = yield* world.start;
@@ -1951,6 +1957,7 @@ describe("crew: cooling after a failure", () => {
     Effect.gen(function* () {
       const world = yield* makeWorld("interrupted", new Set([1]), false, {
         pinned: pinnedHaiku,
+        fallbacks: { worker: [{ instanceId: CODEX, model: "gpt-5.4-mini" }] },
       });
       const service = yield* world.start;
       yield* failFirstThenFinish(world, service.crew, "429 Too Many Requests");
@@ -1977,6 +1984,46 @@ describe("crew: cooling after a failure", () => {
         "claude/claude-haiku-5",
         "codex/gpt-5.4",
       ]);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("fails a picked role's task once its models are spent, rather than pick another", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set([1]), false, { pinned: pinnedHaiku });
+      const service = yield* world.start;
+      const delegated = yield* service.crew.delegate({
+        threadId: LEAD,
+        role: "worker",
+        task: "Do it",
+      });
+      yield* world.failStart(yield* Queue.take(world.heldStarts), {
+        detail: "The session crashed.",
+        sessionError: "The session crashed.",
+      });
+      const [report] = yield* service.crew.wait({
+        threadId: LEAD,
+        taskIds: [delegated.taskId],
+      });
+      assert.strictEqual(report!.status, "failed");
+      // Codex is signed in and idle, but the user did not pick it for this role.
+      assert.deepStrictEqual(createdModels(yield* world.issued), ["claude/claude-haiku-5"]);
+      yield* service.close;
+    }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("refuses a task for a role picked for a model this environment does not list", () =>
+    Effect.gen(function* () {
+      const world = yield* makeWorld("interrupted", new Set(), false, {
+        pinned: { worker: { instanceId: CLAUDE, model: "claude-gone-5" } },
+      });
+      const service = yield* world.start;
+      const error = yield* Effect.flip(
+        service.crew.delegate({ threadId: LEAD, role: "worker", task: "Do it" }),
+      );
+      assert.include(error.reason, "No model is available for the worker role");
+      // Both providers can run a worker, but the user picked neither of their models.
+      assert.deepStrictEqual(createdModels(yield* world.issued), []);
       yield* service.close;
     }).pipe(Effect.scoped, Effect.provide(TestLayer), Effect.provide(TestClock.layer())),
   );

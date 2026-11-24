@@ -121,8 +121,8 @@ function selectEntries(option: EffectAcpSchema.SessionConfigOption | undefined) 
 
 /**
  * Agent 1.4 splits a model into a base model and a separate thinking level. T3 keeps the combined
- * IDs (`gemini-3.8-flash-high`) that the agent still accepts as a model value, so saved
- * selections and the model manifest keep matching across agent versions.
+ * IDs (`gemini-3.8-flash-high`) so saved selections and the model manifest stay stable;
+ * `applyAntigravityAcpModelSelection` sets them as the two separate settings.
  */
 export function antigravityModelOptions(
   configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
@@ -169,12 +169,29 @@ export function resolveAntigravityModel(input: {
     : current;
 }
 
+/** Splits a combined model and thinking level back into the agent's two settings. */
+function splitAntigravityModel(
+  configOptions: ReadonlyArray<EffectAcpSchema.SessionConfigOption>,
+  combined: string,
+) {
+  const levelConfig = antigravityThinkingLevelConfig(configOptions);
+  if (levelConfig?.type !== "select") return undefined;
+  const models = selectEntries(antigravityModelConfig(configOptions));
+  for (const level of selectEntries(levelConfig)) {
+    const model = models.find((entry) => `${entry.value}-${level.value}` === combined);
+    if (model) {
+      return { model: model.value, levelConfigId: levelConfig.id, level: level.value };
+    }
+  }
+  return undefined;
+}
+
 /** Never replace a saved selection with the default returned by a cold resume. */
 export const applyAntigravityAcpModelSelection = Effect.fn("applyAntigravityAcpModelSelection")(
   function* <E>(input: {
     readonly runtime: Pick<
       AcpSessionRuntime.AcpSessionRuntime["Service"],
-      "getConfigOptions" | "setModel"
+      "getConfigOptions" | "setModel" | "setConfigOption"
     >;
     readonly model: string | null | undefined;
     /** Model to select for the provider default alias. See `resolveAntigravityModel`. */
@@ -203,7 +220,15 @@ export const applyAntigravityAcpModelSelection = Effect.fn("applyAntigravityAcpM
         ),
       );
     }
-    yield* input.runtime.setModel(resolved).pipe(Effect.mapError(input.mapError));
+    const split = splitAntigravityModel(configOptions, resolved);
+    if (!split) {
+      yield* input.runtime.setModel(resolved).pipe(Effect.mapError(input.mapError));
+      return resolved;
+    }
+    yield* input.runtime.setModel(split.model).pipe(Effect.mapError(input.mapError));
+    yield* input.runtime
+      .setConfigOption(split.levelConfigId, split.level)
+      .pipe(Effect.mapError(input.mapError));
     return resolved;
   },
 );

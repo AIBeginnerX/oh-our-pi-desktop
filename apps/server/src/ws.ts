@@ -54,6 +54,7 @@ import {
   type RelayClientInstallProgressEvent,
   ServerSelfUpdateError,
   type ServerSelfUpdateProgressEvent,
+  type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
   FilesystemBrowseError,
   AssetWorkspaceContextNotFoundError,
@@ -2939,7 +2940,7 @@ const makeWsRpcLayer = (
                   },
                 })),
               );
-              const providerStatuses = Stream.zipLatestWith(
+              const providerLists = Stream.zipLatestWith(
                 // The registry stream carries changes only. Seed it with the current
                 // providers so a source refresh that lands before any provider change
                 // still pairs up and reaches the client.
@@ -2966,13 +2967,43 @@ const makeWsRpcLayer = (
                   (previous, next) => JSON.stringify(previous) === JSON.stringify(next),
                 ),
                 Stream.drop(1),
-                Stream.map((providers) => ({
-                  version: 1 as const,
-                  type: "providerStatuses" as const,
-                  payload: { providers },
-                })),
                 Stream.debounce(Duration.millis(PROVIDER_STATUS_DEBOUNCE_MS)),
               );
+              const providerStatuses =
+                input.providerStatusPatches === true
+                  ? providerLists.pipe(
+                      Stream.mapAccum(
+                        () => config.providers,
+                        (previous, next) => {
+                          const previousById = new Map(previous.map((p) => [p.instanceId, p]));
+                          const changed = next.filter(
+                            (p) =>
+                              JSON.stringify(p) !== JSON.stringify(previousById.get(p.instanceId)),
+                          );
+                          const instanceIds = next.map((p) => p.instanceId);
+                          if (
+                            changed.length === 0 &&
+                            previous.length === instanceIds.length &&
+                            instanceIds.every((id, i) => id === previous[i]?.instanceId)
+                          ) {
+                            return [previous, []];
+                          }
+                          const patch: ServerConfigStreamEvent = {
+                            version: 1,
+                            type: "providerStatusesPatched",
+                            payload: { instanceIds, changed },
+                          };
+                          return [next, [patch]];
+                        },
+                      ),
+                    )
+                  : providerLists.pipe(
+                      Stream.map((providers): ServerConfigStreamEvent => ({
+                        version: 1,
+                        type: "providerStatuses",
+                        payload: { providers },
+                      })),
+                    );
               // The only source of published themes: the stream emits the
               // current set before any change, so the snapshot carrying it too
               // would just send every client the same array twice per connect.

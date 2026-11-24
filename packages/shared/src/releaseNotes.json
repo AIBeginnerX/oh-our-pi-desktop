@@ -1,6 +1,40 @@
 {
   "versions": [
     {
+      "version": "0.0.164",
+      "date": "2026-11-24",
+      "highlights": [
+        {
+          "en": "The desktop app now opens with a short OOP motion: one line draws the letters, agents gather around them, and the wordmark settles with its tagline and version number. It plays once per launch, and any click or key skips it. With reduced motion turned on, only the finished wordmark is shown. The startup screen in the browser is unchanged.",
+          "ko": "데스크톱 앱이 짧은 OOP 모션과 함께 열립니다. 한 줄이 글자를 그리고 그 주위로 에이전트가 모인 뒤 태그라인과 버전 번호와 함께 워드마크가 자리를 잡습니다. 실행할 때마다 한 번 재생되며, 아무 곳이나 클릭하거나 키를 누르면 건너뜁니다. 동작 줄이기를 켜 두면 완성된 워드마크만 표시합니다. 브라우저의 시작 화면은 그대로입니다."
+        },
+        {
+          "en": "The Agents panel now shows the turn's work as one checklist instead of separate cards joined by lines. A done and total count sits at the top, each step gets a box that fills when it finishes, is crossed when it fails and dashed when it stops, and the step running now carries an underline in its agent's color.",
+          "ko": "Agents 패널에서 턴의 작업을 선으로 이은 카드 대신 하나의 체크리스트로 보여 줍니다. 위쪽에 완료 개수와 전체 개수가 표시되고, 단계마다 끝나면 체크가 채워지고 실패하면 X, 중지되면 가로줄 표시가 나타납니다. 지금 실행 중인 단계에는 그 에이전트 색의 밑줄이 표시됩니다."
+        },
+        {
+          "en": "A crew role you picked now runs only the model you chose and the fallbacks you set for it; if those all fail, the task fails and the lead does the work. A role whose model is not available on this machine shows No model, and its tasks run only on your fallbacks. Use this crew for new chats keeps such picks, even for models this machine does not list, and crew results name the model that actually did the work. Roles left on Automatic still move on to other models.",
+          "ko": "직접 고른 크루 역할은 고른 모델과 그 역할에 지정한 대체 모델만 사용하며, 모두 실패하면 작업이 실패하고 리드가 직접 처리합니다. 이 컴퓨터에 없는 모델을 고른 역할은 No model로 표시되고 지정한 대체 모델에서만 작업합니다. Use this crew for new chats로 새 채팅의 기본 크루를 저장해도 이런 선택이 그대로 유지되며, 크루 결과에는 실제로 작업한 모델 이름이 표시됩니다. 자동으로 둔 역할은 기존처럼 같은 등급의 다른 모델로 넘어갑니다."
+        },
+        {
+          "en": "Models you remove in ZCode or MiniMax Code now leave the model picker, including custom providers you deleted, instead of staying there across restarts. Both providers also stay selectable when they start but report no models; in that case only the custom models you added are offered.",
+          "ko": "ZCode나 MiniMax Code에서 지운 모델은 직접 삭제한 사용자 지정 공급자를 포함해 모델 선택 목록에서 사라지고, 재시작해도 다시 나타나지 않습니다. 두 공급자는 시작했지만 모델을 보고하지 않을 때도 계속 선택할 수 있고, 이때는 직접 추가한 모델만 표시합니다."
+        },
+        {
+          "en": "Antigravity now receives the model and its thinking level as two separate settings, so the model you picked is applied instead of being refused. Crew tasks on an Antigravity expert no longer switch to another model for that reason.",
+          "ko": "Antigravity에는 모델과 추론 수준을 따로 전달해, 고른 모델이 거절되지 않고 그대로 적용됩니다. 이런 이유로 Antigravity 전문가의 크루 작업이 다른 모델로 넘어가던 문제도 없어졌습니다."
+        },
+        {
+          "en": "In Settings → General, the list in the Crew scorecard now starts folded, so a long list no longer pushes the rest of the general settings down. Refresh scorecard and a load failure notice stay visible while it is folded.",
+          "ko": "설정 → 일반에서 크루 성과표의 목록이 접힌 채로 시작해, 목록이 길어도 나머지 일반 설정이 아래로 밀리지 않습니다. 접힌 상태에서도 성과표 새로고침과 불러오기 실패 안내는 그대로 보입니다."
+        },
+        {
+          "en": "Open apps now receive only the providers whose status changed instead of the full provider list each time OOP checks them, which cuts a large share of the data sent to every connected client, especially over a relay to a phone.",
+          "ko": "상태가 바뀐 공급자만 앱으로 보내고, 확인할 때마다 전체 공급자 목록을 보내지 않아 연결된 클라이언트로 전송되는 데이터가 크게 줄었습니다. 중계를 거쳐 휴대폰으로 보낼 때 특히 차이가 큽니다."
+        }
+      ]
+    },
+    {
       "version": "0.0.163",
       "date": "2026-11-23",
       "highlights": [

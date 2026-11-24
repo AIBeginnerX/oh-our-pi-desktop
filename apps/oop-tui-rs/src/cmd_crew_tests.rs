@@ -147,6 +147,25 @@ fn make_default_copies_what_the_thread_runs_with_and_only_hand_picked_models() {
 }
 
 #[test]
+fn make_default_keeps_a_pick_whose_model_is_not_listed_here() {
+    let glm = json!({"instanceId": "zai", "model": "glm-5.3"});
+    let config = json!({"settings": {"crew": {"enabled": true, "preset": "recommended", "pinned": {}}},
+        "providers": providers()});
+    let own = json!({"pinned": {"expert": glm}});
+    let brain = Some(("claude", "claude-sonnet-5-5"));
+    let next = as_default(
+        &config["settings"]["crew"],
+        &crew::resolve(&config, Some(&own), brain),
+    );
+    assert_eq!(next["pinned"], json!({"expert": glm}));
+    // a new chat runs the saved default: the role stays picked, with no model OOP chose
+    let saved = json!({"settings": {"crew": next}, "providers": providers()});
+    let fresh = crew::resolve(&saved, None, brain);
+    assert!(fresh.roles[1].is_none());
+    assert!(fresh.pinned[1]);
+}
+
+#[test]
 fn the_model_list_puts_auto_first_and_ranks_the_models_that_match() {
     let app = app_with(json!({"enabled": true}));
     let ctx = context(&app, 0);

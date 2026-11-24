@@ -238,7 +238,10 @@ export interface ResolvedCrew {
   readonly enabled: boolean;
   readonly preset: CrewPreset;
   readonly roles: Record<CrewRole, CrewModelOption | null>;
+  /** Roles the user picked a model for, listed here or not; an unlisted pick leaves the role's model null. */
   readonly pinned: ReadonlySet<CrewRole>;
+  /** The picked models as saved, listed here or not, so "Use this crew for new chats" keeps every pick. */
+  readonly pinSelections: Partial<Record<CrewRole, ModelSelection>>;
   /** The user's fallback models per role, in order, that this environment can run now. */
   readonly fallbacks: Record<CrewRole, ReadonlyArray<CrewModelOption>>;
   /**
@@ -271,12 +274,19 @@ export function resolveCrew(input: {
   const fallbacks = {} as Record<CrewRole, ReadonlyArray<CrewModelOption>>;
   const fallbackSelections = {} as Record<CrewRole, ReadonlyArray<ModelSelection>>;
   const pinned = new Set<CrewRole>();
+  const pinSelections: Partial<Record<CrewRole, ModelSelection>> = {};
   for (const role of CREW_ROLES) {
     const pin = pins[role];
-    const pinnedOption =
-      pin == null ? undefined : options.find((option) => sameModel(option.selection, pin));
-    if (pinnedOption !== undefined) pinned.add(role);
-    roles[role] = pinnedOption ?? recommended[role];
+    // A picked model this environment does not list leaves the role without one: its tasks run
+    // only on the user's fallbacks, never on a model OOP would pick instead.
+    if (pin != null) {
+      pinned.add(role);
+      pinSelections[role] = pin;
+    }
+    roles[role] =
+      pin == null
+        ? recommended[role]
+        : (options.find((option) => sameModel(option.selection, pin)) ?? null);
     fallbackSelections[role] = (lists[role] ?? []).slice(0, CREW_FALLBACK_LIMIT);
     // A listed model that is not ready here is skipped, not an error: it comes back with its provider.
     fallbacks[role] = fallbackSelections[role].flatMap((selection) =>
@@ -288,6 +298,7 @@ export function resolveCrew(input: {
     preset,
     roles,
     pinned,
+    pinSelections,
     fallbacks,
     fallbackSelections,
     source: override === undefined ? "default" : "thread",
@@ -362,8 +373,8 @@ export function crewAsDefault(settings: CrewSettings, crew: ResolvedCrew): CrewS
   let pinned: CrewSettings["pinned"] = {};
   let fallbacks: CrewSettings["fallbacks"] = {};
   for (const role of CREW_ROLES) {
-    const option = crew.roles[role];
-    if (crew.pinned.has(role) && option !== null) pinned = { ...pinned, [role]: option.selection };
+    const pick = crew.pinSelections[role];
+    if (pick !== undefined) pinned = { ...pinned, [role]: pick };
     const listed = crew.fallbackSelections[role];
     if (listed.length > 0) fallbacks = { ...fallbacks, [role]: listed };
   }
@@ -377,12 +388,15 @@ const ROLE_TIERS: Record<CrewRole, ReadonlyArray<CrewModelTier>> = {
 };
 
 /**
- * Models a role tries in order when the one before fails: the role's own model, the user's
- * fallbacks for the role, the preset's default for the role, then other models of the same level
- * before the next level, preferring providers not already in the chain. The brain is never in
- * it: it takes the work itself once the chain runs dry. Providers in `unavailableInstances`
- * (cooling down) and models in `unavailableModels` (refused by their provider) are skipped,
- * except the role's own model: a task tries it once, since the user may have reset the limit.
+ * Models a role tries in order when the one before fails. A role the user picked (`userPicked`)
+ * runs only the models the user named: the role's own model, then the user's fallbacks for it,
+ * and nothing else. The brain model is allowed there, as the role's own model or as a fallback,
+ * because the user chose it. A role left on automatic runs the role's own model, the user's
+ * fallbacks, the preset's default for the role, then other models of the same level before the
+ * next level, preferring providers not already in the chain; the brain is never in that chain:
+ * it takes the work itself once the chain runs dry. Providers in `unavailableInstances` (cooling
+ * down) and models in `unavailableModels` (refused by their provider) are skipped, except the
+ * role's own model: a task tries it once, since the user may have reset the limit.
  */
 export function crewFallbackChain(input: {
   readonly options: ReadonlyArray<CrewModelOption>;
@@ -392,6 +406,8 @@ export function crewFallbackChain(input: {
   readonly fallbacks?: ReadonlyArray<CrewModelOption>;
   readonly preset: CrewPreset;
   readonly brain: ModelSelection | null;
+  /** The user picked this role's model, so only it and the user's fallbacks run. */
+  readonly userPicked?: boolean;
   readonly unavailableInstances?: ReadonlySet<string>;
   readonly unavailableModels?: ReadonlyArray<ModelSelection>;
   /** Defaults to three, and grows so that every user fallback and one pick of OOP's fit. */
@@ -404,10 +420,17 @@ export function crewFallbackChain(input: {
   const available = (option: CrewModelOption) =>
     input.unavailableInstances?.has(option.selection.instanceId) !== true &&
     !(input.unavailableModels ?? []).some((selection) => sameModel(selection, option.selection));
-  const notBrain = input.options.filter((option) => !sameModel(option.selection, input.brain));
-  const usable = notBrain.filter(available);
+  const userPicked = input.userPicked === true;
+  // A picked role may run the brain model, since the user named it; an automatic one may not.
+  const listed = userPicked
+    ? input.options
+    : input.options.filter((option) => !sameModel(option.selection, input.brain));
+  const usable = listed.filter(available);
   const chain: CrewModelOption[] = [];
-  const add = (option: CrewModelOption | null | undefined, among = usable) => {
+  const add = (
+    option: CrewModelOption | null | undefined,
+    among: ReadonlyArray<CrewModelOption>,
+  ) => {
     if (
       option != null &&
       among.some((candidate) => sameModel(candidate.selection, option.selection)) &&
@@ -416,20 +439,23 @@ export function crewFallbackChain(input: {
       chain.push(option);
     }
   };
-  add(input.assigned, notBrain);
+  add(input.assigned, listed);
   const fallbacks = (input.fallbacks ?? []).slice(0, CREW_FALLBACK_LIMIT);
-  for (const option of fallbacks) add(option);
-  add(recommendCrew(usable, input.brain, input.preset)[input.role]);
-  const anchor = input.assigned?.tier ?? ROLE_TIERS[input.role][0]!;
-  const tiers = [anchor, ...ROLE_TIERS[input.role].filter((tier) => tier !== anchor)];
-  const inChain = new Set(chain.map((option) => option.selection.instanceId));
-  const rest = [...usable].sort(
-    (a, b) =>
-      tiers.indexOf(a.tier) - tiers.indexOf(b.tier) ||
-      Number(inChain.has(a.selection.instanceId)) - Number(inChain.has(b.selection.instanceId)) ||
-      Number(!a.isDefault) - Number(!b.isDefault),
-  );
-  for (const option of rest) add(option);
+  for (const option of fallbacks) add(option, usable);
+  // Only an automatic role moves on past what the user named to what OOP would pick.
+  if (!userPicked) {
+    add(recommendCrew(usable, input.brain, input.preset)[input.role], usable);
+    const anchor = input.assigned?.tier ?? ROLE_TIERS[input.role][0]!;
+    const tiers = [anchor, ...ROLE_TIERS[input.role].filter((tier) => tier !== anchor)];
+    const inChain = new Set(chain.map((option) => option.selection.instanceId));
+    const rest = [...usable].sort(
+      (a, b) =>
+        tiers.indexOf(a.tier) - tiers.indexOf(b.tier) ||
+        Number(inChain.has(a.selection.instanceId)) - Number(inChain.has(b.selection.instanceId)) ||
+        Number(!a.isDefault) - Number(!b.isDefault),
+    );
+    for (const option of rest) add(option, usable);
+  }
   const limit = input.limit ?? Math.max(3, fallbacks.length + 2);
   const avoided = input.avoidFamilies;
   if (avoided === undefined || avoided.size === 0) return chain.slice(0, limit);

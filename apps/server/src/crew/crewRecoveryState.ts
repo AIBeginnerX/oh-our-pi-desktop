@@ -26,6 +26,7 @@ const CrewReport = Schema.Struct({
   result: Schema.NullOr(Schema.String),
   report: Schema.optional(CrewMemberReport),
   proof: Schema.optional(Schema.Struct({ verdict: CrewProof, reason: Schema.String })),
+  model: Schema.optional(Schema.String),
 });
 
 /** The TODO list the server keeps for a task; it outlives the task's threads and a restart. */

@@ -1,11 +1,14 @@
 import { WS_METHODS, type CrewScorecard, type EnvironmentId } from "@t3tools/contracts";
 import { createEnvironmentRpcCommand } from "@t3tools/client-runtime/state/runtime";
+import { ChevronRightIcon } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { cn } from "~/lib/utils";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useT } from "../../i18n";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../ui/button";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 
 const getScorecard = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:crew-scorecard:get",
@@ -27,6 +30,7 @@ export function CrewScorecardSetting({
   const [scorecard, setScorecard] = useState<CrewScorecard | null>(null);
   const [pending, setPending] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [open, setOpen] = useState(false);
   const refresh = useCallback(async () => {
     setPending(true);
     const result = await get({ environmentId, input: {} });
@@ -44,59 +48,79 @@ export function CrewScorecardSetting({
   // Nothing loaded yet, or a server without the scorecard: the section stays out of the way.
   if (scorecard === null) return null;
   return (
-    <div className="min-w-0 space-y-2 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h3 className="text-sm font-medium">{t("Crew scorecard · Last 30 days")}</h3>
-          <p className="text-xs break-words text-muted-foreground">{environmentLabel}</p>
+    <Collapsible open={open} onOpenChange={setOpen} className="min-w-0">
+      <div className="space-y-2 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium">
+              <CollapsibleTrigger className="flex items-center gap-1.5 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <ChevronRightIcon
+                  aria-hidden
+                  className={cn(
+                    "size-4 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none",
+                    open && "rotate-90",
+                  )}
+                />
+                {t("Crew scorecard · Last 30 days")}
+              </CollapsibleTrigger>
+            </h3>
+            <p className="text-xs break-words text-muted-foreground">{environmentLabel}</p>
+          </div>
+          <Button variant="outline" size="xs" disabled={pending} onClick={() => void refresh()}>
+            {t("Refresh scorecard")}
+          </Button>
         </div>
-        <Button variant="outline" size="xs" disabled={pending} onClick={() => void refresh()}>
-          {t("Refresh scorecard")}
-        </Button>
+        {failed && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {t("Could not load the crew scorecard.")}
+          </p>
+        )}
+        <CollapsiblePanel>
+          <div className="space-y-2">
+            {scorecard.rows.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t("No finished crew work in this period.")}
+              </p>
+            )}
+            <ul className="space-y-2">
+              {scorecard.rows.map((row) => (
+                <li key={`${row.role}:${row.model}`} className="min-w-0 text-xs break-words">
+                  <p className="font-medium">
+                    {t(ROLE_LABELS[row.role])} · {row.model}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {row.role === "auditor" ? (
+                      t(
+                        "{audits} audits · {changes} asked for changes · {proven} with proven blockers · {unreadable} unreadable",
+                        {
+                          audits: row.audits,
+                          changes: row.needsChanges,
+                          proven: row.provenBlocking,
+                          unreadable: row.unreadable,
+                        },
+                      )
+                    ) : (
+                      <>
+                        {t(
+                          "{completed} completed · {failed} failed · {verified} of {tasks} verified",
+                          {
+                            completed: row.completed,
+                            failed: row.failed,
+                            verified: row.verified,
+                            tasks: row.tasks,
+                          },
+                        )}
+                        {row.tasks >= 10 &&
+                          ` (${new Intl.NumberFormat(undefined, { style: "percent" }).format(row.verified / row.tasks)})`}
+                      </>
+                    )}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </CollapsiblePanel>
       </div>
-      {failed && (
-        <p role="status" className="text-xs text-muted-foreground">
-          {t("Could not load the crew scorecard.")}
-        </p>
-      )}
-      {scorecard.rows.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          {t("No finished crew work in this period.")}
-        </p>
-      )}
-      <ul className="space-y-2">
-        {scorecard.rows.map((row) => (
-          <li key={`${row.role}:${row.model}`} className="min-w-0 text-xs break-words">
-            <p className="font-medium">
-              {t(ROLE_LABELS[row.role])} · {row.model}
-            </p>
-            <p className="text-muted-foreground">
-              {row.role === "auditor" ? (
-                t(
-                  "{audits} audits · {changes} asked for changes · {proven} with proven blockers · {unreadable} unreadable",
-                  {
-                    audits: row.audits,
-                    changes: row.needsChanges,
-                    proven: row.provenBlocking,
-                    unreadable: row.unreadable,
-                  },
-                )
-              ) : (
-                <>
-                  {t("{completed} completed · {failed} failed · {verified} of {tasks} verified", {
-                    completed: row.completed,
-                    failed: row.failed,
-                    verified: row.verified,
-                    tasks: row.tasks,
-                  })}
-                  {row.tasks >= 10 &&
-                    ` (${new Intl.NumberFormat(undefined, { style: "percent" }).format(row.verified / row.tasks)})`}
-                </>
-              )}
-            </p>
-          </li>
-        ))}
-      </ul>
-    </div>
+    </Collapsible>
   );
 }

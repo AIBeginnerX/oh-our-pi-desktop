@@ -309,10 +309,12 @@ export const checkAcpAgentProviderStatus = Effect.fn("checkAcpAgentProviderStatu
       : metadata.models.length > 0
         ? metadata.models
         : yield* sessionModels(agent.launch, environment, version);
+  // With no list from the agent, only the user's custom models go out, so the registry keeps
+  // the last discovered list rather than dropping to the built-in fallback.
   const models =
     advertised.length > 0
       ? modelsFor(settings, [...agent.builtInModels, ...advertised])
-      : fallbackModels;
+      : modelsFor(settings, []);
 
   return snapshot(
     {

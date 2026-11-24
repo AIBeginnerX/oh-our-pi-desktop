@@ -134,6 +134,34 @@ describe("resolveCrew", () => {
     expect([...crew.pinned]).toEqual(["worker"]);
   });
 
+  it("leaves a role picked for a model this environment does not list without one", () => {
+    const fallback = { instanceId: "codex", model: "gpt-5.4-mini" } as never;
+    const crew = resolveCrew({
+      settings: settings({
+        pinned: { expert: { instanceId: "zai", model: "glm-5.3" } as never },
+        fallbacks: { expert: [fallback] },
+      }),
+      override: null,
+      providers,
+      brain,
+    });
+    expect(crew.roles.expert).toBeNull();
+    expect(crew.pinned.has("expert")).toBe(true);
+    const chain = (fallbacks: typeof crew.fallbacks.expert) =>
+      crewFallbackChain({
+        options: crewModelOptions(providers),
+        role: "expert",
+        assigned: crew.roles.expert,
+        userPicked: crew.pinned.has("expert"),
+        fallbacks,
+        preset: crew.preset,
+        brain,
+      }).map((option) => option.selection.model);
+    // Only the user's fallback stands in; without one, nothing runs.
+    expect(chain(crew.fallbacks.expert)).toEqual(["gpt-5.4-mini"]);
+    expect(chain([])).toEqual([]);
+  });
+
   it("layers a thread's own crew over the defaults", () => {
     const crew = resolveCrew({
       settings: settings(),
@@ -184,7 +212,7 @@ describe("resolveCrew", () => {
     expect(defaults).toEqual(settings({ preset: "speed" }));
   });
 
-  it("falls back to the preset when a pinned model is no longer available", () => {
+  it("keeps a role picked on a signed-out provider without a model, not the preset's pick", () => {
     const crew = resolveCrew({
       settings: settings({
         pinned: { worker: { instanceId: "cursor", model: "composer-2" } as never },
@@ -193,8 +221,8 @@ describe("resolveCrew", () => {
       providers,
       brain,
     });
-    expect(crew.roles.worker?.selection.model).toBe("claude-haiku-5");
-    expect(crew.pinned.size).toBe(0);
+    expect(crew.roles.worker).toBeNull();
+    expect([...crew.pinned]).toEqual(["worker"]);
   });
 });
 
@@ -277,6 +305,21 @@ describe("crewAsDefault", () => {
     expect(next.preset).toBe("quality");
     expect(Object.keys(next.pinned)).toEqual(["worker"]);
     expect(next.pinned.worker?.model).toBe("gpt-5.4");
+  });
+
+  it("keeps a pick this environment does not list, so a new chat does not run OOP's pick", () => {
+    const glm = { instanceId: "zai", model: "glm-5.3" } as never;
+    const crew = resolveCrew({
+      settings: settings(),
+      override: { pinned: { expert: glm } },
+      providers,
+      brain,
+    });
+    const next = crewAsDefault(settings(), crew);
+    expect(next.pinned).toEqual({ expert: glm });
+    const fresh = resolveCrew({ settings: next, override: null, providers, brain });
+    expect(fresh.roles.expert).toBeNull();
+    expect(fresh.pinned.has("expert")).toBe(true);
   });
 
   it("carries the thread's fallback lists into the default", () => {
@@ -426,6 +469,70 @@ describe("crewFallbackChain", () => {
       brain: { instanceId: "codex", model: "gpt-5.4" } as never,
     });
     expect(chain[0]?.selection.model).toBe("claude-opus-5");
+  });
+
+  it("runs only a picked model and the user's fallbacks, never OOP's pick", () => {
+    const pick = (model: string) => options.filter((option) => option.selection.model === model);
+    const chain = crewFallbackChain({
+      options,
+      role: "worker",
+      assigned: glm,
+      userPicked: true,
+      fallbacks: [...pick("gpt-5.4")],
+      preset: "recommended",
+      brain,
+      limit: 5,
+    });
+    expect(models(chain)).toEqual(["glm-5.3-flash", "gpt-5.4"]);
+  });
+
+  it("keeps a picked model and its fallback even when they are the brain model", () => {
+    const opus = options.find((option) => option.selection.model === "claude-opus-5") ?? null;
+    // The picked model is the brain's own model: the user chose it, so it runs.
+    expect(
+      models(
+        crewFallbackChain({
+          options,
+          role: "expert",
+          assigned: opus,
+          userPicked: true,
+          preset: "quality",
+          brain,
+          limit: 5,
+        }),
+      ),
+    ).toEqual(["claude-opus-5"]);
+    // A fallback the user listed is the brain's own model: it still runs after the picked one.
+    expect(
+      models(
+        crewFallbackChain({
+          options,
+          role: "worker",
+          assigned: glm,
+          userPicked: true,
+          fallbacks: opus === null ? [] : [opus],
+          preset: "recommended",
+          brain,
+          limit: 5,
+        }),
+      ),
+    ).toEqual(["glm-5.3-flash", "claude-opus-5"]);
+  });
+
+  it("gives a picked role only its own model when every fallback is cooling", () => {
+    const pick = (model: string) => options.filter((option) => option.selection.model === model);
+    const chain = crewFallbackChain({
+      options,
+      role: "worker",
+      assigned: glm,
+      userPicked: true,
+      fallbacks: [...pick("gpt-5.4"), ...pick("claude-haiku-5")],
+      preset: "recommended",
+      brain,
+      unavailableInstances: new Set(["codex", "claude"]),
+      limit: 5,
+    });
+    expect(models(chain)).toEqual(["glm-5.3-flash"]);
   });
 });
 

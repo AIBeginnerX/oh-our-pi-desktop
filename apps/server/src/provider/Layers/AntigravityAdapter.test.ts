@@ -175,6 +175,11 @@ const makeHarness = Effect.fn("makeAntigravityAdapterHarness")(function* (option
         }
         currentModel = model;
       }),
+    setConfigOption: (configId, value) =>
+      Effect.sync(() => {
+        calls.push(`config:${configId}=${value}`);
+        return { configOptions: configOptions() };
+      }),
     setMode: (mode) =>
       Effect.sync(() => {
         calls.push(`mode:${mode}`);

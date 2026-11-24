@@ -217,6 +217,11 @@ export interface CrewTaskReport {
   readonly report?: CrewMemberReport | undefined;
   /** Whether OOP itself could verify the work; set for a finished worker or expert task. */
   readonly proof?: TaskProof | undefined;
+  /**
+   * The model that did the work, as "Model (Provider)", which differs from the role's model when
+   * a fallback took over.
+   */
+  readonly model?: string | undefined;
 }
 
 export interface CrewTodoCheckResult {
@@ -2238,7 +2243,13 @@ export const make = Effect.gen(function* () {
       };
       const finish = (report: Omit<CrewTaskReport, "taskId" | "role">) =>
         Effect.gen(function* () {
-          const result = { taskId: input.taskId, role: record.role, ...report };
+          const model = record.attempts.at(-1)?.model;
+          const result = {
+            taskId: input.taskId,
+            role: record.role,
+            ...report,
+            ...(model === undefined ? {} : { model }),
+          };
           yield* updateTask(record, { report: result });
           yield* Deferred.succeed(record.done, undefined);
         });
@@ -2607,7 +2618,9 @@ export const make = Effect.gen(function* () {
       options: input.options,
       role: input.role,
       assigned: fastest ?? input.resolved.roles[input.role],
-      // The user's fallback models come before OOP's own picks.
+      // A role the user picked runs only its own model and the user's fallbacks; OOP's own picks
+      // fill in only for a role left on automatic.
+      userPicked: input.resolved.pinned.has(input.role),
       fallbacks: input.resolved.fallbacks[input.role],
       preset: input.resolved.preset,
       brain: input.lead.modelSelection,
@@ -3439,6 +3452,7 @@ export const make = Effect.gen(function* () {
             testsPassed,
             "report" in outcome ? outcome.report : undefined,
           );
+          const recoveredModel = record.attempts.at(-1)?.model;
           report = {
             taskId: record.taskId,
             role: record.role,
@@ -3452,6 +3466,7 @@ export const make = Effect.gen(function* () {
               kept,
             ),
             ...(proof === null ? {} : { proof }),
+            ...(recoveredModel === undefined ? {} : { model: recoveredModel }),
           };
           yield* updateTask(record, { report });
         }

@@ -170,6 +170,8 @@ const makeFixture = Effect.fn("makeAntigravityTextGenerationFixture")(function* 
           Effect.sync(() => {
             state.selectedModels.push(model);
           }),
+        // The test model advertises no thinking level, so nothing sets one.
+        setConfigOption: () => Effect.die("unexpected setConfigOption"),
         prompt: (request) =>
           Effect.gen(function* () {
             state.prompts.push(request);
