@@ -2199,4 +2199,28 @@ export const SETTINGS_MESSAGES: MessageCatalog = {
     "zh-CN": "设置差异面板是否默认忽略仅空白的修改。",
     es: "Define si el panel de diferencias ignora por defecto los cambios que solo afectan a espacios en blanco.",
   },
+  "Copy MCP URL": {
+    ko: "MCP URL 복사",
+    ja: "MCP URLをコピー",
+    "zh-CN": "复制 MCP URL",
+    es: "Copiar URL de MCP",
+  },
+  "MCP URL copied": {
+    ko: "MCP URL을 복사했습니다",
+    ja: "MCP URLをコピーしました",
+    "zh-CN": "已复制 MCP URL",
+    es: "URL de MCP copiada",
+  },
+  "Add it to an agent, e.g. claude mcp add --transport http oop {url}": {
+    ko: "에이전트에 추가하세요. 예: claude mcp add --transport http oop {url}",
+    ja: "エージェントに追加してください。例: claude mcp add --transport http oop {url}",
+    "zh-CN": "添加到智能体，例如：claude mcp add --transport http oop {url}",
+    es: "Añádela a un agente, por ejemplo: claude mcp add --transport http oop {url}",
+  },
+  "Could not copy MCP URL": {
+    ko: "MCP URL을 복사할 수 없습니다",
+    ja: "MCP URLをコピーできませんでした",
+    "zh-CN": "无法复制 MCP URL",
+    es: "No se pudo copiar la URL de MCP",
+  },
 };

@@ -10,7 +10,10 @@ import { defineConfig, type Connect, type Plugin } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 import oopRelease from "../../OOP_RELEASE.json" with { type: "json" };
 
-import { DEV_PROXIED_PATH_PREFIXES } from "@t3tools/shared/devProxy";
+import {
+  DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES,
+  DEV_PROXIED_PATH_PREFIXES,
+} from "@t3tools/shared/devProxy";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
@@ -254,8 +257,12 @@ export default defineConfig(() => {
                   // `/ws` and `/_gw` (forwarded sockets) keep the browser's Host: the server's cookie-upgrade Origin check
                   // compares Origin to Host, and rewriting Host to the backend breaks LAN,
                   // phone and `--share` access (http-proxy's ws path sets no X-Forwarded-Host
-                  // even with `xfwd`).
-                  changeOrigin: prefix !== "/ws" && prefix !== "/_gw",
+                  // even with `xfwd`). MCP OAuth prefixes (`/mcp`, `/oauth`, `/.well-known`)
+                  // also keep the browser's Host so discovery and issuer URLs match the fetched origin.
+                  changeOrigin:
+                    prefix !== "/ws" &&
+                    prefix !== "/_gw" &&
+                    !DEV_PROXIED_ORIGIN_PRESERVING_PREFIXES.has(prefix),
                   ...(prefix === "/ws" || prefix === "/api" || prefix === "/_gw"
                     ? { ws: true }
                     : {}),

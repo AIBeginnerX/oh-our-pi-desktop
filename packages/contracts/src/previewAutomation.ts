@@ -644,9 +644,9 @@ export type PreviewAutomationResponse = typeof PreviewAutomationResponse.Type;
 
 const McpCapabilityErrorFields = {
   environmentId: EnvironmentId,
-  threadId: ThreadId,
-  providerSessionId: TrimmedNonEmptyString,
-  providerInstanceId: ProviderInstanceId,
+  threadId: Schema.optional(ThreadId),
+  providerSessionId: Schema.optional(TrimmedNonEmptyString),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
 };
 
 /** Agents read this message, so it names the next step and not only the failure. */
@@ -658,6 +658,9 @@ export class PreviewAutomationUnavailableError extends Schema.TaggedError<Previe
   },
 ) {
   override get message(): string {
+    if (this.threadId === undefined) {
+      return "Browser preview tools require an agent running inside OOP. Outside MCP clients cannot use thread-bound tools.";
+    }
     return `MCP credential does not grant the ${this.capability} capability: browser preview tools are off for this thread. Do not retry them. To check a page, use a headless browser from the shell, such as Playwright, or curl. The user can turn on "Agent browser access" in Settings; it applies when the agent session next starts.`;
   }
 }
@@ -671,6 +674,9 @@ export class McpCapabilityUnavailableError extends Schema.TaggedError<McpCapabil
   },
 ) {
   override get message(): string {
+    if (this.threadId === undefined) {
+      return `This tool (${this.capability}) requires an agent running inside OOP. Outside MCP clients cannot use thread-bound tools.`;
+    }
     return this.capability === "memory"
       ? "Project memory is off for this thread: it is not shared with this thread's provider. Do not retry memory_recall or memory_propose; continue without them."
       : `MCP credential does not grant the ${this.capability} capability.`;

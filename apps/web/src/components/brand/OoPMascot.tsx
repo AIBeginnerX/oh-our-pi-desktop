@@ -5,6 +5,10 @@ const BODY =
 const EYES =
   "M3 6h3v1h-3zM10 6h3v1h-3zM3 7h1v1h-1zM5 7h1v1h-1zM10 7h1v1h-1zM12 7h1v1h-1zM3 8h3v1h-3zM10 8h3v1h-3z";
 
+export const OOP_MASCOT_GRID = 16;
+export const OOP_MASCOT_BODY_PATH = BODY;
+export const OOP_MASCOT_EYES_PATH = EYES;
+
 /**
  * Oopi, the OOP desktop mascot, drawn on a 16x16 pixel grid: its eyes are the two O's and the
  * flag on its antenna is the P. Render it at 16px multiples so every pixel stays crisp.

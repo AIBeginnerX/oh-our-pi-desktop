@@ -100,7 +100,7 @@ function SidebarBrand({ onBackdrop }: { onBackdrop: boolean }) {
       )}
       to="/"
     >
-      <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span data-startup-intro-home className="inline-flex min-w-0 items-center gap-1.5">
         <span className="inline-flex items-center gap-1 text-sm leading-none font-bold tracking-tight">
           <OoPWordmark className="h-3.5 w-auto shrink-0" />
           <span> AI</span>

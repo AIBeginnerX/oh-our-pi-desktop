@@ -2,17 +2,26 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as Option from "effect/Option";
 
-import { BearerConnectionProfile, type ConnectionCatalogEntry } from "./catalog.ts";
+import {
+  BearerConnectionProfile,
+  SshConnectionProfile,
+  type ConnectionCatalogEntry,
+} from "./catalog.ts";
 import {
   BearerConnectionTarget,
   ConnectionBlockedError,
   ConnectionTransientError,
+  GatewayConnectionTarget,
+  PrimaryConnectionTarget,
+  RelayConnectionTarget,
+  SshConnectionTarget,
   type SupervisorConnectionState,
 } from "./model.ts";
 import {
   connectionCatalogDisplayUrl,
   connectionStatusText,
   connectionStatusTitle,
+  environmentMcpUrl,
   presentEnvironmentConnection,
   presentConnectionState,
 } from "./presentation.ts";
@@ -69,6 +78,88 @@ describe("connection presentation", () => {
 
   it("preserves profile display information without exposing credentials", () => {
     expect(connectionCatalogDisplayUrl(ENTRY)).toBe("https://environment.example.test");
+  });
+
+  it("derives the MCP address from HTTP and HTTPS environment addresses", () => {
+    const withBase = (httpBaseUrl: string): ConnectionCatalogEntry => ({
+      ...ENTRY,
+      profile: Option.some(
+        new BearerConnectionProfile({
+          connectionId: TARGET.connectionId,
+          environmentId: TARGET.environmentId,
+          label: TARGET.label,
+          httpBaseUrl,
+          wsBaseUrl: httpBaseUrl.replace(/^http/, "ws"),
+        }),
+      ),
+    });
+
+    expect(environmentMcpUrl({ entry: ENTRY })).toBe("https://environment.example.test/mcp");
+    expect(environmentMcpUrl({ entry: withBase("http://127.0.0.1:3773/") })).toBe(
+      "http://127.0.0.1:3773/mcp",
+    );
+    expect(environmentMcpUrl({ entry: withBase("http://100.115.1.44:3773/app?x=1#top") })).toBe(
+      "http://100.115.1.44:3773/mcp",
+    );
+    expect(
+      environmentMcpUrl({
+        entry: {
+          target: new PrimaryConnectionTarget({
+            environmentId: TARGET.environmentId,
+            label: "This machine",
+            httpBaseUrl: "http://localhost:3773",
+            wsBaseUrl: "ws://localhost:3773",
+          }),
+          profile: Option.none(),
+          enabled: true,
+        },
+      }),
+    ).toBe("http://localhost:3773/mcp");
+  });
+
+  it("returns null for relay targets along with SSH and gateway environments with no direct address", () => {
+    const relayEntry: ConnectionCatalogEntry = {
+      ...ENTRY,
+      target: new RelayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: TARGET.label,
+      }),
+      profile: Option.none(),
+    };
+    const sshEntry: ConnectionCatalogEntry = {
+      ...ENTRY,
+      target: new SshConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: TARGET.label,
+        connectionId: "ssh-1",
+      }),
+      profile: Option.some(
+        new SshConnectionProfile({
+          connectionId: "ssh-1",
+          environmentId: TARGET.environmentId,
+          label: TARGET.label,
+          target: {
+            alias: "box",
+            username: "dev",
+            hostname: "box.example.test",
+            port: 22,
+          },
+        }),
+      ),
+    };
+    const gatewayEntry: ConnectionCatalogEntry = {
+      ...ENTRY,
+      target: new GatewayConnectionTarget({
+        environmentId: TARGET.environmentId,
+        label: TARGET.label,
+        httpBaseUrl: "http://127.0.0.1:3773/gateway/environment-1",
+      }),
+      profile: Option.none(),
+    };
+
+    expect(environmentMcpUrl({ entry: relayEntry })).toBeNull();
+    expect(environmentMcpUrl({ entry: sshEntry })).toBeNull();
+    expect(environmentMcpUrl({ entry: gatewayEntry })).toBeNull();
   });
 
   it("distinguishes initial connection, reconnect, and retry errors", () => {

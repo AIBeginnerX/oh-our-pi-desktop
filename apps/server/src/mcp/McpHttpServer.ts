@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream";
 import type * as Types from "effect/Types";
 import { McpProtocol, McpSchema, McpServer, Tool } from "effect/unstable/ai";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { PreviewAutomationError } from "@t3tools/contracts";
+import { McpCapabilityUnavailableError, PreviewAutomationError } from "@t3tools/contracts";
 
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
@@ -36,6 +36,8 @@ import { CrewToolkitHandlersLive } from "./toolkits/crew/handlers.ts";
 import { CrewToolkit } from "./toolkits/crew/tools.ts";
 import { MemoryToolkitHandlersLive } from "./toolkits/memory/handlers.ts";
 import { MemoryToolkit } from "./toolkits/memory/tools.ts";
+import { OutsideToolkitHandlersLive } from "./toolkits/outside/handlers.ts";
+import { OutsideToolkit } from "./toolkits/outside/tools.ts";
 import { ThreadsToolkitHandlersLive } from "./toolkits/threads/handlers.ts";
 import { ThreadsToolkit } from "./toolkits/threads/tools.ts";
 import { PullRequestsToolkitHandlersLive } from "./toolkits/pullRequests/handlers.ts";
@@ -50,19 +52,62 @@ import {
   DeviceStandardToolkit,
 } from "./toolkits/device/tools.ts";
 
-const unauthorized = HttpServerResponse.jsonUnsafe(
-  {
-    error: "invalid_mcp_credential",
-    message: "A valid provider-scoped MCP bearer credential is required.",
-  },
-  {
-    status: 401,
-    headers: {
-      "cache-control": "no-store",
-      "www-authenticate": "Bearer",
+/** Where an MCP client discovers how to sign in (RFC 9728), at this request's own origin. */
+const mcpResourceMetadataUrl = (request: HttpServerRequest.HttpServerRequest) =>
+  HttpServerRequest.toURL(request).pipe(
+    Option.map((url) => `${url.origin}/.well-known/oauth-protected-resource/mcp`),
+  );
+
+/**
+ * Agents OOP launched carry a registry token and must never be sent into
+ * an OAuth flow when it dies: they cannot open a browser, and a sign-in
+ * would mint a credential that outlives their session. Only a request that
+ * does not look like a provider token is pointed at the OAuth metadata.
+ */
+const unauthorized = (input: {
+  readonly request: HttpServerRequest.HttpServerRequest;
+  readonly presentedToken: boolean;
+  readonly offerOAuth: boolean;
+}) => {
+  const metadataUrl = input.offerOAuth
+    ? Option.getOrUndefined(mcpResourceMetadataUrl(input.request))
+    : undefined;
+  const challenge = [
+    "Bearer",
+    [
+      ...(metadataUrl === undefined ? [] : [`resource_metadata="${metadataUrl}"`]),
+      ...(input.presentedToken ? ['error="invalid_token"'] : []),
+    ].join(", "),
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
+  return HttpServerResponse.jsonUnsafe(
+    {
+      error: "invalid_mcp_credential",
+      message: "A valid OOP MCP credential is required.",
     },
-  },
-);
+    {
+      status: 401,
+      headers: {
+        "cache-control": "no-store",
+        "www-authenticate": challenge,
+      },
+    },
+  );
+};
+
+/**
+ * Resolves a bearer token that is not a provider-session token: an OAuth
+ * client signed in from outside OOP. Undefined when the token is not one.
+ */
+export class McpClientAuthenticator extends Context.Service<
+  McpClientAuthenticator,
+  {
+    readonly authenticate: (
+      request: HttpServerRequest.HttpServerRequest,
+    ) => Effect.Effect<McpInvocationContext.McpInvocationScope | undefined>;
+  }
+>()("t3/mcp/McpHttpServer/McpClientAuthenticator") {}
 
 type AuthenticatedHttpEffect = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
@@ -90,33 +135,43 @@ export const normalizeMcpHttpResponse = (
     : response;
 };
 
-const makeMcpAuthMiddleware = McpSessionRegistry.McpSessionRegistry.pipe(
-  Effect.map((registry): McpAuthMiddleware =>
-    Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
-      const request = yield* HttpServerRequest.HttpServerRequest;
-      const authorization = request.headers.authorization;
-      const token =
-        authorization?.startsWith("Bearer ") === true
-          ? authorization.slice("Bearer ".length).trim()
-          : "";
-      const invocation = yield* registry.resolve(token);
-      if (!invocation) {
-        // Without this the only symptom of a dead credential is the agent
-        // quietly losing the whole `t3-code` toolkit for the rest of its
-        // session, with nothing on the server to explain why.
-        yield* Effect.logWarning("rejected MCP request with an unusable credential", {
-          reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
-        });
-        return unauthorized;
-      }
-      return yield* httpEffect.pipe(
-        Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-        Effect.map(normalizeMcpHttpResponse),
-      );
-    }),
-  ),
-  Effect.withSpan("McpHttpServer.makeAuthMiddleware"),
-);
+// Session tokens are `<payload>.<signature>`; registry tokens are a bare base64url secret.
+const looksLikeProviderToken = (token: string) => token.length > 0 && !token.includes(".");
+
+const makeMcpAuthMiddleware = Effect.gen(function* () {
+  const registry = yield* McpSessionRegistry.McpSessionRegistry;
+  const clients = yield* Effect.serviceOption(McpClientAuthenticator);
+  return Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const authorization = request.headers.authorization;
+    const token =
+      authorization?.startsWith("Bearer ") === true
+        ? authorization.slice("Bearer ".length).trim()
+        : "";
+    const invocation =
+      (yield* registry.resolve(token)) ??
+      (Option.isSome(clients) && token.length > 0
+        ? yield* clients.value.authenticate(request)
+        : undefined);
+    if (!invocation) {
+      // Without this the only symptom of a dead credential is the agent
+      // quietly losing the whole `t3-code` toolkit for the rest of its
+      // session, with nothing on the server to explain why.
+      yield* Effect.logWarning("rejected MCP request with an unusable credential", {
+        reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
+      });
+      return unauthorized({
+        request,
+        presentedToken: token.length > 0,
+        offerOAuth: Option.isSome(clients) && !looksLikeProviderToken(token),
+      });
+    }
+    return yield* httpEffect.pipe(
+      Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+      Effect.map(normalizeMcpHttpResponse),
+    );
+  }) satisfies McpAuthMiddleware;
+}).pipe(Effect.withSpan("McpHttpServer.makeAuthMiddleware"));
 
 const McpAuthMiddlewareLive = HttpRouter.middleware<{
   provides: McpInvocationContext.McpInvocationContext;
@@ -338,6 +393,7 @@ const saveScreenshot = Effect.fn("McpHttpServer.saveScreenshot")(function* (
 });
 
 const isPreviewAutomationError = Schema.is(PreviewAutomationError);
+const isMcpCapabilityUnavailableError = Schema.is(McpCapabilityUnavailableError);
 
 const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
   if (Cause.hasInterrupts(cause) || cause.reasons.some(Cause.isDieReason)) {
@@ -519,6 +575,9 @@ const imageToolFailure =
       typeof firstFailure._tag === "string"
         ? firstFailure._tag
         : `${toolName}Error`;
+    const message = isMcpCapabilityUnavailableError(firstFailure)
+      ? firstFailure.message
+      : undefined;
     const result = new McpSchema.CallToolResult({
       isError: true,
       structuredContent: {
@@ -526,9 +585,15 @@ const imageToolFailure =
           _tag: errorTag,
           operation,
           failureCount: failures.length,
+          ...(message === undefined ? {} : { message }),
         },
       },
-      content: [{ type: "text", text: failureText }],
+      content: [
+        {
+          type: "text",
+          text: message === undefined ? failureText : `${failureText} ${message}`,
+        },
+      ],
     });
     return Effect.logWarning(`${toolName} failed`, {
       operation,
@@ -684,6 +749,11 @@ const ThreadsToolkitRegistrationLive = McpServer.toolkit(ThreadsToolkit).pipe(
   Layer.provide(ProjectionTurnRepositoryLive),
 );
 
+export const OutsideToolkitRegistrationLive = McpServer.toolkit(OutsideToolkit).pipe(
+  Layer.provide(OutsideToolkitHandlersLive),
+  Layer.provide(ProjectionTurnRepositoryLive),
+);
+
 const DeviceStandardToolkitRegistrationLive = McpServer.toolkit(DeviceStandardToolkit).pipe(
   Layer.provide(DeviceStandardToolkitHandlersLive),
 );
@@ -697,7 +767,7 @@ export const DeviceToolkitRegistrationLive = thenRegisterToolkit(
   DeviceScreenshotRegistrationLive,
 );
 
-const McpTransportLive = McpServer.layerHttp({
+export const McpTransportLive = McpServer.layerHttp({
   name: "OOP",
   version: packageJson.version,
   path: "/mcp",
@@ -712,7 +782,10 @@ export const layer = thenRegisterToolkit(
       CrewToolkitRegistrationLive,
       thenRegisterToolkit(
         MemoryToolkitRegistrationLive,
-        thenRegisterToolkit(ThreadsToolkitRegistrationLive, DeviceToolkitRegistrationLive),
+        thenRegisterToolkit(
+          ThreadsToolkitRegistrationLive,
+          thenRegisterToolkit(OutsideToolkitRegistrationLive, DeviceToolkitRegistrationLive),
+        ),
       ),
     ),
   ),

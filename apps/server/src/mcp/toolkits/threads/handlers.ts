@@ -9,7 +9,6 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { resolveProjectMemoryReferences } from "@t3tools/shared/composerContextReferences";
-import { isCrewThreadTitle } from "@t3tools/shared/crew";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -28,6 +27,7 @@ import { OrchestrationEngineService } from "../../../orchestration/Services/Orch
 import { ProjectionSnapshotQuery } from "../../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ProjectionTurnRepository } from "../../../persistence/Services/ProjectionTurns.ts";
 import { requireMcpCapability } from "../../McpInvocationContext.ts";
+import { deriveThreadListStatus, isCrewMember, readThreadMessages } from "./readThreadMessages.ts";
 import { ThreadsToolkit, ThreadsToolRejected } from "./tools.ts";
 
 // Stored in the same command as the user message, before the provider can run.
@@ -38,19 +38,12 @@ const encodeSuggestionKey = Schema.encodeSync(Schema.fromJsonString(Schema.Array
 // server starts there afterwards (a crew follow-up, a goal or plan continuation), which would
 // otherwise let two threads keep starting turns in each other with nobody watching.
 const RECEIVE_COOLDOWN_MS = 60 * 60 * 1000;
-const MAX_MESSAGES = 20;
-const MAX_TEXT_CHARS = 12_000;
-const TRUNCATED = "… [truncated]";
 
 const reject = (message: string) => new ThreadsToolRejected({ message });
 const busy = () => reject(THREAD_MESSAGE_BUSY_DETAIL);
 
 const unavailable = () => new ThreadsToolRejected({ message: "Thread data is unavailable." });
 const missing = () => new ThreadsToolRejected({ message: "Thread not found in your project." });
-
-// A crew member's thread belongs to the crew tools: its lead reads it with crew_wait.
-const isCrewMember = (thread: Pick<OrchestrationThreadShell, "parentThreadId" | "title">) =>
-  thread.parentThreadId != null || isCrewThreadTitle(thread.title);
 
 const make = Effect.gen(function* () {
   const snapshots = yield* ProjectionSnapshotQuery;
@@ -125,12 +118,7 @@ const make = Effect.gen(function* () {
               id: thread.id,
               title: thread.title,
               updatedAt: thread.updatedAt,
-              status:
-                thread.hasPendingApprovals || thread.hasPendingUserInput
-                  ? ("needs input" as const)
-                  : isThreadRunning(thread)
-                    ? ("running" as const)
-                    : ("idle" as const),
+              status: deriveThreadListStatus(thread),
             })),
         };
       }),
@@ -140,33 +128,13 @@ const make = Effect.gen(function* () {
         // The shell settles the project boundary before any message is loaded.
         const target = yield* targetShell(threadId, source);
         if (target.archivedAt !== null) return yield* missing();
-        const detail = yield* snapshots
-          .getThreadDetailSnapshot(threadId, { turnLimit: MAX_MESSAGES })
-          .pipe(Effect.mapError(unavailable));
-        if (Option.isNone(detail) || detail.value.thread.projectId !== source.projectId) {
-          return yield* missing();
-        }
-
-        const all = detail.value.thread.messages.flatMap(({ role, text }) =>
-          role === "user" || role === "assistant" ? [{ role, text }] : [],
-        );
-        let truncated = detail.value.page?.hasMore === true || all.length > MAX_MESSAGES;
-        let remaining = MAX_TEXT_CHARS;
-        const messages = [];
-        for (const message of all.slice(-MAX_MESSAGES).toReversed()) {
-          if (remaining < TRUNCATED.length && message.text.length > remaining) {
-            truncated = true;
-            break;
-          }
-          const text =
-            message.text.length <= remaining
-              ? message.text
-              : message.text.slice(0, remaining - TRUNCATED.length) + TRUNCATED;
-          truncated ||= text !== message.text;
-          remaining -= text.length;
-          messages.push({ role: message.role, text });
-        }
-        return { messages: messages.toReversed(), truncated };
+        return yield* readThreadMessages({
+          snapshots,
+          threadId,
+          isAllowed: (detail) => detail.thread.projectId === source.projectId,
+          onMissing: missing,
+          onUnavailable: unavailable,
+        });
       }),
     send_thread_message: ({ threadId, text }) =>
       writeLock.withPermits(1)(

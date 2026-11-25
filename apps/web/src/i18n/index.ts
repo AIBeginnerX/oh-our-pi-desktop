@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 
 import { currentUiLanguage, useUiLanguage, type UiLanguage } from "../state/menuLanguage";
+import { AUTH_MESSAGES } from "./messages/auth";
 import { CHAT_MESSAGES } from "./messages/chat";
 import { CHROME_MESSAGES } from "./messages/chrome";
 import { DIFF_MESSAGES } from "./messages/diff";
@@ -19,6 +20,7 @@ import type { MessageCatalog } from "./messages/types";
  * string without one, or a language without a translation, shows the English text.
  */
 export const MESSAGES: MessageCatalog = {
+  ...AUTH_MESSAGES,
   ...CHROME_MESSAGES,
   ...SIDEBAR_MESSAGES,
   ...SETTINGS_MESSAGES,

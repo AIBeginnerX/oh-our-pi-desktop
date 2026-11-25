@@ -92,6 +92,37 @@ export function presentEnvironmentConnection(
   return presentConnectionState(state);
 }
 
+/**
+ * The address an agent outside OOP (Claude Code, Codex) uses to reach this
+ * environment's MCP server: the environment's HTTP address with `/mcp`.
+ * SSH connections ride a local forward that disappears with the client,
+ * gateway-forwarded environments have no direct address, and relay-served
+ * environments have no address of their own, so all return null.
+ */
+export function environmentMcpUrl(input: {
+  readonly entry: ConnectionCatalogEntry;
+}): string | null {
+  const httpBaseUrl =
+    input.entry.target._tag === "SshConnectionTarget"
+      ? null
+      : connectionCatalogDisplayUrl(input.entry);
+  return httpBaseUrl === null ? null : mcpUrlFromBase(httpBaseUrl);
+}
+
+function mcpUrlFromBase(httpBaseUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(httpBaseUrl);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  url.pathname = "/mcp";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {
   switch (entry.target._tag) {
     case "PrimaryConnectionTarget":

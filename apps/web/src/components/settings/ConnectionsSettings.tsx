@@ -25,11 +25,14 @@ import {
   type EnvironmentId,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
+import { environmentMcpUrl } from "@t3tools/client-runtime/connection";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import * as Option from "effect/Option";
+import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useT } from "~/i18n";
 import { cn } from "../../lib/utils";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
 import {
@@ -80,7 +83,7 @@ import {
 } from "../ui/alert-dialog";
 import { Spinner } from "../ui/spinner";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -171,6 +174,7 @@ import {
 } from "./ConnectionsSettings.cloud";
 
 export function ConnectionsSettings() {
+  const t = useT();
   const desktopBridge = window.desktopBridge;
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const { environments } = useEnvironments();
@@ -184,6 +188,30 @@ export function ConnectionsSettings() {
     reportFailure: false,
   });
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
+  const primaryMcpUrl = primaryEnvironment
+    ? environmentMcpUrl({ entry: primaryEnvironment.entry })
+    : null;
+  const { copyToClipboard: copyMcpUrl } = useCopyToClipboard<{ url: string }>({
+    target: "MCP URL",
+    onCopy: ({ url }) => {
+      toastManager.add({
+        type: "success",
+        title: t("MCP URL copied"),
+        description: t("Add it to an agent, e.g. claude mcp add --transport http oop {url}", {
+          url,
+        }),
+      });
+    },
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: t("Could not copy MCP URL"),
+          description: error.message,
+        }),
+      );
+    },
+  });
   const primarySessionState = usePrimarySessionState();
   const currentSessionScopes = desktopBridge
     ? AuthAdministrativeScopes
@@ -1665,6 +1693,11 @@ export function ConnectionsSettings() {
                       environmentId={primaryEnvironmentId}
                       serverConfig={primaryServerConfig}
                     />
+                    {primaryMcpUrl ? (
+                      <MenuItem onClick={() => copyMcpUrl(primaryMcpUrl, { url: primaryMcpUrl })}>
+                        {t("Copy MCP URL")}
+                      </MenuItem>
+                    ) : null}
                   </MenuPopup>
                 </Menu>
               ) : null

@@ -21,8 +21,38 @@ authority.
 Browser cookies, bearer tokens, and DPoP tokens adapt the same scoped session
 model. DPoP binds a token to a client's proof key; an invalid proof must fail
 rather than fall back to bearer authentication. The OAuth token-exchange
-vocabulary gives these grants a familiar meaning, but the environment does not
-implement a general-purpose OAuth authorization server.
+vocabulary gives these grants a familiar meaning.
+
+### MCP clients are a separate audience
+
+Agents OOP did not launch sign in to `/mcp` through a narrow OAuth
+authorization-code server ([McpOAuth](../../apps/server/src/auth/McpOAuth.ts)).
+It accepts loopback redirect URIs for agents on the user's machine and any
+HTTPS redirect for hosted agents (ChatGPT, bots). An HTTPS redirect means a
+link someone else sends the owner can deliver access to that someone, so the
+approval page names the host access goes to and approving stays the owner's
+call. Every client is public and proves itself with PKCE; a client that asks
+for a secret is registered without one. Client registration is stateless, so an
+unauthenticated caller cannot grow server state. Approval spends a one-time
+pairing code, or uses a browser session with `access:write`; proof-bound OOP
+Connect codes are refused without being spent.
+
+The user grants either read-only access or a runtime-mode ceiling, not a
+scope list: MCP tools are all orchestration, and `orchestration:operate`
+alone would let an agent start a thread in full access and act through it.
+The result is an ordinary session with subject `mcp-client`. A read-only
+grant holds `orchestration:read` alone; any other grant adds
+`orchestration:operate` and a signed ceiling (`rtc`). Only `/mcp` accepts these
+sessions. Every other HTTP and WebSocket path rejects that subject, because the
+RPC surface would let the agent act above its ceiling. Inside `/mcp`,
+[McpInvocationContext](../../apps/server/src/mcp/McpInvocationContext.ts) keeps
+outside clients distinct from thread-bound provider sessions and refuses
+thread-only tools before their handlers run.
+
+Issuer and resource URLs come from the request's Host and
+`X-Forwarded-Proto`, so one server answers over loopback, Tailscale Serve and an
+OOP Connect tunnel. A proxy that rewrites Host or drops the protocol header
+breaks sign-in.
 
 Bearer and DPoP clients obtain short-lived WebSocket tickets through authenticated
 HTTP so long-lived tokens stay out of socket URLs. Browser sessions can

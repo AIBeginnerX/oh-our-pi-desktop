@@ -21,6 +21,7 @@
 - [Reports in chat](./user/reports.md)
 - [Product usage data and network requests](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
+- [Outside agents](./user/outside-agents.md)
 - [Running in the background](./user/background-service.md)
 - [Updating OOP](./user/updating.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md)

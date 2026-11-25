@@ -2,9 +2,10 @@ import { ChevronsLeftRightEllipsisIcon, EllipsisIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useState } from "react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@t3tools/contracts";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
+import { connectionStatusText, environmentMcpUrl } from "@t3tools/client-runtime/connection";
 import * as Option from "effect/Option";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { useT } from "~/i18n";
 import { cn } from "../../lib/utils";
 import { SettingsRow } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
@@ -89,6 +90,29 @@ export function SavedBackendListRow({
   onRemove,
 }: SavedBackendListRowProps) {
   const environmentId = environment.environmentId;
+  const t = useT();
+  const mcpUrl = environmentMcpUrl({ entry: environment.entry });
+  const { copyToClipboard: copyMcpUrl } = useCopyToClipboard<{ url: string }>({
+    target: "MCP URL",
+    onCopy: ({ url }) => {
+      toastManager.add({
+        type: "success",
+        title: t("MCP URL copied"),
+        description: t("Add it to an agent, e.g. claude mcp add --transport http oop {url}", {
+          url,
+        }),
+      });
+    },
+    onError: (error) => {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: t("Could not copy MCP URL"),
+          description: error.message,
+        }),
+      );
+    },
+  });
   const unsupported = environment.connection.phase === "unsupported";
   const enabled = environment.entry.enabled && !unsupported;
   const isConnected = environment.connection.phase === "connected";
@@ -266,6 +290,11 @@ export function SavedBackendListRow({
             environmentId={environmentId}
             serverConfig={environment.serverConfig}
           />
+          {mcpUrl ? (
+            <MenuItem onClick={() => copyMcpUrl(mcpUrl, { url: mcpUrl })}>
+              {t("Copy MCP URL")}
+            </MenuItem>
+          ) : null}
           {errorTraceId ? (
             <MenuItem onClick={() => copyTraceId(errorTraceId)}>Copy trace ID</MenuItem>
           ) : null}

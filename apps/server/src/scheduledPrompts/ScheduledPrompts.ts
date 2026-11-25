@@ -37,7 +37,7 @@ import { ServerSettingsService } from "../serverSettings.ts";
 // longer than this before it reads the clock again.
 const MAX_SLEEP_MS = 60_000;
 
-function resolveModelSelection(
+export function resolveModelSelection(
   selection: ModelSelection | null,
   providers: ReadonlyArray<ServerProvider>,
 ): ModelSelection {
